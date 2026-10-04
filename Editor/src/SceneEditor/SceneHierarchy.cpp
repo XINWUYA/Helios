@@ -197,7 +197,7 @@ namespace Helios
 			START_STYLE_ALPHA(0.5f);
 			ImGui::SameLine(panel_width - 15);
 			const auto menu_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/menu.png"));
-			if (ImGui::ImageButton((ImTextureID)menu_icon->GetTextureID(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+			if (ImGui::ImageButton((ImTextureID)menu_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
 				ImGui::OpenPopup("ComponentSettings");
 			END_STYLE_ALPHA;
 			END_TRANSPARENT_BUTTON;
@@ -281,7 +281,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		START_STYLE_ALPHA(0.5f);
-		if (ImGui::ImageButton((ImTextureID)m_pAddComponentIcon->GetTextureID(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+		if (ImGui::ImageButton((ImTextureID)m_pAddComponentIcon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
 			ImGui::OpenPopup("AddComponentPopup");
 		END_STYLE_ALPHA;
 

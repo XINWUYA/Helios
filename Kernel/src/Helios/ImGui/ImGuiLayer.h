@@ -29,8 +29,6 @@ namespace Helios
 		ImGuiRenderer* GetRenderer() const { return m_Renderer.get(); }
 		
 	private:
-		void SetDefaultStyle();
-		void SetDarkThemeColors();
 		/* 多视口副窗口渲染（PlatformIO默认实现） */
 		void RenderPlatformWindows();
 

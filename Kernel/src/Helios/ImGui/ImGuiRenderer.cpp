@@ -6,16 +6,6 @@
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderAPI.h"
 
-#ifdef PLATFORM_MACOS
-#include "GraphicsAPI/Metal/MetalShader.h"
-#include "GraphicsAPI/Metal/MetalTexture.h"
-#include "GraphicsAPI/Metal/MetalBuffer.h"
-#include "GraphicsAPI/Metal/MetalVertexArray.h"
-#include "GraphicsAPI/Metal/MetalUniformBuffer.h"
-#include "GraphicsAPI/Metal/MetalRenderAPI.h"
-#include <Metal/Metal.hpp>
-#include <QuartzCore/CAMetalLayer.hpp>
-#endif
 #include <Helios/Scene/SceneCommon.h>
 
 namespace Helios
@@ -135,211 +125,9 @@ namespace Helios
         /* 上传索引数据 - 容量已在 EnsureBuffersCapacity 中保证足够 */
         m_IndexBuffer->SetData(idx_data, total_index_count * sizeof(ImDrawIdx));
 
-#ifdef PLATFORM_MACOS
-        /* Metal后端：直接使用当前已激活的RenderCommandEncoder（由外部的FrameGraph Pass驱动创建），
-         * ImGuiRenderer不再自行创建CommandBuffer/RenderPassDescriptor，也不负责commit。 */
-        auto metalRenderAPI = dynamic_cast<MetalRenderAPI*>(Renderer::GetRenderAPI().get());
-        if (metalRenderAPI)
-        {
-            MTL::RenderCommandEncoder* renderEncoder = metalRenderAPI->GetCurrentRenderEncoder();
-            if (!renderEncoder)
-            {
-                CORE_LOG_ERROR("ImGuiRenderer::RenderDrawData requires an active Metal RenderCommandEncoder (should be driven by ImGuiPass).");
-                return;
-            }
-
-            /* 设置视口 */
-            MTL::Viewport viewport;
-            viewport.originX = 0.0;
-            viewport.originY = 0.0;
-            viewport.width = static_cast<double>(m_DisplayWidth);
-            viewport.height = static_cast<double>(m_DisplayHeight);
-            viewport.znear = 0.0;
-            viewport.zfar = 1.0;
-            renderEncoder->setViewport(viewport);
-
-            /* 绑定着色器 */
-            auto metalShader = std::dynamic_pointer_cast<MetalShader>(m_UIShader);
-            if (!metalShader)
-            {
-                CORE_LOG_ERROR("Failed to get Metal shader for ImGui rendering");
-                return;
-            }
-            
-            /* 直接在渲染编码器上绑定着色器 */
-            renderEncoder->setRenderPipelineState(metalShader->GetPipelineState());
-            
-            /* 绑定UI uniform buffer */
-            if (m_UIUniformBuffer)
-            {
-                auto metalUniformBuffer = std::dynamic_pointer_cast<MetalUniformBuffer>(m_UIUniformBuffer);
-                if (metalUniformBuffer && metalUniformBuffer->GetMetalBuffer())
-                {
-                    renderEncoder->setVertexBuffer(metalUniformBuffer->GetMetalBuffer(), 0, 4);
-                }
-            }
-
-            /* 设置渲染状态 */
-            /* ImGui是2D UI，不需要深度测试 - 不设置深度模板状态，使用默认值（禁用深度测试） */
-            
-            /* 设置裁剪测试启用 */
-            renderEncoder->setCullMode(MTL::CullModeNone);
-            
-            /* 绑定顶点缓冲区 - 必须显式绑定！ */
-            auto metalVertexArray = std::dynamic_pointer_cast<MetalVertexArray>(m_VertexArray);
-            if (metalVertexArray)
-            {
-                metalVertexArray->Bind(renderEncoder);
-            }
-            
-            /* 获取索引缓冲区 */
-            auto metalIndexBuffer = std::dynamic_pointer_cast<MetalIndexBuffer>(m_IndexBuffer);
-            if (!metalIndexBuffer)
-            {
-                CORE_LOG_ERROR("Failed to get Metal index buffer for ImGui rendering");
-                return;
-            }
-            
-            /* 遍历所有DrawList和DrawCmd，分批次渲染 */
-            index_offset = 0;
-            ImTextureID lastTextureId = nullptr;
-            
-            for (int n = 0; n < draw_data->CmdListsCount; n++)
-            {
-                const ImDrawList* draw_list = draw_data->CmdLists[n];
-                
-                /* 遍历命令 */
-                for (int cmd_i = 0; cmd_i < draw_list->CmdBuffer.Size; cmd_i++)
-                {
-                    const ImDrawCmd* pcmd = &draw_list->CmdBuffer[cmd_i];
-                    
-                    if (pcmd->UserCallback)
-                    {
-                        /* 用户回调 */
-                        pcmd->UserCallback(draw_list, pcmd);
-                    }
-                    else
-                    {
-                        /* 设置裁剪区域 */
-                        ImVec2 clip_off = draw_data->DisplayPos;
-                        ImVec2 clip_scale = draw_data->FramebufferScale;
-                        
-                        ImVec2 clip_min(
-                            (pcmd->ClipRect.x - clip_off.x) * clip_scale.x,
-                            (pcmd->ClipRect.y - clip_off.y) * clip_scale.y
-                        );
-                        ImVec2 clip_max(
-                            (pcmd->ClipRect.z - clip_off.x) * clip_scale.x,
-                            (pcmd->ClipRect.w - clip_off.y) * clip_scale.y
-                        );
-                        
-                        if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y)
-                        {
-                            index_offset += pcmd->ElemCount;
-                            continue;
-                        }
-                        
-                        /* Metal坐标系Y轴向上，需要转换 */
-                        MTL::ScissorRect scissorRect;
-                        scissorRect.x = static_cast<NS::UInteger>(clip_min.x);
-                        scissorRect.y = static_cast<NS::UInteger>(m_DisplayHeight - clip_max.y);
-                        scissorRect.width = static_cast<NS::UInteger>(clip_max.x - clip_min.x);
-                        scissorRect.height = static_cast<NS::UInteger>(clip_max.y - clip_min.y);
-                        renderEncoder->setScissorRect(scissorRect);
-                        
-                        /* 根据TextureId绑定纹理 - 每个DrawCmd可能使用不同的纹理 */
-                        if (pcmd->TextureId != lastTextureId)
-                        {
-                            MetalTexture* metalTexture = nullptr;
-                            
-                            /* TextureId可能存储两种类型：
-                             * 1. Texture* 指针（字体纹理）
-                             * 2. uint32_t 纹理ID（用户图片，从MTL::Texture*转换而来）
-                             * 需要尝试两种转换方式
-                             */
-                            
-                            /* 方式1：尝试作为Texture*指针转换（字体纹理） */
-                            DeviceTexture* texture = reinterpret_cast<DeviceTexture*>(pcmd->TextureId);
-                            metalTexture = dynamic_cast<MetalTexture*>(texture);
-                            
-                            /* 方式2：如果不是MetalTexture，尝试作为uint32_t纹理ID（用户图片） */
-                            if (!metalTexture)
-                            {
-                                /* TextureId可能是uint32_t，代表MTL::Texture*指针 */
-                                uint32_t textureId = reinterpret_cast<uintptr_t>(pcmd->TextureId);
-                                if (textureId != 0)
-                                {
-                                    MTL::Texture* metalTexturePtr = reinterpret_cast<MTL::Texture*>(static_cast<uintptr_t>(textureId));
-                                    if (metalTexturePtr)
-                                    {
-                                        /* 创建临时MetalTexture包装器来获取采样器状态 */
-                                        /* 注意：这里无法获取原始的MetalTexture对象，所以使用默认采样器 */
-                                        renderEncoder->setFragmentTexture(metalTexturePtr, 0);
-                                        
-                                        /* 使用默认采样器状态 - 需要从字体纹理获取 */
-                                        auto defaultFontTexture = std::dynamic_pointer_cast<MetalTexture>(m_FontTexture);
-                                        if (defaultFontTexture && defaultFontTexture->GetSamplerState())
-                                        {
-                                            renderEncoder->setFragmentSamplerState(defaultFontTexture->GetSamplerState(), 0);
-                                        }
-                                        lastTextureId = pcmd->TextureId;
-                                        continue; /* 已经绑定纹理，跳过后续检查 */
-                                    }
-                                }
-                            }
-                            
-                            /* 方式1成功：使用Texture*指针 */
-                            if (metalTexture && metalTexture->GetMetalTexture())
-                            {
-                                renderEncoder->setFragmentTexture(metalTexture->GetMetalTexture(), 0);
-                                if (metalTexture->GetSamplerState())
-                                {
-                                    renderEncoder->setFragmentSamplerState(metalTexture->GetSamplerState(), 0);
-                                }
-                                lastTextureId = pcmd->TextureId;
-                            }
-                            else
-                            {
-                                /* 所有方式都失败，使用默认字体纹理作为fallback */
-                                auto defaultFontTexture = std::dynamic_pointer_cast<MetalTexture>(m_FontTexture);
-                                if (defaultFontTexture && defaultFontTexture->GetMetalTexture())
-                                {
-                                    CORE_LOG_WARN("Unknown texture ID format, using default font texture");
-                                    renderEncoder->setFragmentTexture(defaultFontTexture->GetMetalTexture(), 0);
-                                    if (defaultFontTexture->GetSamplerState())
-                                    {
-                                        renderEncoder->setFragmentSamplerState(defaultFontTexture->GetSamplerState(), 0);
-                                    }
-                                    lastTextureId = pcmd->TextureId;
-                                }
-                                else
-                                {
-                                    CORE_LOG_ERROR("Failed to bind texture in ImGui rendering: texture is null or invalid");
-                                }
-                            }
-                        }
-                        
-                        /* 绘制 - 根据索引类型选择正确的IndexType和偏移计算 */
-                        MTL::IndexType metalIndexType = metalIndexBuffer->GetIndexType() == IndexType::UInt16 
-                            ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32;
-                        size_t indexSize = metalIndexBuffer->GetIndexType() == IndexType::UInt16 
-                            ? sizeof(uint16_t) : sizeof(uint32_t);
-                        
-                        renderEncoder->drawIndexedPrimitives(
-                            MTL::PrimitiveTypeTriangle,
-                            pcmd->ElemCount,
-                            metalIndexType,
-                            metalIndexBuffer->GetMetalBuffer(),
-                            index_offset * indexSize  /* 索引数量转换为字节偏移 */
-                        );
-                    }
-                    
-                    index_offset += pcmd->ElemCount;
-                }
-            }
-        }
-#else
-        /* 非Mac平台：使用通用RenderAPI进行渲染（默认OpenGL） */
+        /* 统一走通用 RenderAPI：Metal 与 OpenGL 共用同一套绘制调用。
+         * 平台差异（管线状态与附件格式、纹理/采样器槽位、裁剪 Y 轴方向、索引类型）
+         * 全部由各后端在内部消化。 */
         auto renderAPI = Renderer::GetRenderAPI();
         if (!renderAPI)
         {
@@ -364,10 +152,17 @@ namespace Helios
         /* 设置视口为整个窗口，保证ImGui能绘制到屏幕 */
         renderAPI->SetViewport(0, 0, static_cast<uint32_t>(m_DisplayWidth), static_cast<uint32_t>(m_DisplayHeight));
 
-        /* 绑定着色器和UI uniform buffer */
+        /* 绑定着色器、UI uniform buffer 与顶点数组 */
         m_UIShader->Bind();
-        /* 字体纹理绑定到纹理单元0（与shader里sampler2D u_FontTexture对应） */
+        /* 字体纹理绑定到纹理槽 0（与 GLSL 中 sampler2D u_FontTexture 的 binding 一致） */
         m_UIShader->SetInt("u_FontTexture", 0);
+
+        /* UIUniformBuffer 在 GLSL 中声明了 binding = 4，由 MetalUniformBuffer/OpenGL
+         * 各自的 Bind() 落到后端对应的槽位，调用方无需关心具体索引。 */
+        if (m_UIUniformBuffer)
+        {
+            m_UIUniformBuffer->Bind();
+        }
 
         /* 绑定VAO（顶点/索引缓冲已在上面填充好） */
         m_VertexArray->Bind();
@@ -410,33 +205,28 @@ namespace Helios
                         continue;
                     }
 
-                    /* OpenGL/通用后端：Y轴向上，需要翻转 */
+                    /* 按 OpenGL 约定给出裁剪矩形（原点在左下角）；Y 轴方向由各
+                     * 后端在 SetScissor 内部消化，调用方不区分平台。 */
                     uint32_t scissor_x = static_cast<uint32_t>(clip_min.x);
                     uint32_t scissor_y = static_cast<uint32_t>(m_DisplayHeight - clip_max.y);
                     uint32_t scissor_w = static_cast<uint32_t>(clip_max.x - clip_min.x);
                     uint32_t scissor_h = static_cast<uint32_t>(clip_max.y - clip_min.y);
                     renderAPI->SetScissor(scissor_x, scissor_y, scissor_w, scissor_h);
 
-                    /* 绑定纹理：TextureId可能是 DeviceTexture* 指针，也可能是裸纹理ID（uintptr_t） */
+                    /* 绑定纹理：ImTextureID 统一存 DeviceTexture 指针，各后端在自己槽位约定下绑定。别把硬件
+                     * 句柄塞进 ImTextureID —— Metal 的纹理句柄是 64 位，而 GetTextureID() 返回 32 位、高位会丢。 */
                     if (pcmd->TextureId != last_texture_id)
                     {
-                        bool bound = false;
-                        /* 先尝试作为Texture*指针（字体纹理使用这种方式） */
-                        if (pcmd->TextureId)
+                        DeviceTexture* texture = reinterpret_cast<DeviceTexture*>(pcmd->TextureId);
+
+                        if (!texture)
                         {
-                            DeviceTexture* texture = reinterpret_cast<DeviceTexture*>(pcmd->TextureId);
-                            /* 简单健壮性处理：只要指针非空就尝试调用Bind */
-                            if (texture)
-                            {
-                                texture->Bind(0);
-                                bound = true;
-                            }
+                            texture = m_FontTexture.get();
                         }
 
-                        /* fallback：使用字体纹理 */
-                        if (!bound && m_FontTexture)
+                        if (texture)
                         {
-                            m_FontTexture->Bind(0);
+                            texture->Bind(0);
                         }
 
                         last_texture_id = pcmd->TextureId;
@@ -457,7 +247,6 @@ namespace Helios
 
         m_VertexArray->Unbind();
         m_UIShader->Unbind();
-#endif
     }
 
     void ImGuiRenderer::SetDisplaySize(int width, int height, float scale_x, float scale_y)
@@ -533,20 +322,13 @@ namespace Helios
     void ImGuiRenderer::CreateUIShader()
     {
         m_UIShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ImGuiUI.glsl"));
-        
-#ifdef PLATFORM_MACOS
-        /* 对于Metal后端，需要设置VertexDescriptor */
-        if (m_VertexArray)
+        if (m_UIShader && m_VertexArray)
         {
-            auto metal_vertex_array = std::dynamic_pointer_cast<MetalVertexArray>(m_VertexArray);
-            auto metal_shader = std::dynamic_pointer_cast<MetalShader>(m_UIShader);
-            if (metal_vertex_array && metal_shader)
-            {
-                metal_shader->SetVertexDescriptor(metal_vertex_array->GetVertexDescriptor());
-            }
+            /* 把顶点布局交给着色器：OpenGL 在 VAO 中记录属性位置，Metal 需要据此
+             * 生成顶点描述符与管线状态。由后端在内部消化，调用方无需区分平台。 */
+            m_UIShader->BindVertexArray(m_VertexArray);
         }
-#endif
-        
+
         CORE_LOG_INFO("ImGui UI shader created from embedded resource");
     }
 
@@ -574,19 +356,10 @@ namespace Helios
             /* 若已有IndexBuffer，重新挂回VAO，保持索引绑定一致 */
             if (m_IndexBuffer)
                 m_VertexArray->SetIndexBuffer(m_IndexBuffer);
-            
-#ifdef PLATFORM_MACOS
-            /* 对于Metal后端，需要更新VertexDescriptor */
+
+            /* 顶点数组被重建，重新把布局同步给着色器（见 CreateUIShader） */
             if (m_UIShader)
-            {
-                auto metal_vertex_array = std::dynamic_pointer_cast<MetalVertexArray>(m_VertexArray);
-                auto metal_shader = std::dynamic_pointer_cast<MetalShader>(m_UIShader);
-                if (metal_vertex_array && metal_shader)
-                {
-                    metal_shader->SetVertexDescriptor(metal_vertex_array->GetVertexDescriptor());
-                }
-            }
-#endif
+                m_UIShader->BindVertexArray(m_VertexArray);
         }
 
         /* 索引缓冲区：几何增长扩容，避免频繁重建 */

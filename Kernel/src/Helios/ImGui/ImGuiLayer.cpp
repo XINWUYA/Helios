@@ -10,12 +10,7 @@
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderAPI.h"
 #include "Helios/Scene/SceneCommon.h"
-
-#ifdef PLATFORM_MACOS
-#include "GraphicsAPI/Metal/MetalRenderAPI.h"
-#include <Metal/Metal.hpp>
-#include <QuartzCore/CAMetalLayer.hpp>
-#endif
+#include "Helios/ImGui/EditorTheme.h"
 
 namespace Helios
 {
@@ -50,18 +45,21 @@ namespace Helios
 		const static std::string ini_path = std::string(ASSETS_PATH) + "/../imgui.ini";
 		io.IniFilename = ini_path.c_str();
 
-		const float fontSize = 18.0f;
-		if (!io.Fonts->AddFontFromFileTTF(ABSOLUTE_PATH("EditorRes/fonts/msyh.ttf").c_str(), fontSize))
+		/* 窗口需在字体构建前取得：字形按屏幕 content scale 光栅化，Retina 下文字才锐利 */
+		auto* window = static_cast<GLFWwindow*>(Application::Instance()->GetWindow().GetNativeWindow());
+
+		float dpi_scale = 1.0f;
+		glfwGetWindowContentScale(window, &dpi_scale, nullptr);	/* Retina = 2.0 */
+		const auto editor_fonts = EditorTheme::SetupFonts(io, ABSOLUTE_PATH("EditorRes/fonts"), dpi_scale);
+		if (editor_fonts.Regular == nullptr)
 		{
-			CORE_LOG_ERROR("Failed to load font: EditorRes/fonts/msyh.ttf");
+			CORE_LOG_ERROR("Failed to load editor fonts: EditorRes/fonts");
 		}
 
-		// Setup Dear ImGui style
-		SetDefaultStyle();
-		SetDarkThemeColors();
+		/* 编辑器主题：统一颜色体系 + 形状语言（见 Helios/ImGui/EditorTheme.h） */
+		EditorTheme::ApplyDark();
 
 		// Setup Platform bindings (GLFW only, no renderer backend)
-		auto* window = static_cast<GLFWwindow*>(Application::Instance()->GetWindow().GetNativeWindow());
 		ImGui_ImplGlfw_InitForOpenGL(window, true);
 
 		// Create our custom renderer
@@ -128,50 +126,20 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-#ifdef PLATFORM_MACOS
 		auto render_api = Renderer::GetRenderAPI();
 		if (!render_api)
 			return;
 
-		/* Metal：直接绑定主窗口drawable作为ColorAttachment，LoadActionLoad保留前序Pass的结果，
-			* 并复用当前CommandBuffer（不在ImGui内部创建/提交CommandBuffer）。 */
-		auto metal_render_api = std::dynamic_pointer_cast<MetalRenderAPI>(render_api);
-		if (metal_render_api)
-		{
-			auto* drawable = metal_render_api->GetCurrentDrawable();
-			if (!drawable)
-			{
-				CORE_LOG_ERROR("ImGuiPass: no valid drawable available");
-				return;
-			}
-
-			/* 若仍有上一Pass未结束的encoder，先结束 */
-			if (metal_render_api->GetCurrentRenderEncoder())
-				metal_render_api->EndRenderPass();
-
-			/* 构造ImGuiPass专用的RenderPassDescriptor（不清除drawable内容） */
-			MTL::RenderPassDescriptor* pass_desc = MTL::RenderPassDescriptor::alloc()->init();
-			auto* color_attachment = pass_desc->colorAttachments()->object(0);
-			color_attachment->setTexture(drawable->texture());
-			color_attachment->setLoadAction(MTL::LoadActionLoad);
-			color_attachment->setStoreAction(MTL::StoreActionStore);
-
-			/* 使用统一的BeginRenderPass以复用当前CommandBuffer */
-			metal_render_api->BeginRenderPass(pass_desc);
-
-			/* 提交ImGui绘制 */
-			m_Renderer->RenderDrawData();
-
-			metal_render_api->EndRenderPass();
-
-			pass_desc->release();
-		}
-#else
+		/* 统一入口：在默认渲染目标上开一个"保留已有内容"的通道。各后端自处（Metal 复用当前
+		 * CommandBuffer、drawable 以 LoadActionLoad 挂颜色附件；OpenGL 直接画默认帧缓冲）。 */
+		render_api->BeginDefaultRenderPass(/*preserve_content=*/true);
 		m_Renderer->RenderDrawData();
-#endif
+		render_api->EndDefaultRenderPass();
 
+		/* io.DisplaySize / DisplayFramebufferScale 由 ImGui_ImplGlfw_NewFrame 每帧从 GLFW 读
+		 * （逻辑点 / 像素比），渲染端乘上 scale 得到像素视口。别用引擎窗口尺寸去覆盖 —— GetWidth() 是
+		 * 逻辑点，写进 DisplaySize 会让 UI 坐标系跟鼠标坐标错位。 */
 		ImGuiIO& io = ImGui::GetIO();
-		io.DisplaySize = ImVec2((float)Application::Instance()->GetWindow().GetWidth(), (float)Application::Instance()->GetWindow().GetHeight());
 		if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
 		{
 			GLFWwindow* backup_current_context = glfwGetCurrentContext();
@@ -181,72 +149,4 @@ namespace Helios
 		}
 	}
 
-	void ImGuiLayer::SetDefaultStyle()
-	{
-		//ImGui::StyleColorsDark();
-		//ImGui::StyleColorsClassic();
-
-		ImGuiStyle* style = &ImGui::GetStyle();
-		ImVec4* colors = style->Colors;
-
-		colors[ImGuiCol_Text]					= ImVec4(1.00f, 1.00f, 1.00f, 1.00f); /* 文字默认颜色 */
-		colors[ImGuiCol_TextDisabled]			= ImVec4(0.50f, 0.50f, 0.50f, 1.00f); /* 禁用的控件文字颜色 */
-		colors[ImGuiCol_WindowBg]				= ImVec4(0.12f, 0.12f, 0.12f, 1.00f); /* 窗口背景颜色 */
-		colors[ImGuiCol_ChildBg]				= ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-		colors[ImGuiCol_PopupBg]				= ImVec4(0.12f, 0.12f, 0.12f, 0.94f); /* 弹窗背景颜色 */
-		colors[ImGuiCol_Border]					= ImVec4(0.43f, 0.43f, 0.50f, 0.50f);
-		colors[ImGuiCol_BorderShadow]			= ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-		colors[ImGuiCol_FrameBg]				= ImVec4(0.08f, 0.08f, 0.08f, 0.74f);
-		colors[ImGuiCol_FrameBgHovered]			= ImVec4(0.43f, 0.40f, 0.35f, 0.40f);
-		colors[ImGuiCol_FrameBgActive]			= ImVec4(0.43f, 0.40f, 0.35f, 0.67f);
-		colors[ImGuiCol_TitleBg]				= ImVec4(0.18f, 0.18f, 0.18f, 1.00f); /* 窗口标题背景颜色 */
-		colors[ImGuiCol_TitleBgActive]			= ImVec4(0.20f, 0.20f, 0.20f, 1.00f); /* 活动窗口标题背景颜色 */
-		colors[ImGuiCol_TitleBgCollapsed]		= ImVec4(0.18f, 0.18f, 0.18f, 0.50f); /*  */
-		colors[ImGuiCol_MenuBarBg]				= ImVec4(0.14f, 0.14f, 0.14f, 1.00f); /* 菜单栏背景颜色 */
-		colors[ImGuiCol_ScrollbarBg]			= ImVec4(0.02f, 0.02f, 0.02f, 0.53f);
-		colors[ImGuiCol_ScrollbarGrab]			= ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
-		colors[ImGuiCol_ScrollbarGrabHovered]	= ImVec4(0.41f, 0.41f, 0.41f, 1.00f);
-		colors[ImGuiCol_ScrollbarGrabActive]	= ImVec4(0.51f, 0.51f, 0.51f, 1.00f);
-		colors[ImGuiCol_CheckMark]				= ImVec4(0.43f, 0.40f, 0.35f, 1.00f);
-		colors[ImGuiCol_SliderGrab]				= ImVec4(0.40f, 0.38f, 0.32f, 1.00f);
-		colors[ImGuiCol_SliderGrabActive]		= ImVec4(0.43f, 0.40f, 0.35f, 1.00f);
-		colors[ImGuiCol_Button]					= ImVec4(0.43f, 0.40f, 0.35f, 0.40f);
-		colors[ImGuiCol_ButtonHovered]			= ImVec4(0.43f, 0.40f, 0.35f, 1.00f);
-		colors[ImGuiCol_ButtonActive]			= ImVec4(0.56f, 0.53f, 0.35f, 1.00f);
-		colors[ImGuiCol_Header]					= ImVec4(0.43f, 0.40f, 0.35f, 0.31f); /* 窗口标题背景颜色 */
-		colors[ImGuiCol_HeaderHovered]			= ImVec4(0.43f, 0.40f, 0.35f, 0.80f); /* 鼠标悬停窗口标题背景颜色 */
-		colors[ImGuiCol_HeaderActive]			= ImVec4(0.43f, 0.40f, 0.35f, 1.00f); /* 活动窗口标题背景颜色 */
-		colors[ImGuiCol_Separator]				= colors[ImGuiCol_Border];
-		colors[ImGuiCol_SeparatorHovered]		= ImVec4(0.10f, 0.40f, 0.75f, 0.78f);
-		colors[ImGuiCol_SeparatorActive]		= ImVec4(0.10f, 0.40f, 0.75f, 1.00f);
-		colors[ImGuiCol_ResizeGrip]				= ImVec4(0.43f, 0.40f, 0.35f, 0.20f);
-		colors[ImGuiCol_ResizeGripHovered]		= ImVec4(0.43f, 0.40f, 0.35f, 0.67f);
-		colors[ImGuiCol_ResizeGripActive]		= ImVec4(0.43f, 0.40f, 0.35f, 0.95f);
-		colors[ImGuiCol_Tab]					= ImLerp(colors[ImGuiCol_Header], colors[ImGuiCol_TitleBgActive], 0.80f);
-		colors[ImGuiCol_TabHovered]				= colors[ImGuiCol_HeaderHovered];
-		colors[ImGuiCol_TabActive]				= ImLerp(colors[ImGuiCol_HeaderActive], colors[ImGuiCol_TitleBgActive], 0.60f);
-		colors[ImGuiCol_TabUnfocused]			= ImLerp(colors[ImGuiCol_Tab], colors[ImGuiCol_TitleBg], 0.80f);
-		colors[ImGuiCol_TabUnfocusedActive]		= ImLerp(colors[ImGuiCol_TabActive], colors[ImGuiCol_TitleBg], 0.40f); /* 活动窗口标签颜色 */
-		colors[ImGuiCol_DockingPreview]			= colors[ImGuiCol_HeaderActive]/* * ImVec4(1.0f, 1.0f, 1.0f, 0.7f)*/;
-		colors[ImGuiCol_DockingEmptyBg]			= ImVec4(0.20f, 0.20f, 0.20f, 1.00f);
-		colors[ImGuiCol_PlotLines]				= ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
-		colors[ImGuiCol_PlotLinesHovered]		= ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
-		colors[ImGuiCol_PlotHistogram]			= ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
-		colors[ImGuiCol_PlotHistogramHovered]	= ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
-		colors[ImGuiCol_TableHeaderBg]			= ImVec4(0.19f, 0.19f, 0.20f, 1.00f);
-		colors[ImGuiCol_TableBorderStrong]		= ImVec4(0.31f, 0.31f, 0.35f, 1.00f);   // Prefer using Alpha=1.0 here
-		colors[ImGuiCol_TableBorderLight]		= ImVec4(0.23f, 0.23f, 0.25f, 1.00f);   // Prefer using Alpha=1.0 here
-		colors[ImGuiCol_TableRowBg]				= ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-		colors[ImGuiCol_TableRowBgAlt]			= ImVec4(1.00f, 1.00f, 1.00f, 0.06f);
-		colors[ImGuiCol_TextSelectedBg]			= ImVec4(0.43f, 0.40f, 0.35f, 0.35f);
-		colors[ImGuiCol_DragDropTarget]			= ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
-		colors[ImGuiCol_NavHighlight]			= ImVec4(0.43f, 0.40f, 0.35f, 1.00f);
-		colors[ImGuiCol_NavWindowingHighlight]	= ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
-		colors[ImGuiCol_NavWindowingDimBg]		= ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
-		colors[ImGuiCol_ModalWindowDimBg]		= ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
-	}
-
-	void ImGuiLayer::SetDarkThemeColors()
-	{
-	}
 }

@@ -4,6 +4,7 @@
 #include "ImGuizmo.h"
 #include "ModelEditor/ModelEditorLayer.h"
 #include "SceneEditor/SceneEditorLayer.h"
+#include "Helios/ImGui/EditorTheme.h"
 
 namespace Helios
 {
@@ -173,6 +174,7 @@ namespace Helios
 		static bool p_open = true;
 		static bool opt_fullscreen = true;
 		static bool opt_padding = false;
+		static bool show_style_editor = false;
 		static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
 
 		// We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
@@ -204,9 +206,12 @@ namespace Helios
 		// all active windows docked into it will lose their parent and become undocked.
 		// We cannot preserve the docking relationship between an active window and an inactive docking, otherwise
 		// any change of dockspace/settings would lead to windows being stuck in limbo and never being visible.
+		/* 宿主画布背景压暗一档（Neutral0）：停靠面板（Neutral2）形成"浮在画布上"的层级 */
+		EditorTheme::PushDockHostBackground();
 		if (!opt_padding)
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		ImGui::Begin("DockSpace Demo", &p_open, window_flags);
+		/* ### 之后为窗口 ID：保持不变，旧的 imgui.ini 停靠布局继续有效 */
+		ImGui::Begin("Helios###DockSpace Demo", &p_open, window_flags);
 		{
 			if (!opt_padding)
 				ImGui::PopStyleVar();
@@ -221,9 +226,6 @@ namespace Helios
 				ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
 				ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
 			}
-
-			ImGuiStyle& style = ImGui::GetStyle();
-			style.WindowMinSize.x = 200.0f;
 
 			/* 菜单栏 */
 			if (ImGui::BeginMenuBar())
@@ -298,6 +300,7 @@ namespace Helios
 					// which we can't undo at the moment without finer window depth/z control.
 					ImGui::MenuItem("Fullscreen", NULL, &opt_fullscreen);
 					ImGui::MenuItem("Padding", NULL, &opt_padding);
+					ImGui::MenuItem("Style Editor", nullptr, &show_style_editor);
 					ImGui::Separator();
 
 					if (ImGui::MenuItem("Flag: NoSplit", "", (dockspace_flags & ImGuiDockNodeFlags_NoSplit) != 0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoSplit; }
@@ -316,6 +319,11 @@ namespace Helios
 			}
 		}
 		ImGui::End();
+		EditorTheme::PopDockHostBackground();
+
+		/* Style Editor：实时调参，Export 后固化回 EditorTheme.h */
+		if (show_style_editor)
+			ImGui::ShowStyleEditor();
 	}
 
 	/* 显示场景控制UI */
@@ -344,8 +352,6 @@ namespace Helios
 			constexpr float cursor_offset = 10.0f;
 			/* 保存按钮 */
 			ImGui::SetCursorPosX(cursor_offset);
-			/*if (ImGui::ImageButton((ImTextureID)save_icon->GetTextureID(), ImVec2(icon_size, icon_size), ImVec2(0, 1), ImVec2(1, 0), 0))
-				SaveScene();*/
 			bool checked = false;
 			ImGuiExt::DrawCheckedImageButtonUI("Save", save_icon, ImVec2(icon_size, icon_size), checked,
 				[&]()
@@ -392,7 +398,7 @@ namespace Helios
 				ImGui::SameLine();
 				const SharedPtr<DeviceTexture> icon = (m_PlayMode == PlayMode::Edit) ? play_icon : stop_icon;
 				ImGui::SetCursorPosX((panel_width - icon_size) * 0.5f);
-				if (ImGui::ImageButton((ImTextureID)icon->GetTextureID(), ImVec2(icon_size, icon_size), ImVec2(0, 1), ImVec2(1, 0), 0))
+				if (ImGui::ImageButton((ImTextureID)icon.get(), ImVec2(icon_size, icon_size), ImVec2(0, 1), ImVec2(1, 0), 0))
 				{
 					m_PlayMode = (m_PlayMode == PlayMode::Edit) ? PlayMode::Runtime : PlayMode::Edit;
 					NotifyPlayModeChanged();
@@ -403,7 +409,7 @@ namespace Helios
 			{
 				ImGui::SameLine(panel_width - cursor_offset - 20);
 				START_STYLE_ALPHA(0.5f);
-				if (ImGui::ImageButton((ImTextureID)menu_icon->GetTextureID(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+				if (ImGui::ImageButton((ImTextureID)menu_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
 					ImGui::OpenPopup("ConfigPopup");
 				END_STYLE_ALPHA;
 

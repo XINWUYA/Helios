@@ -13,14 +13,6 @@
 struct ImDrawData;
 struct ImDrawList;
 
-#ifdef PLATFORM_MACOS
-// Forward declaration for Metal types
-namespace MTL
-{
-    class SamplerState;
-}
-#endif
-
 namespace Helios
 {
     /**

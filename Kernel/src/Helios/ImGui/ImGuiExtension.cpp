@@ -379,8 +379,9 @@ namespace Helios::ImGuiExt
 		{
 			const auto& show_texture = texture ? texture : TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Default.png"));
 
-			/* Image */
-			ImGui::ImageButton((ImTextureID)show_texture->GetTextureID(), ImVec2(80, 80), ImVec2(0, 1), ImVec2(1, 0), 0);
+			/* Image：ImTextureID 统一存放 DeviceTexture 指针，
+			 * 由渲染后端自行解析为硬件句柄（避免 32 位 GetTextureID 截断指针）。 */
+			ImGui::ImageButton((ImTextureID)show_texture.get(), ImVec2(80, 80), ImVec2(0, 1), ImVec2(1, 0), 0);
 			if (ImGui::BeginDragDropTarget())
 			{
 				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
@@ -402,7 +403,7 @@ namespace Helios::ImGuiExt
 			if (ImGui::IsItemHovered())
 			{
 				ImGui::BeginTooltip();
-				ImGui::Image((ImTextureID)show_texture->GetTextureID(), ImVec2(240, 240), ImVec2(0, 1), ImVec2(1, 0));
+				ImGui::Image((ImTextureID)show_texture.get(), ImVec2(240, 240), ImVec2(0, 1), ImVec2(1, 0));
 				ImGui::EndTooltip();
 			}
 
@@ -760,7 +761,7 @@ namespace Helios::ImGuiExt
 		}
 
 		/* Button */
-		if (ImGui::ImageButton((ImTextureID)texture->GetTextureID(), size, ImVec2(0, 1), ImVec2(1, 0), 0))
+		if (ImGui::ImageButton((ImTextureID)texture.get(), size, ImVec2(0, 1), ImVec2(1, 0), 0))
 		{
 			button_func();
 		}

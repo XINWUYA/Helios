@@ -45,7 +45,7 @@ namespace Helios
 
 				START_STYLE_ALPHA(button_alpha);
 				const auto return_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/return.png"));
-				if (ImGui::ImageButton((ImTextureID)return_icon->GetTextureID(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+				if (ImGui::ImageButton((ImTextureID)return_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
 					m_CurrentFileNode = m_CurrentFileNode->ParentNode.lock();
 				END_STYLE_ALPHA;
 
@@ -73,7 +73,7 @@ namespace Helios
 				const auto filter_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/filter.png"));
 
 				START_STYLE_ALPHA(0.5f);
-				ImGui::Image((ImTextureID)filter_icon->GetTextureID(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0));
+				ImGui::Image((ImTextureID)filter_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0));
 				END_STYLE_ALPHA;
 			}
 
@@ -82,7 +82,7 @@ namespace Helios
 				ImGui::SameLine(panel_width - 15);
 				START_STYLE_ALPHA(0.5f);
 				const auto menu_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/menu.png"));
-				if (ImGui::ImageButton((ImTextureID)menu_icon->GetTextureID(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+				if (ImGui::ImageButton((ImTextureID)menu_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
 					ImGui::OpenPopup("SettingPopup");
 				END_STYLE_ALPHA;
 
@@ -127,7 +127,7 @@ namespace Helios
 							ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
                             {
                                 /* 图标 */
-                                ImGui::ImageButton((ImTextureID)child_node->Icon->GetTextureID(), ImVec2(thumbnail_size, thumbnail_size), ImVec2(0, 1), ImVec2(1, 0));
+                                ImGui::ImageButton((ImTextureID)child_node->Icon.get(), ImVec2(thumbnail_size, thumbnail_size), ImVec2(0, 1), ImVec2(1, 0));
                                 
                                 /* 拖拽 */
                                 if (ImGui::BeginDragDropSource())

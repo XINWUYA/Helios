@@ -294,12 +294,6 @@ namespace Helios
 			);
 		frame_graph->GetBlackboard()["LightingPassOutput"] = lighting_pass->GetData().LightingResult;
 
-		/* 将ImGui渲染作为FrameGraph的最后一个Pass */
-		if (const auto& imgui_layer = Application::Instance()->GetImGuiLayer())
-		{
-			imgui_layer->AddFrameGraphPass(*frame_graph);
-		}
-
 		// frame_graph->ExportGraphviz("framegraph.txt");
 		m_pRenderView->Prepare();
 

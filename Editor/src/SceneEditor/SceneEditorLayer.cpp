@@ -258,9 +258,10 @@ namespace Helios
 			auto output_rt = m_pEditorCamera->GetRenderView()->GetRenderTarget();
 			if (output_rt)
 			{
-				const uint64_t texture_id = output_rt->GetTextureID();
 				const auto viewport_panel_size = ImGui::GetContentRegionAvail();
-				ImGui::Image((ImTextureID)texture_id, viewport_panel_size, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+				/* ImTextureID 统一存放 DeviceTexture 指针：GetTextureID() 返回的硬件
+				 * 句柄在 Metal 上是 64 位指针被截断后的 32 位，不能当指针使用。 */
+				ImGui::Image((ImTextureID)output_rt.get(), viewport_panel_size, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
 			}
 
 			/* 拖动资源到主窗口 */
