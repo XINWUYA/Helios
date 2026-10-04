@@ -1,10 +1,33 @@
 ﻿#include "Pch.h"
 #include "OpenGLContext.h"
+#include <cstring>
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
 
 namespace Helios
 {
+	namespace
+	{
+		/* glClipControl / glClipControlEXT 签名相同：void(GLenum origin, GLenum depth)。
+		 * 运行时从 GL 加载器动态获取，不依赖编译期 glad 是否声明该符号。 */
+		using PFNGLCLIPCONTROL = void (*)(GLenum origin, GLenum depth);
+
+		/* EXT 版本与核心版本的裁剪空间枚举取值相同，桌面 / GLES 可共用。 */
+#ifndef GL_LOWER_LEFT_EXT
+#define GL_LOWER_LEFT_EXT 0x8CA1
+#endif
+#ifndef GL_ZERO_TO_ONE_EXT
+#define GL_ZERO_TO_ONE_EXT 0x935F
+#endif
+
+		/* 运行时判定当前上下文是否为 OpenGL ES（读 GL_VERSION 前缀，与所用加载器无关）。 */
+		bool IsOpenGLESContext()
+		{
+			const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+			return version != nullptr && std::strncmp(version, "OpenGL ES", 9) == 0;
+		}
+	}
+
 	OpenGLContext::OpenGLContext(GLFWwindow* window)
 		: m_pGLFWWindow(window)
 	{
@@ -26,14 +49,44 @@ namespace Helios
 		CORE_LOG_INFO("    Renderer: {0}", glGetString(GL_RENDERER));
 		CORE_LOG_INFO("    Version: {0}", glGetString(GL_VERSION));
 
+		const bool is_es = IsOpenGLESContext();
+
+		if (is_es)
+		{
+			/* GLES 门槛：EXT_clip_control 需要 ES 3.0+ */
+			ASSERT((GLVersion.major >= 3),
+				"OpenGL ES Version is too old(need >= 3.0).");
+		}
+		else
+		{
 #ifdef __APPLE__
-		// macOS only supports OpenGL 4.1
-		ASSERT((GLVersion.major > 4 || (GLVersion.major == 4 && GLVersion.minor >= 1)),
-			"OpenGL Version is too old(need >= 4.1 on macOS).");
+			// macOS only supports OpenGL 4.1
+			ASSERT((GLVersion.major > 4 || (GLVersion.major == 4 && GLVersion.minor >= 1)),
+				"OpenGL Version is too old(need >= 4.1 on macOS).");
 #else
-		ASSERT((GLVersion.major > 4 || (GLVersion.major == 4 && GLVersion.minor >= 5)),
-			"OpenGL Version is too old(need >= 4.5).");
+			ASSERT((GLVersion.major > 4 || (GLVersion.major == 4 && GLVersion.minor >= 5)),
+				"OpenGL Version is too old(need >= 4.5).");
 #endif
+		}
+
+		/* ZO + Reversed-Z 深度约定（跟 Metal 对齐）：裁剪空间 z 从 [-1,1] 切到 [0,1]，y 保持
+		 * GL_LOWER_LEFT。桌面 GL 用 glClipControl(4.5+)、GLES 用 glClipControlEXT（签名一样，运行时
+		 * 从加载器拿；取不到就显式报错）。 */
+		const char* clip_control_name = is_es ? "glClipControlEXT" : "glClipControl";
+		auto clip_control = reinterpret_cast<PFNGLCLIPCONTROL>(glfwGetProcAddress(clip_control_name));
+		if (clip_control)
+		{
+			clip_control(GL_LOWER_LEFT_EXT, GL_ZERO_TO_ONE_EXT);
+		}
+		else
+		{
+			CORE_LOG_ERROR("{} is unavailable; the ZO/reversed-Z depth convention "
+				"cannot be applied, rendering will be incorrect.", clip_control_name);
+		}
+
+		/* Reversed-Z：深度清零值为 0（远平面）。用 glClearDepthf：桌面 GL 4.1+ 与
+		 * GLES 2.0+ 均可用，而 glClearDepth 在 GLES / ANGLE 上不导出。 */
+		glClearDepthf(0.0f);
 
 
 		/* 创建DebugOutput回调 */

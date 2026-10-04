@@ -63,7 +63,7 @@ namespace Helios
 
 	void OpenGLRenderAPI::SetClearColor(const glm::vec4& color)
 	{
-		glClearColor(color.r, color.b, color.b, color.a);
+		glClearColor(color.r, color.g, color.b, color.a);
 	}
 
 	void OpenGLRenderAPI::Clear()

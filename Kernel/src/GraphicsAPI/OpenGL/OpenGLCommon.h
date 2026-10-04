@@ -57,6 +57,7 @@ namespace Helios
 		case TextureFormat::RGBA8_SNorm:	 return GL_RGBA8_SNORM;
 		case TextureFormat::R10G10B10A2:	 return GL_RGB10_A2;
 		case TextureFormat::Depth32:		 return GL_DEPTH_COMPONENT32;
+		case TextureFormat::Depth32F:		 return GL_DEPTH_COMPONENT32F;
 		case TextureFormat::Depth24Stencil8: return GL_DEPTH24_STENCIL8;
 		case TextureFormat::RGBA16F:		 return GL_RGBA16F;
 		case TextureFormat::RGB32F:			 return GL_RGB32F;
@@ -262,6 +263,7 @@ namespace Helios
 		case TextureFormat::Depth16:
 		case TextureFormat::Depth24:
 		case TextureFormat::Depth32:
+		case TextureFormat::Depth32F:
 			return GL_DEPTH_COMPONENT;
 		case TextureFormat::Depth24Stencil8:
 			return GL_DEPTH_STENCIL;
@@ -329,6 +331,8 @@ namespace Helios
 		case TextureFormat::Depth24:
 		case TextureFormat::Depth32:
 			return GL_UNSIGNED_INT;
+		case TextureFormat::Depth32F:
+			return GL_FLOAT;
 		case TextureFormat::Depth24Stencil8:
 			return GL_UNSIGNED_INT_24_8;
 		case TextureFormat::Stencil8:
