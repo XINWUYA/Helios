@@ -216,6 +216,10 @@ namespace Helios
 		if (m_ActiveScenePath.empty())
 			m_ActiveScenePath = FileDialog::SaveFile("scene(*.scn)\0*.scn\0");
 
+		/* 用户取消了路径选择：不写出空路径 */
+		if (m_ActiveScenePath.empty())
+			return;
+
 		m_pMainScene->Serializer(m_ActiveScenePath);
 	}
 
@@ -224,11 +228,15 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		std::string file_path = FileDialog::SaveFile("scene(*.scn)\0*.scn\0");
-		if (!file_path.empty())
-			m_pMainScene->Serializer(file_path);
+		const std::string file_path = FileDialog::SaveFile("scene(*.scn)\0*.scn\0");
 
-		/* 在保存之后，将当前场景路径切换为新创建的路径 */
+		/* 用户取消：保持当前场景路径不变 */
+		if (file_path.empty())
+			return;
+
+		m_pMainScene->Serializer(file_path);
+
+		/* 保存成功后，当前场景路径切换为新路径 */
 		m_ActiveScenePath = file_path;
 	}
 
