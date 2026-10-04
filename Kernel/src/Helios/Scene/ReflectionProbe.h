@@ -134,6 +134,9 @@ namespace Helios
         /* 注销一个反射探针（由 ReflectionProbeComponent 销毁时调用） */
         void UnregisterProbe(const SharedPtr<ReflectionProbe>& probe);
 
+        /* 清空所有已注册的探针（场景内容被整体替换时调用） */
+        void ClearProbes();
+
         /* 是否存在已注册的反射探针 */
         bool HasProbe() const { return !m_RegisteredProbes.empty(); }
 

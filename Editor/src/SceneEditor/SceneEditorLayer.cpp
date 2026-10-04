@@ -171,16 +171,7 @@ namespace Helios
 
 			SharedPtr<Scene> new_scene = CreateSharedPtr<Scene>();
 			if (new_scene->Deserializer(path.generic_string()))
-			{
-				m_pMainScene = new_scene;
-				m_ActiveScenePath = path.generic_string();
-
-				/* 设置对象层次结构面板对应的场景 */
-				m_SceneHierarchy.SetOwnerScene(m_pMainScene);
-
-				/* 切换场景时，需更新Editor RenderView的场景 */
-				m_pEditorCamera->GetRenderView()->SetOwnerScene(m_pMainScene);
-			}
+				SetActiveScene(new_scene, path.generic_string());
 
 			return;
 		}
@@ -199,16 +190,33 @@ namespace Helios
 		
 	}
 
+	void SceneEditorLayer::SetActiveScene(const SharedPtr<Scene>& scene, const std::string& path)
+	{
+		PROFILE_FUNCTION();
+
+		m_pMainScene = scene;
+		m_ActiveScenePath = path;
+
+		/* 层级面板与 RenderView 都要指向新场景 */
+		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
+		m_pEditorCamera->GetRenderView()->SetOwnerScene(m_pMainScene);
+
+		/* 场景内容已整体替换：缓存的实体句柄（悬停 / 选中）与旧命令都不再有效 */
+		m_HoveredEntity = {};
+		m_CommandStack.Clear();
+		m_IsGizmoDragging = false;
+
+		/* 新建 / 打开场景后场景视口必须可见：它同时是视口窗口被关闭后的恢复入口，
+		 * 否则用户新建了一个空场景却看不到它。 */
+		m_IsActivated = true;
+		m_IsViewportVisible = true;
+	}
+
 	void SceneEditorLayer::NewScene()
 	{
 		PROFILE_FUNCTION();
 
-		m_pMainScene = CreateSharedPtr<Scene>();
-		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
-
-		/* 场景已更换，旧命令引用的实体不再存在 */
-		m_CommandStack.Clear();
-		m_IsGizmoDragging = false;
+		SetActiveScene(CreateSharedPtr<Scene>(), std::string());
 	}
 
 	void SceneEditorLayer::ImportScene()
@@ -216,21 +224,11 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		const auto file_path = FileDialog::OpenFile("scene(*.scn)\0*.scn\0");
-		if (!file_path.empty())
-		{
-			m_pMainScene->Deserializer(file_path);
-			m_ActiveScenePath = file_path;
+		if (file_path.empty())
+			return;
 
-			/* 设置对象层次结构面板对应的场景 */
-			m_SceneHierarchy.SetOwnerScene(m_pMainScene);
-
-			/* 切换场景时，需更新Editor RenderView的场景 */
-			m_pEditorCamera->GetRenderView()->SetOwnerScene(m_pMainScene);
-
-			/* 场景内容已整体替换，旧命令不再适用 */
-			m_CommandStack.Clear();
-			m_IsGizmoDragging = false;
-		}
+		m_pMainScene->Deserializer(file_path);
+		SetActiveScene(m_pMainScene, file_path);
 	}
 
 	void SceneEditorLayer::SaveScene()
@@ -287,7 +285,9 @@ namespace Helios
 		static ImGuiWindowFlags tab_bar_flags = ImGuiWindowFlags_NoFocusOnAppearing;
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		ImGui::Begin(Panel::kScene, &m_IsActivated);
+		/* 每帧都必须调用 Begin：窗口被关闭（点 X 或 View 菜单取消勾选）时它返回 false，
+		 * 只有继续调用才可能重新显示（关闭时不画内容即可）。 */
+		if (ImGui::Begin(Panel::kScene, &m_IsViewportVisible))
 		{
 			/* 获取窗口范围 */
 			const auto viewport_region_min = ImGui::GetWindowContentRegionMin();
@@ -328,6 +328,13 @@ namespace Helios
 
 			/* Gizmos */
 			ShowOperationGizmoUI();
+		}
+		else
+		{
+			/* 视口窗口不可见：清掉交互标志，否则残留的 focus / hover
+			 * 会让相机继续吃键鼠输入、点击也会被误判成视口内选择。 */
+			m_IsViewportFocused = false;
+			m_IsViewportHovered = false;
 		}
 
 		ImGui::End();

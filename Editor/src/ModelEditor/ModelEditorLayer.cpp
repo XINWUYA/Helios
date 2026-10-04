@@ -84,7 +84,9 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		ImGui::Begin(Panel::kModel, &m_IsActivated);
+		/* 每帧都必须调用 Begin：窗口被关闭时它返回 false，
+		 * 只有继续调用才可能重新显示（关闭时不画内容即可）。 */
+		if (ImGui::Begin(Panel::kModel, &m_IsViewportVisible))
 		{
 			/* 获取窗口范围 */
 			const auto viewport_region_min = ImGui::GetWindowContentRegionMin();
@@ -459,6 +461,10 @@ namespace Helios
 
 			/* 更新场景模型信息 */
 			UpdateModel();
+
+			/* 模型已就绪：层与视口窗口一并唤回，导入结果必然可见 */
+			m_IsActivated = true;
+			m_IsViewportVisible = true;
 		}
 	}
 

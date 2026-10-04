@@ -39,10 +39,19 @@ namespace Helios
 		void Active(bool active = true) { m_IsActivated = active; }
 		bool IsActivated() const { return m_IsActivated; }
 
+		/* 场景视口窗口显隐（窗口右上角关闭按钮 / View 菜单）。
+		 * 与 m_IsActivated 分开：关掉视口只隐藏这一个窗口，
+		 * 层级、属性、统计面板与场景数据都不受影响。 */
+		void SetViewportVisible(bool visible) { m_IsViewportVisible = visible; }
+		[[nodiscard]] bool IsViewportVisible() const { return m_IsViewportVisible; }
+
 		void SetGizmoType(int type) { m_GizmoType = type; }
 		void SetPlayMode(PlayMode mode) { m_PlayMode = mode; }
 
 	private:
+		/* 切换到指定场景并重置一切与「旧场景内容」绑定的状态。
+		 * 新建 / 打开 / 拖拽导入都必须经过这里，否则容易漏掉其中一项。 */
+		void SetActiveScene(const SharedPtr<Scene>& scene, const std::string& path);
 		/* 更新视口 */
 		void UpdateViewport();
 		/* 响应键盘 */
@@ -91,5 +100,7 @@ namespace Helios
 		PlayMode m_PlayMode{ PlayMode::Edit };
 		/* 当前编辑器是否被启用 */
 		bool m_IsActivated{ true };
+		/* 场景视口窗口是否显示 */
+		bool m_IsViewportVisible{ true };
 	};
 }

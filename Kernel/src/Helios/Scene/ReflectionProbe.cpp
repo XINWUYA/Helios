@@ -539,6 +539,14 @@ namespace Helios
             m_RegisteredProbes.erase(it);
     }
 
+    void ReflectionProbeManager::ClearProbes()
+    {
+        PROFILE_FUNCTION();
+
+        m_RegisteredProbes.clear();
+        m_NeedBakeProbes.clear();
+    }
+
     /* 获取距离最近的反射探针 */
     SharedPtr<ReflectionProbe> ReflectionProbeManager::GetClostedReflectionProbe(const glm::vec3& target_pos) const
     {

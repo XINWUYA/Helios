@@ -35,11 +35,17 @@ namespace Helios
 		[[nodiscard]] PlayMode GetPlayMode() const { return m_PlayMode; }
 		void SetPlayMode(PlayMode mode);
 
-		/* ---- 面板显隐 ---- */
+		/* ---- 面板显隐：整层启用 ---- */
 		[[nodiscard]] bool IsSceneEditorActive();
 		void SetSceneEditorActive(bool active);
 		[[nodiscard]] bool IsModelEditorActive();
 		void SetModelEditorActive(bool active);
+
+		/* ---- 视口窗口显隐：与「整层启用」分开，是窗口右上角关闭按钮的恢复入口 ---- */
+		[[nodiscard]] bool IsSceneViewportVisible();
+		void SetSceneViewportVisible(bool visible);
+		[[nodiscard]] bool IsModelViewportVisible();
+		void SetModelViewportVisible(bool visible);
 
 		/* 模型导入（ModelEditor 面板） */
 		void ImportModel();

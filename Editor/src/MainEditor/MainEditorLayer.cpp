@@ -294,9 +294,21 @@ namespace Helios
 					ImGui::EndMenu();
 				}
 
-				/* View：面板显隐 + 布局重置 */
+				/* View：面板显隐 + 布局重置。
+				 * 分两级：视口窗口（窗口右上角的关闭按钮只能靠这里恢复）与面板整层启用；
+				 * 场景的新建 / 打开也会自动唤回视口窗口，避免「关掉后再也打不开」。 */
 				if (ImGui::BeginMenu("View"))
 				{
+					bool scene_viewport_visible = m_Context.IsSceneViewportVisible();
+					if (ImGui::MenuItem("Scene Viewport", nullptr, &scene_viewport_visible))
+						m_Context.SetSceneViewportVisible(scene_viewport_visible);
+
+					bool model_viewport_visible = m_Context.IsModelViewportVisible();
+					if (ImGui::MenuItem("Model Viewport", nullptr, &model_viewport_visible))
+						m_Context.SetModelViewportVisible(model_viewport_visible);
+
+					ImGui::Separator();
+
 					bool scene_active = m_Context.IsSceneEditorActive();
 					if (ImGui::MenuItem("Scene Editor", nullptr, &scene_active))
 						m_Context.SetSceneEditorActive(scene_active);

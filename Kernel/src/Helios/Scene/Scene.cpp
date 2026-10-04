@@ -54,6 +54,18 @@ namespace Helios
 		m_Registry.destroy(entity);
 	}
 
+	void Scene::ClearAllEntities()
+	{
+		PROFILE_FUNCTION();
+
+		/* 实体销毁会触发组件的 OnRemoved（反射探针随之从管理器注销），
+		 * 但管理器仍可能持有引用，一并清空以保证不留上一份场景的残留。 */
+		m_Registry.clear();
+
+		if (m_pReflectionProbeManager != nullptr)
+			m_pReflectionProbeManager->ClearProbes();
+	}
+
 	void Scene::OnUpdate(float delta_time, Camera* editor_camera)
 	{
 		PROFILE_FUNCTION();
@@ -180,16 +192,24 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		auto* doc = new tinyxml2::XMLDocument();
-		tinyxml2::XMLError error = doc->LoadFile(path.c_str());
-		if (error != tinyxml2::XML_SUCCESS)
+		tinyxml2::XMLDocument doc;
+		if (doc.LoadFile(path.c_str()) != tinyxml2::XML_SUCCESS)
 		{
 			CORE_LOG_ERROR("Failed to deserializer scene file: {}.", path);
 			return false;
 		}
 
-		tinyxml2::XMLElement* scene_root = doc->FirstChildElement("Scene");
-		tinyxml2::XMLElement* entities_root = scene_root->FirstChildElement("Entities");
+		tinyxml2::XMLElement* scene_root = doc.FirstChildElement("Scene");
+		tinyxml2::XMLElement* entities_root = (scene_root != nullptr) ? scene_root->FirstChildElement("Entities") : nullptr;
+		if (entities_root == nullptr)
+		{
+			CORE_LOG_ERROR("Scene file has no <Scene>/<Entities>: {}.", path);
+			return false;
+		}
+
+		/* 加载是「替换」语义：不清空会把上一份场景的实体留在新场景里。
+		 * 先确认文件可加载再清空，加载失败时当前内容不受影响。 */
+		ClearAllEntities();
 
 		for (tinyxml2::XMLElement* entity_root = entities_root->FirstChildElement(); entity_root; entity_root = entity_root->NextSiblingElement("Entity"))
 		{
@@ -221,7 +241,6 @@ namespace Helios
 			}
 		}
 
-		delete doc;
 		return true;
 	}
 

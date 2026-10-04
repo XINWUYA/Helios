@@ -25,8 +25,8 @@ namespace Helios
 		Entity CreateEntity(const std::string& name = std::string());
 		/* 销毁实体 */
 		void DestroyEntity(Entity& entity);
-		/* 清空所有实体 */
-		void ClearAllEntities() { m_Registry.clear(); }
+		/* 清空所有实体，以及由实体派生的场景侧状态（反射探针管理器） */
+		void ClearAllEntities();
 		/* 销毁指定类型的实体 */
 		template <typename T>
 		void DestroyTargetEntities() { m_Registry.clear<T>(); }

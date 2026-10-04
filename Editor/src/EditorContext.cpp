@@ -126,6 +126,30 @@ namespace Helios
 			layer->Active(active);
 	}
 
+	bool EditorContext::IsSceneViewportVisible()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->IsViewportVisible();
+	}
+
+	void EditorContext::SetSceneViewportVisible(bool visible)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->SetViewportVisible(visible);
+	}
+
+	bool EditorContext::IsModelViewportVisible()
+	{
+		const auto* layer = GetModelLayer();
+		return layer != nullptr && layer->IsViewportVisible();
+	}
+
+	void EditorContext::SetModelViewportVisible(bool visible)
+	{
+		if (auto* layer = GetModelLayer())
+			layer->SetViewportVisible(visible);
+	}
+
 	void EditorContext::ImportModel()
 	{
 		if (auto* layer = GetModelLayer())
