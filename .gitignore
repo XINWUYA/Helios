@@ -384,9 +384,13 @@ TimeCostProfiler-Startup.json
 TimeCostProfiler-Runtime.json
 
 build/
+build-xcode/
 cache/
 cmake-build-debug/
 cmake-build-release/
+
+# WorkBuddy 工作区数据
+.workbuddy/
 
 # CMake generated files
 CMakeCache.txt

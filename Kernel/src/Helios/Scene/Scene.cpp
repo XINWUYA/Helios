@@ -361,8 +361,8 @@ namespace Helios
     void Scene::ConnectSignalsForComponents(std::tuple<T...>)
     {
         (
-            (m_Registry.on_construct<T>().connect<&Scene::OnConstructComponent<T>>(this), ...),
-            (m_Registry.on_destroy<T>().connect<&Scene::OnDestroyComponent<T>>(this), ...)
+            (m_Registry.on_construct<T>().template connect<&Scene::OnConstructComponent<T>>(this), ...),
+            (m_Registry.on_destroy<T>().template connect<&Scene::OnDestroyComponent<T>>(this), ...)
             );
     }
 

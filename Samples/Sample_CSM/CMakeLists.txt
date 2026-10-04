@@ -59,4 +59,6 @@ elseif(APPLE)
     set_target_properties(Sample_CSM PROPERTIES
         MACOSX_BUNDLE ON
     )
+
+    helios_sign_macos_bundle(Sample_CSM)
 endif()

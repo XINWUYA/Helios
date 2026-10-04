@@ -103,6 +103,27 @@ elseif(APPLE)
     # AppleClang has incomplete support for consteval in C++20
     # This forces fmt library to use constexpr instead of consteval
     add_compile_definitions(FMT_CONSTEVAL=)
+
+    # macOS 要求可执行文件至少带有 ad-hoc 签名：未签名的 arm64 二进制会在启动
+    # 瞬间被内核以 SIGKILL 终止（表现为“无任何输出地立即退出”，退出码 137）。
+    # Xcode 生成器在链接阶段传入了 -no_adhoc_codesign（期望之后由 Xcode 签名），
+    # 但本工程没有设置 CODE_SIGN* 构建设置，Xcode 的 CodeSign 阶段不会执行，
+    # 于是产物处于未签名状态。此处在各 .app 构建完成后统一补一次 ad-hoc 签名，
+    # 对 Makefile/Ninja 等单配置生成器同样是幂等的（链接器已签过则重新签）。
+    function(helios_sign_macos_bundle target)
+        find_program(HELIOS_CODESIGN_EXECUTABLE codesign)
+        if(NOT HELIOS_CODESIGN_EXECUTABLE)
+            message(WARNING "codesign 未找到，${target}.app 可能在 Apple Silicon 上无法启动")
+            return()
+        endif()
+
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${HELIOS_CODESIGN_EXECUTABLE} --force --sign - --timestamp=none
+                    "$<TARGET_BUNDLE_DIR:${target}>"
+            COMMENT "Ad-hoc signing ${target}.app"
+            VERBATIM
+        )
+    endfunction()
 elseif(UNIX)
     add_compile_definitions(PLATFORM_LINUX)
 endif()

@@ -75,6 +75,8 @@ elseif(APPLE)
     set_target_properties(Editor PROPERTIES
         MACOSX_BUNDLE ON
     )
+
+    helios_sign_macos_bundle(Editor)
 endif()
 
 # Copy assets to output directory (optional)

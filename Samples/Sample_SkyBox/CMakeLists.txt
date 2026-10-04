@@ -60,4 +60,6 @@ elseif(APPLE)
     set_target_properties(Sample_SkyBox PROPERTIES
         MACOSX_BUNDLE ON
     )
+
+    helios_sign_macos_bundle(Sample_SkyBox)
 endif()
