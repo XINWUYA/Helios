@@ -55,6 +55,8 @@ set(INCLUDE_DIRS
     assimp        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
     tracy         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tracy/public
     spirv-cross   ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/spirv-cross
+    glslang       ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glslang
+    glslang-SPIRV ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glslang/SPIRV
 )
 
 if(VULKAN_SDK)

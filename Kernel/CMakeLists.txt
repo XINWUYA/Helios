@@ -6,7 +6,8 @@ project(Kernel LANGUAGES CXX)
 add_library(Kernel STATIC)
 
 # Source files
-file(GLOB_RECURSE KERNEL_SOURCES
+# CONFIGURE_DEPENDS 让新增/删除源文件后无需手动重新配置即可被自动收录
+file(GLOB_RECURSE KERNEL_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
@@ -66,6 +67,8 @@ target_include_directories(Kernel
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tracy/public
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/spirv-cross
+        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glslang
+        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glslang/SPIRV
 )
 
 if(APPLE)
@@ -95,8 +98,10 @@ target_link_libraries(Kernel
         tinyobjloader
         assimp
         xxHash
-    PRIVATE
         spirv-cross
+        glslang
+        SPIRV
+        glslang-default-resource-limits
 )
 
 # Platform-specific linking

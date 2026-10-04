@@ -43,6 +43,9 @@
 [submodule "Libraries/ThirdParty/metal-cpp"]
 	path = Libraries/ThirdParty/metal-cpp
 	url = https://github.com/bkaradzic/metal-cpp.git
+[submodule "Libraries/ThirdParty/glslang"]
+	path = Libraries/ThirdParty/glslang
+	url = https://github.com/KhronosGroup/glslang.git
 [submodule "Libraries/ThirdParty/spirv-cross"]
 	path = Libraries/ThirdParty/spirv-cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross.git

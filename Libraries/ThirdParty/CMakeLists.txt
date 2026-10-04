@@ -199,40 +199,6 @@ set_target_properties(xxHash PROPERTIES
     FOLDER "Libraries/ThirdParty"
 )
 
-# SPIRV-Cross
-# 用途：
-#   1) 从 SPIR-V 反射 sampler 的 layout(binding = X)，供 Material 自动匹配 texture unit
-#   2) 在 Metal 后端把 GLSL(SPIR-V) 转译为 MSL，并取得 [[texture(N)]] 的实际索引
-project(spirv-cross CXX)
-
-set(SPIRV_CROSS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross)
-
-add_library(spirv-cross STATIC)
-
-target_sources(spirv-cross PRIVATE
-    ${SPIRV_CROSS_DIR}/spirv_cross.cpp
-    ${SPIRV_CROSS_DIR}/spirv_cfg.cpp
-    ${SPIRV_CROSS_DIR}/spirv_cross_parsed_ir.cpp
-    ${SPIRV_CROSS_DIR}/spirv_parser.cpp
-    ${SPIRV_CROSS_DIR}/spirv_cross_util.cpp
-    ${SPIRV_CROSS_DIR}/spirv_glsl.cpp
-    ${SPIRV_CROSS_DIR}/spirv_msl.cpp
-)
-
-target_include_directories(spirv-cross PUBLIC ${SPIRV_CROSS_DIR})
-
-# 第三方代码不参与本工程的告警治理
-if(MSVC)
-    target_compile_options(spirv-cross PRIVATE /W0)
-else()
-    target_compile_options(spirv-cross PRIVATE -w)
-endif()
-
-set_target_properties(spirv-cross PROPERTIES
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
-    FOLDER "Libraries/ThirdParty"
-)
-
 # tinyobjloader
 project(tinyobjloader CXX)
 
@@ -382,6 +348,49 @@ if(ASSIMP_USE_SYSTEM_ZLIB)
 endif()
 
 set_target_properties(assimp PROPERTIES 
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
+    FOLDER "Libraries/ThirdParty"
+)
+
+# glslang (GLSL to SPIR-V compiler, no external deps, no binaries/tests)
+set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
+set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(glslang)
+set_target_properties(glslang PROPERTIES FOLDER "Libraries/ThirdParty")
+set_target_properties(SPIRV PROPERTIES FOLDER "Libraries/ThirdParty")
+
+# SPIRV-Cross (MSL backend only, no CLI/tests)
+project(SPIRV-Cross CXX)
+
+add_library(spirv-cross STATIC)
+
+target_sources(spirv-cross PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_cross.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_cross_parsed_ir.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_cross_util.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_parser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_glsl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_msl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_cfg.cpp
+)
+
+target_include_directories(spirv-cross PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross
+)
+
+# SPIRV-Cross emits many warnings under C++20; disable them for this third-party target
+if(MSVC)
+    target_compile_options(spirv-cross PRIVATE /W0)
+else()
+    target_compile_options(spirv-cross PRIVATE -w)
+endif()
+
+target_compile_features(spirv-cross PRIVATE cxx_std_11)
+set_target_properties(spirv-cross PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
 )
