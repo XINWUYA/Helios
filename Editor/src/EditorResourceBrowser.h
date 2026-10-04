@@ -1,4 +1,6 @@
 ﻿#pragma once
+#include <filesystem>
+#include <vector>
 
 namespace Helios
 {
@@ -61,6 +63,14 @@ namespace Helios
 		/* 构建文件节点UI(简洁) */
 		void BuildFileUIListTreeSimple(const SharedPtr<FileNode>& node);
 
+		/* 在树中按相对路径查找节点：重建后据此恢复浏览位置 */
+		static SharedPtr<FileNode> FindNode(const SharedPtr<FileNode>& node, const std::string& path);
+
+		/* 资源目录是否被改动（新增 / 删除资源，或编辑器之外的操作） */
+		[[nodiscard]] bool HasDirectoryChanged() const;
+		/* 记录当前目录状态，供下次比较 */
+		void UpdateDirectoryStamp();
+
 		/* 获取文件相对路径 */
 		static std::filesystem::path GetRelativePath(const std::filesystem::path& dir, const std::filesystem::path& path);
 
@@ -71,5 +81,11 @@ namespace Helios
 
 		/* 只有文件夹文件变化时才更新的文件节点树 */
 		bool m_IsDirty{ true };
+
+		/* 目录状态指纹：目录数量 + 最新的目录写入时间 */
+		size_t m_DirectoryCount{ 0 };
+		std::filesystem::file_time_type m_NewestDirectoryWriteTime{};
+		/* 距上次检查目录状态的累计时间 */
+		float m_RefreshElapsed{ 0.0f };
 	};
 }

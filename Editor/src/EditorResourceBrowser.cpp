@@ -5,15 +5,95 @@
 
 namespace Helios
 {
+	namespace
+	{
+		/* 目录状态检查间隔：兼顾刷新及时性与遍历开销 */
+		constexpr float kDirectoryCheckInterval = 0.5f;
+
+		/* 统计资源目录（含根目录）的目录数量与最新写入时间。
+		 * 新增 / 删除文件会更新其所在目录的时间戳，因此只需读目录，不必 stat 每个文件。 */
+		void CollectDirectoryStamp(size_t& out_count, std::filesystem::file_time_type& out_newest)
+		{
+			std::error_code error;
+
+			/* 资源根目录自身：直接在根下新增 / 删除文件只更新它的时间戳 */
+			out_count = 1;
+			out_newest = std::filesystem::last_write_time(g_AssetsPath, error);
+
+			for (const auto& entry : std::filesystem::recursive_directory_iterator(
+				g_AssetsPath, std::filesystem::directory_options::skip_permission_denied))
+			{
+				std::error_code entry_error;
+				if (!entry.is_directory(entry_error))
+					continue;
+
+				++out_count;
+
+				const auto write_time = entry.last_write_time(entry_error);
+				if (!entry_error && write_time > out_newest)
+					out_newest = write_time;
+			}
+		}
+	}
+
+	bool EditorResourceBrowser::HasDirectoryChanged() const
+	{
+		size_t count = 0;
+		std::filesystem::file_time_type newest{};
+		CollectDirectoryStamp(count, newest);
+
+		return count != m_DirectoryCount || newest != m_NewestDirectoryWriteTime;
+	}
+
+	void EditorResourceBrowser::UpdateDirectoryStamp()
+	{
+		CollectDirectoryStamp(m_DirectoryCount, m_NewestDirectoryWriteTime);
+	}
+
+	SharedPtr<EditorResourceBrowser::FileNode> EditorResourceBrowser::FindNode(
+		const SharedPtr<FileNode>& node, const std::string& path)
+	{
+		if (node == nullptr)
+			return nullptr;
+
+		if (node->FilePath == path)
+			return node;
+
+		for (const auto& child : node->ChildNodes)
+		{
+			if (auto found = FindNode(child, path))
+				return found;
+		}
+
+		return nullptr;
+	}
+
 	void EditorResourceBrowser::OnImGuiRenderer()
 	{
 		PROFILE_FUNCTION();
 
+		/* 资源可能被编辑器之外的操作改动（新建场景、另存为、外部增删），定期比对目录状态 */
+		m_RefreshElapsed += ImGui::GetIO().DeltaTime;
+		if (m_RefreshElapsed >= kDirectoryCheckInterval)
+		{
+			m_RefreshElapsed = 0.0f;
+			if (HasDirectoryChanged())
+				m_IsDirty = true;
+		}
+
         /* 创建根文件目录节点 */
 		if (m_IsDirty)
 		{
+			/* 记住浏览位置，重建后按路径找回，避免刷新把用户弹回根目录 */
+			const std::string current_path = (m_CurrentFileNode != nullptr) ? m_CurrentFileNode->FilePath : std::string();
+
 			m_RootFileNodeTree = CreateSharedPtr<FileNode>(g_AssetsPath.string(), "", FileType::Folder, 0, -1);
 			BuildFileNodeTree(m_RootFileNodeTree);
+			UpdateDirectoryStamp();
+
+			m_CurrentFileNode = current_path.empty() ? nullptr : FindNode(m_RootFileNodeTree, current_path);
+			if (!m_CurrentFileNode)
+				m_CurrentFileNode = m_RootFileNodeTree;   /* 未浏览过，或原目录已被删除 */
 		}
 
 		/* 文件目录列表窗口 */
