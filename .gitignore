@@ -405,3 +405,6 @@ Makefile
 
 /Kernel/src/Helios/Tracy/TracyClient.cpp
 
+# 本地验证工具（不入库）
+Tools/reflect_check/
+

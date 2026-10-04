@@ -5,7 +5,9 @@ namespace Helios
 	class Scene;
 	class Entity;
 
-	/* 场景实体列表 */
+	/* 场景实体列表 + 属性面板
+	 * 属性面板的组件 UI 由 ComponentRegistry 驱动，本类不依赖任何具体组件类型；
+	 * 新增组件只需在注册表补一段（见 Helios/Reflection/ComponentRegistry.cpp）。 */
 	class SceneHierarchy
 	{
 	public:
@@ -22,40 +24,20 @@ namespace Helios
 		void SetSelectedEntity(const Entity& entity);
 
 	private:
-		/* 初始化图标 */
-		void InitIcons();
-
 		/* 显示场景实体列表UI */
 		void ShowSceneHierarchyUI();
 		/* 显示选中实体属性 */
 		void ShowEntityPropertiesUI();
 		/* 显示实体节点（SceneHierarchy中的节点）*/
 		void ShowEntityNode(Entity& entity);
-		/* 显示实体属性组件 */
+		/* 显示选中实体的全部组件（遍历 ComponentRegistry，不认识具体类型） */
 		void ShowEntityComponents();
-
-		/* 实体名称组件 */
-		void ShowNameComponent();
-		/* 增加组件按钮 */
+		/* 增加组件按钮（菜单项同样来自注册表） */
 		void ShowAddComponentButton();
-		/* 空间变换组件 */
-		void ShowTransformComponent();
-		/* 图片精灵组件 */
-		void ShowSpriteComponent();
-		/* 场景相机组件 */
-		void ShowCameraComponent();
-		/* 模型组件 */
-		void ShowModelComponent();
-		/* 光源组件 */
-		void ShowLightComponent();
 
 		/* 所属场景 */
 		SharedPtr<Scene> m_pOwnerScene;
 		/* 选中实体 */
 		Entity m_SelectedEntity;
-
-		/* 图标 */
-		SharedPtr<DeviceTexture> m_pAddComponentIcon;
-		SharedPtr<DeviceTexture> m_pMenuIcon;
 	};
 }

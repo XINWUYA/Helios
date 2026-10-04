@@ -16,6 +16,7 @@ namespace Helios
 
 		ASSERT(!s_pInstance, "Application already exist!");
 		s_pInstance = this;
+		m_Name = window_title;
 
 		m_pWindow = DeviceWindow::Create({ window_title, width, height });
 		m_pWindow->SetEventCallback(BIND_EVENT_FUNC(Application::OnEvent));

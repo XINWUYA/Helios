@@ -15,6 +15,9 @@ namespace Helios
 		static Application* Instance();
 		DeviceWindow& GetWindow() { return *m_pWindow; }
 
+		/* 应用名（即窗口标题）。用于区分各应用自身的配置文件（如 ImGui 布局 ini）。 */
+		[[nodiscard]] const std::string& GetName() const { return m_Name; }
+
 		virtual void Run();
 		void Close();
 
@@ -34,6 +37,7 @@ namespace Helios
 		UniquePtr<DeviceWindow> m_pWindow{ nullptr };
 		SharedPtr<ImGuiLayer> m_pImGuiLayer{ nullptr };
 		LayerStack m_LayerStack{};
+		std::string m_Name{};
 		bool m_IsRunning{ true };
 		bool m_IsMinimized{ false };
 		float m_LastFrameTime{ 0.0f };

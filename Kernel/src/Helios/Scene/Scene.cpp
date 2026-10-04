@@ -1,6 +1,8 @@
 ﻿#include "Pch.h"
 #include "Scene.h"
 #include <tinyxml2.h>
+#include <algorithm>
+#include <vector>
 #include "Components.h"
 #include "Entity.h"
 #include "Material.h"
@@ -8,6 +10,7 @@
 #include "Camera.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderView.h"
+#include "Helios/Reflection/ComponentRegistry.h"
 #include "SceneCommon.h"
 
 namespace Helios
@@ -142,17 +145,24 @@ namespace Helios
 
 		tinyxml2::XMLElement* entities_root = scene_root->InsertNewChildElement("Entities");
 
-		/* 遍历场景中实体，进行序列化 */
-		m_Registry.each(
-			[&](auto& entity_id)
+		/* 按实体句柄升序输出：registry 的遍历顺序与创建顺序无关，
+		 * 直接遍历会让每次「加载 → 保存」把实体顺序整体翻转。 */
+		std::vector<entt::entity> entities;
+		m_Registry.each([&entities](auto entity_id) { entities.emplace_back(entity_id); });
+		std::sort(entities.begin(), entities.end(),
+			[](entt::entity lhs, entt::entity rhs)
 			{
-				Entity entity = { entity_id, shared_from_this() };
-				if (!entity)
-					return;
+				return entt::to_integral(lhs) < entt::to_integral(rhs);
+			});
 
-				SerializeEntity(entities_root, entity);
-			}
-		);
+		for (const auto entity_id : entities)
+		{
+			Entity entity = { entity_id, shared_from_this() };
+			if (!entity)
+				continue;
+
+			SerializeEntity(entities_root, entity);
+		}
 
 		/* 保存到文本 */
 		doc->SaveFile(path.c_str());
@@ -177,90 +187,32 @@ namespace Helios
 
 		for (tinyxml2::XMLElement* entity_root = entities_root->FirstChildElement(); entity_root; entity_root = entity_root->NextSiblingElement("Entity"))
 		{
-			if (auto* id_attr = entity_root->FindAttribute("ID"))
+			if (entity_root->FindAttribute("ID") == nullptr)
+				continue;
+
+			const char* name = entity_root->Attribute("Name");
+			if (name == nullptr || *name == '\0')
+				continue;
+
+			Entity entity = CreateEntity(name);
+
+			/* Name / Transform 由 CreateEntity 带上，其余组件由注册表驱动 */
+			for (const ComponentDesc& desc : ComponentRegistry::Instance().All())
 			{
-				uint32_t entity_id = id_attr->UnsignedValue();
+				if (!desc.bSerializable || desc.Has == nullptr || desc.GetPtr == nullptr || desc.Add == nullptr)
+					continue;
 
-				/* Name */
-				std::string name;
-				if (auto* name_attr = entity_root->FindAttribute("Name"))
-					name = name_attr->Value();
+				const tinyxml2::XMLElement* element = entity_root->FirstChildElement(desc.Name);
+				if (element == nullptr)
+					continue;
 
-				if (!name.empty())
-				{
-					auto entity = CreateEntity(name);
+				if (!desc.Has(entity))
+					desc.Add(entity);
 
-					/* Transform */
-					if (const auto* transform_root = entity_root->FirstChildElement("Transform"))
-					{
-						auto& transform_component = entity.GetComponent<TransformComponent>();
-						transform_component.m_Position = ToVec3(transform_root->Attribute("Position"));
-						transform_component.m_Rotation = ToVec3(transform_root->Attribute("Rotation"));
-						transform_component.m_Scale = ToVec3(transform_root->Attribute("Scale"));
-					}
-
-					/* Sprite */
-					if (const auto* sprite_root = entity_root->FirstChildElement("Sprite"))
-					{
-						auto& sprite_component = entity.AddComponent<SpriteComponent>();
-						const std::string texture_path = sprite_root->Attribute("TexturePath");
-						sprite_component.m_Texture = DeviceTexture::Create(texture_path);
-						sprite_component.m_BaseColor = ToVec4(sprite_root->Attribute("BaseColor"));
-						sprite_component.m_TilingFactor = sprite_root->FloatAttribute("TilingFactor");
-					}
-
-					/* Camera */
-					if (const auto* camera_root = entity_root->FirstChildElement("Camera"))
-					{
-						auto& camera_component = entity.AddComponent<CameraComponent>();
-						camera_component.m_IsPrimary = camera_root->BoolAttribute("IsPrimary");
-						camera_component.m_IsFixedAspectRatio = camera_root->BoolAttribute("IsFixedAspectRatio");
-
-						const auto projection_type = static_cast<CameraProjectionType>(camera_root->IntAttribute("ProjectionType"));
-						camera_component.m_Camera->SetProjectionType(projection_type);
-						switch (projection_type)
-						{
-						case CameraProjectionType::Perspective:
-							camera_component.m_Camera->SetFov(camera_root->FloatAttribute("Fov"));
-							camera_component.m_Camera->SetNearClip(camera_root->FloatAttribute("Near"));
-							camera_component.m_Camera->SetFarClip(camera_root->FloatAttribute("Far"));
-							break;
-						case CameraProjectionType::Orthographic:
-							camera_component.m_Camera->SetHeightSize(camera_root->FloatAttribute("HeightSize"));
-							camera_component.m_Camera->SetNearClip(camera_root->FloatAttribute("Near"));
-							camera_component.m_Camera->SetFarClip(camera_root->FloatAttribute("Far"));
-							break;
-						}
-					}
-
-					/* Model */
-					if (auto* model_root = entity_root->FirstChildElement("Model"))
-					{
-						auto& model_component = entity.AddComponent<ModelComponent>();
-
-						const std::string model_path = model_root->Attribute("ModelPath");
-
-						if (!model_path.empty())
-							model_component.m_Model = Model::Create(model_path);
-						
-
-						/* todo: 内建模型处理 */
-
-					}
-
-					/* Light */
-					if (auto* light_root = entity_root->FirstChildElement("Light"))
-					{
-						auto& component = entity.AddComponent<LightComponent>();
-						component.m_Type = static_cast<LightType>(light_root->IntAttribute("LightType"));
-
-						component.m_Light = Light::Create(component.m_Type);
-						component.m_Light->SetColor(ToVec4(light_root->Attribute("LightColor")));
-						component.m_Light->SetIntensity(light_root->FloatAttribute("LightIntensity"));
-						component.m_Light->SetIsCastShadow(light_root->BoolAttribute("IsCastShadow"));
-					}
-				}
-			}	
+				void* component = desc.GetPtr(entity);
+				if (component != nullptr)
+					LoadComponentFromXml(desc, component, element);
+			}
 		}
 
 		delete doc;
@@ -276,83 +228,24 @@ namespace Helios
 		/* ID */
 		entity_root->SetAttribute("ID", (uint32_t)entity);
 
-		/* Name */
+		/* Name 由实体自身的属性承载 */
 		if (entity.HasComponent<NameComponent>())
+			entity_root->SetAttribute("Name", entity.GetComponent<NameComponent>().m_Name.c_str());
+
+		/* 其余组件由注册表驱动，元素名即组件名 */
+		for (const ComponentDesc& desc : ComponentRegistry::Instance().All())
 		{
-			const auto& component = entity.GetComponent<NameComponent>();
-			entity_root->SetAttribute("Name", component.m_Name.c_str());
-		}
+			if (!desc.bSerializable || desc.Has == nullptr || desc.GetPtr == nullptr)
+				continue;
 
-		/* Transform */
-		if (entity.HasComponent<TransformComponent>())
-		{
-			auto* transform_root = entity_root->InsertNewChildElement("Transform");
-			const auto& component = entity.GetComponent<TransformComponent>();
-			transform_root->SetAttribute("Position", ToString(component.m_Position).c_str());
-			transform_root->SetAttribute("Rotation", ToString(component.m_Rotation).c_str());
-			transform_root->SetAttribute("Scale", ToString(component.m_Scale).c_str());
-		}
+			if (!desc.Has(entity))
+				continue;
 
-		/* Sprite */
-		if (entity.HasComponent<SpriteComponent>())
-		{
-			auto* sprite_root = entity_root->InsertNewChildElement("Sprite");
-			const auto& component = entity.GetComponent<SpriteComponent>();
-			sprite_root->SetAttribute("TexturePath", RELATIVE_PATH(component.m_Texture->GetPath()).c_str());
-			sprite_root->SetAttribute("BaseColor", ToString(component.m_BaseColor).c_str());
-			sprite_root->SetAttribute("TilingFactor", component.m_TilingFactor);
-		}
+			void* component = desc.GetPtr(entity);
+			if (component == nullptr)
+				continue;
 
-		/* Camera */
-		if (entity.HasComponent<CameraComponent>())
-		{
-			auto* camera_root = entity_root->InsertNewChildElement("Camera");
-			const auto& component = entity.GetComponent<CameraComponent>();
-
-			camera_root->SetAttribute("IsPrimary", component.m_IsPrimary);
-			camera_root->SetAttribute("IsFixedAspectRatio", component.m_IsFixedAspectRatio);
-
-			const auto projection_type = component.m_Camera->GetProjectionType();
-			camera_root->SetAttribute("ProjectionType", static_cast<int>(projection_type));
-
-			switch (projection_type)
-			{
-			case CameraProjectionType::Perspective:
-			{
-				camera_root->SetAttribute("Fov", component.m_Camera->GetFov());
-				camera_root->SetAttribute("Near", component.m_Camera->GetNearClip());
-				camera_root->SetAttribute("Far", component.m_Camera->GetFarClip());
-			}
-			break;
-			case CameraProjectionType::Orthographic:
-			{
-				camera_root->SetAttribute("HeightSize", component.m_Camera->GetHeightSize());
-				camera_root->SetAttribute("Near", component.m_Camera->GetNearClip());
-				camera_root->SetAttribute("Far", component.m_Camera->GetFarClip());
-			}
-			break;
-			}
-		}
-
-		/* Model */
-		if (entity.HasComponent<ModelComponent>())
-		{
-			auto* model_root = entity_root->InsertNewChildElement("Model");
-			const auto& component = entity.GetComponent<ModelComponent>();
-
-			model_root->SetAttribute("ModelPath", RELATIVE_PATH(component.m_Model->GetPath()).c_str());
-		}
-
-		/* Light */
-		if (entity.HasComponent<LightComponent>())
-		{
-			auto* model_root = entity_root->InsertNewChildElement("Light");
-			const auto& component = entity.GetComponent<LightComponent>();
-
-			model_root->SetAttribute("LightType", static_cast<int>(component.m_Type));
-			model_root->SetAttribute("LightColor", ToString(component.m_Light->GetColor()).c_str());
-			model_root->SetAttribute("LightIntensity", component.m_Light->GetIntensity());
-			model_root->SetAttribute("IsCastShadow", component.m_Light->IsCastShadow());
+			SaveComponentToXml(desc, component, entity_root->InsertNewChildElement(desc.Name));
 		}
 	}
 

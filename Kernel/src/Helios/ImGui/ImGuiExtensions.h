@@ -20,8 +20,8 @@ namespace ImGuiExt
 	void DrawCommonTextUI(const std::string& label, const std::string& value, float label_width = 100.0f);
 	/* 绘制一个Color UI */
 	void DrawColorUI(const std::string& label, glm::vec4& color, float label_width = 100.0f);
-	/* 绘制一个图片UI */
-	void DrawTextureUI(const std::string& label, SharedPtr<DeviceTexture>& texture, float& tiling_factor, float label_width = 100.0f);
+	/* 绘制一个资源引用的UI（图片选择 + 拖入 + 悬停预览） */
+	void DrawTextureUI(const std::string& label, SharedPtr<DeviceTexture>& texture, float label_width = 100.0f);
 	/* 绘制一个可拖动的Int UI */
 	void DrawDragIntUI(const char* label, int& value, float label_width = 100.0f);
 	/* 绘制一个可拖动的Float UI */

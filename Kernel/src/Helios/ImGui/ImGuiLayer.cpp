@@ -5,6 +5,7 @@
 #include <imgui_internal.h>
 #include <backends/imgui_impl_glfw.h>
 #include <GLFW/glfw3.h>
+#include <filesystem>
 #include "Helios/Application/Application.h"
 #include "Helios/VirtualDevice/DeviceWindow.h"
 #include "Helios/Renderer/Renderer.h"
@@ -17,6 +18,36 @@ namespace Helios
 	/* ImGuiPass Payload：此Pass不依赖任何FrameGraph资源 */
 	struct ImGuiPassData
 	{};
+
+	/* 应用名可能含空格等字符，折算为安全的文件名 */
+	static std::string SanitizeFileName(const std::string& name)
+	{
+		std::string result;
+		result.reserve(name.size());
+		for (const char c : name)
+		{
+			const bool safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+				|| (c >= '0' && c <= '9') || c == '_' || c == '-';
+			result.push_back(safe ? c : '_');
+		}
+		return result.empty() ? std::string("App") : result;
+	}
+
+	/* 布局 ini 路径：<工程根>/imgui/<应用名>.ini
+	 * ASSETS_PATH 对所有 target 相同，若各应用共用同一个 ini 会互相覆盖布局，故按应用名分文件。
+	 * 建目录失败时退回工程根，保证布局仍可持久化。 */
+	static std::string BuildLayoutIniPath()
+	{
+		const Application* app = Application::Instance();
+		const std::filesystem::path file_name = SanitizeFileName(app != nullptr ? app->GetName() : std::string()) + ".ini";
+
+		const std::filesystem::path root = std::filesystem::path(ASSETS_PATH).parent_path();
+		const std::filesystem::path dir = root / "imgui";
+
+		std::error_code error;
+		std::filesystem::create_directories(dir, error);
+		return (error ? root / file_name : dir / file_name).string();
+	}
 
 	ImGuiLayer::ImGuiLayer()
 		: ILayer("ImGuiLayer")
@@ -40,8 +71,8 @@ namespace Helios
 		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;			// Enable Multi-Viewport / Platform Windows
 		//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
 
-		/* ini 路径固定为绝对路径（工程根目录），与 ASSETS_PATH 同目录，便于跨工作目录运行时复用同一份布局 */
-		m_IniPath = std::string(ASSETS_PATH) + "/../imgui.ini";
+		/* 每个应用各用一份布局文件，避免编辑器与各 Sample 互相覆盖（见 BuildLayoutIniPath） */
+		m_IniPath = BuildLayoutIniPath();
 		SetLayoutSavingEnabled(true);
 
 		/* 窗口需在字体构建前取得：字形按屏幕 content scale 光栅化，Retina 下文字才锐利 */

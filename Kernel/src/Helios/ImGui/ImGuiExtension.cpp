@@ -362,8 +362,8 @@ namespace Helios::ImGuiExt
 		ImGui::PopID();
 	}
 
-	/* 绘制一个图片UI */
-	void DrawTextureUI(const std::string& label, SharedPtr<DeviceTexture>& texture, float& tiling_factor, float label_width)
+	/* 绘制一个资源引用UI */
+	void DrawTextureUI(const std::string& label, SharedPtr<DeviceTexture>& texture, float label_width)
 	{
 		PROFILE_FUNCTION();
 
@@ -410,9 +410,6 @@ namespace Helios::ImGuiExt
 			/* Path */
 			ImGui::SameLine();
 			ImGui::TextWrapped(RELATIVE_PATH(show_texture->GetPath()).c_str());
-
-			/* Tiling Factor */
-			ImGui::DragFloat("Tiling Factor", &tiling_factor, 0.1f, 0.0f, 100.0f);
 		}
 
 		ImGui::Columns(1);

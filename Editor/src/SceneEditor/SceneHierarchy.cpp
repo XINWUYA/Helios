@@ -2,14 +2,15 @@
 #include "SceneHierarchy.h"
 #include "EditorIcons.h"
 #include "PanelRegistry.h"
+#include "Helios/Reflection/ComponentRegistry.h"
+#include "Helios/Reflection/EntityTemplateRegistry.h"
+#include <cstring>
 
 namespace Helios
 {
 	SceneHierarchy::SceneHierarchy()
 	{
 		PROFILE_FUNCTION();
-
-		InitIcons();
 	}
 
 	SceneHierarchy::SceneHierarchy(const SharedPtr<Scene>& scene)
@@ -17,7 +18,6 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		SetOwnerScene(scene);
-		InitIcons();
 	}
 
 	void SceneHierarchy::SetOwnerScene(const SharedPtr<Scene>& scene)
@@ -59,50 +59,23 @@ namespace Helios
 			// if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
 			// 	m_SelectedEntity = {};
 
-			/* 空白处右键，唤出新建 */
+			/* 空白处右键，唤出新建（条目来自实体预设注册表） */
 			if (ImGui::BeginPopupContextWindow("New", 1, false))
 			{
 				if (ImGui::BeginMenu("New A Entity"))
 				{
-					if (ImGui::MenuItem("Empty"))
+					for (const EntityTemplateDesc& template_desc : EntityTemplateRegistry::Instance().All())
 					{
-						const auto entity = m_pOwnerScene->CreateEntity("Empty");
-						m_SelectedEntity = entity;
-					}
-
-					if (ImGui::MenuItem("Sprite"))
-					{
-						auto entity = m_pOwnerScene->CreateEntity("New Sprite");
-						entity.AddComponent<SpriteComponent>();
-						m_SelectedEntity = entity;
-					}
-
-					if (ImGui::MenuItem("Camera"))
-					{
-						auto entity = m_pOwnerScene->CreateEntity("New Camera");
-						entity.AddComponent<CameraComponent>();
-						m_SelectedEntity = entity;
-					}
-
-					if (ImGui::MenuItem("Directional Light"))
-					{
-						auto entity = m_pOwnerScene->CreateEntity("New Directional Light");
-						entity.AddComponent<LightComponent>(LightType::Directional);
-						m_SelectedEntity = entity;
-					}
-
-					if (ImGui::MenuItem("Point Light"))
-					{
-						auto entity = m_pOwnerScene->CreateEntity("New Point Light");
-						entity.AddComponent<LightComponent>(LightType::Point);
-						m_SelectedEntity = entity;
-					}
-
-					if (ImGui::MenuItem("Spot Light"))
-					{
-						auto entity = m_pOwnerScene->CreateEntity("New Spot Light");
-						entity.AddComponent<LightComponent>(LightType::Spot);
-						m_SelectedEntity = entity;
+						if (ImGui::MenuItem(template_desc.Name))
+						{
+							Entity entity = m_pOwnerScene->CreateEntity(template_desc.Name);
+							for (const AddFunc add : template_desc.Components)
+							{
+								if (add != nullptr)
+									add(entity);
+							}
+							m_SelectedEntity = entity;
+						}
 					}
 
 					ImGui::EndMenu();
@@ -123,14 +96,6 @@ namespace Helios
 				ShowEntityComponents();
 		}
 		ImGui::End();
-	}
-
-	void SceneHierarchy::InitIcons()
-	{
-		PROFILE_FUNCTION();
-
-		m_pAddComponentIcon = Icons::GetTexture(Icons::Id::Add);
-		m_pMenuIcon = Icons::GetTexture(Icons::Id::Menu);
 	}
 
 	void SceneHierarchy::ShowEntityNode(Entity& entity)
@@ -176,306 +141,207 @@ namespace Helios
 		}
 	}
 
-	/* 组件框架 */
-	template<typename T, typename UIFunction>
-	static void ShowComponent(const std::string& name, Entity& entity, UIFunction show_custom)
+	/* 按字段类型绘制单个控件，field_ptr 指向可写的字段存储 */
+	static void DrawFieldControl(const FieldDesc& field, void* field_ptr)
 	{
-		PROFILE_FUNCTION();
-
-		const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap | ImGuiTreeNodeFlags_FramePadding;
-		if (entity.HasComponent<T>())
+		switch (field.Type)
 		{
-			auto& component = entity.GetComponent<T>();
-			const float panel_width = ImGui::GetContentRegionAvail().x;
-
-			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2{ 4, 4 });
-			//float lineHeight = GImGui->Font->FontSize + GImGui->Style.FramePadding.y * 2.0f;
-			ImGui::Separator();
-			bool open = ImGui::TreeNodeEx((void*)typeid(T).hash_code(), flags, name.c_str());
-			ImGui::PopStyleVar();
-
-			/* 设置图标 */
-			START_TRANSPARENT_BUTTON;
-			START_STYLE_ALPHA(0.5f);
-			ImGui::SameLine(panel_width - 15);
-			if (Icons::IconButton(Icons::Id::Menu, ImVec2(20, 20)))
-				ImGui::OpenPopup("ComponentSettings");
-			END_STYLE_ALPHA;
-			END_TRANSPARENT_BUTTON;
-
-			/* 删除组件选项 */
-			bool remove = false;
-			if (ImGui::BeginPopup("ComponentSettings"))
+		case FieldType::Bool:
+			ImGuiExt::DrawCheckboxUI(field.Name, *reinterpret_cast<bool*>(field_ptr));
+			break;
+		case FieldType::Int:
+			ImGuiExt::DrawDragIntUI(field.Name, *reinterpret_cast<int*>(field_ptr));
+			break;
+		case FieldType::Float:
+			ImGuiExt::DrawDragFloatUI(field.Name, *reinterpret_cast<float*>(field_ptr));
+			break;
+		case FieldType::Vec2:
+			ImGuiExt::DrawDragFloat2UI(field.Name, *reinterpret_cast<glm::vec2*>(field_ptr));
+			break;
+		case FieldType::Vec3:
+		{
+			auto& vec = *reinterpret_cast<glm::vec3*>(field_ptr);
+			if (field.Semantics != nullptr && std::strcmp(field.Semantics, "AngleDeg") == 0)
 			{
-				if (ImGui::MenuItem("Remove"))
-					remove = true;
-
-				ImGui::EndPopup();
+				/* 内部以弧度存储、Inspector 按角度编辑 */
+				glm::vec3 degree = glm::degrees(vec);
+				ImGuiExt::DrawVec3ControlUI(field.Name, degree, field.ResetValue);
+				vec = glm::radians(degree);
 			}
-
-			/* 展开时显示组件内容 */
-			if (open)
+			else
 			{
-				show_custom(component);
-				ImGui::TreePop();
+				ImGuiExt::DrawVec3ControlUI(field.Name, vec, field.ResetValue);
 			}
-
-			/* 删除组件 */
-			if (remove)
-				entity.RemoveComponent<T>();
+			break;
 		}
+		case FieldType::Vec4:
+		case FieldType::Color:
+			ImGuiExt::DrawColorUI(field.Name, *reinterpret_cast<glm::vec4*>(field_ptr));
+			break;
+		case FieldType::Enum:
+		{
+			if (field.GetEnumNames == nullptr)
+				break;
+
+			/* 枚举底层类型可能小于 int（如 uint8_t），按实际大小读写 */
+			const size_t size = (field.ValueSize == 0 || field.ValueSize > sizeof(int))
+				? sizeof(int) : field.ValueSize;
+			int value = 0;
+			std::memcpy(&value, field_ptr, size);
+			ImGuiExt::DrawComboUI(field.Name, field.GetEnumNames(), value);
+			std::memcpy(field_ptr, &value, size);
+			break;
+		}
+		case FieldType::String:
+		{
+			auto& str = *reinterpret_cast<std::string*>(field_ptr);
+			char buffer[256] = {};
+			std::strncpy(buffer, str.c_str(), sizeof(buffer));
+			ImGui::Text("%s:", field.Name);
+			ImGui::SameLine();
+			if (ImGui::InputText("##value", buffer, sizeof(buffer)))
+				str = std::string(buffer);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	/* 按字段元数据自动生成控件（schema 驱动） */
+	static void DrawComponentFieldsBySchema(const ComponentDesc& desc, void* data)
+	{
+		for (const FieldDesc& field : desc.Fields)
+		{
+			/* 条件不满足：不画该行（字段值保留，序列化照常） */
+			if (!EvaluateCondition(field.Condition, data))
+				continue;
+
+			ImGui::PushID(field.Name);
+
+			if (field.Get != nullptr && field.Set != nullptr)
+			{
+				/* 访问器字段：先读入缓冲，编辑后写回 */
+				alignas(16) uint8_t buffer[kFieldValueCapacity] = {};
+				field.Get(data, buffer);
+				DrawFieldControl(field, buffer);
+				field.Set(data, buffer);
+			}
+			else
+			{
+				DrawFieldControl(field, static_cast<uint8_t*>(data) + field.Offset);
+			}
+
+			ImGui::PopID();
+		}
+	}
+
+	/* 绘制单个组件块（折叠标题 + schema 字段 + 自定义绘制 + 移除菜单） */
+	static void DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component)
+	{
+		const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap | ImGuiTreeNodeFlags_FramePadding;
+		const float panel_width = ImGui::GetContentRegionAvail().x;
+
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2{ 4, 4 });
+		ImGui::Separator();
+		const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(desc.Type.hash_code()), flags, "%s", desc.Name);
+		ImGui::PopStyleVar();
+
+		/* 设置图标 */
+		START_TRANSPARENT_BUTTON;
+		START_STYLE_ALPHA(0.5f);
+		ImGui::SameLine(panel_width - 15);
+		if (Icons::IconButton(Icons::Id::Menu, ImVec2(20, 20)))
+			ImGui::OpenPopup("ComponentSettings");
+		END_STYLE_ALPHA;
+		END_TRANSPARENT_BUTTON;
+
+		/* 删除组件选项 */
+		bool remove = false;
+		if (ImGui::BeginPopup("ComponentSettings"))
+		{
+			if (ImGui::MenuItem("Remove"))
+				remove = true;
+
+			ImGui::EndPopup();
+		}
+
+		/* 展开时显示组件内容 */
+		if (open)
+		{
+			DrawComponentFieldsBySchema(desc, component);
+			if (desc.CustomDraw != nullptr)
+				desc.CustomDraw(component);
+			ImGui::TreePop();
+		}
+
+		/* 删除组件 */
+		if (remove && desc.Remove != nullptr)
+			desc.Remove(entity);
 	}
 
 	void SceneHierarchy::ShowEntityComponents()
 	{
 		PROFILE_FUNCTION();
 
-		/* 实体名称组件 */
-		ShowNameComponent();
-
 		/* 增加组件按钮 */
 		const float panel_width = ImGui::GetContentRegionAvail().x; /* 窗口区域宽度 */
 		ImGui::SameLine(panel_width - 15); /* 放置在同行靠右的位置 */
 		ShowAddComponentButton();
 
-		/* 空间变换组件 */
-		ShowTransformComponent();
-
-		/* 图片精灵组件 */
-		ShowSpriteComponent();
-
-		/* 场景相机组件 */
-		ShowCameraComponent();
-
-		/* 模型组件 */
-		ShowModelComponent();
-
-		/* 光源组件 */
-		ShowLightComponent();
-	}
-
-	/* 实体名称组件 */
-	void SceneHierarchy::ShowNameComponent()
-	{
-		PROFILE_FUNCTION();
-
-		if (m_SelectedEntity.HasComponent<NameComponent>())
+		/* 全部组件：由 ComponentRegistry 驱动，本类不认识任何具体组件类型。
+		 * 新增组件只需在注册表补一段，这里零改动。 */
+		for (const ComponentDesc& desc : ComponentRegistry::Instance().All())
 		{
-			PROFILE_SCOPE("Show NameComponent");
+			if (desc.Has == nullptr || !desc.Has(m_SelectedEntity))
+				continue;
 
-			auto& name = m_SelectedEntity.GetComponent<NameComponent>().m_Name;
+			void* component = (desc.GetPtr != nullptr) ? desc.GetPtr(m_SelectedEntity) : nullptr;
+			if (component == nullptr)
+				continue;
 
-			char buffer[256] = {};
-			std::strncpy(buffer, name.c_str(), sizeof(buffer));
-			ImGui::Text("Name:");
-			ImGui::SameLine();
-			if (ImGui::InputText("##Name", buffer, sizeof(buffer)))
-			{
-				name = std::string(buffer);
-			}
+			/* 组件级条件：如持有对象为空则整块不显示 */
+			if (desc.Visible != nullptr && !desc.Visible(component))
+				continue;
+
+			ImGui::PushID(static_cast<int>(desc.Type.hash_code()));
+			DrawComponentBlock(desc, m_SelectedEntity, component);
+			ImGui::PopID();
 		}
 	}
 
-	/* 增加组件按钮 */
+	/* 增加组件按钮：菜单项来自注册表（bAddable == false 的组件不出现，如 Name / Transform） */
 	void SceneHierarchy::ShowAddComponentButton()
 	{
 		PROFILE_FUNCTION();
 
 		START_STYLE_ALPHA(0.5f);
-		if (ImGui::ImageButton((ImTextureID)m_pAddComponentIcon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+		if (Icons::IconButton(Icons::Id::Add, ImVec2(20, 20)))
 			ImGui::OpenPopup("AddComponentPopup");
 		END_STYLE_ALPHA;
 
 		if (ImGui::BeginPopup("AddComponentPopup"))
 		{
-			/* 相机 */
-			if (ImGui::MenuItem("Camera Component"))
+			for (const ComponentDesc& desc : ComponentRegistry::Instance().All())
 			{
-				m_SelectedEntity.AddComponent<CameraComponent>();
-				ImGui::CloseCurrentPopup();
-			}
+				if (!desc.bAddable)
+					continue;
 
-			/* 图片精灵 */
-			if (ImGui::MenuItem("Sprite Component"))
-			{
-				m_SelectedEntity.AddComponent<SpriteComponent>();
-				ImGui::CloseCurrentPopup();
-			}
+				for (const ComponentVariant& variant : desc.Variants)
+				{
+					if (variant.Add == nullptr)
+						continue;
 
-			/* 模型 */
-			if (ImGui::MenuItem("Model Component"))
-			{
-				m_SelectedEntity.AddComponent<ModelComponent>();
-				ImGui::CloseCurrentPopup();
-			}
-
-			/* 光源 */
-			if (ImGui::MenuItem("Light Component"))
-			{
-				m_SelectedEntity.AddComponent<LightComponent>();
-				ImGui::CloseCurrentPopup();
+					const char* label = (variant.MenuName != nullptr) ? variant.MenuName : desc.Name;
+					if (ImGui::MenuItem(label))
+					{
+						variant.Add(m_SelectedEntity);
+						ImGui::CloseCurrentPopup();
+					}
+				}
 			}
 
 			ImGui::EndPopup();
 		}
-	}
-
-	/* 空间变换组件 */
-	void SceneHierarchy::ShowTransformComponent()
-	{
-		PROFILE_FUNCTION();
-
-		ShowComponent<TransformComponent>("Transform", m_SelectedEntity,
-			[](auto& component)
-			{
-				ImGuiExt::DrawVec3ControlUI("Position", component.m_Position, 0.0f);
-				glm::vec3 rotation = glm::degrees(component.m_Rotation);
-				ImGuiExt::DrawVec3ControlUI("Rotation", rotation, 0.0f);
-				component.m_Rotation = glm::radians(rotation);
-				ImGuiExt::DrawVec3ControlUI("Scale", component.m_Scale, 1.0f);
-
-			});
-	}
-
-	/* 图片精灵组件 */
-	void SceneHierarchy::ShowSpriteComponent()
-	{
-		PROFILE_FUNCTION();
-
-		ShowComponent<SpriteComponent>("Sprite", m_SelectedEntity,
-			[](auto& component)
-			{
-				ImGuiExt::DrawColorUI("BaseColor", component.m_BaseColor);
-				ImGuiExt::DrawTextureUI("Texture", component.m_Texture, component.m_TilingFactor);
-			});
-	}
-
-/* 场景相机组件 */
-void SceneHierarchy::ShowCameraComponent()
-{
-	PROFILE_FUNCTION();
-
-	ShowComponent<CameraComponent>("Camera", m_SelectedEntity,
-		[](auto& component)
-		{
-			ImGuiExt::DrawCheckboxUI("IsPrimary", component.m_IsPrimary);
-			ImGuiExt::DrawCheckboxUI("IsFixedAspectRatio", component.m_IsFixedAspectRatio);
-			auto& camera = component.m_Camera;
-			int projection_idx = static_cast<int>(camera->GetProjectionType());
-			ImGuiExt::DrawComboUI("ProjectionType", GetEnumNames<CameraProjectionType>(), projection_idx,
-				[&camera](int selected_idx)
-				{
-					camera->SetProjectionType(static_cast<CameraProjectionType>(selected_idx));
-				});
-
-			switch (camera->GetProjectionType())
-			{
-			case CameraProjectionType::Perspective:
-			{
-				float fov = camera->GetFov();
-				ImGuiExt::DrawDragFloatUI("Fov", fov);
-				float near_clip = camera->GetNearClip();
-				ImGuiExt::DrawDragFloatUI("Near", near_clip);
-				float far_clip = camera->GetFarClip();
-				ImGuiExt::DrawDragFloatUI("Far", far_clip);
-
-				camera->SetFov(fov);
-				camera->SetNearClip(near_clip);
-				camera->SetFarClip(far_clip);
-			}
-			break;
-			case CameraProjectionType::Orthographic:
-			{
-				float height_size = camera->GetHeightSize();
-				ImGuiExt::DrawDragFloatUI("HeightSize", height_size);
-				float near_clip = camera->GetNearClip();
-				ImGuiExt::DrawDragFloatUI("Near", near_clip);
-				float far_clip = camera->GetFarClip();
-				ImGuiExt::DrawDragFloatUI("Far", far_clip);
-
-				camera->SetHeightSize(height_size);
-				camera->SetNearClip(near_clip);
-				camera->SetFarClip(far_clip);
-			}
-			break;
-			}
-		});
-}
-
-	/* 模型组件 */
-	void SceneHierarchy::ShowModelComponent()
-	{
-		PROFILE_FUNCTION();
-
-		ShowComponent<ModelComponent>("Model", m_SelectedEntity,
-			[](auto& component)
-			{
-				auto& model = component.m_Model;
-
-				if (model)
-				{
-					ImGui::PushID("ModelPath");
-					ImGui::Columns(2);
-
-					/* Label */
-					ImGui::SetColumnWidth(0, 100);
-					ImGui::Text("ModelPath");
-
-					/* Texture */
-					ImGui::NextColumn();
-					{
-						ImGui::TextWrapped(model->GetPath().c_str());
-					}
-
-					ImGui::Columns(1);
-					ImGui::PopID();
-				}
-
-				/*const auto& mesh_segments = model->GetMeshSegments();
-				for (auto& mesh_segment : mesh_segments)
-				{
-					auto* mesh_segment_root = model_root->InsertNewChildElement("MeshSegment");
-					mesh_segment_root->SetAttribute("Name", mesh_segment->GetName().c_str());
-					auto* mtl_root = mesh_segment_root->InsertNewChildElement("Material");
-					mtl_root->SetAttribute("ShaderPath", mesh_segment->GetMaterial()->GetShader()->GetPath().c_str());
-				}*/
-			});
-	}
-
-	/* 光源组件 */
-	void SceneHierarchy::ShowLightComponent()
-	{
-		PROFILE_FUNCTION();
-		ShowComponent<LightComponent>("Light", m_SelectedEntity,
-			[](auto& component)
-			{
-				SharedPtr<Light>& light = component.m_Light;
-				if (!light)
-					return;
-
-				/* 光源类型 */
-				int type_idx = static_cast<int>(light->GetLightType());
-				ImGuiExt::DrawComboUI("Type", GetEnumNames<LightType>(), type_idx,
-					[&light](int selected_idx)
-					{
-						/* todo: 切换光源类型 */
-						//scene_camera.SetProjectionType(static_cast<SceneCamera::ProjectionType>(selected_idx));
-					});
-
-				/* 光源颜色 */
-				glm::vec4 light_color = light->GetColor();
-				ImGuiExt::DrawColorUI("Color", light_color);
-				light->SetColor(light_color);
-
-				/* 光源强度 */
-				float light_intensity = light->GetIntensity();
-				ImGuiExt::DrawDragFloatUI("Intensity", light_intensity);
-				light->SetIntensity(light_intensity);
-
-				/* 投影 */
-				bool cast_shadow = light->IsCastShadow();
-				ImGuiExt::DrawCheckboxUI("CastShadow", cast_shadow);
-				light->SetIsCastShadow(cast_shadow);
-			});
 	}
 }
