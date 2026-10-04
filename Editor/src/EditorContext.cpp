@@ -52,6 +52,42 @@ namespace Helios
 			layer->SaveSceneAs();
 	}
 
+	bool EditorContext::Undo()
+	{
+		auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->Undo();
+	}
+
+	bool EditorContext::Redo()
+	{
+		auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->Redo();
+	}
+
+	bool EditorContext::CanUndo()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->CanUndo();
+	}
+
+	bool EditorContext::CanRedo()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->CanRedo();
+	}
+
+	const char* EditorContext::GetUndoLabel()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr ? layer->GetUndoLabel() : nullptr;
+	}
+
+	const char* EditorContext::GetRedoLabel()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr ? layer->GetRedoLabel() : nullptr;
+	}
+
 	void EditorContext::SetGizmoType(int type)
 	{
 		m_GizmoType = type;

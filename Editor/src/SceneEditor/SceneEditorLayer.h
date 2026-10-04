@@ -1,8 +1,8 @@
 ﻿#pragma once
 #include "SceneHierarchy.h"
-#include "EditorResourceBrowser.h"
 #include "EditorBuiltinCamera.h"
 #include "EditorCommon.h"
+#include "Helios/Command/CommandStack.h"
 
 namespace Helios
 {
@@ -27,6 +27,14 @@ namespace Helios
 		void SaveScene();
 		/* 保存场景到指定路径 */
 		void SaveSceneAs();
+
+		/* 编辑历史 */
+		bool Undo();
+		bool Redo();
+		[[nodiscard]] bool CanUndo() const { return m_CommandStack.CanUndo(); }
+		[[nodiscard]] bool CanRedo() const { return m_CommandStack.CanRedo(); }
+		[[nodiscard]] const char* GetUndoLabel() const { return m_CommandStack.GetUndoLabel(); }
+		[[nodiscard]] const char* GetRedoLabel() const { return m_CommandStack.GetRedoLabel(); }
 
 		void Active(bool active = true) { m_IsActivated = active; }
 		bool IsActivated() const { return m_IsActivated; }
@@ -65,6 +73,10 @@ namespace Helios
 		std::string m_ActiveScenePath{};
 		/* 场景实体管理窗口 */
 		SceneHierarchy m_SceneHierarchy;
+		/* 编辑历史：所有改动经命令栈落地 */
+		CommandStack m_CommandStack;
+		/* Gizmo 拖拽进行中（拖拽期间的逐帧改动合并为一条历史） */
+		bool m_IsGizmoDragging{ false };
 		/* 选中实体 */
 		Entity m_HoveredEntity;
 		/* 视口范围: x: width_min; y: height_min; z: width_max; w: height_max */

@@ -3,7 +3,12 @@
 #include "EditorIcons.h"
 #include "PanelRegistry.h"
 #include "Helios/Reflection/ComponentRegistry.h"
-#include "Helios/Reflection/EntityTemplateRegistry.h"
+#include "EntityTemplateRegistry.h"
+#include "Command/ComponentFieldCommand.h"
+#include "Command/AddComponentCommand.h"
+#include "Command/RemoveComponentCommand.h"
+#include "Command/CreateEntityCommand.h"
+#include "Command/DeleteEntityCommand.h"
 #include <cstring>
 
 namespace Helios
@@ -24,6 +29,9 @@ namespace Helios
 	{
 		m_pOwnerScene = scene;
 		m_SelectedEntity = {};
+
+		/* 场景已更换，字段编辑的合并窗口不再有效 */
+		m_FieldEditTransactionOpen = false;
 	}
 
 	void SceneHierarchy::OnImGuiRender()
@@ -46,18 +54,18 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 删除请求延后到遍历结束后执行：在 each 中销毁当前实体并不安全 */
+		Entity pending_delete{};
+
 		ImGui::Begin(Panel::kSceneHierarchy);
 		{
 			m_pOwnerScene->GetRegistry().each(
 				[&](auto entity_id)
 				{
 					Entity entity{ entity_id, m_pOwnerScene };
-					ShowEntityNode(entity);
+					if (ShowEntityNode(entity) && !pending_delete)
+						pending_delete = entity;
 				});
-
-			/* 点击左键，选中 */
-			// if (ImGui::IsMouseDown(0) && ImGui::IsWindowHovered())
-			// 	m_SelectedEntity = {};
 
 			/* 空白处右键，唤出新建（条目来自实体预设注册表） */
 			if (ImGui::BeginPopupContextWindow("New", 1, false))
@@ -67,15 +75,7 @@ namespace Helios
 					for (const EntityTemplateDesc& template_desc : EntityTemplateRegistry::Instance().All())
 					{
 						if (ImGui::MenuItem(template_desc.Name))
-						{
-							Entity entity = m_pOwnerScene->CreateEntity(template_desc.Name);
-							for (const AddFunc add : template_desc.Components)
-							{
-								if (add != nullptr)
-									add(entity);
-							}
-							m_SelectedEntity = entity;
-						}
+							m_SelectedEntity = CreateEntityFromTemplate(template_desc);
 					}
 
 					ImGui::EndMenu();
@@ -84,6 +84,51 @@ namespace Helios
 			}
 		}
 		ImGui::End();
+
+		/* 删除经命令栈落地，可撤销 */
+		if (pending_delete)
+			DeleteEntity(pending_delete);
+	}
+
+	/* 新建实体：走命令栈则实体本身也进历史（撤销即消失） */
+	Entity SceneHierarchy::CreateEntityFromTemplate(const EntityTemplateDesc& template_desc)
+	{
+		if (m_pOwnerScene == nullptr)
+			return {};
+
+		if (m_pCommandStack == nullptr)
+		{
+			Entity entity = m_pOwnerScene->CreateEntity(template_desc.Name);
+			for (const AddFunc add : template_desc.Components)
+			{
+				if (add != nullptr)
+					add(entity);
+			}
+			return entity;
+		}
+
+		auto command = CreateUniquePtr<CreateEntityCommand>(m_pOwnerScene, template_desc.Name, template_desc.Components);
+		CreateEntityCommand* raw = command.get();
+		m_pCommandStack->Execute(std::move(command));
+		return raw->GetEntity();
+	}
+
+	void SceneHierarchy::DeleteEntity(Entity entity)
+	{
+		if (!entity || m_pOwnerScene == nullptr)
+			return;
+
+		if (m_pCommandStack == nullptr)
+		{
+			m_pOwnerScene->DestroyEntity(entity);
+		}
+		else
+		{
+			m_pCommandStack->Execute(CreateUniquePtr<DeleteEntityCommand>(m_pOwnerScene, entity));
+		}
+
+		if (m_SelectedEntity == entity)
+			m_SelectedEntity = {};
 	}
 
 	void SceneHierarchy::ShowEntityPropertiesUI()
@@ -98,7 +143,8 @@ namespace Helios
 		ImGui::End();
 	}
 
-	void SceneHierarchy::ShowEntityNode(Entity& entity)
+	/* 返回 true 表示用户请求删除该实体（由调用方在遍历结束后执行） */
+	bool SceneHierarchy::ShowEntityNode(Entity& entity)
 	{
 		PROFILE_FUNCTION();
 
@@ -132,13 +178,7 @@ namespace Helios
 			ImGui::TreePop();
 		}
 
-		/* 确认删除节点 */
-		if (entity_deleted)
-		{
-			m_pOwnerScene->DestroyEntity(entity);
-			if (m_SelectedEntity == entity)
-				m_SelectedEntity = {};
-		}
+		return entity_deleted;
 	}
 
 	/* 按字段类型绘制单个控件，field_ptr 指向可写的字段存储 */
@@ -208,28 +248,102 @@ namespace Helios
 		}
 	}
 
-	/* 按字段元数据自动生成控件（schema 驱动） */
-	static void DrawComponentFieldsBySchema(const ComponentDesc& desc, void* data)
+	namespace
 	{
+		/* 字段值的字节数（定长字段由注册表给出） */
+		size_t FieldByteSize(const FieldDesc& field)
+		{
+			return (field.ValueSize != 0) ? field.ValueSize : sizeof(float);
+		}
+
+		/* 访问器字段经 getter/setter 读写，偏移字段直接取址 */
+		bool IsAccessorField(const FieldDesc& field)
+		{
+			return field.Get != nullptr && field.Set != nullptr;
+		}
+	}
+
+	/* 按字段元数据生成控件；编辑前后各取一次值，有变化则生成字段改动命令 */
+	void SceneHierarchy::DrawComponentFieldsBySchema(const ComponentDesc& desc, Entity& entity, void* component)
+	{
+		/* 上一帧有控件活跃、这一帧没有 → 一次编辑结束，给命令栈封口。
+		 * 否则下一次编辑会并进上一条历史，撤销一次退过头。 */
+		const bool item_active = ImGui::IsAnyItemActive();
+		if (m_FieldEditTransactionOpen && !item_active)
+		{
+			m_FieldEditTransactionOpen = false;
+			if (m_pCommandStack != nullptr)
+				m_pCommandStack->EndTransaction();
+		}
+
 		for (const FieldDesc& field : desc.Fields)
 		{
 			/* 条件不满足：不画该行（字段值保留，序列化照常） */
-			if (!EvaluateCondition(field.Condition, data))
+			if (!EvaluateCondition(field.Condition, component))
 				continue;
 
 			ImGui::PushID(field.Name);
 
-			if (field.Get != nullptr && field.Set != nullptr)
+			const size_t value_size = FieldByteSize(field);
+			const bool is_text = (field.Type == FieldType::String);
+			const bool is_accessor = IsAccessorField(field);
+
+			/* 编辑前的值，以及供控件操作的存储 */
+			alignas(16) uint8_t before[kFieldValueCapacity] = {};
+			alignas(16) uint8_t edited[kFieldValueCapacity] = {};
+			std::string before_text;
+
+			void* field_ptr = nullptr;
+			if (is_accessor)
 			{
-				/* 访问器字段：先读入缓冲，编辑后写回 */
-				alignas(16) uint8_t buffer[kFieldValueCapacity] = {};
-				field.Get(data, buffer);
-				DrawFieldControl(field, buffer);
-				field.Set(data, buffer);
+				field.Get(component, edited);
+				std::memcpy(before, edited, value_size);
+				field_ptr = edited;
 			}
 			else
 			{
-				DrawFieldControl(field, static_cast<uint8_t*>(data) + field.Offset);
+				field_ptr = static_cast<uint8_t*>(component) + field.Offset;
+				if (is_text)
+					before_text = *static_cast<const std::string*>(field_ptr);
+				else
+					std::memcpy(before, field_ptr, value_size);
+			}
+
+			DrawFieldControl(field, field_ptr);
+
+			/* 访问器字段：把编辑结果写回对象 */
+			if (is_accessor)
+				field.Set(component, field_ptr);
+
+			/* 只有用户正在操作控件时才生成命令：外部改动（如 Gizmo 拖拽、
+			 * 组件被移除）不是字段编辑，不应产生历史 */
+			if (m_pCommandStack != nullptr && ImGui::IsAnyItemActive())
+			{
+				bool changed = false;
+				if (is_text)
+					changed = (before_text != *static_cast<const std::string*>(field_ptr));
+				else
+					changed = (std::memcmp(before, field_ptr, value_size) != 0);
+
+				if (changed)
+				{
+					if (!m_FieldEditTransactionOpen)
+					{
+						m_FieldEditTransactionOpen = true;
+						m_pCommandStack->BeginTransaction();
+					}
+
+					if (is_text)
+					{
+						m_pCommandStack->Execute(CreateUniquePtr<ComponentFieldCommand>(
+							entity, desc, field, before_text, *static_cast<const std::string*>(field_ptr)));
+					}
+					else
+					{
+						m_pCommandStack->Execute(CreateUniquePtr<ComponentFieldCommand>(
+							entity, desc, field, before, field_ptr));
+					}
+				}
 			}
 
 			ImGui::PopID();
@@ -237,7 +351,7 @@ namespace Helios
 	}
 
 	/* 绘制单个组件块（折叠标题 + schema 字段 + 自定义绘制 + 移除菜单） */
-	static void DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component)
+	void SceneHierarchy::DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component)
 	{
 		const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap | ImGuiTreeNodeFlags_FramePadding;
 		const float panel_width = ImGui::GetContentRegionAvail().x;
@@ -269,15 +383,24 @@ namespace Helios
 		/* 展开时显示组件内容 */
 		if (open)
 		{
-			DrawComponentFieldsBySchema(desc, component);
+			DrawComponentFieldsBySchema(desc, entity, component);
 			if (desc.CustomDraw != nullptr)
 				desc.CustomDraw(component);
 			ImGui::TreePop();
 		}
 
-		/* 删除组件 */
+		/* 删除组件：经命令栈则可连组件数据一起还原 */
 		if (remove && desc.Remove != nullptr)
-			desc.Remove(entity);
+		{
+			if (m_pCommandStack != nullptr)
+			{
+				m_pCommandStack->Execute(CreateUniquePtr<RemoveComponentCommand>(entity, desc));
+			}
+			else
+			{
+				desc.Remove(entity);
+			}
+		}
 	}
 
 	void SceneHierarchy::ShowEntityComponents()
@@ -335,7 +458,16 @@ namespace Helios
 					const char* label = (variant.MenuName != nullptr) ? variant.MenuName : desc.Name;
 					if (ImGui::MenuItem(label))
 					{
-						variant.Add(m_SelectedEntity);
+						if (m_pCommandStack != nullptr)
+						{
+							m_pCommandStack->Execute(CreateUniquePtr<AddComponentCommand>(
+								m_SelectedEntity, desc.Name, variant.Add, desc.Remove));
+						}
+						else
+						{
+							variant.Add(m_SelectedEntity);
+						}
+
 						ImGui::CloseCurrentPopup();
 					}
 				}

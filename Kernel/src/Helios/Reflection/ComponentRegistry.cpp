@@ -78,6 +78,13 @@ namespace Helios
 		return *this;
 	}
 
+	ComponentRegistrar& ComponentRegistrar::Snapshot(ComponentCaptureFunc capture, ComponentRestoreFunc restore)
+	{
+		m_Desc.Capture = capture;
+		m_Desc.Restore = restore;
+		return *this;
+	}
+
 	ComponentRegistrar& ComponentRegistrar::NotAddable()
 	{
 		m_Desc.bAddable = false;
@@ -173,17 +180,26 @@ namespace Helios
 		return true;
 	}
 
+	const void* ReadFieldValue(const FieldDesc& field, const void* component, void* buffer)
+	{
+		if (component == nullptr)
+			return nullptr;
+
+		if (field.Get != nullptr)
+		{
+			field.Get(component, buffer);
+			return buffer;
+		}
+
+		return static_cast<const uint8_t*>(component) + field.Offset;
+	}
+
 	namespace
 	{
 		/* 字段值所在地址：偏移字段直接取址，访问器字段拷进缓冲 */
 		const void* ResolveFieldAddress(const FieldDesc& field, const void* component, void* buffer)
 		{
-			if (field.Get != nullptr)
-			{
-				field.Get(component, buffer);
-				return buffer;
-			}
-			return static_cast<const uint8_t*>(component) + field.Offset;
+			return ReadFieldValue(field, component, buffer);
 		}
 
 		/* 反序列化目标地址：访问器字段先写进缓冲，随后由 CommitFieldAddress 提交 */
@@ -408,7 +424,7 @@ namespace Helios
 			return static_cast<const LightComponent*>(component)->m_Light != nullptr;
 		}
 
-		/* 用组件类型生成带访问器的注册器 */
+		/* 用组件类型生成带访问器与数据快照的注册器 */
 		template <typename T>
 		ComponentRegistrar MakeRegistrar(const char* name)
 		{
@@ -418,6 +434,24 @@ namespace Helios
 				[](Entity& e) -> void* { return static_cast<void*>(&e.GetComponent<T>()); },
 				[](Entity& e) { e.RemoveComponent<T>(); },
 				[](Entity& e) { e.AddComponent<T>(); });
+			registrar.Snapshot(
+				[](Entity& e, ComponentSnapshot& out)
+				{
+					if (e.HasComponent<T>())
+						out = ComponentSnapshot(e.GetComponent<T>());
+				},
+				[](Entity& e, const ComponentSnapshot& in)
+				{
+					const T* source = in.As<T>();
+					if (source == nullptr)
+						return;
+
+					/* 实体上仍有该组件（如移除后重做再撤销）时直接覆盖，否则按默认构造补上 */
+					if (e.HasComponent<T>())
+						e.GetComponent<T>() = *source;
+					else
+						e.AddComponent<T>() = *source;
+				});
 			return registrar;
 		}
 

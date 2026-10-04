@@ -20,6 +20,14 @@ namespace Helios
 		void SaveScene();
 		void SaveSceneAs();
 
+		/* ---- 编辑历史：所有编辑改动经这条通道撤销 / 重做 ---- */
+		bool Undo();
+		bool Redo();
+		[[nodiscard]] bool CanUndo();
+		[[nodiscard]] bool CanRedo();
+		[[nodiscard]] const char* GetUndoLabel();
+		[[nodiscard]] const char* GetRedoLabel();
+
 		/* ---- 运行 / Gizmo 状态（本类持有权威值，再转发给场景面板）---- */
 		[[nodiscard]] int GetGizmoType() const { return m_GizmoType; }
 		void SetGizmoType(int type);

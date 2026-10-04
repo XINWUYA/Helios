@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <typeindex>
@@ -73,6 +74,42 @@ namespace Helios
 
 	using FieldGetFunc = void (*)(const void* component, void* out_value);
 	using FieldSetFunc = void (*)(void* component, const void* in_value);
+
+	/* ---- 组件数据快照 ----
+	 * 类型擦除地按值持有组件的一份拷贝，供「移除组件 / 删除实体」被撤销时还原内容。
+	 * 只承载数据，不参与 Inspector 与序列化。 */
+
+	class ComponentSnapshot
+	{
+	public:
+		ComponentSnapshot() = default;
+
+		template <typename T>
+		explicit ComponentSnapshot(const T& component)
+			: m_Value(std::make_shared<T>(component)), m_Type(typeid(T))
+		{
+		}
+
+		[[nodiscard]] bool IsValid() const { return m_Value != nullptr; }
+		[[nodiscard]] const std::type_index& GetType() const { return m_Type; }
+
+		/* 快照为空或类型不符时返回 nullptr */
+		template <typename T>
+		[[nodiscard]] const T* As() const
+		{
+			if (m_Value == nullptr || m_Type != std::type_index(typeid(T)))
+				return nullptr;
+			return static_cast<const T*>(m_Value.get());
+		}
+
+	private:
+		std::shared_ptr<void> m_Value;
+		std::type_index       m_Type{ typeid(void) };
+	};
+
+	/* Capture 把组件拷进快照；Restore 把快照写回实体（实体尚无该组件时先添加） */
+	using ComponentCaptureFunc = void (*)(Entity& entity, ComponentSnapshot& out);
+	using ComponentRestoreFunc = void (*)(Entity& entity, const ComponentSnapshot& in);
 
 	/* 编辑缓冲容量：需容纳 Bool/Int/Float/Vec2/Vec3/Vec4/Color 及按 int 编辑的枚举 */
 	inline constexpr size_t kFieldValueCapacity = 64;
@@ -225,6 +262,10 @@ namespace Helios
 		/* 组件级可见性条件：为空则始终显示 */
 		ComponentVisibleFunc Visible{ nullptr };
 
+		/* 组件数据快照：供撤销「移除组件 / 删除实体」还原内容 */
+		ComponentCaptureFunc Capture{ nullptr };
+		ComponentRestoreFunc Restore{ nullptr };
+
 		/* 自定义序列化：SaveExtra 在字段表之前调用，属性顺序与既有场景文件一致 */
 		ComponentSaveFunc SaveExtra{ nullptr };
 		ComponentLoadFunc LoadExtra{ nullptr };
@@ -239,6 +280,10 @@ namespace Helios
 	/* 按字段表把组件写入 / 读出 XML 元素（Scene 序列化使用） */
 	void SaveComponentToXml(const ComponentDesc& desc, const void* component, tinyxml2::XMLElement* element);
 	void LoadComponentFromXml(const ComponentDesc& desc, void* component, const tinyxml2::XMLElement* element);
+
+	/* 取字段当前值的地址：偏移字段直接取址，访问器字段经 Get 拷进 buffer 后返回 buffer。
+	 * 用于编辑前后比较（属性面板据此生成改动命令）。 */
+	const void* ReadFieldValue(const FieldDesc& field, const void* component, void* buffer);
 
 	/* 求成员在类内的字节偏移（用真实对象取址，避免 UB） */
 	template <typename T, typename M>
@@ -311,6 +356,9 @@ namespace Helios
 
 		ComponentRegistrar& Accessors(HasFunc has, GetPtrFunc get, RemoveFunc remove, AddFunc add);
 		ComponentRegistrar& CustomDraw(ComponentDrawFunc draw);
+
+		/* 组件数据快照的读写（MakeRegistrar 已按组件类型生成，通常无需手工调用） */
+		ComponentRegistrar& Snapshot(ComponentCaptureFunc capture, ComponentRestoreFunc restore);
 
 		/* 组件级可见性条件：不满足时整个组件块不显示 */
 		ComponentRegistrar& Visible(ComponentVisibleFunc visible);

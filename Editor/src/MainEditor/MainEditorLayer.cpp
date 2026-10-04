@@ -79,6 +79,19 @@ namespace Helios
 			if (is_ctrl_pressed)
 				m_Context.ImportScene();
 			break;
+		case Key::Z: /* Ctrl+Z：撤销；Ctrl+Shift+Z：重做 */
+			if (is_ctrl_pressed)
+			{
+				if (is_shift_pressed)
+					m_Context.Redo();
+				else
+					m_Context.Undo();
+			}
+			break;
+		case Key::Y: /* Ctrl+Y：重做 */
+			if (is_ctrl_pressed)
+				m_Context.Redo();
+			break;
 		case Key::Q: /* Q/W/E/R：切换 Gizmo 操作 */
 			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
 				m_Context.SetGizmoType(-1);
@@ -245,6 +258,25 @@ namespace Helios
 
 					if (ImGui::MenuItem("Exit"))
 						Application::Instance()->Close();
+
+					ImGui::EndMenu();
+				}
+
+				/* Edit：编辑历史 */
+				if (ImGui::BeginMenu("Edit"))
+				{
+					const char* undo_label = m_Context.GetUndoLabel();
+					const char* redo_label = m_Context.GetRedoLabel();
+
+					/* 菜单里带上操作名，用户能看到 Ctrl+Z 会撤销什么 */
+					const std::string undo_text = "Undo" + (undo_label != nullptr ? std::string(" ") + undo_label : std::string());
+					const std::string redo_text = "Redo" + (redo_label != nullptr ? std::string(" ") + redo_label : std::string());
+
+					if (ImGui::MenuItem(undo_text.c_str(), "Ctrl+Z", false, m_Context.CanUndo()))
+						m_Context.Undo();
+
+					if (ImGui::MenuItem(redo_text.c_str(), "Ctrl+Y", false, m_Context.CanRedo()))
+						m_Context.Redo();
 
 					ImGui::EndMenu();
 				}

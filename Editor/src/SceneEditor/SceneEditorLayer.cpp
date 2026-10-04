@@ -3,6 +3,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "EditorBuiltinCamera.h"
 #include "PanelRegistry.h"
+#include "Command/TransformCommand.h"
 #include "Helios/Application/Application.h"
 #include "ImGuizmo.h"
 
@@ -23,6 +24,9 @@ namespace Helios
 
 		m_pMainScene = CreateSharedPtr<Scene>();
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
+
+		/* 属性面板的字段改动与撤销重做共用同一条历史 */
+		m_SceneHierarchy.SetCommandStack(&m_CommandStack);
 
 
 
@@ -121,6 +125,19 @@ namespace Helios
 					ImportScene();
 			}
 			return true;;
+		case Key::Z: /* Ctrl+Z：撤销；Ctrl+Shift+Z：重做 */
+			if (is_ctrl_pressed)
+			{
+				if (is_shift_pressed)
+					Redo();
+				else
+					Undo();
+			}
+			return true;
+		case Key::Y: /* Ctrl+Y：重做 */
+			if (is_ctrl_pressed)
+				Redo();
+			return true;
 		}
 
 		return false;
@@ -188,6 +205,10 @@ namespace Helios
 
 		m_pMainScene = CreateSharedPtr<Scene>();
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
+
+		/* 场景已更换，旧命令引用的实体不再存在 */
+		m_CommandStack.Clear();
+		m_IsGizmoDragging = false;
 	}
 
 	void SceneEditorLayer::ImportScene()
@@ -205,6 +226,10 @@ namespace Helios
 
 			/* 切换场景时，需更新Editor RenderView的场景 */
 			m_pEditorCamera->GetRenderView()->SetOwnerScene(m_pMainScene);
+
+			/* 场景内容已整体替换，旧命令不再适用 */
+			m_CommandStack.Clear();
+			m_IsGizmoDragging = false;
 		}
 	}
 
@@ -238,6 +263,20 @@ namespace Helios
 
 		/* 保存成功后，当前场景路径切换为新路径 */
 		m_ActiveScenePath = file_path;
+	}
+
+	bool SceneEditorLayer::Undo()
+	{
+		PROFILE_FUNCTION();
+
+		return m_CommandStack.Undo();
+	}
+
+	bool SceneEditorLayer::Redo()
+	{
+		PROFILE_FUNCTION();
+
+		return m_CommandStack.Redo();
 	}
 
 	void SceneEditorLayer::ShowSceneViewportUI()
@@ -378,7 +417,8 @@ namespace Helios
 		ImGuizmo::SetRect(m_ViewportRegion.MinX, m_ViewportRegion.MinY, m_ViewportRegion.Width, m_ViewportRegion.Height);
 
 		Entity selected_entity = m_SceneHierarchy.GetSelectedEntity();
-		if (selected_entity && m_GizmoType != -1)
+		/* 组件可被移除，缺少 Transform 时本帧不画 Gizmo */
+		if (selected_entity && m_GizmoType != -1 && selected_entity.HasComponent<TransformComponent>())
 		{
 			// Entity transform
 			auto& transform_component = selected_entity.GetComponent<TransformComponent>();
@@ -397,17 +437,34 @@ namespace Helios
 				(ImGuizmo::OPERATION)m_GizmoType, ImGuizmo::LOCAL, glm::value_ptr(transform_mat),
 				nullptr, snap ? snap_values : nullptr); /* ImGuizmo::LOCAL/ ImGuizmo::WORLD */
 
-			if (ImGuizmo::IsUsing())
+			const bool is_using = ImGuizmo::IsUsing();
+
+			/* 按下时开启合并窗口：整段拖拽的逐帧改动合并为一条历史 */
+			if (is_using && !m_IsGizmoDragging)
+			{
+				m_IsGizmoDragging = true;
+				m_CommandStack.BeginTransaction();
+			}
+
+			if (is_using)
 			{
 				/* 从变换矩阵中恢复 */
 				glm::vec3 position, rotation, scale;
 				DecomposeTransform(transform_mat, position, rotation, scale);
 
-				/* 更新组件信息 */
-				glm::vec3 delta_rotation = rotation - transform_component.m_Rotation;
-				transform_component.m_Position = position;
-				transform_component.m_Rotation += delta_rotation;
-				transform_component.m_Scale = scale;
+				/* 旋转按增量叠加（ImGuizmo 给出的是绝对量） */
+				TransformComponent next = transform_component;
+				next.m_Position = position;
+				next.m_Rotation += rotation - transform_component.m_Rotation;
+				next.m_Scale = scale;
+
+				/* 改动经命令栈落地 */
+				m_CommandStack.Execute(CreateUniquePtr<TransformCommand>(selected_entity, transform_component, next));
+			}
+			else if (m_IsGizmoDragging)
+			{
+				m_IsGizmoDragging = false;
+				m_CommandStack.EndTransaction();
 			}
 		}
 

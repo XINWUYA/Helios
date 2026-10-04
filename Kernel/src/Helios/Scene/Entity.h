@@ -55,13 +55,14 @@ namespace Helios
 			return m_OwnerScene.lock()->GetRegistry().get<T>(m_EntityHandle);
 		}
 
-		/* 是否具有组件 */
+		/* 是否具有组件；实体已被销毁时返回 false */
 		template<typename T>
 		bool HasComponent() const
 		{
-			/*if (!m_OwnerScene->GetRegistry().valid(m_EntityHandle))
-				return false;*/
-			return m_OwnerScene.lock()->GetRegistry().all_of<T>(m_EntityHandle);
+			const SharedPtr<Scene> scene = m_OwnerScene.lock();
+			return scene != nullptr
+				&& scene->GetRegistry().valid(m_EntityHandle)
+				&& scene->GetRegistry().all_of<T>(m_EntityHandle);
 		}
 
 		/* 重载 */
