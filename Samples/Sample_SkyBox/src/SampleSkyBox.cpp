@@ -49,10 +49,10 @@ void SampleSkyBox::OnAttached()
 		auto& camera_component = camera_entity.AddComponent<CameraComponent>();
 		m_pCameraController = CreateSharedPtr<SampleCameraController>(camera_entity);
 		m_pCameraController->SetFocus(true);
-		m_pCameraController->SetViewportRegion({ 0,0,window.GetWidth(), window.GetHeight() });
+		m_pCameraController->SetViewportRegion({ 0, 0, window.GetWidth(), window.GetHeight() });
 
 		auto render_view = camera_component.m_Camera->GetRenderView();
-		render_view->SetViewportRegion({ 0,0, window.GetWidth(), window.GetHeight() });
+		render_view->SetViewportRegion({ 0, 0, window.GetWidth(), window.GetHeight() });
 		render_view->SetOwnerScene(m_pScene);
 	}
 }

@@ -4,10 +4,7 @@
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 #include "Helios/Renderer/Renderer.h"
-
-#ifdef PLATFORM_MACOS
-#include "GraphicsAPI/Metal/MetalRenderAPI.h"
-#endif
+#include "Helios/Renderer/RenderAPI.h"
 
 namespace Helios 
 {
@@ -23,6 +20,10 @@ namespace Helios
 		m_pWindow = DeviceWindow::Create({ window_title, width, height });
 		m_pWindow->SetEventCallback(BIND_EVENT_FUNC(Application::OnEvent));
 		Renderer::Init();
+		m_pWindow->InitGraphicsContext();
+
+		/* 视口按物理像素建立（GetWidth/GetHeight 语义就是物理像素，与 RenderTarget 一致） */
+		Renderer::SetViewport(0, 0, m_pWindow->GetWidth(), m_pWindow->GetHeight());
 
 		m_pImGuiLayer = CreateSharedPtr<ImGuiLayer>();
 		PushOverlay(m_pImGuiLayer);
@@ -55,14 +56,13 @@ namespace Helios
 
 			if (!m_IsMinimized)
 			{
-#ifdef PLATFORM_MACOS
-				/* Metal: 在帧开始时准备下一帧的drawable */
-				auto metalRenderAPI = std::dynamic_pointer_cast<MetalRenderAPI>(Renderer::GetRenderAPI());
-				if (metalRenderAPI)
+				/* 帧开始时准备本帧的默认渲染目标（显式交换链后端在此取得 drawable，
+				 * 直接绘制到默认帧缓冲的后端为空实现），调用方无需区分平台。 */
+				if (auto render_api = Renderer::GetRenderAPI())
 				{
-					metalRenderAPI->PrepareNextDrawable();
+					render_api->PrepareNextFrame();
 				}
-#endif
+
 				/* 先更新逻辑层和渲染层 */
 				{
 					PROFILE_SCOPE("Update Layers");
@@ -144,6 +144,9 @@ namespace Helios
 		}
 
 		m_IsMinimized = false;
+
+		/* WindowResizeEvent 携带的是帧缓冲的物理像素（见各后端的
+		 * OnFramebufferSizeChanged），与 viewport / RenderTarget 的单位一致。 */
 		Renderer::SetViewport(0, 0, resize_event->GetWidth(), resize_event->GetHeight());
 
 		// 事件继续向下层传递，应返回false

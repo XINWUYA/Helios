@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "ModelEditorLayer.h"
 #include <glm/gtc/type_ptr.hpp>
+#include "Helios/Application/Application.h"
 
 namespace Helios
 {
@@ -90,9 +91,13 @@ namespace Helios
 			m_ViewportRegion.MinX = viewport_region_min.x + viewport_offset.x;
 			m_ViewportRegion.Width = viewport_region_max.x - viewport_region_min.x;
 			m_ViewportRegion.MinY = viewport_region_min.y + viewport_offset.y;
-			m_ViewportRegion.Height = viewport_region_max.y - viewport_region_min.x;
+			m_ViewportRegion.Height = viewport_region_max.y - viewport_region_min.y;
 
-			m_pEditorCamera->SetViewportRegion({ 0,0,m_ViewportRegion.Width, m_ViewportRegion.Height });
+			/* ImGui 给的是逻辑点，RenderTarget 按物理像素分配 */
+			const auto content_scale = Application::Instance()->GetWindow().GetContentScale();
+			m_pEditorCamera->SetViewportRegion({ 0, 0,
+				static_cast<uint32_t>(m_ViewportRegion.Width * content_scale + 0.5f),
+				static_cast<uint32_t>(m_ViewportRegion.Height * content_scale + 0.5f) });
 
 			///* 若当前ImGui窗口不是主窗口，应阻塞事件传递 */
 			//m_IsViewportFocused = ImGui::IsWindowFocused();

@@ -2,6 +2,7 @@
 #include "SceneEditorLayer.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "EditorBuiltinCamera.h"
+#include "Helios/Application/Application.h"
 #include "ImGuizmo.h"
 
 namespace Helios
@@ -22,38 +23,11 @@ namespace Helios
 		m_pMainScene = CreateSharedPtr<Scene>();
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
 
-		//{
-		//	// Material
-		//	auto material = CreateSharedPtr<Material>();
-		//	const auto albedo_texture = DeviceTexture::Create("assets/textures/container.jpg");
-		//	material->SetTexture(albedo_texture, 0);
-		//	const auto shader = ShaderAssetManager::Instance().GetOrLoad("assets/shaders/simple.glsl");
-		//	material->SetShader(shader);
 
-		//	Entity entity = m_pMainScene->CreateEntity("Cube");
-		//	auto& mesh_component = entity.AddComponent<ModelComponent>();
-		//	mesh_component.Model = Model::Create(BuiltinModelType::Cube, material);
-		//	auto& transform_component = entity.GetComponent<TransformComponent>();
-		//	transform_component.Position = glm::vec3(3, 0, 0);
-		//}
 
-		/*{
-			Entity entity = m_pMainScene->CreateEntity("Dragon");
-			auto& mesh_component = entity.AddComponent<ModelComponent>();
-			mesh_component.Model = Model::Create("assets/models/dragon/dragon.obj");
-			auto& transform_component = entity.GetComponent<TransformComponent>();
-			transform_component.Position = glm::vec3(0, 0, 0);
-			transform_component.Scale = glm::vec3(5, 5, 5);
-		}
 
-		{
-			Entity entity = m_pMainScene->CreateEntity("Nanosuit");
-			auto& mesh_component = entity.AddComponent<ModelComponent>();
-			mesh_component.Model = Model::Create("assets/models/nanosuit/nanosuit.obj");
-			auto& transform_component = entity.GetComponent<TransformComponent>();
-			transform_component.Position = glm::vec3(-3, -1, 0);
-			transform_component.Scale = glm::vec3(0.2, 0.2, 0.2);
-		}*/
+
+
 	}
 
 	void SceneEditorLayer::OnDetached()
@@ -101,7 +75,12 @@ namespace Helios
 		if (m_ViewportRegion.Width > 0 && m_ViewportRegion.Height > 0/* && (desc.Width != m_ViewportRegion.Width() || desc.Height != m_ViewportRegion.Height())*/)
 		{
 			//m_pFrameBuffer->Resize(m_ViewportRegion.Width(), m_ViewportRegion.Height());
-			m_pEditorCamera->SetViewportRegion({ 0,0,m_ViewportRegion.Width, m_ViewportRegion.Height });
+			/* ImGui 给的是逻辑点，RenderTarget 必须按物理像素分配，
+			 * 否则 Retina 上场景视口只渲染 1/2 分辨率再被拉伸放大。 */
+			const auto content_scale = Application::Instance()->GetWindow().GetContentScale();
+			const auto rt_width = static_cast<uint32_t>(m_ViewportRegion.Width * content_scale + 0.5f);
+			const auto rt_height = static_cast<uint32_t>(m_ViewportRegion.Height * content_scale + 0.5f);
+			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_width, rt_height });
 			//m_pOrthographicCameraController->OnResize(static_cast<float>(m_ViewportRegion.Width()), static_cast<float>(m_ViewportRegion.Height()));
 		}
 	}
@@ -268,7 +247,7 @@ namespace Helios
 			m_ViewportRegion.MinX = viewport_region_min.x + viewport_offset.x;
 			m_ViewportRegion.Width = viewport_region_max.x - viewport_region_min.x;
 			m_ViewportRegion.MinY = viewport_region_min.y + viewport_offset.y;
-			m_ViewportRegion.Height = viewport_region_max.y - viewport_region_min.x;
+			m_ViewportRegion.Height = viewport_region_max.y - viewport_region_min.y;
 
 			/* 若当前ImGui窗口不是主窗口，应阻塞事件传递 */
 			m_IsViewportFocused = ImGui::IsWindowFocused();
@@ -419,10 +398,7 @@ namespace Helios
 			}
 		}
 
-		/* 坐标线框
-		 *
-		 * todo: 将线框划到场景物体之后
-		 */
+		/* 坐标线框（todo：划到场景物体之后） */
 		//const auto identity_mat = glm::identity<glm::mat4>();
 		//ImGuizmo::DrawGrid(glm::value_ptr(view_mat), glm::value_ptr(projection_mat), glm::value_ptr(identity_mat), 100.f);
 

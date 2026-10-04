@@ -109,7 +109,7 @@ void SampleCSM::OnAttached()
 		m_pCameraController->SetFocalPoint(center_pos);
 
 		auto render_view = camera_component.m_Camera->GetRenderView();
-		render_view->SetViewportRegion({ 0,0, window.GetWidth(), window.GetHeight() });
+		render_view->SetViewportRegion({ 0, 0, window.GetWidth(), window.GetHeight() });
 		render_view->SetOwnerScene(m_pScene);
 	}
 }
