@@ -132,6 +132,16 @@ namespace Helios
 		glfwSetWindowUserPointer(m_pGLFWWindow, &m_WindowInfo);
 		SetVSync(desc.IsVSync);
 
+		/* 窗口最小尺寸（屏幕坐标/点）：给停靠布局一个物理下限，避免被拖到小于布局最小尺寸
+		 * 导致 ImGui DockNode 被钳制、分栏比例丢失。详见 MetalWindow.cpp 同名常量注释。 */
+		{
+			constexpr int kMinWindowWidthPoints = 800;
+			constexpr int kMinWindowHeightPoints = 480;
+			glfwSetWindowSizeLimits(m_pGLFWWindow,
+				kMinWindowWidthPoints, kMinWindowHeightPoints,
+				GLFW_DONT_CARE, GLFW_DONT_CARE);
+		}
+
 		/* 设置帧缓冲 Resize 回调（物理像素），viewport 以像素为准 */
 		glfwSetFramebufferSizeCallback(m_pGLFWWindow, [](GLFWwindow* window, int width, int height)
 			{
@@ -152,6 +162,17 @@ namespace Helios
 
 				if (info->Owner)
 					info->Owner->OnContentScaleChanged(x_scale, y_scale);
+			});
+
+		// 设置最小化/还原回调（显式上报最小化，不依赖 0×0 帧缓冲推断）
+		glfwSetWindowIconifyCallback(m_pGLFWWindow, [](GLFWwindow* window, int iconified)
+			{
+				WindowInfo* info = (WindowInfo*)glfwGetWindowUserPointer(window);
+				if (!info)
+					return;
+
+				if (info->Owner)
+					info->Owner->OnIconified(iconified == GLFW_TRUE);
 			});
 
 		// 设置窗口Close回调
@@ -259,6 +280,13 @@ namespace Helios
 	{
 		(void)scale_y;
 		m_WindowInfo.ContentScale = (scale_x > 0.0f) ? scale_x : 1.0f;
+	}
+
+	/* 最小化/还原：派发显式事件，由 Application 维护 m_IsMinimized */
+	void OpenGLWindow::OnIconified(bool iconified)
+	{
+		WindowIconifyEvent event(iconified);
+		m_WindowInfo.CallBackFunc(&event);
 	}
 
 	/* 销毁窗口 */

@@ -62,7 +62,7 @@ namespace Helios
 	}
 
 	/* Get Layer */
-	const SharedPtr<ILayer>& LayerStack::GetLayerByName(const std::string& name)
+	SharedPtr<ILayer> LayerStack::GetLayerByName(const std::string& name)
 	{
 		for (auto& layer : m_Layers)
 		{

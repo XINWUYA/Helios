@@ -54,6 +54,12 @@ namespace Helios
 			const float delta_time = time - m_LastFrameTime;
 			m_LastFrameTime = time;
 
+			/* 最小化期间冻结布局持久化：ImGui 会把宿主尺寸钳制后的 DockNode 比例写进 imgui.ini，一旦
+			 * 落盘、窗口还原后就回不到原样了。只冻结 ini、不跳过 DockSpace 提交 —— DockSpace inactive
+			 * 会让停靠窗口失去 parent 而脱坞。 */
+			if (m_pImGuiLayer)
+				m_pImGuiLayer->SetLayoutSavingEnabled(!m_IsMinimized);
+
 			if (!m_IsMinimized)
 			{
 				/* 帧开始时准备本帧的默认渲染目标（显式交换链后端在此取得 drawable，
@@ -115,6 +121,7 @@ namespace Helios
 		EventDispatcher dispatcher(event);
 		dispatcher.Dispatch<WindowCloseEvent>(BIND_EVENT_FUNC(Application::OnHandleWindowCloseEvent));
 		dispatcher.Dispatch<WindowResizeEvent>(BIND_EVENT_FUNC(Application::OnHandleWindowResizeEvent));
+		dispatcher.Dispatch<WindowIconifyEvent>(BIND_EVENT_FUNC(Application::OnHandleWindowIconifyEvent));
 
 		// 从上层Layer向下层Layer传递
 		for (auto it = m_LayerStack.rbegin(); it != m_LayerStack.rend(); ++it)
@@ -148,6 +155,20 @@ namespace Helios
 		/* WindowResizeEvent 携带的是帧缓冲的物理像素（见各后端的
 		 * OnFramebufferSizeChanged），与 viewport / RenderTarget 的单位一致。 */
 		Renderer::SetViewport(0, 0, resize_event->GetWidth(), resize_event->GetHeight());
+
+		// 事件继续向下层传递，应返回false
+		return false;
+	}
+
+	/* 最小化/还原由 GLFW 的 iconify 回调显式上报：
+	 * 最小化时帧缓冲为 0×0，但各后端都会忽略 0 尺寸（不重建 drawable / 不派发 resize），
+	 * 因此不能靠"0 尺寸"推断最小化，否则两端行为不一致（Windows 派发 0×0、macOS 不派发）。 */
+	bool Application::OnHandleWindowIconifyEvent(IEvent* event)
+	{
+		PROFILE_FUNCTION();
+
+		const auto iconify_event = static_cast<WindowIconifyEvent*>(event);
+		m_IsMinimized = iconify_event->IsIconified();
 
 		// 事件继续向下层传递，应返回false
 		return false;

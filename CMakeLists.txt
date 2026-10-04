@@ -143,8 +143,9 @@ add_subdirectory(Libraries/ThirdParty)
 add_subdirectory(Kernel)
 
 # Add applications
+# 说明：旧的 ModelEditor 独立编辑器已废弃（其场景/模型编辑能力已并入 Editor 的
+# MainEditor / SceneEditor / ModelEditor 三个面板层），源目录与 target 一并移除。
 add_subdirectory(Editor)
-# add_subdirectory(ModelEditor)  # Temporarily disabled for macOS compatibility
 
 # Add samples (optional)
 option(BUILD_SAMPLES "Build sample projects" ON)  # Disabled for macOS compatibility

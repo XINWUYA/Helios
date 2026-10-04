@@ -2,6 +2,7 @@
 #include "SceneEditorLayer.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "EditorBuiltinCamera.h"
+#include "PanelRegistry.h"
 #include "Helios/Application/Application.h"
 #include "ImGuizmo.h"
 
@@ -74,13 +75,14 @@ namespace Helios
 		//const FrameBufferDescription desc = m_pFrameBuffer->GetDescription();
 		if (m_ViewportRegion.Width > 0 && m_ViewportRegion.Height > 0/* && (desc.Width != m_ViewportRegion.Width() || desc.Height != m_ViewportRegion.Height())*/)
 		{
-			//m_pFrameBuffer->Resize(m_ViewportRegion.Width(), m_ViewportRegion.Height());
-			/* ImGui 给的是逻辑点，RenderTarget 必须按物理像素分配，
-			 * 否则 Retina 上场景视口只渲染 1/2 分辨率再被拉伸放大。 */
+			/* ImGui 给的是逻辑点，RenderTarget 必须按物理像素分配（不然 Retina 上视口只渲染 1/2 分辨率、
+			 * 被拉伸）。ClampRenderSize 负责负值 / 超大值的防护。 */
 			const auto content_scale = Application::Instance()->GetWindow().GetContentScale();
-			const auto rt_width = static_cast<uint32_t>(m_ViewportRegion.Width * content_scale + 0.5f);
-			const auto rt_height = static_cast<uint32_t>(m_ViewportRegion.Height * content_scale + 0.5f);
-			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_width, rt_height });
+			const auto rt_size = ClampRenderSize(
+				static_cast<float>(m_ViewportRegion.Width),
+				static_cast<float>(m_ViewportRegion.Height),
+				content_scale);
+			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
 			//m_pOrthographicCameraController->OnResize(static_cast<float>(m_ViewportRegion.Width()), static_cast<float>(m_ViewportRegion.Height()));
 		}
 	}
@@ -238,16 +240,18 @@ namespace Helios
 		static ImGuiWindowFlags tab_bar_flags = ImGuiWindowFlags_NoFocusOnAppearing;
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		ImGui::Begin("Scene", &m_IsActivated);
+		ImGui::Begin(Panel::kScene, &m_IsActivated);
 		{
 			/* 获取窗口范围 */
 			const auto viewport_region_min = ImGui::GetWindowContentRegionMin();
 			const auto viewport_region_max = ImGui::GetWindowContentRegionMax();
 			const auto viewport_offset = ImGui::GetWindowPos();
 			m_ViewportRegion.MinX = viewport_region_min.x + viewport_offset.x;
-			m_ViewportRegion.Width = viewport_region_max.x - viewport_region_min.x;
 			m_ViewportRegion.MinY = viewport_region_min.y + viewport_offset.y;
-			m_ViewportRegion.Height = viewport_region_max.y - viewport_region_min.y;
+			/* 窗口极小时 max 可能小于 min，差值为负；赋给 uint32_t 会回绕成极大值，
+			 * 因此先在浮点域夹到非负再赋值（否则下游按"尺寸有效"处理会分配巨型 RT）。 */
+			m_ViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, viewport_region_max.x - viewport_region_min.x));
+			m_ViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, viewport_region_max.y - viewport_region_min.y));
 
 			/* 若当前ImGui窗口不是主窗口，应阻塞事件传递 */
 			m_IsViewportFocused = ImGui::IsWindowFocused();
@@ -287,7 +291,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::Begin("Stat Info");
+		ImGui::Begin(Panel::kStatInfo);
 		{
 			if (ImGui::CollapsingHeader("GPU Stats"))
 			{

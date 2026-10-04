@@ -15,8 +15,8 @@ namespace Helios
 		void PopLayer(const SharedPtr<ILayer>& layer);
 		void PopOverlay(const SharedPtr<ILayer>& layer);
 
-		/* Get Layer */
-		const SharedPtr<ILayer>& GetLayerByName(const std::string& name);
+		/* Get Layer（按值返回：未命中时返回空 SharedPtr，避免返回绑定到临时量的悬垂引用） */
+		SharedPtr<ILayer> GetLayerByName(const std::string& name);
 
 		std::vector<SharedPtr<ILayer>>::iterator begin() { return m_Layers.begin(); }
 		std::vector<SharedPtr<ILayer>>::iterator end() { return m_Layers.end(); }

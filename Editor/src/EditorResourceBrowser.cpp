@@ -1,5 +1,7 @@
 ﻿#include "Pch.h"
 #include "EditorResourceBrowser.h"
+#include "EditorIcons.h"
+#include "PanelRegistry.h"
 
 namespace Helios
 {
@@ -15,7 +17,7 @@ namespace Helios
 		}
 
 		/* 文件目录列表窗口 */
-		ImGui::Begin("File List");
+		ImGui::Begin(Panel::kFileList);
 		{
 			if (ImGui::CollapsingHeader(g_AssetsPath.string().c_str()))
 			{
@@ -26,7 +28,7 @@ namespace Helios
 		ImGui::End();
 
 		/* 详细资源列表窗口 */
-		ImGui::Begin("Resource Browser");
+		ImGui::Begin(Panel::kResourceBrowser);
 		{
 			if (!m_CurrentFileNode)
 				m_CurrentFileNode = m_RootFileNodeTree; /* 默认为根节点 */
@@ -44,8 +46,7 @@ namespace Helios
 				}
 
 				START_STYLE_ALPHA(button_alpha);
-				const auto return_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/return.png"));
-				if (ImGui::ImageButton((ImTextureID)return_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+				if (Icons::IconButton(Icons::Id::Return, ImVec2(20, 20)))
 					m_CurrentFileNode = m_CurrentFileNode->ParentNode.lock();
 				END_STYLE_ALPHA;
 
@@ -70,7 +71,7 @@ namespace Helios
 				ImGui::SameLine(40, 20);
 				filter.Draw("##", 200);
 				ImGui::SameLine(236);
-				const auto filter_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/filter.png"));
+				const auto filter_icon = Icons::GetTexture(Icons::Id::Filter);
 
 				START_STYLE_ALPHA(0.5f);
 				ImGui::Image((ImTextureID)filter_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0));
@@ -81,8 +82,7 @@ namespace Helios
 			{
 				ImGui::SameLine(panel_width - 15);
 				START_STYLE_ALPHA(0.5f);
-				const auto menu_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/menu.png"));
-				if (ImGui::ImageButton((ImTextureID)menu_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+				if (Icons::IconButton(Icons::Id::Menu, ImVec2(20, 20)))
 					ImGui::OpenPopup("SettingPopup");
 				END_STYLE_ALPHA;
 
@@ -207,7 +207,7 @@ namespace Helios
 			if (directory_entry.is_directory()) /* 文件夹，递归目录 */
 			{
                 file_node->Type = FileType::Folder;
-				file_node->Icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/directory.png"));
+				file_node->Icon = Icons::GetTexture(Icons::Id::Directory);
 				parent_node->ChildNodes.emplace_back(file_node);
 				BuildFileNodeTree(file_node);
 			}
@@ -226,18 +226,18 @@ namespace Helios
 				else if (ext == ".SCN")
 				{
                     file_node->Type = FileType::Scene;
-					file_node->Icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/file_scn.png"));
+					file_node->Icon = Icons::GetTexture(Icons::Id::FileScene);
 
 				}
 				else if (ext == ".MTLGRAPH")
 				{
                     file_node->Type = FileType::MtlGraph;
-					file_node->Icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/file_mtlgraph.png"));
+					file_node->Icon = Icons::GetTexture(Icons::Id::FileMtlGraph);
 				}
 				else
 				{
                     file_node->Type = FileType::Default;
-					file_node->Icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/file.png"));
+					file_node->Icon = Icons::GetTexture(Icons::Id::File);
 				}
 
 				file_node->FileSize = static_cast<float>(std::filesystem::file_size(path)) / 1024.0f;

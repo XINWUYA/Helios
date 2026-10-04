@@ -64,6 +64,31 @@ namespace Helios
 			WindowFocusEvent() = default;
 	};
 
+	/* 窗口最小化 / 还原事件：最小化状态由 GLFW 的 iconify 回调显式上报，不靠帧缓冲尺寸推断
+	 * （最小化时帧缓冲是 0×0，但各平台是否派发这个尺寸并不一致）。 */
+	class WindowIconifyEvent : public AppEvent
+	{
+	public:
+		EVENT_CLASS_TYPE(WindowIconify)
+
+			WindowIconifyEvent(bool iconified)
+			: m_Iconified(iconified)
+		{
+		}
+
+		bool IsIconified() const { return m_Iconified; }
+
+		std::string ToString() const override
+		{
+			std::stringstream ss;
+			ss << "WindowIconifyEvent: " << (m_Iconified ? "iconified" : "restored");
+			return ss.str();
+		}
+
+	private:
+		bool m_Iconified;
+	};
+
 	/*
 	* 应用Tick事件类
 	*/

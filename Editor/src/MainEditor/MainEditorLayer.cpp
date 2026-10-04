@@ -1,9 +1,8 @@
 ﻿#include "Pch.h"
 #include "MainEditorLayer.h"
-#include "EditorBuiltinCamera.h"
+#include "EditorIcons.h"
+#include "PanelRegistry.h"
 #include "ImGuizmo.h"
-#include "ModelEditor/ModelEditorLayer.h"
-#include "SceneEditor/SceneEditorLayer.h"
 #include "Helios/ImGui/EditorTheme.h"
 
 namespace Helios
@@ -17,7 +16,6 @@ namespace Helios
 	void MainEditorLayer::OnAttached()
 	{
 		PROFILE_FUNCTION();
-		
 	}
 
 	void MainEditorLayer::OnDetached()
@@ -31,15 +29,12 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* 菜单 */
+		/* 菜单（含 DockSpace 宿主） */
 		ShowMenuUI();
 		/* 场景控制UI */
 		ShowSceneControllerUI();
 		/* 资源管理窗口 */
 		m_ResourceBrowser.OnImGuiRenderer();
-
-		// bool show = true;
-		// ImGui::ShowDemoWindow(&show);
 	}
 
 	void MainEditorLayer::OnEvent(IEvent* event)
@@ -61,68 +56,46 @@ namespace Helios
 		if (event->GetRepeatCount() > 0)
 			return false;
 
-		bool is_ctrl_pressed = Input::IsKeyPressed(Key::LeftControl) || Input::IsKeyPressed(Key::RightControl);
-		bool is_shift_pressed = Input::IsKeyPressed(Key::LeftShift) || Input::IsKeyPressed(Key::RightShift);
-		bool is_button_right_pressed = Input::IsMouseButtonPressed(Mouse::ButtonRight);
+		const bool is_ctrl_pressed = Input::IsKeyPressed(Key::LeftControl) || Input::IsKeyPressed(Key::RightControl);
+		const bool is_shift_pressed = Input::IsKeyPressed(Key::LeftShift) || Input::IsKeyPressed(Key::RightShift);
+		const bool is_button_right_pressed = Input::IsMouseButtonPressed(Mouse::ButtonRight);
 
 		switch (event->GetKeyCode())
 		{
-		case Key::N: /* Ctrl+N：新建一个场景 */
-			{
-				if (is_ctrl_pressed)
-					NewScene();
-			}
+		case Key::N: /* Ctrl+N：新建场景 */
+			if (is_ctrl_pressed)
+				m_Context.NewScene();
 			break;
-		case Key::S: /* Ctrl+S: 保存场景; Ctrl+Shift+S: 场景另存为 */
+		case Key::S: /* Ctrl+S: 保存场景; Ctrl+Shift+S: 另存为 */
 			if (is_ctrl_pressed)
 			{
 				if (is_shift_pressed)
-					SaveSceneAs();
+					m_Context.SaveSceneAs();
 				else
-					SaveScene();
+					m_Context.SaveScene();
 			}
 			break;
-		case Key::I: /* Ctrl+I：导入一个场景 */
-			{
-				if (is_ctrl_pressed)
-					ImportScene();
-			}
+		case Key::I: /* Ctrl+I：导入场景 */
+			if (is_ctrl_pressed)
+				m_Context.ImportScene();
 			break;
-		case Key::Q:
-			{
-				if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
-				{
-					m_GizmoType = -1;
-					NotifyGizmoTypeChanged();
-				}
-			}
+		case Key::Q: /* Q/W/E/R：切换 Gizmo 操作 */
+			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
+				m_Context.SetGizmoType(-1);
 			break;
 		case Key::W:
-			{
-				if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
-				{
-					m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
-					NotifyGizmoTypeChanged();
-				}
-			}
+			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
+				m_Context.SetGizmoType(ImGuizmo::OPERATION::TRANSLATE);
 			break;
 		case Key::E:
-			{
-				if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
-				{
-					m_GizmoType = ImGuizmo::OPERATION::ROTATE;
-					NotifyGizmoTypeChanged();
-				}
-			}
+			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
+				m_Context.SetGizmoType(ImGuizmo::OPERATION::ROTATE);
 			break;
 		case Key::R:
-			{
-				if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
-				{
-					m_GizmoType = ImGuizmo::OPERATION::SCALE;
-					NotifyGizmoTypeChanged();
-				}
-			}
+			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
+				m_Context.SetGizmoType(ImGuizmo::OPERATION::SCALE);
+			break;
+		default:
 			break;
 		}
 
@@ -134,37 +107,43 @@ namespace Helios
 		PROFILE_FUNCTION();
 		return false;
 	}
-	
-	void MainEditorLayer::NewScene()
+
+	/* 默认布局：左（层级树 / 资产浏览器）· 中（视口）· 右（属性 / 统计）。只在 ini 里没有这个
+	 * DockSpace 节点、或者用户主动重置时才构建；resize 由 ImGui 按比例自适应。 */
+	void MainEditorLayer::BuildDefaultLayout(ImGuiID dockspace_id)
 	{
 		PROFILE_FUNCTION();
 
-		const auto& scene_editor_layer = reinterpret_cast<const SharedPtr<SceneEditorLayer>&>(Application::Instance()->GetLayerByName("SceneEditorLayer"));
-		scene_editor_layer->NewScene();
-	}
+		const ImGuiViewport* viewport = ImGui::GetMainViewport();
 
-	void MainEditorLayer::ImportScene()
-	{
-		PROFILE_FUNCTION();
+		ImGui::DockBuilderRemoveNode(dockspace_id);
+		ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+		ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
 
-		const auto file_path = FileDialog::OpenFile("scene(*.scn)\0*.scn\0");
-		if (!file_path.empty())
+		ImGuiID center = dockspace_id;
+		ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr, &center);
+		ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
+		ImGuiID left_bottom = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.40f, nullptr, &left);
+		ImGuiID right_bottom = ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.40f, nullptr, &right);
+
+		/* 语义槽位 -> 实际 DockNode */
+		const auto slot_to_node = [&](Panel::DockSlot slot) -> ImGuiID
 		{
-		}
-	}
+			switch (slot)
+			{
+			case Panel::DockSlot::Center:      return center;
+			case Panel::DockSlot::LeftTop:     return left;
+			case Panel::DockSlot::LeftBottom:  return left_bottom;
+			case Panel::DockSlot::RightTop:    return right;
+			case Panel::DockSlot::RightBottom: return right_bottom;
+			default:                           return center;
+			}
+		};
 
-	void MainEditorLayer::SaveScene()
-	{
-		PROFILE_FUNCTION();
-	}
+		for (const auto& desc : Panel::kDefaultLayout)
+			ImGui::DockBuilderDockWindow(desc.Id, slot_to_node(desc.Slot));
 
-	/* 保存场景到指定路径 */
-	void MainEditorLayer::SaveSceneAs()
-	{
-		PROFILE_FUNCTION();
-
-		std::string file_path = FileDialog::SaveFile("scene(*.scn)\0*.scn\0");
-
+		ImGui::DockBuilderFinish(dockspace_id);
 	}
 
 	void MainEditorLayer::ShowMenuUI()
@@ -223,7 +202,16 @@ namespace Helios
 			ImGuiIO& io = ImGui::GetIO();
 			if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
 			{
-				ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+				const ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+
+				/* 首次运行（ini 里没有该 DockSpace 节点）或用户点了 Reset Layout 时构建默认布局。
+				 * DockBuilder 必须在 DockSpace() 之前调用；构建后不要再每帧重建，否则用户的自定义分栏会被覆盖。 */
+				if (m_ResetLayoutRequested || ImGui::DockBuilderGetNode(dockspace_id) == nullptr)
+				{
+					m_ResetLayoutRequested = false;
+					BuildDefaultLayout(dockspace_id);
+				}
+
 				ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
 			}
 
@@ -233,40 +221,26 @@ namespace Helios
 				if (ImGui::BeginMenu("File"))
 				{
 					if (ImGui::MenuItem("New Scene", "Ctrl+N"))
-					{
-						NewScene();
-					}
+						m_Context.NewScene();
 
 					if (ImGui::MenuItem("Open Scene", "Ctrl+O"))
-					{
-						ImportScene();
-					}
+						m_Context.ImportScene();
 
 					if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
-					{
-						SaveScene();
-					}
+						m_Context.SaveScene();
 
 					if (ImGui::MenuItem("Save Scene As", "Ctrl+Shift+S"))
-					{
-						SaveSceneAs();
-					}
+						m_Context.SaveSceneAs();
 
 					if (ImGui::MenuItem("Import Model(.obj)", "Ctrl+I"))
 					{
-						m_ActiveModelEditor = true;
-						const auto& model_editor_layer = reinterpret_cast<const SharedPtr<ModelEditorLayer>&>(Application::Instance()->GetLayerByName("ModelEditorLayer"));
-						model_editor_layer->Active(m_ActiveModelEditor);
-						model_editor_layer->ImportModel();
+						m_Context.SetModelEditorActive(true);
+						m_Context.ImportModel();
 					}
 
 					if (ImGui::MenuItem("Export Mesh & Mtl(.mesh & .mtl)", "Ctrl+E"))
 					{
-						//ExportMeshAndMtl();
-						const auto& scene_editor_layer = reinterpret_cast<const SharedPtr<SceneEditorLayer>&>(Application::Instance()->GetLayerByName("SceneEditorLayer"));
-						static bool active = false;
-						scene_editor_layer->Active(active);
-						active = !active;
+						/* TODO: 尚未实现导出 */
 					}
 
 					if (ImGui::MenuItem("Exit"))
@@ -275,21 +249,21 @@ namespace Helios
 					ImGui::EndMenu();
 				}
 
-				if (ImGui::BeginMenu("Windows"))
+				/* View：面板显隐 + 布局重置 */
+				if (ImGui::BeginMenu("View"))
 				{
-					const auto& scene_editor_layer = reinterpret_cast<const SharedPtr<SceneEditorLayer>&>(Application::Instance()->GetLayerByName("SceneEditorLayer"));
-					m_ActiveSceneEditor = scene_editor_layer->IsActivated();
-					if (ImGui::MenuItem("SceneEditor", NULL, &m_ActiveSceneEditor))
-					{
-						scene_editor_layer->Active(m_ActiveSceneEditor);
-					}
+					bool scene_active = m_Context.IsSceneEditorActive();
+					if (ImGui::MenuItem("Scene Editor", nullptr, &scene_active))
+						m_Context.SetSceneEditorActive(scene_active);
 
-					const auto& model_editor_layer = reinterpret_cast<const SharedPtr<ModelEditorLayer>&>(Application::Instance()->GetLayerByName("ModelEditorLayer"));
-					m_ActiveModelEditor = model_editor_layer->IsActivated();
-					if (ImGui::MenuItem("ModelEditor", NULL, &m_ActiveModelEditor))
-					{
-						model_editor_layer->Active(m_ActiveModelEditor);
-					}
+					bool model_active = m_Context.IsModelEditorActive();
+					if (ImGui::MenuItem("Model Editor", nullptr, &model_active))
+						m_Context.SetModelEditorActive(model_active);
+
+					ImGui::Separator();
+
+					if (ImGui::MenuItem("Reset Layout"))
+						m_ResetLayoutRequested = true;
 
 					ImGui::EndMenu();
 				}
@@ -331,20 +305,13 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		static auto save_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/save.png"));
-		static auto translate_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/translate.png"));
-		static auto rotate_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/rotate.png"));
-		static auto scale_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/scale.png"));
-		static auto play_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/play.png"));
-		static auto stop_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/stop.png"));
-		static auto menu_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/menu.png"));
-
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 2)); /* 指定间隔 */
 		ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0, 2));
 
 		ImGui::Begin("##Scene Controller", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		{
-			const float icon_size = ImGui::GetWindowHeight() - 4.0f;
+			/* 图标尺寸取整数下限，避免窗口被压扁时 GetWindowHeight() 导致 size <= 0 */
+			const float icon_size = std::max(16.0f, ImGui::GetWindowHeight() - 4.0f);
 			const float panel_width = ImGui::GetWindowContentRegionMax().x;
 
 			START_TRANSPARENT_BUTTON;
@@ -352,56 +319,51 @@ namespace Helios
 			constexpr float cursor_offset = 10.0f;
 			/* 保存按钮 */
 			ImGui::SetCursorPosX(cursor_offset);
-			bool checked = false;
-			ImGuiExt::DrawCheckedImageButtonUI("Save", save_icon, ImVec2(icon_size, icon_size), checked,
+			ImGuiExt::DrawCheckedImageButtonUI("Save", Icons::GetTexture(Icons::Id::Save), ImVec2(icon_size, icon_size), false,
 				[&]()
 				{
-					SaveScene();
+					m_Context.SaveScene();
 				});
 
-			/* 移动/旋转/平移操作 */
+			/* 移动/旋转/缩放操作 */
 			{
 				/* translate */
 				ImGui::SameLine(cursor_offset + icon_size * 2);
-				bool checked = m_GizmoType == ImGuizmo::OPERATION::TRANSLATE;
-				ImGuiExt::DrawCheckedImageButtonUI("Translate", translate_icon, ImVec2(icon_size, icon_size), checked,
+				const bool t_checked = m_Context.GetGizmoType() == ImGuizmo::OPERATION::TRANSLATE;
+				ImGuiExt::DrawCheckedImageButtonUI("Translate", Icons::GetTexture(Icons::Id::Translate), ImVec2(icon_size, icon_size), t_checked,
 					[&]()
 					{
-						m_GizmoType = ImGuizmo::OPERATION::TRANSLATE;
-						NotifyGizmoTypeChanged();
+						m_Context.SetGizmoType(ImGuizmo::OPERATION::TRANSLATE);
 					});
 
 				/* rotate */
 				ImGui::SameLine();
-				checked = m_GizmoType == ImGuizmo::OPERATION::ROTATE;
-				ImGuiExt::DrawCheckedImageButtonUI("Rotate", rotate_icon, ImVec2(icon_size, icon_size), checked,
+				const bool r_checked = m_Context.GetGizmoType() == ImGuizmo::OPERATION::ROTATE;
+				ImGuiExt::DrawCheckedImageButtonUI("Rotate", Icons::GetTexture(Icons::Id::Rotate), ImVec2(icon_size, icon_size), r_checked,
 					[&]()
 					{
-						m_GizmoType = ImGuizmo::OPERATION::ROTATE;
-						NotifyGizmoTypeChanged();
+						m_Context.SetGizmoType(ImGuizmo::OPERATION::ROTATE);
 					});
 
 				/* scale */
-
 				ImGui::SameLine();
-				checked = m_GizmoType == ImGuizmo::OPERATION::SCALE;
-				ImGuiExt::DrawCheckedImageButtonUI("Scale", scale_icon, ImVec2(icon_size, icon_size), checked,
+				const bool s_checked = m_Context.GetGizmoType() == ImGuizmo::OPERATION::SCALE;
+				ImGuiExt::DrawCheckedImageButtonUI("Scale", Icons::GetTexture(Icons::Id::Scale), ImVec2(icon_size, icon_size), s_checked,
 					[&]()
 					{
-						m_GizmoType = ImGuizmo::OPERATION::SCALE;
-						NotifyGizmoTypeChanged();
+						m_Context.SetGizmoType(ImGuizmo::OPERATION::SCALE);
 					});
 			}
 
 			/* 切换执行模式 */
 			{
 				ImGui::SameLine();
-				const SharedPtr<DeviceTexture> icon = (m_PlayMode == PlayMode::Edit) ? play_icon : stop_icon;
+				const PlayMode play_mode = m_Context.GetPlayMode();
+				const Icons::Id play_id = (play_mode == PlayMode::Edit) ? Icons::Id::Play : Icons::Id::Stop;
 				ImGui::SetCursorPosX((panel_width - icon_size) * 0.5f);
-				if (ImGui::ImageButton((ImTextureID)icon.get(), ImVec2(icon_size, icon_size), ImVec2(0, 1), ImVec2(1, 0), 0))
+				if (Icons::IconButton(play_id, ImVec2(icon_size, icon_size)))
 				{
-					m_PlayMode = (m_PlayMode == PlayMode::Edit) ? PlayMode::Runtime : PlayMode::Edit;
-					NotifyPlayModeChanged();
+					m_Context.SetPlayMode((play_mode == PlayMode::Edit) ? PlayMode::Runtime : PlayMode::Edit);
 				}
 			}
 
@@ -409,22 +371,9 @@ namespace Helios
 			{
 				ImGui::SameLine(panel_width - cursor_offset - 20);
 				START_STYLE_ALPHA(0.5f);
-				if (ImGui::ImageButton((ImTextureID)menu_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+				if (Icons::IconButton(Icons::Id::Menu, ImVec2(20, 20)))
 					ImGui::OpenPopup("ConfigPopup");
 				END_STYLE_ALPHA;
-
-				/* 展开弹窗时，显示控件 */
-				// if (ImGui::BeginPopup("ConfigPopup"))
-				// {
-				// 	ImGui::PushItemWidth(200);
-				//
-				// 	bool is_focus = m_pEditorCamera->IsFocus();
-				// 	ImGui::Checkbox("FocusMode", &is_focus);
-				// 	m_pEditorCamera->SetFocus(is_focus);
-				//
-				// 	ImGui::PopItemWidth();
-				// 	ImGui::EndPopup();
-				// }
 			}
 
 			END_TRANSPARENT_BUTTON;
@@ -434,38 +383,8 @@ namespace Helios
 		ImGui::PopStyleVar(2);
 	}
 
-	/* 显示渲染统计信息 */
-	void MainEditorLayer::ShowStatisticInfoUI()
-	{
-		PROFILE_FUNCTION();
-
-		ImGui::Begin("Stat Info");
-		{
-			// todo: 帧率等
-			// Renderer3D Stats
-			if (ImGui::CollapsingHeader("3D"))
-			{
-				// todo: 三角形、模型数量
-			}
-		}
-		ImGui::End();
-	}
-
-	void MainEditorLayer::NotifyGizmoTypeChanged()
-	{
-		const auto& scene_editor_layer = reinterpret_cast<const SharedPtr<SceneEditorLayer>&>(Application::Instance()->GetLayerByName("SceneEditorLayer"));
-		scene_editor_layer->SetGizmoType(m_GizmoType);
-	}
-
-	void MainEditorLayer::NotifyPlayModeChanged()
-	{
-		const auto& scene_editor_layer = reinterpret_cast<const SharedPtr<SceneEditorLayer>&>(Application::Instance()->GetLayerByName("SceneEditorLayer"));
-		scene_editor_layer->SetPlayMode(m_PlayMode);
-	}
-
 	void MainEditorLayer::OnUpdate(float delta_time)
 	{
 		PROFILE_FUNCTION();
-		
 	}
 }

@@ -308,6 +308,17 @@ namespace Helios
         glfwSetWindowUserPointer(m_pGLFWWindow, &m_WindowInfo);
         SetVSync(desc.IsVSync);
 
+        /* 窗口最小尺寸（点）：给停靠布局一个物理下限。ImGui DockNode 的最小尺寸取自 WindowMinSize，
+         * 三栏布局最小宽 ≈ 600 点，取 800×480 既托得住布局、又低于默认的 960×540；不然 DockNode 被
+         * 钳制会丢比例。 */
+        {
+            constexpr int kMinWindowWidthPoints = 800;
+            constexpr int kMinWindowHeightPoints = 480;
+            glfwSetWindowSizeLimits(m_pGLFWWindow,
+                kMinWindowWidthPoints, kMinWindowHeightPoints,
+                GLFW_DONT_CARE, GLFW_DONT_CARE);
+        }
+
         /* 创建 Metal 上下文；实际初始化由 Renderer::Init() 后的 InitGraphicsContext() 触发 */
         m_pMetalContext = CreateUniquePtr<MetalContext>(m_pGLFWWindow);
 
@@ -319,6 +330,17 @@ namespace Helios
 
             if (info->Owner)
                 info->Owner->OnFramebufferSizeChanged(width, height);
+        });
+
+        /* 最小化/还原回调：显式上报（最小化时帧缓冲为 0×0，但上面会忽略它，
+         * 因此不能靠 0 尺寸推断最小化） */
+        glfwSetWindowIconifyCallback(m_pGLFWWindow, [](GLFWwindow* window, int iconified) {
+            WindowInfo* info = (WindowInfo*)glfwGetWindowUserPointer(window);
+            if (!info)
+                return;
+
+            if (info->Owner)
+                info->Owner->OnIconified(iconified == GLFW_TRUE);
         });
 
         /* 内容缩放回调：窗口在不同 DPI 屏幕间移动，或系统缩放变化时触发 */
@@ -423,6 +445,13 @@ namespace Helios
         {
             m_pMetalContext->OnResize(m_WindowInfo.Descriptor.Width, m_WindowInfo.Descriptor.Height);
         }
+    }
+
+    /* 最小化/还原：派发显式事件，由 Application 维护 m_IsMinimized */
+    void MetalWindow::OnIconified(bool iconified)
+    {
+        WindowIconifyEvent event(iconified);
+        m_WindowInfo.CallBackFunc(&event);
     }
 
     void MetalWindow::Destroy()

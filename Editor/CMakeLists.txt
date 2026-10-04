@@ -6,7 +6,8 @@ project(Editor LANGUAGES CXX)
 add_executable(Editor)
 
 # Source files
-file(GLOB_RECURSE EDITOR_SOURCES
+# CONFIGURE_DEPENDS：新增/删除源文件时自动重新 glob，避免"新文件没进构建"导致链接报未定义符号
+file(GLOB_RECURSE EDITOR_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )

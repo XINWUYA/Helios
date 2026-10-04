@@ -377,7 +377,10 @@ MigrationBackup/
 FodyWeavers.xsd
 
 *.ini
-!imgui.ini
+# imgui.ini 是编辑器运行期自动生成的停靠布局，运行时会反复改写，不入库
+
+# 本地设计文档（工作笔记）不入库
+Documents/*.md
 
 framegraph.txt
 TimeCostProfiler-Startup.json

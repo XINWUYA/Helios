@@ -1,5 +1,7 @@
 ﻿#include "Pch.h"
 #include "SceneHierarchy.h"
+#include "EditorIcons.h"
+#include "PanelRegistry.h"
 
 namespace Helios
 {
@@ -44,7 +46,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::Begin("Scene Hierarchy");
+		ImGui::Begin(Panel::kSceneHierarchy);
 		{
 			m_pOwnerScene->GetRegistry().each(
 				[&](auto entity_id)
@@ -115,7 +117,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::Begin("Properties");
+		ImGui::Begin(Panel::kProperties);
 		{
 			if (m_SelectedEntity)
 				ShowEntityComponents();
@@ -127,8 +129,8 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		m_pAddComponentIcon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/add.png"));
-		m_pMenuIcon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/menu.png"));
+		m_pAddComponentIcon = Icons::GetTexture(Icons::Id::Add);
+		m_pMenuIcon = Icons::GetTexture(Icons::Id::Menu);
 	}
 
 	void SceneHierarchy::ShowEntityNode(Entity& entity)
@@ -196,8 +198,7 @@ namespace Helios
 			START_TRANSPARENT_BUTTON;
 			START_STYLE_ALPHA(0.5f);
 			ImGui::SameLine(panel_width - 15);
-			const auto menu_icon = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("EditorRes/icons/menu.png"));
-			if (ImGui::ImageButton((ImTextureID)menu_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0)))
+			if (Icons::IconButton(Icons::Id::Menu, ImVec2(20, 20)))
 				ImGui::OpenPopup("ComponentSettings");
 			END_STYLE_ALPHA;
 			END_TRANSPARENT_BUTTON;

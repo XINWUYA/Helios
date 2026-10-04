@@ -2,6 +2,8 @@
 #include "ModelEditorLayer.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "Helios/Application/Application.h"
+#include "EditorCommon.h"
+#include "PanelRegistry.h"
 
 namespace Helios
 {
@@ -82,22 +84,26 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		ImGui::Begin("Model", &m_IsActivated);
+		ImGui::Begin(Panel::kModel, &m_IsActivated);
 		{
 			/* 获取窗口范围 */
 			const auto viewport_region_min = ImGui::GetWindowContentRegionMin();
 			const auto viewport_region_max = ImGui::GetWindowContentRegionMax();
 			const auto viewport_offset = ImGui::GetWindowPos();
 			m_ViewportRegion.MinX = viewport_region_min.x + viewport_offset.x;
-			m_ViewportRegion.Width = viewport_region_max.x - viewport_region_min.x;
 			m_ViewportRegion.MinY = viewport_region_min.y + viewport_offset.y;
-			m_ViewportRegion.Height = viewport_region_max.y - viewport_region_min.y;
+			/* 窗口极小时 max 可能小于 min，差值为负；赋给 uint32_t 会回绕成极大值 */
+			m_ViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, viewport_region_max.x - viewport_region_min.x));
+			m_ViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, viewport_region_max.y - viewport_region_min.y));
 
-			/* ImGui 给的是逻辑点，RenderTarget 按物理像素分配 */
+			/* ImGui 给的是逻辑点，RenderTarget 按物理像素分配；
+			 * ClampRenderSize 负责负值/超大值防护。 */
 			const auto content_scale = Application::Instance()->GetWindow().GetContentScale();
-			m_pEditorCamera->SetViewportRegion({ 0, 0,
-				static_cast<uint32_t>(m_ViewportRegion.Width * content_scale + 0.5f),
-				static_cast<uint32_t>(m_ViewportRegion.Height * content_scale + 0.5f) });
+			const auto rt_size = ClampRenderSize(
+				static_cast<float>(m_ViewportRegion.Width),
+				static_cast<float>(m_ViewportRegion.Height),
+				content_scale);
+			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
 
 			///* 若当前ImGui窗口不是主窗口，应阻塞事件传递 */
 			//m_IsViewportFocused = ImGui::IsWindowFocused();
@@ -141,7 +147,7 @@ namespace Helios
 			return;
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		ImGui::Begin("ModelHelper");
+		ImGui::Begin(Panel::kModelHelper);
 		{
 			const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap | ImGuiTreeNodeFlags_FramePadding;
 			

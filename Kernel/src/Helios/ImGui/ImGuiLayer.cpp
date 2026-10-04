@@ -40,10 +40,9 @@ namespace Helios
 		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;			// Enable Multi-Viewport / Platform Windows
 		//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
 
-		// Set ini file path to absolute path for consistent layout persistence
-		// Use the same directory as ASSETS_PATH (project root)
-		const static std::string ini_path = std::string(ASSETS_PATH) + "/../imgui.ini";
-		io.IniFilename = ini_path.c_str();
+		/* ini 路径固定为绝对路径（工程根目录），与 ASSETS_PATH 同目录，便于跨工作目录运行时复用同一份布局 */
+		m_IniPath = std::string(ASSETS_PATH) + "/../imgui.ini";
+		SetLayoutSavingEnabled(true);
 
 		/* 窗口需在字体构建前取得：字形按屏幕 content scale 光栅化，Retina 下文字才锐利 */
 		auto* window = static_cast<GLFWwindow*>(Application::Instance()->GetWindow().GetNativeWindow());
@@ -80,6 +79,13 @@ namespace Helios
 		ImGui::DestroyContext();
 	}
 
+	/* 布局持久化开关：ImGui 在 IniFilename == nullptr 时既不读也不写 ini。
+	 * 用于最小化/尺寸退化期间冻结保存，避免钳制后的 DockNode 比例落盘。 */
+	void ImGuiLayer::SetLayoutSavingEnabled(bool enabled)
+	{
+		ImGui::GetIO().IniFilename = enabled ? m_IniPath.c_str() : nullptr;
+	}
+
 	void ImGuiLayer::OnEvent(IEvent* event)
 	{
 		if (m_IsBlockEvents)
@@ -100,7 +106,7 @@ namespace Helios
 	void ImGuiLayer::Begin()
 	{
 		PROFILE_FUNCTION();
-		
+
 		// Platform new frame
 		m_Renderer->NewFrame();
 		ImGui_ImplGlfw_NewFrame();

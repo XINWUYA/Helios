@@ -76,6 +76,8 @@ namespace Helios
         /* GLFW 回调转发（需要在静态回调里访问 this 与 Metal 上下文） */
         void OnFramebufferSizeChanged(int width, int height);
         void OnContentScaleChanged(float scale_x, float scale_y);
+        /* 最小化/还原：显式上报最小化状态（不依赖 0×0 帧缓冲推断） */
+        void OnIconified(bool iconified);
 
         struct WindowInfo
         {
