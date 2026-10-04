@@ -14,27 +14,42 @@ namespace Helios
 		enum class Id : uint16_t
 		{
 			None = 0,
-			Save, Play, Stop,
+			/* 文件 */
+			NewScene, OpenScene, Save,
+			/* 编辑历史 */
+			Undo, Redo,
+			/* 变换 */
 			Translate, Rotate, Scale,
-			Menu, Add, Return, Filter,
-			Directory, File, FileScene, FileMtlGraph, Visible,
+			/* 运行 */
+			Play, Stop,
+			/* 通用 */
+			Menu, Add, Return, Filter, Visible,
+			/* 内容（位图） */
+			Directory, File, FileScene, FileMtlGraph,
 			COUNT
 		};
 
+		/* 矢量绘制：在以 center 为中心、边长 size 的正方形内作图 */
+		using IconDrawFunc = void (*)(ImDrawList* draw_list, const ImVec2& center, float size, ImU32 color);
+
 		struct IconDesc
 		{
-			const char* Name;      /* 语义名：用于 tooltip / 调试 */
-			const char* PngPath;   /* 相对 Assets 的路径；改用字体图标后可置 nullptr */
-			const char* Glyph;     /* 字体图标码点；暂无字体时为 nullptr */
+			const char*  Name;      /* 语义名：用于调试与阅读 */
+			const char*  PngPath;   /* 相对 Assets 的路径；矢量图标为 nullptr */
+			IconDrawFunc Draw;      /* 矢量绘制；为 nullptr 时走 PngPath */
 		};
 
 		/* 元数据表：新增图标只在这里加一行（Id 与表项一一对应） */
 		const IconDesc& Get(Id id);
 
-		/* 取图标贴图（内部集中缓存，同一图标全局只加载一次） */
+		/* 绘制图标本体（按钮内、装饰处均可直接调用） */
+		void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color);
+
+		/* 取位图图标贴图（内部集中缓存，同一图标全局只加载一次）。
+		 * 矢量图标返回空指针。 */
 		std::shared_ptr<DeviceTexture> GetTexture(Id id);
 
-		/* 统一图标按钮：集中尺寸与 checked 高亮，替代各处手写 ImageButton */
+		/* 统一图标按钮：集中尺寸、扁平底色、checked 高亮与 tooltip */
 		bool IconButton(Id id, const ImVec2& size, bool checked = false, const char* tooltip = nullptr);
 	}
 }

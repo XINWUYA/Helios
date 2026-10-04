@@ -2,6 +2,7 @@
 #include "EditorResourceBrowser.h"
 #include "EditorIcons.h"
 #include "PanelRegistry.h"
+#include "Helios/ImGui/EditorTheme.h"
 
 namespace Helios
 {
@@ -150,11 +151,17 @@ namespace Helios
 			{
 				ImGui::SameLine(40, 20);
 				filter.Draw("##", 200);
+
+				/* 筛选图标是装饰性的，不接收点击 */
 				ImGui::SameLine(236);
-				const auto filter_icon = Icons::GetTexture(Icons::Id::Filter);
+				ImGui::Dummy(ImVec2(20.0f, 20.0f));
+				const ImVec2 icon_min = ImGui::GetItemRectMin();
+				const ImVec2 icon_max = ImGui::GetItemRectMax();
 
 				START_STYLE_ALPHA(0.5f);
-				ImGui::Image((ImTextureID)filter_icon.get(), ImVec2(20, 20), ImVec2(0, 1), ImVec2(1, 0));
+				Icons::Draw(ImGui::GetWindowDrawList(), Icons::Id::Filter,
+					ImVec2((icon_min.x + icon_max.x) * 0.5f, (icon_min.y + icon_max.y) * 0.5f), 16.0f,
+					ImGui::GetColorU32(EditorTheme::Token::Text));
 				END_STYLE_ALPHA;
 			}
 

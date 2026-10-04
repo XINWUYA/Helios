@@ -31,8 +31,6 @@ namespace Helios
 
 		/* 菜单（含 DockSpace 宿主） */
 		ShowMenuUI();
-		/* 场景控制UI */
-		ShowSceneControllerUI();
 		/* 资源管理窗口 */
 		m_ResourceBrowser.OnImGuiRenderer();
 	}
@@ -121,17 +119,50 @@ namespace Helios
 		return false;
 	}
 
+	namespace
+	{
+		/* 工具条分组之间的竖向分隔线：占 1px 布局宽度并居中画出 */
+		void ToolbarSeparator(float button_size, float gap)
+		{
+			ImGui::SameLine(0.0f, gap);
+			ImGui::Dummy(ImVec2(1.0f, button_size));
+
+			const ImVec2 min = ImGui::GetItemRectMin();
+			const float x = min.x + 0.5f;
+			const float center_y = min.y + button_size * 0.5f;
+			const float half = button_size * 0.32f;
+
+			ImGui::GetWindowDrawList()->AddLine(ImVec2(x, center_y - half), ImVec2(x, center_y + half),
+				ImGui::GetColorU32(EditorTheme::Token::Border), 1.0f);
+
+			ImGui::SameLine(0.0f, gap);
+		}
+
+		/* 撤销 / 重做的 tooltip：带上会撤销什么操作，与 Edit 菜单一致 */
+		std::string MakeHistoryTooltip(const char* action, const char* label, const char* shortcut)
+		{
+			std::string text(action);
+			if (label != nullptr)
+			{
+				text += " ";
+				text += label;
+			}
+			text += "  (";
+			text += shortcut;
+			text += ")";
+			return text;
+		}
+	}
+
 	/* 默认布局：左（层级树 / 资产浏览器）· 中（视口）· 右（属性 / 统计）。只在 ini 里没有这个
 	 * DockSpace 节点、或者用户主动重置时才构建；resize 由 ImGui 按比例自适应。 */
-	void MainEditorLayer::BuildDefaultLayout(ImGuiID dockspace_id)
+	void MainEditorLayer::BuildDefaultLayout(ImGuiID dockspace_id, const ImVec2& size)
 	{
 		PROFILE_FUNCTION();
 
-		const ImGuiViewport* viewport = ImGui::GetMainViewport();
-
 		ImGui::DockBuilderRemoveNode(dockspace_id);
 		ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-		ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
+		ImGui::DockBuilderSetNodeSize(dockspace_id, size);
 
 		ImGuiID center = dockspace_id;
 		ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr, &center);
@@ -166,7 +197,6 @@ namespace Helios
 		static bool p_open = true;
 		static bool opt_fullscreen = true;
 		static bool opt_padding = false;
-		static bool show_style_editor = false;
 		static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
 
 		// We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
@@ -210,23 +240,6 @@ namespace Helios
 
 			if (opt_fullscreen)
 				ImGui::PopStyleVar(2);
-
-			// Submit the DockSpace
-			ImGuiIO& io = ImGui::GetIO();
-			if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
-			{
-				const ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
-
-				/* 首次运行（ini 里没有该 DockSpace 节点）或用户点了 Reset Layout 时构建默认布局。
-				 * DockBuilder 必须在 DockSpace() 之前调用；构建后不要再每帧重建，否则用户的自定义分栏会被覆盖。 */
-				if (m_ResetLayoutRequested || ImGui::DockBuilderGetNode(dockspace_id) == nullptr)
-				{
-					m_ResetLayoutRequested = false;
-					BuildDefaultLayout(dockspace_id);
-				}
-
-				ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
-			}
 
 			/* 菜单栏 */
 			if (ImGui::BeginMenuBar())
@@ -306,7 +319,7 @@ namespace Helios
 					// which we can't undo at the moment without finer window depth/z control.
 					ImGui::MenuItem("Fullscreen", NULL, &opt_fullscreen);
 					ImGui::MenuItem("Padding", NULL, &opt_padding);
-					ImGui::MenuItem("Style Editor", nullptr, &show_style_editor);
+					ImGui::MenuItem("Style Editor", nullptr, &m_ShowStyleEditor);
 					ImGui::Separator();
 
 					if (ImGui::MenuItem("Flag: NoSplit", "", (dockspace_flags & ImGuiDockNodeFlags_NoSplit) != 0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoSplit; }
@@ -323,96 +336,125 @@ namespace Helios
 
 				ImGui::EndMenuBar();
 			}
+
+			/* 顶部工具栏：菜单栏与工作区之间的固定一行（不参与停靠） */
+			ShowToolbarUI();
+
+			/* DockSpace 占满工具条之后的剩余区域 */
+			ImGuiIO& io = ImGui::GetIO();
+			if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable)
+			{
+				const ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+				const ImVec2 dockspace_size = ImGui::GetContentRegionAvail();
+
+				/* 首次运行（ini 里没有该 DockSpace 节点）或用户点了 Reset Layout 时构建默认布局。
+				 * DockBuilder 必须在 DockSpace() 之前调用；构建后不要再每帧重建，否则用户的自定义分栏会被覆盖。 */
+				if (m_ResetLayoutRequested || ImGui::DockBuilderGetNode(dockspace_id) == nullptr)
+				{
+					m_ResetLayoutRequested = false;
+					BuildDefaultLayout(dockspace_id, dockspace_size);
+				}
+
+				ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
+			}
 		}
 		ImGui::End();
 		EditorTheme::PopDockHostBackground();
 
 		/* Style Editor：实时调参，Export 后固化回 EditorTheme.h */
-		if (show_style_editor)
+		if (m_ShowStyleEditor)
 			ImGui::ShowStyleEditor();
 	}
 
-	/* 显示场景控制UI */
-	void MainEditorLayer::ShowSceneControllerUI()
+	/* 顶部工具栏：固定一行、横跨整个窗口宽，跟菜单栏一起构成顶部 chrome。分组从左到右按操作
+	 * 频率排：文件 → 编辑历史 → 变换；运行控制单独贴右端，免得误点。 */
+	void MainEditorLayer::ShowToolbarUI()
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 2)); /* 指定间隔 */
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(0, 2));
+		constexpr float kToolbarHeight = 34.0f;
+		constexpr float kButtonSize = 24.0f;
+		constexpr float kGroupGap = 9.0f;
+		constexpr float kSidePadding = 8.0f;
 
-		ImGui::Begin("##Scene Controller", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+		ImGui::PushStyleColor(ImGuiCol_ChildBg, EditorTheme::Token::Neutral3);
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2.0f, 0.0f));
+
+		ImGui::BeginChild("##MainToolbar", ImVec2(0.0f, kToolbarHeight), false,
+			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoNavFocus);
 		{
-			/* 图标尺寸取整数下限，避免窗口被压扁时 GetWindowHeight() 导致 size <= 0 */
-			const float icon_size = std::max(16.0f, ImGui::GetWindowHeight() - 4.0f);
-			const float panel_width = ImGui::GetWindowContentRegionMax().x;
+			const ImVec2 button_size(kButtonSize, kButtonSize);
 
-			START_TRANSPARENT_BUTTON;
+			/* 子窗口自身没有内边距（除非显式要求 AlwaysUseWindowPadding），
+			 * 位置必须显式指定，否则按钮会贴着顶边。 */
+			ImGui::SetCursorPos(ImVec2(kSidePadding, (kToolbarHeight - kButtonSize) * 0.5f));
 
-			constexpr float cursor_offset = 10.0f;
-			/* 保存按钮 */
-			ImGui::SetCursorPosX(cursor_offset);
-			ImGuiExt::DrawCheckedImageButtonUI("Save", Icons::GetTexture(Icons::Id::Save), ImVec2(icon_size, icon_size), false,
-				[&]()
-				{
-					m_Context.SaveScene();
-				});
+			/* ---- 文件 ---- */
+			if (Icons::IconButton(Icons::Id::NewScene, button_size, false, "New Scene  (Ctrl+N)"))
+				m_Context.NewScene();
 
-			/* 移动/旋转/缩放操作 */
+			ImGui::SameLine();
+			if (Icons::IconButton(Icons::Id::OpenScene, button_size, false, "Open Scene  (Ctrl+O)"))
+				m_Context.ImportScene();
+
+			ImGui::SameLine();
+			if (Icons::IconButton(Icons::Id::Save, button_size, false, "Save Scene  (Ctrl+S)"))
+				m_Context.SaveScene();
+
+			/* ---- 编辑历史 ---- */
+			ToolbarSeparator(kButtonSize, kGroupGap);
+
+			const std::string undo_tip = MakeHistoryTooltip("Undo", m_Context.GetUndoLabel(), "Ctrl+Z");
+			const std::string redo_tip = MakeHistoryTooltip("Redo", m_Context.GetRedoLabel(), "Ctrl+Y");
+
+			ImGui::BeginDisabled(!m_Context.CanUndo());
+			if (Icons::IconButton(Icons::Id::Undo, button_size, false, undo_tip.c_str()))
+				m_Context.Undo();
+			ImGui::EndDisabled();
+
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!m_Context.CanRedo());
+			if (Icons::IconButton(Icons::Id::Redo, button_size, false, redo_tip.c_str()))
+				m_Context.Redo();
+			ImGui::EndDisabled();
+
+			/* ---- 变换 ---- */
+			ToolbarSeparator(kButtonSize, kGroupGap);
+
+			const int gizmo_type = m_Context.GetGizmoType();
+			if (Icons::IconButton(Icons::Id::Translate, button_size, gizmo_type == ImGuizmo::OPERATION::TRANSLATE, "Translate  (W)"))
+				m_Context.SetGizmoType(ImGuizmo::OPERATION::TRANSLATE);
+
+			ImGui::SameLine();
+			if (Icons::IconButton(Icons::Id::Rotate, button_size, gizmo_type == ImGuizmo::OPERATION::ROTATE, "Rotate  (E)"))
+				m_Context.SetGizmoType(ImGuizmo::OPERATION::ROTATE);
+
+			ImGui::SameLine();
+			if (Icons::IconButton(Icons::Id::Scale, button_size, gizmo_type == ImGuizmo::OPERATION::SCALE, "Scale  (R)"))
+				m_Context.SetGizmoType(ImGuizmo::OPERATION::SCALE);
+
+			/* ---- 运行控制：水平居中 ---- */
+			const float previous_right = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
+			const float centered_x = ImGui::GetWindowWidth() * 0.5f - kButtonSize * 0.5f;
+			ImGui::SameLine(std::max(centered_x, previous_right + kGroupGap));
+
+			const bool running = (m_Context.GetPlayMode() == PlayMode::Runtime);
+			if (Icons::IconButton(running ? Icons::Id::Stop : Icons::Id::Play, button_size, running,
+				running ? "Stop" : "Play"))
 			{
-				/* translate */
-				ImGui::SameLine(cursor_offset + icon_size * 2);
-				const bool t_checked = m_Context.GetGizmoType() == ImGuizmo::OPERATION::TRANSLATE;
-				ImGuiExt::DrawCheckedImageButtonUI("Translate", Icons::GetTexture(Icons::Id::Translate), ImVec2(icon_size, icon_size), t_checked,
-					[&]()
-					{
-						m_Context.SetGizmoType(ImGuizmo::OPERATION::TRANSLATE);
-					});
-
-				/* rotate */
-				ImGui::SameLine();
-				const bool r_checked = m_Context.GetGizmoType() == ImGuizmo::OPERATION::ROTATE;
-				ImGuiExt::DrawCheckedImageButtonUI("Rotate", Icons::GetTexture(Icons::Id::Rotate), ImVec2(icon_size, icon_size), r_checked,
-					[&]()
-					{
-						m_Context.SetGizmoType(ImGuizmo::OPERATION::ROTATE);
-					});
-
-				/* scale */
-				ImGui::SameLine();
-				const bool s_checked = m_Context.GetGizmoType() == ImGuizmo::OPERATION::SCALE;
-				ImGuiExt::DrawCheckedImageButtonUI("Scale", Icons::GetTexture(Icons::Id::Scale), ImVec2(icon_size, icon_size), s_checked,
-					[&]()
-					{
-						m_Context.SetGizmoType(ImGuizmo::OPERATION::SCALE);
-					});
+				m_Context.SetPlayMode(running ? PlayMode::Edit : PlayMode::Runtime);
 			}
-
-			/* 切换执行模式 */
-			{
-				ImGui::SameLine();
-				const PlayMode play_mode = m_Context.GetPlayMode();
-				const Icons::Id play_id = (play_mode == PlayMode::Edit) ? Icons::Id::Play : Icons::Id::Stop;
-				ImGui::SetCursorPosX((panel_width - icon_size) * 0.5f);
-				if (Icons::IconButton(play_id, ImVec2(icon_size, icon_size)))
-				{
-					m_Context.SetPlayMode((play_mode == PlayMode::Edit) ? PlayMode::Runtime : PlayMode::Edit);
-				}
-			}
-
-			/* 配置 */
-			{
-				ImGui::SameLine(panel_width - cursor_offset - 20);
-				START_STYLE_ALPHA(0.5f);
-				if (Icons::IconButton(Icons::Id::Menu, ImVec2(20, 20)))
-					ImGui::OpenPopup("ConfigPopup");
-				END_STYLE_ALPHA;
-			}
-
-			END_TRANSPARENT_BUTTON;
 		}
+		ImGui::EndChild();
 
-		ImGui::End();
-		ImGui::PopStyleVar(2);
+		ImGui::PopStyleVar();
+		ImGui::PopStyleColor();
+
+		/* 与下方工作区之间的分隔线 */
+		const ImVec2 bar_min = ImGui::GetItemRectMin();
+		const ImVec2 bar_max = ImGui::GetItemRectMax();
+		ImGui::GetWindowDrawList()->AddLine(ImVec2(bar_min.x, bar_max.y), ImVec2(bar_max.x, bar_max.y),
+			ImGui::GetColorU32(EditorTheme::Token::Separator), 1.0f);
 	}
 
 	void MainEditorLayer::OnUpdate(float delta_time)
