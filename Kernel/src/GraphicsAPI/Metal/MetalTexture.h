@@ -26,6 +26,9 @@ namespace Helios
         void SetData(void* data, const PixelDesc& pixel_desc, uint32_t level = 0,
             uint32_t offset_x = 0, uint32_t offset_y = 0, uint32_t offset_z = 0) override;
 
+        /* 回读某一 mip / 面（layer）的原始 texel 数据。纹理为私有存储时不可读。 */
+        bool ReadbackPixels(std::vector<uint8_t>& out_data, uint32_t mip_level = 0, uint32_t layer = 0) override;
+
         [[nodiscard]] const std::string& GetPath() const override { return m_Path; }
 
         /* 硬件句柄。注意：受接口返回类型限制会被截断为 32 位，

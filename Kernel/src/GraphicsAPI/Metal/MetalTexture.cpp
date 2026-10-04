@@ -192,6 +192,51 @@ namespace Helios
         }
     }
 
+    bool MetalTexture::ReadbackPixels(std::vector<uint8_t>& out_data, uint32_t mip_level, uint32_t layer)
+    {
+        PROFILE_FUNCTION();
+
+        if (!m_Texture)
+            return false;
+
+        if (mip_level >= m_Texture->mipmapLevelCount())
+        {
+            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: mip level {} out of range ({})",
+                mip_level, m_Texture->mipmapLevelCount());
+            return false;
+        }
+
+        const uint32_t bytes_per_pixel = GetTextureFormatTexelSize(m_TextureDesc.Format);
+        if (bytes_per_pixel == 0)
+        {
+            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: format of '{}' has no fixed texel size", m_DebugName);
+            return false;
+        }
+
+        /* 私有存储的纹理 CPU 不可直接访问，需要先 blit 到可读纹理 */
+        if (m_Texture->storageMode() == MTL::StorageModePrivate)
+        {
+            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: '{}' uses private storage", m_DebugName);
+            return false;
+        }
+
+        const uint32_t level_width = MipDimension(m_TextureDesc.Width, mip_level);
+        const uint32_t level_height = MipDimension(m_TextureDesc.Height, mip_level);
+        const NS::UInteger bytes_per_row = level_width * bytes_per_pixel;
+
+        MTL::Region region;
+        region.origin.x = 0;
+        region.origin.y = 0;
+        region.origin.z = layer;            /* 立方体贴图的面索引 / 数组的切片索引 */
+        region.size.width = level_width;
+        region.size.height = level_height;
+        region.size.depth = 1;
+
+        out_data.resize(static_cast<size_t>(bytes_per_row) * level_height);
+        m_Texture->getBytes(out_data.data(), bytes_per_row, region, mip_level);
+        return true;
+    }
+
     bool MetalTexture::operator==(const DeviceTexture& other) const
     {
         const auto* metal_other = dynamic_cast<const MetalTexture*>(&other);

@@ -424,6 +424,95 @@ namespace Helios
 			return static_cast<const LightComponent*>(component)->m_Light != nullptr;
 		}
 
+		/* 探针的字段表之外的持久化内容：天空盒纹理与烘焙结果缓存路径。
+		 * 对象为空时不写属性，读的时候也接受属性缺失。 */
+		void SaveProbeExtra(tinyxml2::XMLElement* element, const void* component)
+		{
+			const auto& probe = static_cast<const ReflectionProbeComponent*>(component)->m_ReflectionProbe;
+			if (probe == nullptr)
+				return;
+
+			const SharedPtr<DeviceTexture> skybox = probe->GetSkyBoxTexture();
+			if (skybox != nullptr)
+				element->SetAttribute("SkyBoxPath", RELATIVE_PATH(skybox->GetPath()).c_str());
+
+			/* 缓存路径只在有烘焙结果时才落盘：否则场景会指向一份与当前状态不符的缓存 */
+			const std::string& cache_path = probe->GetBakeCachePath();
+			if (probe->IsBaked() && !cache_path.empty())
+				element->SetAttribute("BakeCachePath", cache_path.c_str());
+		}
+
+		void LoadProbeExtra(const tinyxml2::XMLElement* element, void* component)
+		{
+			auto& probe = static_cast<ReflectionProbeComponent*>(component)->m_ReflectionProbe;
+			if (probe == nullptr)
+				return;
+
+			if (const char* path = element->Attribute("SkyBoxPath"); path != nullptr && *path != '\0')
+				probe->SetSkyBoxTexture(DeviceTexture::Create(path));
+
+			/* 命中缓存就直接恢复烘焙结果：加载后无需再烘焙 */
+			if (const char* cache_path = element->Attribute("BakeCachePath"); cache_path != nullptr && *cache_path != '\0')
+			{
+				probe->SetBakeCachePath(cache_path);
+				if (!probe->LoadBakeCache(ABSOLUTE_PATH(cache_path)))
+					CORE_LOG_WARN("ReflectionProbe: bake cache '{}' is unavailable, it will be baked again", cache_path);
+			}
+		}
+
+		/* 天空盒是资源引用，需要选择与悬停预览，故整块自定义绘制；
+		 * 烘焙参数走 schema 字段（见注册处）。 */
+		void DrawProbeBlock(void* raw)
+		{
+			auto& probe = static_cast<ReflectionProbeComponent*>(raw)->m_ReflectionProbe;
+			if (probe == nullptr)
+				return;
+
+			SharedPtr<DeviceTexture> skybox = probe->GetSkyBoxTexture();
+			ImGuiExt::DrawTextureUI("SkyBox", skybox);
+			if (skybox != probe->GetSkyBoxTexture())
+				probe->SetSkyBoxTexture(skybox);
+
+			ImGui::Separator();
+
+			/* 烘焙结果随「保存场景」一并落盘，这里只显示状态。
+			 * 写盘要等 GPU 执行完，因此不是存档当帧就完成。 */
+			using WriteState = ReflectionProbe::BakeCacheWriteState;
+			switch (probe->GetBakeCacheWriteState())
+			{
+			case WriteState::Requested:
+				ImGui::TextUnformatted("Baking...");
+				break;
+			case WriteState::WaitingForGPU:
+				ImGui::TextUnformatted("Saving...");
+				break;
+			default:
+				if (probe->IsBaked())
+				{
+					const std::string& cache_path = probe->GetBakeCachePath();
+					ImGui::Text("Baked: true");
+					ImGui::Text("BakeCache: %s", cache_path.empty() ? "(saved with the scene)" : cache_path.c_str());
+				}
+				else
+				{
+					ImGui::TextUnformatted("Baked: false");
+				}
+
+				if (ImGui::Button("Rebake"))
+					probe->Reset();
+				break;
+			}
+
+			if (probe->HasBakeCacheWriteFailed())
+				ImGui::TextUnformatted("BakeCache: write failed");
+		}
+
+		/* 探针为空时整个组件块不显示 */
+		bool HasProbeObject(const void* component)
+		{
+			return static_cast<const ReflectionProbeComponent*>(component)->m_ReflectionProbe != nullptr;
+		}
+
 		/* 用组件类型生成带访问器与数据快照的注册器 */
 		template <typename T>
 		ComponentRegistrar MakeRegistrar(const char* name)
@@ -446,11 +535,15 @@ namespace Helios
 					if (source == nullptr)
 						return;
 
-					/* 实体上仍有该组件（如移除后重做再撤销）时直接覆盖，否则按默认构造补上 */
 					if (e.HasComponent<T>())
+					{
 						e.GetComponent<T>() = *source;
-					else
-						e.AddComponent<T>() = *source;
+						return;
+					}
+
+					/* 按快照直接构造：组件的 OnAdded 会看到最终数据，
+					 * 需要把自身注册到场景的组件（如反射探针）才不会挂错对象。 */
+					e.AddComponent<T>(*source);
 				});
 			return registrar;
 		}
@@ -545,6 +638,45 @@ namespace Helios
 						{
 							entity.AddComponent<LightComponent>(LightType::Spot);
 						})
+					.Register();
+
+				/* 反射探针：烘焙参数以结构体整体读写，故用配置访问器逐个字段暴露 */
+				MakeRegistrar<ReflectionProbeComponent>("ReflectionProbe")
+					.SaveExtra(&SaveProbeExtra)
+					.LoadExtra(&LoadProbeExtra)
+					.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::IsRealtime, &ReflectionProbe::SetRealtime>(),
+						"Realtime", FieldType::Bool)
+					.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
+							&ReflectionProbe::BakeConfig::EnvSize>(),
+						"EnvSize", FieldType::Int)
+					.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
+							&ReflectionProbe::BakeConfig::IrradianceSize>(),
+						"IrradianceSize", FieldType::Int)
+					.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
+							&ReflectionProbe::BakeConfig::PrefilterSize>(),
+						"PrefilterSize", FieldType::Int)
+					.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
+							&ReflectionProbe::BakeConfig::PrefilterMipLevels>(),
+						"PrefilterMipLevels", FieldType::Int)
+					.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
+							&ReflectionProbe::BakeConfig::BakeSkyBoxOnly>(),
+						"BakeSkyBoxOnly", FieldType::Bool)
+					.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
+							&ReflectionProbe::BakeConfig::BakeDiffuse>(),
+						"BakeDiffuse", FieldType::Bool)
+					.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
+							&ReflectionProbe::BakeConfig::BakeSpecular>(),
+						"BakeSpecular", FieldType::Bool)
+					.CustomDraw(&DrawProbeBlock)
+					.Visible(&HasProbeObject)
 					.Register();
 			}
 		};

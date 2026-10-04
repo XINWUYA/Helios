@@ -90,6 +90,12 @@ namespace Helios
         }
         m_DepthStencilStates.clear();
 
+        if (m_LastSubmittedCommandBuffer)
+        {
+            m_LastSubmittedCommandBuffer->release();
+            m_LastSubmittedCommandBuffer = nullptr;
+        }
+
         if (m_CommandQueue)
         {
             m_CommandQueue->release();
@@ -512,6 +518,14 @@ namespace Helios
         blit->endEncoding();
     }
 
+    void MetalRenderAPI::WaitForGPU()
+    {
+        PROFILE_FUNCTION();
+
+        if (m_LastSubmittedCommandBuffer)
+            m_LastSubmittedCommandBuffer->waitUntilCompleted();
+    }
+
     void MetalRenderAPI::Present()
     {
         PROFILE_FUNCTION();
@@ -530,6 +544,15 @@ namespace Helios
         }
 
         m_CurrentCommandBuffer->commit();
+
+        /* 留一份已提交命令缓冲区的句柄：CPU 回读 GPU 写入的结果前需要等它执行完，
+         * 而 Present 之后 m_CurrentCommandBuffer 会被丢弃、autorelease pool 也会排空，
+         * 因此额外 retain 一份（模型见 MetalQueryNode 的采样回读）。 */
+        if (m_LastSubmittedCommandBuffer)
+            m_LastSubmittedCommandBuffer->release();
+        m_LastSubmittedCommandBuffer = m_CurrentCommandBuffer;
+        m_LastSubmittedCommandBuffer->retain();
+
         m_CurrentCommandBuffer = nullptr;
 
         m_ActivePipelineState = nullptr;

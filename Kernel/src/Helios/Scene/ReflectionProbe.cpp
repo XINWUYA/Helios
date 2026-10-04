@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "ReflectionProbe.h"
+#include "ReflectionProbeBakeCache.h"
 #include "SceneCommon.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include <Helios/Renderer/RenderView.h>
@@ -52,6 +53,220 @@ namespace Helios
     void ReflectionProbe::Reset()
     {
         m_BakeResult = BakeResult{};
+        m_BakeCompleted = false;
+    }
+
+    /* ==================== 烘焙结果缓存 ==================== */
+
+    namespace
+    {
+        /* 烘焙完成后至少等待的帧数：让承载烘焙绘制的命令缓冲区先提交，
+         * 随后 TickBakeCacheWrite 才能在它执行完成后回读。 */
+        constexpr uint8_t kBakeCacheWriteFrameDelay = 1;
+
+        /* 缓存里用到的纹理格式 -> 上传时需要的数据描述 */
+        bool ResolveBakeCachePixelDesc(TextureFormat format, PixelDesc& out_desc)
+        {
+            switch (format)
+            {
+            case TextureFormat::RGBA16F: out_desc = PixelDesc{ PixelFormat::RGBA, PixelType::Half };         return true;
+            case TextureFormat::RGBA32F: out_desc = PixelDesc{ PixelFormat::RGBA, PixelType::Float };        return true;
+            case TextureFormat::RGBA8:   out_desc = PixelDesc{ PixelFormat::RGBA, PixelType::UnsignedByte }; return true;
+            default:                     return false;
+            }
+        }
+    }
+
+    void ReflectionProbe::RequestBakeCacheWrite(const std::string& path)
+    {
+        m_BakeCachePath = path;
+        m_CacheWriteFailed = false;
+
+        if (path.empty())
+        {
+            m_CacheWriteState = BakeCacheWriteState::Idle;
+            return;
+        }
+
+        m_CacheWriteState = BakeCacheWriteState::Requested;
+    }
+
+    std::string ReflectionProbe::MakeDefaultBakeCachePath() const
+    {
+        std::string name = GetDebugName();
+        if (name.empty())
+            name = "ReflectionProbe";
+
+        /* 只把真正非法的字符替换掉；UTF-8 多字节序列原样保留，中文名可用 */
+        for (char& character : name)
+        {
+            const unsigned char code = static_cast<unsigned char>(character);
+            if (code >= 0x80)
+                continue;
+            const bool safe = (code >= 'a' && code <= 'z') || (code >= 'A' && code <= 'Z')
+                || (code >= '0' && code <= '9') || code == '_' || code == '-';
+            if (!safe)
+                character = '_';
+        }
+
+        return "BakedReflectionProbes/" + name + ".probe";
+    }
+
+    void ReflectionProbe::TickBakeCacheWrite()
+    {
+        if (m_CacheWriteState == BakeCacheWriteState::Idle)
+            return;
+
+        if (m_CacheWriteState == BakeCacheWriteState::Requested)
+        {
+            /* 等这一次烘焙真正完成（未烘焙的探针会由 Manager 在本帧或下一帧排入烘焙） */
+            if (!m_BakeCompleted)
+                return;
+
+            m_CacheWriteState = BakeCacheWriteState::WaitingForGPU;
+            m_CacheWriteCountdown = kBakeCacheWriteFrameDelay;
+            return;
+        }
+
+        if (m_CacheWriteCountdown > 0)
+        {
+            --m_CacheWriteCountdown;
+            return;
+        }
+
+        /* 承载烘焙绘制的命令缓冲区此时已提交且 GPU 可能仍在执行，
+         * 直接回读会拿到旧内容，因此先等它执行完。 */
+        if (auto render_api = Renderer::GetRenderAPI())
+            render_api->WaitForGPU();
+
+        m_CacheWriteFailed = !SaveBakeCache(ABSOLUTE_PATH(m_BakeCachePath));
+        m_CacheWriteState = BakeCacheWriteState::Idle;
+    }
+
+    bool ReflectionProbe::SaveBakeCache(const std::string& path)
+    {
+        PROFILE_FUNCTION();
+
+        if (path.empty())
+            return false;
+
+        ReflectionProbeBakeCache::Data data;
+
+        const auto append_image = [&data](ReflectionProbeBakeCache::ImageKind kind, const SharedPtr<DeviceTexture>& texture)
+        {
+            if (texture == nullptr)
+                return true;
+
+            ReflectionProbeBakeCache::Image image;
+            image.Kind = kind;
+            image.Format = texture->GetTextureDesc().Format;
+            image.Size = texture->GetWidth();
+
+            const uint32_t mip_levels = std::max<uint32_t>(1u, texture->GetTextureDesc().MipLevels);
+            for (uint32_t mip = 0; mip < mip_levels; ++mip)
+            {
+                std::vector<std::vector<uint8_t>> faces(ReflectionProbeBakeCache::kFaceCount);
+                for (uint32_t face = 0; face < ReflectionProbeBakeCache::kFaceCount; ++face)
+                {
+                    if (!texture->ReadbackPixels(faces[face], mip, face))
+                        return false;
+                }
+
+                image.Mips.emplace_back(std::move(faces));
+            }
+
+            data.Images.emplace_back(std::move(image));
+            return true;
+        };
+
+        if (!append_image(ReflectionProbeBakeCache::ImageKind::Environment, m_BakeResult.EnvColorCubemap))
+            return false;
+
+        if (m_BakeConfig.BakeDiffuse
+            && !append_image(ReflectionProbeBakeCache::ImageKind::Irradiance, m_BakeResult.IrradianceMap))
+            return false;
+
+        if (m_BakeConfig.BakeSpecular
+            && !append_image(ReflectionProbeBakeCache::ImageKind::Prefilter, m_BakeResult.PrefilterMap))
+            return false;
+
+        if (!data.IsValid())
+        {
+            CORE_LOG_WARN("ReflectionProbe '{}': nothing to cache, bake it first", GetDebugName());
+            return false;
+        }
+
+        const bool succeeded = ReflectionProbeBakeCache::Write(path, data);
+        if (succeeded)
+            CORE_LOG_INFO("ReflectionProbe '{}': bake result cached to '{}'", GetDebugName(), path);
+
+        return succeeded;
+    }
+
+    bool ReflectionProbe::LoadBakeCache(const std::string& path)
+    {
+        PROFILE_FUNCTION();
+
+        ReflectionProbeBakeCache::Data data;
+        if (!ReflectionProbeBakeCache::Read(path, data))
+            return false;
+
+        Reset();
+
+        const auto restore_image = [this](const ReflectionProbeBakeCache::Image& image) -> SharedPtr<DeviceTexture>
+        {
+            PixelDesc pixel_desc;
+            if (!ResolveBakeCachePixelDesc(image.Format, pixel_desc))
+            {
+                CORE_LOG_ERROR("ReflectionProbe '{}': cache format is not uploadable", GetDebugName());
+                return nullptr;
+            }
+
+            TextureDesc desc;
+            desc.SamplerType = SamplerType::SamplerCubeMap;
+            desc.Width = image.Size;
+            desc.Height = image.Size;
+            desc.Format = image.Format;
+            desc.Usage = TextureUsage::ColorAttachment | TextureUsage::Sampleable;
+            desc.MipLevels = static_cast<uint8_t>(image.Mips.size());
+
+            SharedPtr<DeviceTexture> texture = DeviceTexture::Create(GetDebugName() + "_Cached", desc);
+            if (texture == nullptr)
+                return nullptr;
+
+            for (uint32_t mip = 0; mip < image.Mips.size(); ++mip)
+            {
+                for (uint32_t face = 0; face < ReflectionProbeBakeCache::kFaceCount; ++face)
+                {
+                    const auto& face_data = image.Mips[mip][face];
+                    texture->SetData(const_cast<uint8_t*>(face_data.data()), pixel_desc, mip, 0, 0, face);
+                }
+            }
+
+            return texture;
+        };
+
+        for (const ReflectionProbeBakeCache::Image& image : data.Images)
+        {
+            const SharedPtr<DeviceTexture> texture = restore_image(image);
+            if (texture == nullptr)
+            {
+                Reset();
+                return false;
+            }
+
+            switch (image.Kind)
+            {
+            case ReflectionProbeBakeCache::ImageKind::Environment: m_BakeResult.EnvColorCubemap = texture; break;
+            case ReflectionProbeBakeCache::ImageKind::Irradiance:  m_BakeResult.IrradianceMap = texture;   break;
+            case ReflectionProbeBakeCache::ImageKind::Prefilter:   m_BakeResult.PrefilterMap = texture;    break;
+            }
+        }
+
+        /* 结果已就绪，无需再烘焙 */
+        m_BakeCompleted = true;
+        CORE_LOG_INFO("ReflectionProbe '{}': bake result restored from '{}'", GetDebugName(), path);
+        return true;
     }
 
     /* 构造一个带 Color0(立方体贴图) + Depth 的离屏帧缓冲，用于把场景渲染到立方体贴图的某一面。 */
@@ -358,8 +573,28 @@ namespace Helios
         {
             if (!probe || !probe->GetEnable())
                 continue;
+
+            /* 推进「烘焙结果落盘」状态机：等烘焙完成、再等 GPU 执行完，最后回读写出 */
+            probe->TickBakeCacheWrite();
+
             if (probe->IsRealtime() || !probe->IsBaked())
                 m_NeedBakeProbes.push_back(probe);
+        }
+    }
+
+    void ReflectionProbeManager::RequestBakeCacheWrites()
+    {
+        PROFILE_FUNCTION();
+
+        for (const auto& probe : m_RegisteredProbes)
+        {
+            /* 没有烘焙结果就没有需要持久化的内容 */
+            if (!probe || !probe->GetEnable() || !probe->IsBaked())
+                continue;
+
+            /* 已有路径的沿用场景里记录的那个；否则按探针名推导 */
+            const std::string& recorded = probe->GetBakeCachePath();
+            probe->RequestBakeCacheWrite(recorded.empty() ? probe->MakeDefaultBakeCachePath() : recorded);
         }
     }
 

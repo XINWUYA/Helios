@@ -1,4 +1,6 @@
 ﻿#pragma once
+#include <cstdint>
+#include <vector>
 #include <Helios/Renderer/RenderCommon.h>
 
 namespace Helios
@@ -71,6 +73,14 @@ namespace Helios
 		/* 填充数据 */
 		virtual void SetData(void* data, const PixelDesc& pixel_desc, uint32_t level = 0,
 			uint32_t offset_x = 0, uint32_t offset_y = 0, uint32_t offset_z = 0) = 0;
+
+		/* 把指定 mip / 层的像素读回 CPU（层对立方图来说就是面索引）。数据是纹理自身格式的原始
+		 * texel 字节。只保证"拷出此刻内容"：绘制还没执行完就读到旧数据，得先 WaitForGPU()。
+		 * 后端不支持或纹理私有存储时返回 false。 */
+		virtual bool ReadbackPixels(std::vector<uint8_t>& /*out_data*/, uint32_t /*mip_level*/ = 0, uint32_t /*layer*/ = 0)
+		{
+			return false;
+		}
 
 		/* 获取名称 */
 		[[nodiscard]] const std::string& GetDebugName() const { return m_DebugName; }

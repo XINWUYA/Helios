@@ -33,6 +33,9 @@ namespace Helios
         /* 在当前帧的命令缓冲区上插入 blit 编码器生成 mipmap（见 RenderAPI 的说明） */
         void GenerateMipmap(const SharedPtr<DeviceTexture>& texture) override;
 
+        /* 等待最近提交的命令缓冲区执行完成（见 RenderAPI 的说明） */
+        void WaitForGPU() override;
+
         /* 呈现当前帧 */
         void Present();
 
@@ -110,6 +113,10 @@ namespace Helios
         MTL::RenderPassDescriptor* m_ActiveRenderPassDescriptor{ nullptr };
 
         MTL::CommandBuffer* m_CurrentCommandBuffer{ nullptr };
+        /* 最近一次提交的命令缓冲区（额外 retain 一份）。
+         * getBytes 之类的 CPU 回读需要等它执行完，而 Present 提交后就丢掉了
+         * m_CurrentCommandBuffer，故单独留一个句柄。 */
+        MTL::CommandBuffer* m_LastSubmittedCommandBuffer{ nullptr };
         MTL::RenderCommandEncoder* m_CurrentRenderEncoder{ nullptr };
         CA::MetalDrawable* m_CurrentDrawable{ nullptr };
 

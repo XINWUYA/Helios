@@ -51,12 +51,44 @@ namespace Helios
         /* Probe已经烘焙 */
         bool IsBaked() const { return m_BakeCompleted; }
 
+        /* ---- 烘焙结果的磁盘缓存 ----
+         * 一组 HDR 立方体贴图可以落盘复用（加载场景直接恢复、跳过烘焙）。写入时机 = 保存场景
+         * （Scene::Serializer 登记请求）；编辑过程中的高频中间状态不持久化。 */
+
+        /* 缓存写入的状态机：等待烘焙完成 -> 等待 GPU 执行完 -> 回读落盘 */
+        enum class BakeCacheWriteState : uint8_t
+        {
+            Idle = 0,
+            Requested,
+            WaitingForGPU,
+        };
+
+        /* 缓存文件路径（相对资源根）；为空表示不持久化 */
+        void SetBakeCachePath(const std::string& path) { m_BakeCachePath = path; }
+        [[nodiscard]] const std::string& GetBakeCachePath() const { return m_BakeCachePath; }
+
+        /* 请求把当前烘焙结果写入 path（相对资源根，同时记为持久化路径）。
+         * 由 Scene::Serializer 在保存场景时登记，实际写盘由 TickBakeCacheWrite 推进。 */
+        void RequestBakeCacheWrite(const std::string& path);
+
+        /* 默认缓存位置：BakedReflectionProbes/<探针名>.probe（相对资源根） */
+        [[nodiscard]] std::string MakeDefaultBakeCachePath() const;
+
+        /* 每帧推进写入状态机（由 ReflectionProbeManager 驱动）。
+         * 落盘必须等 GPU 执行完承载烘焙绘制的命令缓冲区，否则 Shared 存储模式下读到的是旧内容。 */
+        void TickBakeCacheWrite();
+
+        /* 立即写出 / 读入缓存（路径为绝对路径）；写入要求 GPU 已完成本次烘焙的绘制 */
+        bool SaveBakeCache(const std::string& path);
+        bool LoadBakeCache(const std::string& path);
+
+        [[nodiscard]] BakeCacheWriteState GetBakeCacheWriteState() const { return m_CacheWriteState; }
+        [[nodiscard]] bool HasBakeCacheWriteFailed() const { return m_CacheWriteFailed; }
+
     private:
         SharedPtr<DeviceFrameBuffer> MakeSceneCaptureFrameBuffer(const SharedPtr<DeviceTexture>& color_target, const SharedPtr<DeviceTexture>& depth_target, uint32_t size);
-        /* 生成环境立方体贴图：
-         * 当BakeSkyBoxOnly时由EquirectToCube生成；
-         * 否则在探针位置用6个朝向相机实时捕获场景几何生成。
-         * 返回的环境立方体贴图供后续烘焙IrradianceMap和PrefilterMap */
+        /* 生成环境立方体贴图：BakeSkyBoxOnly 时用 EquirectToCube 生成；否则在探针位置用 6 个朝向的
+         * 相机实时捕获场景几何。返回的立方图供后续烘焙 IrradianceMap 和 PrefilterMap。 */
         void BakeEnvCubemap(RenderView* render_view);
         /* 烘焙IrradianceMap */
         void BakeIrradianceMap();
@@ -77,6 +109,13 @@ namespace Helios
         BakeResult m_BakeResult{};
         bool m_IsRealtime{ false };
         bool m_BakeCompleted{ false };
+
+        /* 烘焙结果缓存 */
+        std::string m_BakeCachePath{};
+        BakeCacheWriteState m_CacheWriteState{ BakeCacheWriteState::Idle };
+        /* 烘焙完成后还需等待的帧数，让承载烘焙绘制的命令缓冲区先提交 */
+        uint8_t m_CacheWriteCountdown{ 0 };
+        bool m_CacheWriteFailed{ false };
 
         friend class ReflectionProbeManager;
     };
@@ -106,6 +145,10 @@ namespace Helios
 
         /* 从已注册的反射探针中，筛选当前帧需要烘焙（realtime 或 dirty）的探针。 */
         void Prepare();
+
+        /* 为所有已烘焙的探针登记缓存写入请求（由 Scene::Serializer 在保存场景时调用）。
+         * 没有烘焙结果的探针会被跳过：此时没有需要持久化的内容。 */
+        void RequestBakeCacheWrites();
 
         /* 将 BRDFLut 烘焙 Pass 与所有需要烘焙的 ReflectionProbe 的 Bake Pass 注入到当前 RenderView 的 FrameGraph 中。
          * BRDFLut 纹理句柄会被写入 FrameGraph 的 Blackboard（"ReflectionProbeBRDFLutHandle"），供后续 Pass 使用。 */

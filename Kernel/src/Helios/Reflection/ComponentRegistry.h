@@ -136,6 +136,10 @@ namespace Helios
 		template <typename F> struct GetterReturn;
 		template <typename O, typename R> struct GetterReturn<R (O::*)() const>
 		{ using Type = R; };
+
+		/* 成员指针的值类型 */
+		template <typename M> struct MemberValue;
+		template <typename C, typename M> struct MemberValue<M C::*> { using Type = M; };
 	}
 
 	/* 由「组件成员（指向嵌套对象）+ 该对象的 getter / setter」生成读写回调。
@@ -186,6 +190,41 @@ namespace Helios
 			Object* object = (static_cast<Component*>(component)->*Member).get();
 			if (object != nullptr)
 				(object->*Setter)(static_cast<Value>(*static_cast<const int*>(in_value)));
+		};
+		return accessor;
+	}
+
+	/* 配置结构体字段的访问器：适用于嵌套对象把一组参数以结构体整体读写的情形
+	 * （如 ReflectionProbe::GetBakeConfig / SetBakeConfig）。
+	 * 读：取出配置副本后读其中的成员；写：取出副本、改成员、整体写回。 */
+	template <auto Member, auto Getter, auto Setter, auto ConfigMember>
+	FieldAccessor MakeConfigAccessor()
+	{
+		using Component = typename Detail::MemberOwner<decltype(Member)>::Type;
+		using Object    = typename Detail::MemberSharedElement<decltype(Member)>::Type;
+		using Config    = std::decay_t<typename Detail::GetterReturn<decltype(Getter)>::Type>;
+		using Value     = typename Detail::MemberValue<decltype(ConfigMember)>::Type;
+
+		FieldAccessor accessor;
+		accessor.ValueSize = sizeof(Value);
+		accessor.Get = [](const void* component, void* out_value)
+		{
+			const Object* object = (static_cast<const Component*>(component)->*Member).get();
+			if (object == nullptr)
+				return;
+
+			const Config config = (object->*Getter)();
+			*static_cast<Value*>(out_value) = config.*ConfigMember;
+		};
+		accessor.Set = [](void* component, const void* in_value)
+		{
+			Object* object = (static_cast<Component*>(component)->*Member).get();
+			if (object == nullptr)
+				return;
+
+			Config config = (object->*Getter)();
+			config.*ConfigMember = *static_cast<const Value*>(in_value);
+			(object->*Setter)(config);
 		};
 		return accessor;
 	}

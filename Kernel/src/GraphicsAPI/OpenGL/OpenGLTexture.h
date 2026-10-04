@@ -24,6 +24,9 @@ namespace Helios
 		/* 设置纹理数据 */
 		void SetData(void* data, const PixelDesc& pixel_desc, uint32_t level = 0,
 			uint32_t offset_x = 0, uint32_t offset_y = 0, uint32_t offset_z = 0) override;
+
+		/* 回读某一 mip / 面（layer）的原始 texel 数据 */
+		bool ReadbackPixels(std::vector<uint8_t>& out_data, uint32_t mip_level = 0, uint32_t layer = 0) override;
 		
 		/* 获取纹理路径 */
 		const std::string& GetPath() const override { return m_Path; }

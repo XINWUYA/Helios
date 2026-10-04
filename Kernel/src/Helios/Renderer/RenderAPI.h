@@ -44,6 +44,10 @@ namespace Helios
 		 * DeviceTexture::GenerateMipmap 会独立提交命令缓冲区，先于还没提交的烘焙绘制执行、读到空纹理。 */
 		virtual void GenerateMipmap(const SharedPtr<DeviceTexture>& /*texture*/) {}
 
+		/* 等最近提交的 GPU 工作完成（阻塞）。用在必须拿到 GPU 写入结果的操作上（比如烘焙回读落盘）：
+		 * 命令提交后 GPU 是异步执行的。回读本身就同步的后端不用实现。 */
+		virtual void WaitForGPU() {}
+
 		/* GroupMarker */
 		virtual void PushDebugGroup(const char* name) = 0;
 		virtual void PopDebugGroup() = 0;

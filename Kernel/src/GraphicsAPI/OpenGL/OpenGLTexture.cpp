@@ -287,14 +287,17 @@ namespace Helios
 				TranslateToOpenGLPixelFormat(pixel_desc.Format), TranslateToOpenGLPixelType(pixel_desc.Type), data);
 			break;
 		case GL_TEXTURE_CUBE_MAP:
-			ASSERT(false, "Not implemented!")
-			// todo
-			//const auto face_data_size = m_TextureDesc.Width * m_TextureDesc.Height * sizeof(float) * 4/*ChannelNum*/;
-			//for (auto i = 0; i < 6; ++i)
-			//{
-			//	glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, (GLint)level, 0, 0, (GLsizei)m_TextureDesc.Width, (GLsizei)m_TextureDesc.Height,
-			//		TranslateToOpenGLPixelFormat(pixel_desc.Format), TranslateToOpenGLPixelType(pixel_desc.Type), static_cast<uint8_t const*>(data) + face_data_size * i);
-			//}
+			/* 一次上传一个面：offset_z 即面索引（与 Metal 后端一致）。
+			 * glTexSubImage2D 的 target 必须是具体面，不能直接用 GL_TEXTURE_CUBE_MAP。 */
+			if (offset_z >= 6)
+			{
+				CORE_LOG_ERROR("OpenGLTexture::SetData: cube map face {} out of range", offset_z);
+				break;
+			}
+
+			glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + offset_z, (GLint)level, (GLint)offset_x, (GLint)offset_y,
+				(GLsizei)m_TextureDesc.Width, (GLsizei)m_TextureDesc.Height,
+				TranslateToOpenGLPixelFormat(pixel_desc.Format), TranslateToOpenGLPixelType(pixel_desc.Type), data);
 			break;
 		case GL_TEXTURE_3D:
 		case GL_TEXTURE_2D_ARRAY:
@@ -306,4 +309,58 @@ namespace Helios
 		}
 
 		CHECK_GL_ERROR;
-	}}
+	}
+
+	/* 内部格式 -> glGetTexImage 需要的 (外部格式, 像素类型)。
+	 * 只覆盖可整体回读的常规格式；块压缩格式需要按块解压，不走这里。 */
+	static bool ResolveReadbackPixelLayout(GLenum internal_format, GLenum& out_format, GLenum& out_type)
+	{
+		switch (internal_format)
+		{
+		case GL_RGBA16F: out_format = GL_RGBA; out_type = GL_HALF_FLOAT;    return true;
+		case GL_RGBA32F: out_format = GL_RGBA; out_type = GL_FLOAT;         return true;
+		case GL_RGBA8:   out_format = GL_RGBA; out_type = GL_UNSIGNED_BYTE; return true;
+		case GL_RGBA8_SNORM:
+		case GL_RGBA8I:  out_format = GL_RGBA; out_type = GL_BYTE;          return true;
+		case GL_RGBA8UI: out_format = GL_RGBA; out_type = GL_UNSIGNED_BYTE; return true;
+		case GL_R32F:    out_format = GL_RED;  out_type = GL_FLOAT;         return true;
+		default:         return false;
+		}
+	}
+
+	bool OpenGLTexture::ReadbackPixels(std::vector<uint8_t>& out_data, uint32_t mip_level, uint32_t layer)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_TextureId == 0 || mip_level >= m_TextureDesc.MipLevels)
+			return false;
+
+		GLenum read_format = 0;
+		GLenum read_type = 0;
+		if (!ResolveReadbackPixelLayout(m_InternalFormat, read_format, read_type))
+		{
+			CORE_LOG_ERROR("OpenGLTexture::ReadbackPixels: format of '{}' is not readable", m_DebugName);
+			return false;
+		}
+
+		const uint32_t texel_size = GetTextureFormatTexelSize(m_TextureDesc.Format);
+		if (texel_size == 0)
+			return false;
+
+		const uint32_t level_width = std::max(1u, m_TextureDesc.Width >> mip_level);
+		const uint32_t level_height = std::max(1u, m_TextureDesc.Height >> mip_level);
+
+		/* 立方体贴图的面必须作为独立 target 读取，GL_TEXTURE_CUBE_MAP 本身不可回读 */
+		const GLenum read_target = (m_TextureTarget == GL_TEXTURE_CUBE_MAP)
+			? (GL_TEXTURE_CUBE_MAP_POSITIVE_X + layer)
+			: m_TextureTarget;
+
+		out_data.resize(static_cast<size_t>(level_width) * level_height * texel_size);
+
+		glBindTexture(m_TextureTarget, m_TextureId);
+		glGetTexImage(read_target, static_cast<GLint>(mip_level), read_format, read_type, out_data.data());
+
+		CHECK_GL_ERROR;
+		return true;
+	}
+}

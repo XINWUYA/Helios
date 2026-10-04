@@ -194,38 +194,6 @@ namespace Helios
         }
     }
 
-    /* 纹理格式每像素字节数（压缩格式返回 0，请使用块尺寸计算） */
-    [[nodiscard]] inline uint32_t GetTextureFormatBytesPerPixel(TextureFormat format)
-    {
-        if (IsCompressedFormat(format))
-            return 0;
-
-        switch (NormalizeTextureFormat(format))
-        {
-        case TextureFormat::R8: case TextureFormat::R8I: case TextureFormat::R8UI:
-        case TextureFormat::R8_SNorm: case TextureFormat::Stencil8:
-            return 1;
-        case TextureFormat::R16I: case TextureFormat::R16UI: case TextureFormat::R16F:
-        case TextureFormat::RG8: case TextureFormat::RG8I: case TextureFormat::RG8UI:
-        case TextureFormat::RG8_SNorm: case TextureFormat::Depth16:
-            return 2;
-        case TextureFormat::R32I: case TextureFormat::R32UI: case TextureFormat::R32F:
-        case TextureFormat::RG16I: case TextureFormat::RG16UI: case TextureFormat::RG16F:
-        case TextureFormat::R11G11B10F: case TextureFormat::RGBA8:
-        case TextureFormat::s_RGBA8: case TextureFormat::RGBA8_SNorm:
-        case TextureFormat::R10G10B10A2: case TextureFormat::RGB9_E5:
-        case TextureFormat::Depth32: case TextureFormat::Depth32F:
-        case TextureFormat::Depth24Stencil8:
-            return 4;
-        case TextureFormat::RGBA16F:
-            return 8;
-        case TextureFormat::RGBA32F:
-            return 16;
-        default:
-            return 4;
-        }
-    }
-
     /* ============================ 采样器 ============================ */
 
     [[nodiscard]] inline MTL::TextureType ToMetalSamplerType(SamplerType type)

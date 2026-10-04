@@ -53,6 +53,10 @@ namespace Helios
 					.Component([](Entity& entity) { entity.AddComponent<ModelComponent>(); })
 					.Register();
 
+				EntityTemplateRegistrar("Reflection Probe")
+					.Component([](Entity& entity) { entity.AddComponent<ReflectionProbeComponent>(); })
+					.Register();
+
 				EntityTemplateRegistrar("Directional Light")
 					.Component([](Entity& entity) { entity.AddComponent<LightComponent>(LightType::Directional); })
 					.Register();
