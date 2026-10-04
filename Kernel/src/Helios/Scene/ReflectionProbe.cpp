@@ -35,6 +35,11 @@ namespace Helios
         if (!m_BakeResult.EnvColorCubemap)
             return;
 
+        /* 立方图只渲染了 mip0：卷积需要采样更模糊的层级来近似"按立体角积分"，否则太阳这类极亮的
+         * 小特征会被点采样成孤立超亮 texel。要用 RenderAPI 的版本（记录进当前帧命令流）——
+         * GenerateMipmap 独立提交命令缓冲区会先执行、mip 全是 0。 */
+        Renderer::GetRenderAPI()->GenerateMipmap(m_BakeResult.EnvColorCubemap);
+
         if (m_BakeConfig.BakeDiffuse)
             BakeIrradianceMap();
 
@@ -108,7 +113,9 @@ namespace Helios
             env_desc.Height = size;
             env_desc.Format = TextureFormat::RGBA16F;
             env_desc.Usage = TextureUsage::ColorAttachment | TextureUsage::Sampleable;
-            env_desc.MipLevels = 1;
+            /* 完整 mip 链：预滤波按采样立体角选 LOD 时需要更模糊的源层级，
+             * 只渲染 mip0 会让极亮小特征（太阳）走样成孤立白斑 */
+            env_desc.MipLevels = static_cast<uint8_t>(std::floor(std::log2(static_cast<float>(size)))) + 1;
             m_BakeResult.EnvColorCubemap = DeviceTexture::Create(GetDebugName() + "_EnvColorCubemap", env_desc);
         }
 
@@ -175,6 +182,18 @@ namespace Helios
         }
         capture_fb->Unbind();
 
+        /* 捕获过程中改写了全局共享的 View 常量（上面每面都调用 SetViewUniforms 换成
+         * 捕获相机）。ViewUniformBuffer 是全局唯一的，若不恢复，本 Pass 之后的
+         * ScenePass 会继续用最后一个捕获面的视角（探针位置、90° FOV）绘制主视图。 */
+        if (render_view)
+        {
+            if (const Camera* culling_camera = render_view->GetCullingCamera())
+            {
+                Renderer::SetViewUniforms(culling_camera->GetViewMatrix(),
+                    culling_camera->GetProjectionMatrix(), culling_camera->GetPosition());
+            }
+        }
+
         Renderer::GetRenderAPI()->PopDebugGroup();
         RenderQueryProfiler::Instance().EndGPUScope();
     }
@@ -203,6 +222,14 @@ namespace Helios
         auto shader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ReflectionProbe/Irradiance.glsl"));
         auto material = Material::Create(shader);
         material->SetTexture("u_EnvironmentMap", m_BakeResult.EnvColorCubemap);
+
+        /* 源环境立方图的最大 mip（= log2(size)）：卷积据此换算出源分辨率，
+         * 再按每次采样的立体角选源 mip，避免点采样命中太阳这类极亮 texel。 */
+        const uint32_t env_mip_levels = m_BakeResult.EnvColorCubemap
+            ? m_BakeResult.EnvColorCubemap->GetTextureDesc().MipLevels
+            : 1u;
+        material->SetParameters(ParamType::Float, "u_EnvironmentMapMaxMip",
+            static_cast<float>(env_mip_levels > 0 ? env_mip_levels - 1u : 0u));
 
         auto fb = MakeSceneCaptureFrameBuffer(m_BakeResult.IrradianceMap, nullptr, size);
         for (int face = 0; face < 6; ++face)
@@ -247,6 +274,13 @@ namespace Helios
         auto shader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ReflectionProbe/Prefilter.glsl"));
         auto material = Material::Create(shader);
         material->SetTexture("u_EnvironmentMap", m_BakeResult.EnvColorCubemap);
+
+        /* 源环境立方图的最大 mip：预滤波按 u_Roughness * MaxMip 选取采样层级。 */
+        const uint32_t env_mip_levels = m_BakeResult.EnvColorCubemap
+            ? m_BakeResult.EnvColorCubemap->GetTextureDesc().MipLevels
+            : 1u;
+        material->SetParameters(ParamType::Float, "u_EnvironmentMapMaxMip",
+            static_cast<float>(env_mip_levels > 0 ? env_mip_levels - 1u : 0u));
 
         auto fb = MakeSceneCaptureFrameBuffer(m_BakeResult.PrefilterMap, nullptr, size);
         for (uint32_t mip = 0; mip < mip_levels; ++mip)
@@ -400,5 +434,6 @@ namespace Helios
             Renderer::Submit(material, MeshPrimitive(Renderer::GetFullScreenVertexArray()));
         }
         fb->Unbind();
+
     }
 }

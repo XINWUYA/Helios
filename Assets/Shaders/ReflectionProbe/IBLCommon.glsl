@@ -1,7 +1,8 @@
 #ifndef IBLCOMMON_GLSL
 #define IBLCOMMON_GLSL
 
-/* 根据faceId计算对应采样方向 */
+/* 根据 faceId 和面内坐标 uv(∈[-1,1]) 算采样方向。映射必须跟 GPU 立方体贴图的固定采样约定
+ * 逐面一致（跟 ReflectionProbe::GetCaptureViewMatrix 的六个捕获相机朝向对应）。 */
 vec3 GetCubeFaceDirection(int faceId, vec2 uv)
 {
 	vec3 dir = vec3(0.0f);
@@ -12,7 +13,7 @@ vec3 GetCubeFaceDirection(int faceId, vec2 uv)
 	case 2: dir = vec3( uv.x,  1.0f,  uv.y); break; // +Y
 	case 3: dir = vec3( uv.x, -1.0f, -uv.y); break; // -Y
 	case 4: dir = vec3( uv.x, -uv.y,  1.0f); break; // +Z
-	case 5: dir = vec3( uv.x, -uv.y, -1.0f); break; // -Z
+	case 5: dir = vec3(-uv.x, -uv.y, -1.0f); break; // -Z
 	default: break;
 	}
 	return normalize(dir);

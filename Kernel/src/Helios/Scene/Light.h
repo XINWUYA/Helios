@@ -18,6 +18,9 @@ namespace Helios
 	{
 		uint32_t Size{ 1024 };
 		uint8_t CascadeCnt{ 1 };
+		/* 各级联正交视锥的"最小半边长"下限（世界单位）。只做大、不缩小按几何体 tight-fit 出来的真实
+		 * 范围，不会把投射物挤出阴影图；填 0 = 完全 tight-fit。注意：它不是最大范围 / 钳制值 ——
+		 * 把大范围钳到 radius 会让物体投到 [-1,1] 外、写不进阴影图。 */
 		glm::vec4 CascadeRadius{ 0.0f };
 		float ConstantBias{ 0.01f };
 		float NormalBias{ 1.0f };

@@ -78,7 +78,12 @@ namespace Helios
 			vertex_array->AddVertexBuffer(vertex_buffer);
 		}
 
-		model->AddMeshSegment(CreateSharedPtr<MeshSegment>("BuiltinCube", vertex_array, material));
+		/* 内建模型的顶点范围是固定的（±0.5 的立方体），显式写入局部 AABB。
+		 * 阴影视锥拟合、视锥体剔除等逻辑都依赖 MeshSegment 的 AABB，
+		 * 缺省值 (0,0,0) 是退化包围盒，会让这些逻辑把物体当成一个点。 */
+		auto mesh_segment = CreateSharedPtr<MeshSegment>("BuiltinCube", vertex_array, material);
+		mesh_segment->SetAABB(glm::vec3(-0.5f), glm::vec3(0.5f));
+		model->AddMeshSegment(mesh_segment);
 		return model;
 	}
 
@@ -174,7 +179,10 @@ namespace Helios
 			}
 		}
 
-		model->AddMeshSegment(MeshSegment::Create("BuiltinSphere", { vertex_array, PrimitiveType::Triangle_Strip }, material));
+		/* 内建球为半径 1 的单位球（球心在局部原点） */
+		auto mesh_segment = MeshSegment::Create("BuiltinSphere", { vertex_array, PrimitiveType::Triangle_Strip }, material);
+		mesh_segment->SetAABB(glm::vec3(-1.0f), glm::vec3(1.0f));
+		model->AddMeshSegment(mesh_segment);
 		return model;
 	}
 
@@ -212,7 +220,10 @@ namespace Helios
 			vertex_array->AddVertexBuffer(vertex_buffer);
 		}
 
-		model->AddMeshSegment(CreateSharedPtr<MeshSegment>("BuiltinPlane", vertex_array, material));
+		/* 内建平面位于局部空间的 XZ 平面，范围 ±0.5（零厚度） */
+		auto mesh_segment = CreateSharedPtr<MeshSegment>("BuiltinPlane", vertex_array, material);
+		mesh_segment->SetAABB(glm::vec3(-0.5f, 0.0f, -0.5f), glm::vec3(0.5f, 0.0f, 0.5f));
+		model->AddMeshSegment(mesh_segment);
 		return model;
 	}
 

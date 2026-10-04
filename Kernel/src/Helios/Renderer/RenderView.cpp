@@ -91,10 +91,10 @@ namespace Helios
 
 		UpdateFrameGraph();
 
-		/* 每帧依据当前方向光方向与相机，重算级联阴影的视图投影矩阵与分割距离，
-		 * 使方向光旋转 / 相机移动能实时反映到阴影投影（矩阵计算收口于 ShadowMapManager）。 */
+		/* 每帧重算级联阴影的视图投影矩阵与分割距离，使方向光旋转 / 相机移动实时反映到阴影投影
+		 * （矩阵计算收口于 ShadowMapManager）。传入可见网格：光源视锥拟合需纳入投射物包围盒。 */
 		if (m_IsHasShadowCast)
-			m_pShadowMapManager->UpdateCascadeMatrices(GetCullingCamera());
+			m_pShadowMapManager->UpdateCascadeMatrices(GetCullingCamera(), &m_VisibleMeshObjects);
 
 		m_pFrameGraph->Execute();
 	}

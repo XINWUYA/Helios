@@ -85,7 +85,9 @@ void SampleCSM::OnAttached()
 		auto shadow_map_info = CreateSharedPtr<ShadowMapInfo>();
 		shadow_map_info->Size = 2048;
 		shadow_map_info->CascadeCnt = 4;
-		shadow_map_info->CascadeRadius = glm::vec4(10.0f, 30.0f, 80.0f, 200.0f);
+		/* CascadeRadius 是各级联"最小半边长"下限，用于稳住近处级联的分辨率；
+		 * 填 0 表示完全按几何体 tight-fit。 */
+		shadow_map_info->CascadeRadius = glm::vec4(0.0f);
 		shadow_map_info->ConstantBias = 0.01f;
 		shadow_map_info->NormalBias = 1.0f;
 		shadow_map_info->ShadowFar = 200.0f;

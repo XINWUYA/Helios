@@ -89,7 +89,8 @@ void SampleIBLLayer::OnAttached()
 		auto shadow_map_info = CreateSharedPtr<ShadowMapInfo>();
 		shadow_map_info->Size = 2048;
 		shadow_map_info->CascadeCnt = 1;
-		shadow_map_info->CascadeRadius = glm::vec4(10.0f, 30.0f, 80.0f, 200.0f);
+		/* 见 Sample_CSM：CascadeRadius 只是"最小半边长"下限，0 表示完全 tight-fit */
+		shadow_map_info->CascadeRadius = glm::vec4(0.0f);
 		shadow_map_info->ConstantBias = 0.01f;
 		shadow_map_info->NormalBias = 1.0f;
 		shadow_map_info->ShadowFar = 200.0f;

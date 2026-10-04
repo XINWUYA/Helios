@@ -22,6 +22,8 @@ layout(location = 0) out vec4 OutColor;
 
 layout(binding = 0) uniform samplerCube u_EnvironmentMap;
 layout(location = 0) uniform int u_FaceId;
+/* 源环境立方图的最大 mip 层级（= log2(面尺寸)），用于换算源 texel 的立体角 */
+layout(location = 1) uniform float u_EnvironmentMapMaxMip;
 
 void main()
 {
@@ -34,6 +36,10 @@ void main()
 
 	vec3 irradiance = vec3(0.0f);
 
+	/* 源立方图单个 texel 的立体角（6 个面共 6*size^2 个 texel） */
+	float env_size = exp2(u_EnvironmentMapMaxMip);
+	float sa_texel = 4.0f * PI / (6.0f * env_size * env_size);
+
 	const float k_SampleDelta = 0.025f;
 	float sample_count = 0.0f;
 	for (float phi = 0.0f; phi < 2.0f * PI; phi += k_SampleDelta)
@@ -45,7 +51,12 @@ void main()
 			// 切空间 -> 世界空间
 			vec3 sample_vec = tangent_sample.x * tangent + tangent_sample.y * bitangent + tangent_sample.z * normal;
 
-			irradiance += texture(u_EnvironmentMap, sample_vec).rgb * cos(theta) * sin(theta);
+			/* 按本次采样覆盖的立体角（≈Δθ·Δφ·sinθ）选择源 mip：采样立体角远大于
+			 * texel 时读模糊层级，避免太阳这类极亮 texel 被点采样整颗命中留下白斑。 */
+			float sa_sample = k_SampleDelta * k_SampleDelta * sin(theta);
+			float source_mip = 0.5f * log2(max(sa_sample / sa_texel, 1.0f));
+
+			irradiance += textureLod(u_EnvironmentMap, sample_vec, source_mip).rgb * cos(theta) * sin(theta);
 			++sample_count;
 		}
 	}

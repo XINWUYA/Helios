@@ -1,6 +1,8 @@
 ﻿#pragma once
 #include "Light.h"
 #include "Helios/Renderer/RenderCommon.h"
+/* VisibleMeshObject：光源视锥拟合需要场景投射物（caster）的世界包围盒 */
+#include "Helios/Renderer/RenderView.h"
 
 namespace Helios
 {
@@ -58,18 +60,16 @@ namespace Helios
 		void RegisterShadowLight(const SharedPtr<Light>& light);
 		void PrepareForShadowMaps(const SharedPtr<Scene>& scene, const Camera* camera);
 
-		/* 依据当前方向光方向与相机，重算各级联的视图投影矩阵与分割距离。
-		 * 与 PrepareForShadowMaps 中的矩阵计算逻辑一致，但作为独立接口暴露，
-		 * 供每帧执行前调用，使方向光旋转 / 相机移动能实时反映到阴影投影矩阵。 */
-		void UpdateCascadeMatrices(const Camera* camera);
+		/* 依据当前的方向光方向、相机和场景投射物，重算各级联的视图投影矩阵和分割距离（每帧执行前
+		 * 调用，让方向光旋转 / 相机移动实时反映）。mesh_objects = 当前可见网格，把投射物包围盒也
+		 * 纳入光源视锥拟合，防落 near/far 板外被裁；传 nullptr 就退化成只按相机子视锥拟合。 */
+		void UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects);
 
 		/* 清空已收集的阴影贴图与纹理，保留Manager对象本身 */
 		void Reset();
 
-		/* 将ShadowPass注入到指定的FrameGraph中
-		 * 阴影纹理句柄会被写入FrameGraph的Blackboard（"ShadowMapHandle"），供后续Pass使用
-		 * render_view 用于执行阶段获取当前可见的网格对象（RenderView为UniquePtr，故使用原始指针）
-		 */
+		/* 把 ShadowPass 注入指定的 FrameGraph：阴影纹理句柄会写进 Blackboard（"ShadowMapHandle"）供
+		 * 后续 Pass 使用；render_view 用于执行阶段取当前可见网格（RenderView 是 UniquePtr，所以传原始指针）。 */
 		void AddShadowPass(FrameGraph& frame_graph, const SharedPtr<Scene>& scene, RenderView* render_view);
 
 		/* 获取阴影纹理 */
@@ -112,5 +112,9 @@ namespace Helios
 		glm::vec3 m_LastLightDir{ 0.0f };
 		glm::mat4 m_LastViewMat{ 1.0f };
 		glm::mat4 m_LastProjMat{ 1.0f };
+		/* 上次拟合时是否拿到了投射物包围盒：PrepareForShadowMaps（无几何数据）
+		 * 会先用纯子视锥拟合一次，随后 RenderView 带几何再拟合，
+		 * 若不比较该状态，第二次拟合会被脏检测误判为"无变化"而跳过。 */
+		bool m_LastFitHadCasters{ false };
 	};
 }

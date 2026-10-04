@@ -3,6 +3,7 @@
 #include "Scene.h"
 #include <cmath>
 #include <glm/gtc/type_ptr.hpp>
+#include <Helios/Common/Math.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/RenderView.h>
@@ -99,14 +100,16 @@ namespace Helios
 
 		PrepareRequiredTexture();
 
-		/* 准备方向光的ShadowMap：计算级联 VP 矩阵与分割距离（逻辑收口于 UpdateCascadeMatrices） */
-		UpdateCascadeMatrices(camera);
+		/* 准备方向光 ShadowMap：算级联 VP 矩阵和分割距离。这里拿不到可见网格列表，先按相机
+		 * 子视锥拟合一次；RenderView::Execute 随后会带着投射物重新拟合（脏检测把投射物输入
+		 * 也算上），保证投射物不被 near / far 板裁掉。 */
+		UpdateCascadeMatrices(camera, nullptr);
 	}
 
-	/* 依据当前方向光方向与相机，重算各级联的视图投影矩阵与分割距离。
+	/* 依据当前方向光方向、相机与场景投射物，重算各级联的视图投影矩阵与分割距离。
 	 * 供 PrepareForShadowMaps（首次准备）与每帧执行前（方向光旋转 / 相机移动）共用。
-	 * 通过对比缓存（方向光方向 + 相机视图/投影矩阵）跳过无变化的重算。 */
-	void ShadowMapManager::UpdateCascadeMatrices(const Camera* camera)
+	 * 通过对比缓存（方向光方向 + 相机视图/投影矩阵 + 是否拿到投射物）跳过无变化的重算。 */
+	void ShadowMapManager::UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects)
 	{
 		/* 准备方向光的ShadowMap */
 		if (m_CascadeShadowMaps.empty())
@@ -136,11 +139,14 @@ namespace Helios
 			std::fabs(direction.x - m_LastLightDir.x) <= eps &&
 			std::fabs(direction.y - m_LastLightDir.y) <= eps &&
 			std::fabs(direction.z - m_LastLightDir.z) <= eps;
+		/* 是否拿到了投射物包围盒：它参与光源视锥拟合，属于拟合输入的一部分 */
+		const bool has_casters = mesh_objects != nullptr && !mesh_objects->empty();
 		const bool unchanged =
 			!m_IsDirty &&
 			dir_equal &&
 			mat_equal(view_mat, m_LastViewMat) &&
-			mat_equal(proj_mat, m_LastProjMat);
+			mat_equal(proj_mat, m_LastProjMat) &&
+			has_casters == m_LastFitHadCasters;
 		if (unchanged)
 			return;
 
@@ -148,6 +154,7 @@ namespace Helios
 		m_LastLightDir = direction;
 		m_LastViewMat = view_mat;
 		m_LastProjMat = proj_mat;
+		m_LastFitHadCasters = has_casters;
 		m_IsDirty = false;
 
 
@@ -161,7 +168,13 @@ namespace Helios
 		 * 均匀分割的混合（λ 混合），近处精度和远处稳定性兼顾。split[i] = 第 i 段远边界在视图空间的距离。 */
 		const float lambda = 0.3f;// 0.5f; // 0 = 均匀，1 = 纯对数
 		const float cam_near = camera ? camera->GetNearClip() : 0.1f;
-		const float cam_far  = camera ? camera->GetFarClip()  : shadow_map_info->ShadowFar;
+		/* 阴影只需覆盖到 ShadowFar（>0 时生效）：超出该距离的区域不再产生阴影，
+		 * 避免把级联预算浪费在相机 far 之外的部分 */
+		float cam_far = camera ? camera->GetFarClip() : shadow_map_info->ShadowFar;
+		if (shadow_map_info->ShadowFar > 0.0f)
+			cam_far = std::min(cam_far, shadow_map_info->ShadowFar);
+		if (cam_far <= cam_near)
+			cam_far = cam_near + 1.0f;
 
 		std::vector<float> split_dist(cascade_cnt + 1);
 		split_dist[0] = cam_near;
@@ -171,6 +184,39 @@ namespace Helios
 			const float log_split = cam_near * std::pow(cam_far / cam_near, f);
 			const float uni_split = cam_near + (cam_far - cam_near) * f;
 			split_dist[i] = lambda * log_split + (1.0f - lambda) * uni_split;
+		}
+
+		/* 收集场景几何体在光照空间的 AABB（每个 MeshSegment 一个）。级联的深度板不能只看相机
+		 * 子视锥：空气和近相机那一段会把 z 跨度撑大，深度图偏黑、精度变差；所以要按"与该级联 xy
+		 * 相交的几何体"来拟合 near / far。 */
+		struct LightSpaceBounds { glm::vec3 Min; glm::vec3 Max; };
+		std::vector<LightSpaceBounds> caster_bounds;
+		if (mesh_objects)
+		{
+			caster_bounds.reserve(mesh_objects->size());
+			for (const auto& mesh_object : *mesh_objects)
+			{
+				if (!mesh_object.MeshSegment)
+					continue;
+
+				const glm::vec3& aabb_min = mesh_object.MeshSegment->GetAABBMin();
+				const glm::vec3& aabb_max = mesh_object.MeshSegment->GetAABBMax();
+				LightSpaceBounds bounds{
+					glm::vec3(std::numeric_limits<float>::max()),
+					glm::vec3(-std::numeric_limits<float>::max()) };
+				for (int corner = 0; corner < 8; ++corner)
+				{
+					const glm::vec3 local_corner(
+						(corner & 1) ? aabb_max.x : aabb_min.x,
+						(corner & 2) ? aabb_max.y : aabb_min.y,
+						(corner & 4) ? aabb_max.z : aabb_min.z);
+					const glm::vec3 world_corner = glm::vec3(mesh_object.Local2WorldMat * glm::vec4(local_corner, 1.0f));
+					const glm::vec3 ls_corner = glm::vec3(light_view_mat * glm::vec4(world_corner, 1.0f));
+					bounds.Min = glm::min(bounds.Min, ls_corner);
+					bounds.Max = glm::max(bounds.Max, ls_corner);
+				}
+				caster_bounds.emplace_back(bounds);
+			}
 		}
 
 		// 相机世界矩阵（用于把视图空间子视锥角点变换回世界空间）；view_mat 已在脏检测处获取
@@ -224,39 +270,68 @@ namespace Helios
 			 * 没有投射物或不相交时退回子视锥拟合。 */
 			const float radius = shadow_map_info->CascadeRadius[cascade_id];
 
-			float ortho_left   = ls_min.x;
-			float ortho_right  = ls_max.x;
-			float ortho_bottom = ls_min.y;
-			float ortho_top    = ls_max.y;
-
 			// 居中并取对称正方形范围（以较长边为准），提升 PCF 采样稳定性
-			const float center_x = (ortho_left + ortho_right) * 0.5f;
-			const float center_y = (ortho_bottom + ortho_top) * 0.5f;
-			const float half_x = (ortho_right - ortho_left) * 0.5f;
-			const float half_y = (ortho_top - ortho_bottom) * 0.5f;
+			const float center_x = (ls_min.x + ls_max.x) * 0.5f;
+			const float center_y = (ls_min.y + ls_max.y) * 0.5f;
+			const float half_x = (ls_max.x - ls_min.x) * 0.5f;
+			const float half_y = (ls_max.y - ls_min.y) * 0.5f;
 			float half_extent = std::max(half_x, half_y);
 			// 下限：保证范围不小于级联半径（仅放大、不缩小真实 AABB）
-			half_extent = std::max(half_extent, radius);
+			if (radius > 0.0f)
+				half_extent = std::max(half_extent, radius);
 
-			ortho_left   = center_x - half_extent;
-			ortho_right  = center_x + half_extent;
-			ortho_bottom = center_y - half_extent;
-			ortho_top    = center_y + half_extent;
+			float ortho_left   = center_x - half_extent;
+			float ortho_right  = center_x + half_extent;
+			float ortho_bottom = center_y - half_extent;
+			float ortho_top    = center_y + half_extent;
 
-			// 将范围对齐到阴影纹素尺寸，避免相机移动时级联阴影抖动（shimmering）
+			/* 纹素对齐：把"范围尺寸"向上量化到整纹素，中心吸附到纹素网格（正交视锥保持正方形、
+			 * PCF 更均匀）；light view 不含相机信息，网格稳定，相机移动时阴影不抖。 */
 			const float texel_size = (2.0f * half_extent) / static_cast<float>(shadow_map_info->Size);
-			ortho_left   = std::floor(ortho_left   / texel_size) * texel_size;
-			ortho_right  = std::ceil (ortho_right  / texel_size) * texel_size;
-			ortho_bottom = std::floor(ortho_bottom / texel_size) * texel_size;
-			ortho_top    = std::ceil (ortho_top    / texel_size) * texel_size;
+			if (texel_size > 0.0f)
+			{
+				half_extent = (std::floor(half_extent / texel_size) + 1.0f) * texel_size;
+				const float snapped_center_x = std::round(center_x / texel_size) * texel_size;
+				const float snapped_center_y = std::round(center_y / texel_size) * texel_size;
+
+				ortho_left   = snapped_center_x - half_extent;
+				ortho_right  = snapped_center_x + half_extent;
+				ortho_bottom = snapped_center_y - half_extent;
+				ortho_top    = snapped_center_y + half_extent;
+			}
+
+			/* 深度范围：与该级联 xy 相交的几何体的 Z 跨度；没收敛时再并入相机子视锥的 Z 跨度
+			 * （免得 near / far 板把物体切平）。收敛生效后几何体跨度就是完整依据，深度板收紧之后
+			 * Depth16 对场景深度的分辨率提升很大。 */
+			float ls_depth_z_min = ls_min.z;
+			float ls_depth_z_max = ls_max.z;
+			float geometry_z_min = std::numeric_limits<float>::max();
+			float geometry_z_max = -std::numeric_limits<float>::max();
+			for (const auto& bounds : caster_bounds)
+			{
+				/* 光空间 xy 的 2D 相交测试 */
+				if (bounds.Max.x < ortho_left || bounds.Min.x > ortho_right)
+					continue;
+				if (bounds.Max.y < ortho_bottom || bounds.Min.y > ortho_top)
+					continue;
+
+				geometry_z_min = std::min(geometry_z_min, bounds.Min.z);
+				geometry_z_max = std::max(geometry_z_max, bounds.Max.z);
+			}
+			const bool has_intersecting_geometry = geometry_z_min <= geometry_z_max;
+			if (has_intersecting_geometry)
+			{
+				ls_depth_z_min = std::min(ls_depth_z_min, geometry_z_min);
+				ls_depth_z_max = std::max(ls_depth_z_max, geometry_z_max);
+			}
 
 			// near/far 由光照空间 Z 范围推导（视图空间 Z = -光照空间 Z）
 			const float epsilon = 0.05f;
-			float ortho_near = -ls_max.z - epsilon; // 最近点（光照空间 Z 最大）
-			float ortho_far  = -ls_min.z + epsilon; // 最远点（光照空间 Z 最小）
+			float ortho_near = -ls_depth_z_max - epsilon; // 最近点（光照空间 Z 最大）
+			float ortho_far  = -ls_depth_z_min + epsilon; // 最远点（光照空间 Z 最小）
 			if (ortho_far <= ortho_near) ortho_far = ortho_near + 0.1f;
 
-			glm::mat4 light_proj_mat = glm::ortho(ortho_left, ortho_right, ortho_bottom, ortho_top, ortho_near, ortho_far);
+			glm::mat4 light_proj_mat = MakeReversedZProjection(glm::ortho(ortho_left, ortho_right, ortho_bottom, ortho_top, ortho_near, ortho_far));
 
 			// 计算并设置光照视图投影矩阵
 			glm::mat4 light_view_proj_mat = light_proj_mat * light_view_mat;
@@ -283,6 +358,7 @@ namespace Helios
 		m_LastLightDir = glm::vec3(0.0f);
 		m_LastViewMat = glm::mat4(1.0f);
 		m_LastProjMat = glm::mat4(1.0f);
+		m_LastFitHadCasters = false;
 	}
 
 	/* 准备阴影纹理 */
@@ -383,6 +459,9 @@ namespace Helios
 
 					/* 设置阴影Shader的级联索引 */
 					auto shadow_material = Material::Create(m_ShadowCasterShader);
+				/* 阴影投射材质：关掉背面剔除 —— 单面几何（地面 / 薄墙 / 植被）必须能写进深度，免得绕序
+				 * 约定有差异时这些 caster 直接消失；闭合几何体双面渲染的最终深度跟单面一致，只多花一点光栅化。 */
+					shadow_material->GetRasterState().CullMode = CullMode::Cull_None;
 					shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
 
 					/* 渲染场景到阴影贴图 */
