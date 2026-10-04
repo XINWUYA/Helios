@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <string>
 #include <glm/glm.hpp>
+#include "DeviceVertexArray.h"
 
 namespace Helios
 {
@@ -45,12 +46,13 @@ namespace Helios
 		virtual void Bind() = 0;
 		virtual void Unbind() = 0;
 
+		/* 在绘制前向 Shader 关联顶点数据（Metal 等后端需在创建 PipelineState 前取得 VertexDescriptor） */
+		virtual void BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array) = 0;
+
 		virtual int GetUniformLocation(const std::string& name) = 0;
 
-		/* 获取 sampler 在 Shader 中声明的绑定点（layout(binding = X)）
-		 *  - OpenGL：texture unit
-		 *  - Metal ：[[texture(N)]] 的索引
-		 * 未在 Shader 中找到该 sampler 时返回 -1。 */
+		/* 拿 sampler 在 Shader 里声明的绑定点（layout(binding = X)）：OpenGL 是 texture unit、
+		 * Metal 是 [[texture(N)]] 的索引。没找到该 sampler 时返回 -1。 */
 		[[nodiscard]] virtual int GetUniformBinding(const std::string& name) const
 		{
 			return m_Reflection.FindSamplerBinding(name);

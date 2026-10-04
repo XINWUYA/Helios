@@ -11,8 +11,8 @@ layout(location = 0) out SVextex2Frag vert2frag;
 
 void main()
 {
+	/* ZO + Reversed-Z：全屏三角形 z=1 即近平面（深度最大值），恒通过 GreaterEqual 比较 */
 	gl_Position = a_Position;
-	gl_Position.z = a_Position.z * 0.5f + 0.5f;
 
 	vert2frag.TexCoord = a_Position.xy * 0.5f + 0.5f;
 }

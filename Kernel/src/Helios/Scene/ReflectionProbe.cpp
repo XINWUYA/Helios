@@ -5,6 +5,8 @@
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderCommon.h>
+#include <Helios/Common/Math.h>
+#include <Helios/Scene/Camera.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/Material.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
@@ -149,7 +151,7 @@ namespace Helios
         const float aspect = 1.0f;
         const float near_plane = 0.1f;
         const float far_plane = 1000.0f;
-        const glm::mat4 capture_projection = glm::perspective(glm::radians(90.0f), aspect, near_plane, far_plane);
+        const glm::mat4 capture_projection = MakeReversedZProjection(glm::perspective(glm::radians(90.0f), aspect, near_plane, far_plane));
         const glm::vec3 capture_position = GetPosition();
 
         const auto& visible_objects = render_view->GetVisibleMeshObjects();

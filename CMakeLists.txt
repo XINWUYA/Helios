@@ -88,6 +88,11 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
     add_compile_options(-Wall -Wextra)
 endif()
 
+# 深度约定：全局启用 GLM 的 ZO（z ∈ [0,1]）投影，与 Metal/Vulkan 的裁剪空间一致。
+# 引擎在此基础上统一采用 Reversed-Z（近平面→1，远平面→0），见 Common/Math.h。
+# 必须在所有 glm include 之前生效，因此放在全局编译定义中。
+add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE)
+
 # Platform-specific definitions
 if(WIN32)
     add_compile_definitions(PLATFORM_WINDOWS)

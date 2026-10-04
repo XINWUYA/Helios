@@ -22,8 +22,11 @@ namespace Helios
 		constexpr uint8_t Light			= 3;
 	}
 
+	/* Uniform data 跟着色器的 uniform block 逐字节对应（成员顺序、类型一致）。alignas(16) 是必须的：
+	 * MSL 的 float4x4/float4 struct 和 GLSL std140 都要求 16 对齐。 */
+
 	/* Per view uniform data */
-	struct ViewUniformData
+	struct alignas(16) ViewUniformData
 	{
 		glm::mat4 ViewMatrix{ 1 };
 		glm::mat4 ProjectionMatrix{ 1 };
@@ -33,7 +36,7 @@ namespace Helios
 	};
 
 	/* Per object uniform data */
-	struct ObjectUniformData
+	struct alignas(16) ObjectUniformData
 	{
 		glm::mat4 LocalToWorldMat{ 1 };	/* 模型矩阵 */
 		uint32_t ObjectId{ 0 };				/* 模型ID，用于Picking */
@@ -41,7 +44,7 @@ namespace Helios
 
 	/* Per light uniform data */
 	constexpr uint32_t MAX_LIGHT_VIEW_PROJ = 4; /* 与 Uniforms.glsl 中的数组长度保持一致 */
-	struct LightUniformData
+	struct alignas(16) LightUniformData
 	{
 		/* 级联阴影的光照视图投影矩阵数组（最多 MAX_LIGHT_VIEW_PROJ 个） */
 		glm::mat4 LightViewProjectionMat[MAX_LIGHT_VIEW_PROJ]{ glm::mat4(1) };
@@ -52,7 +55,7 @@ namespace Helios
 		uint32_t CascadeCount{ 0 };
 		glm::vec4 CascadeSplits{ 0.0f };
 		/* 阴影深度偏移（来自 ShadowMapInfo::ConstantBias），缓解阴影失真（peter-panning / acne）。
-		 * 合并进 Light UBO，避免作为独立 uniform 遗漏赋值。 */
+		 * 置于 Light UBO 中，避免作为独立 uniform 被遗漏赋值。 */
 		float ShadowBias{ 0.0f };
 	};
 
@@ -150,8 +153,17 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		material->Bind();
-		mesh_primitive.VertexArray->Bind();
+	/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState */
+	material->GetShader()->BindVertexArray(mesh_primitive.VertexArray);
+
+	/* 绑定全局UniformBuffer（View/Object/Light），Metal后端需要显式绑定到RenderEncoder */
+	s_RenderData.pViewUniformBuffer->Bind();
+	s_RenderData.pObjectUniformBuffer->Bind();
+	s_RenderData.pLightUniformBuffer->Bind();
+
+	material->Bind();
+	mesh_primitive.VertexArray->Bind();
+
 
 		m_pRenderAPI->ApplyRasterState(material->GetRasterState());
 
@@ -219,8 +231,7 @@ namespace Helios
 		data.CascadeCount = cascade_count;
 		data.CascadeSplits = cascade_splits;
 
-		/* 阴影深度偏移：来自光源的 ShadowMapInfo::ConstantBias。
-		 * 合并进 Light UBO，取代原先 shader 中从未被赋值的独立 uniform u_ShadowBias。 */
+		/* 阴影深度偏移：来自光源的 ShadowMapInfo::ConstantBias。 */
 		if (const auto& shadow_map_info = light->GetShadowMapInfo())
 			data.ShadowBias = shadow_map_info->ConstantBias;
 		else

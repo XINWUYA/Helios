@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "RenderPassNode.h"
 #include "RenderResourceNode.h"
+#include "Helios/Renderer/Renderer.h"
 #include "Helios/VirtualDevice/DeviceFrameBuffer.h"
 
 namespace Helios
@@ -137,8 +138,7 @@ namespace Helios
 				desc.StencilRenderBuffer.Layer = fg_texture->GetSubDescriptor().Layer;
 			}
 
-		/* 没有附件的 Pass（如 SideEffect Pass）直接渲染到默认 RT，不需要创建 FrameBuffer，
-		 * 避免每帧生成并销毁空 FBO 造成驱动内存抖动。 */
+		/* 没有附件的 Pass（如 SideEffect Pass）直接渲染到默认 RT，不需要创建 FrameBuffer */
 		if (render_pass_data->RenderBufferUsage == RenderBufferUsage::None)
 		{
 			render_pass_data->FrameBuffer.reset();
@@ -147,11 +147,24 @@ namespace Helios
 
 		/* 创建FrameBuffer */
 		render_pass_data->FrameBuffer = DeviceFrameBuffer::Create(render_pass_data->DebugName + "_FrameBuffer", desc);
-		}
-
-		/* 执行当前Pass */
-		m_OwnerFrameGraphPass->Execute(resources);
 	}
+
+	/* 对于没有附件的Pass，需要由后端绑定默认RenderTarget（如Metal的drawable），
+	 * 否则Metal等显式RenderPass后端会因没有active render encoder而无法绘制。 */
+	const bool need_default_render_pass = m_RenderPassDatas.empty() ||
+		std::any_of(m_RenderPassDatas.begin(), m_RenderPassDatas.end(),
+		[](const SharedPtr<RenderPassData>& data) { return data->RenderBufferUsage == RenderBufferUsage::None; });
+
+	if (need_default_render_pass)
+		Renderer::GetRenderAPI()->BeginDefaultRenderPass();
+
+	/* 执行当前Pass */
+	m_OwnerFrameGraphPass->Execute(resources);
+
+	if (need_default_render_pass)
+		Renderer::GetRenderAPI()->EndDefaultRenderPass();
+}
+
 
 	/* 销毁 */
 	void RenderPassNode::Destroy()

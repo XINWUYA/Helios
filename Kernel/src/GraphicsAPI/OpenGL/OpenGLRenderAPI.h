@@ -24,9 +24,17 @@ namespace Helios
 
 		void Flush() override;
 
-		/* 压入DebugGroup，以便在RenderDoc抓帧时使用Pipeline结构组织 */
+		/* OpenGL 的 mip 生成是立即执行的，直接转交纹理自身实现
+		 * （见 RenderAPI::GenerateMipmap 关于帧内时序的说明） */
+		void GenerateMipmap(const SharedPtr<DeviceTexture>& texture) override;
+
+		/* 压入DebugGroup，以便在RenderDoc抓帧时使用Pipeline结构组织DebugMarker */
 		void PushDebugGroup(const char* name) override;
-        void PopDebugGroup() override;
+		void PopDebugGroup() override;
+
+		/* OpenGL 默认已绑定并直接绘制到默认帧缓冲，无需显式开始/结束通道 */
+		void BeginDefaultRenderPass(bool /*preserve_content*/) override {}
+		void EndDefaultRenderPass() override {}
 
 	private:
 		/* 获取OpenGL支持的扩展 */

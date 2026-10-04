@@ -115,7 +115,11 @@ namespace Helios
 		DXT3_RGBA,
 		s_DXT3_RGBA,
 		DXT5_RGBA,
-		s_DXT5_RGBA
+		s_DXT5_RGBA,
+		/* 32 位浮点深度（GL_DEPTH_COMPONENT32F / MTL::PixelFormatDepth32Float）。
+		 * Reversed-Z 使用的阴影图格式：浮点深度无定点量化损失，
+		 * 且该格式在 OpenGL 3.0+ 规范中保证可作为深度附件渲染。 */
+		Depth32F
 	};
 
 	/* 纹理使用方式 */
@@ -301,7 +305,7 @@ namespace Helios
 			, EnableBlend(true), BlendEquationRGB(BlendEquation::Add), BlendEquationA(BlendEquation::Add)
 			, BlendFuncSrcRGB(BlendFunc::One), BlendFuncSrcA(BlendFunc::One)
 			, BlendFuncDstRGB(BlendFunc::Zero), BlendFuncDstA(BlendFunc::Zero)
-			, EnableDepthWrite(true), DepthCompareFunc(CompareFunc::LessEqual)
+			, EnableDepthWrite(true), DepthCompareFunc(CompareFunc::GreaterEqual)
 			, EnableColorWrite(true), padding(0)
 		{
 		}

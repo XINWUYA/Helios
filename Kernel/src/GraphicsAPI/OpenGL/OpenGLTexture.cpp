@@ -267,6 +267,9 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* glGenerateMipmap 作用于"当前绑定在该 target 上的纹理"，因此必须先绑定自身：
+		 * 帧内被 RenderAPI::GenerateMipmap 调用时，当前绑定的很可能是别的纹理。 */
+		glBindTexture(m_TextureTarget, m_TextureId);
 		glGenerateMipmap(m_TextureTarget);
 	}
 

@@ -3,6 +3,7 @@
 #include <glm/gtx/quaternion.hpp>
 
 #include "Helios/Application/Application.h"
+#include "Helios/Common/Math.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 
 namespace Helios
@@ -318,14 +319,7 @@ namespace Helios
 		return entity_id;
 	}
 
-	/*void EditorCamera::SetViewportSize(float width, float height)
-	{
-		PROFILE_FUNCTION();
 
-		m_ViewportWidth = width;
-		m_ViewportHeight = height;
-
-	}*/
 
 	glm::quat EditorCamera::GetOrientation() const
 	{
@@ -356,7 +350,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		m_ProjectionMatrix = glm::perspective(glm::radians(m_Fov), m_AspectRatio, m_NearClip, m_FarClip);
+		m_ProjectionMatrix = MakeReversedZProjection(glm::perspective(glm::radians(m_Fov), m_AspectRatio, m_NearClip, m_FarClip));
 	}
 
 	void EditorCamera::UpdateViewMatrix()

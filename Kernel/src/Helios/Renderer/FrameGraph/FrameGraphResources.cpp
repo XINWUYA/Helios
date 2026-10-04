@@ -31,7 +31,7 @@ namespace Helios
 	}
 
 	/* 从FrameGraph中获取资源 */
-	const SharedPtr<IResource>& FrameGraphResources::GetResource(FrameGraphResourceHandle handle) const
+	SharedPtr<IResource> FrameGraphResources::GetResource(FrameGraphResourceHandle handle) const
 	{
 		PROFILE_FUNCTION();
 

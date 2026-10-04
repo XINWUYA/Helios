@@ -14,6 +14,9 @@ namespace Helios
 		void Bind() override;
 		void Unbind() override;
 
+		/* OpenGL 无此需求，空实现 */
+		void BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array) override {}
+
 		int GetUniformLocation(const std::string& name) override;
 		void SetInt(const std::string& name, int value) override;
 		void SetIntArray(const std::string& name, int* values, uint32_t count) override;

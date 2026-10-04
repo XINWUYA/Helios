@@ -1,5 +1,12 @@
 ﻿#pragma once
 
+/* === 深度约定（必须在任何 glm 头文件之前定义） ===
+ * 让 glm 的投影矩阵使用 ZO 裁剪空间（z ∈ [0,1]），与引擎统一的 Reversed-Z
+ * 约定一致（见 Helios/Common/Math.h）。 */
+#ifndef GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#endif
+
 /* Ensure Windows Visual Studio correctly handles UTF-8 encoded source files */
 #ifdef _MSC_VER
 #pragma execution_character_set("utf-8")

@@ -18,7 +18,8 @@ void main()
 {
 	mat4 view_mat = mat4(mat3(u_ViewMat));
 	vec4 position = u_ProjectionMat * view_mat * vec4(a_Position, 1.0f);
-	gl_Position = position.xyww;
+	/* Reversed-Z：远平面深度为 0，将 z 置 0 使天空盒始终位于最远处 */
+	gl_Position = vec4(position.xy, 0.0f, position.w);
 
 	Output.Position = a_Position;
 }

@@ -157,11 +157,8 @@ namespace Helios
 		// 计算光照视图矩阵（所有级联共享）
 		auto light_view_mat = ShadowMap::GetDirectionalLightViewMatrix(direction);
 
-		/* ----------------------------------------------------------------------
-		 * CSM 子视锥分割：按相机视距把主视锥切成 cascade_cnt 段，每段对应一个级联。
-		 * 采用对数分割与均匀分割的混合（λ 混合），兼顾近处精度与远处稳定性。
-		 *   split[i] = 第 i 段远边界在视图空间的距离（i ∈ [1, cascade_cnt]）。
-		 * -------------------------------------------------------------------- */
+		/* CSM 子视锥分割：按相机视距把主视锥切成 cascade_cnt 段，每段对应一个级联。用对数分割与
+		 * 均匀分割的混合（λ 混合），近处精度和远处稳定性兼顾。split[i] = 第 i 段远边界在视图空间的距离。 */
 		const float lambda = 0.3f;// 0.5f; // 0 = 均匀，1 = 纯对数
 		const float cam_near = camera ? camera->GetNearClip() : 0.1f;
 		const float cam_far  = camera ? camera->GetFarClip()  : shadow_map_info->ShadowFar;
@@ -222,11 +219,9 @@ namespace Helios
 				ls_max = glm::max(ls_max, ls_corner);
 			}
 
-			// tight-fit 正交范围：直接取子视锥在光照空间下的真实 AABB。
-			// 注意：绝不能用 CascadeRadius 去钳制（std::min/max）这个范围——当子视锥
-			// 实际范围超过 radius 时，钳制会把正交视锥缩小，使本应在阴影图内的几何体被
-			// 投影到 [-1,1] 之外而得不到写入，导致 cascade_id>0 时物体"画到阴影外面"。
-			// CascadeRadius 仅作为"最小半边长"下限（保证近处级联不至于过紧），不会缩小真实范围。
+			/* tight-fit 基础范围：子视锥在光照空间的真实 AABB；别用 CascadeRadius 去钳（几何体会被
+			 * 投到 [-1,1] 外写不进阴影图），那个值只当最小半边长下限。级联范围收敛：XY 与投射物并集求交，
+			 * 没有投射物或不相交时退回子视锥拟合。 */
 			const float radius = shadow_map_info->CascadeRadius[cascade_id];
 
 			float ortho_left   = ls_min.x;
@@ -313,16 +308,11 @@ namespace Helios
 		if (total_layer_num == 0)
 			return;
 
-		/* 仅记录阴影纹理数组所需的描述，实际纹理由FrameGraph在AddShadowPass中创建。
-		 * 注意：此处不可创建 m_ShadowMapTexture，否则每帧（Execute 的 PrepareLights）
-		 * 都会分配一个 GL_TEXTURE_2D_ARRAY，而它被上一帧 ShadowPass 的 FrameBuffer
-		 * 绑定且跨帧保留在 m_PassFrameBuffers 中，删除时处于"仍被绑定"状态而延迟删除，
-		 * 导致 glGenTextures 回收同一 id 后再次 glTexStorage3D 报 "Texture is immutable"。
-		 * 深度格式使用 Depth24（GL_DEPTH_COMPONENT24）：该格式是 OpenGL 规范保证可作为
-		 * 深度附件渲染的格式；而 Depth32 映射到的 GL_DEPTH_COMPONENT32 是"整数"深度格式，
-		 * 并不在规范保证可渲染的 depth 格式列表中，部分严格驱动会返回
-		 * GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT，导致 SetDepthLayer 失败。 */
-		m_RequiredTextureDesc = { max_dimension, total_layer_num, 1, TextureFormat::Depth24 };
+		/* 这里只记录阴影纹理数组的描述，实际纹理由 FrameGraph 在 AddShadowPass 里创建。别在这创建
+		 * m_ShadowMapTexture：它会被上一帧 ShadowPass 的 FrameBuffer 绑着、延迟回收，glGenTextures 复用
+		 * 同一 id 后再 glTexStorage3D 会报 "Texture is immutable"。深度格式用 Depth32F（跟 Reversed-Z
+		 * 搭配无定点量化损失，OpenGL 3.0+ 也保证它能作深度附件渲染）。 */
+		m_RequiredTextureDesc = { max_dimension, total_layer_num, 1, TextureFormat::Depth32F };
 	}
 
 	/* 将ShadowPass注入到FrameGraph */

@@ -52,6 +52,6 @@
             </ParamInfo>
             <ParamInfo Type="2" Name="IOR" Value="1"/>
         </Parameters>
-        <RasterState CullMode="1" FrontFaceType="0" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="0" EnableColorWrite="true"/>
+        <RasterState CullMode="1" FrontFaceType="0" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
     </Material>
 </Materials>

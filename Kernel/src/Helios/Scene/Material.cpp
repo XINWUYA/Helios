@@ -79,11 +79,14 @@ namespace Helios
 				{
 					/* 绑定纹理 */
 					const auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(value);
-					if (texture_info.second != InvalidTextureSlot)
-					{
-						texture_info.first->Bind(texture_info.second);
-						m_pShader->SetInt(param_info.Name, texture_info.second);
-					}
+					if (!texture_info.first)
+						break;
+
+					/* 反射不到绑定点时回退到槽位 0，绝不静默跳过绑定：
+					 * 若管线要求采样器/纹理而未被绑定，Metal 校验层会直接断言终止。 */
+					const uint32_t slot = (texture_info.second == InvalidTextureSlot) ? 0u : texture_info.second;
+					texture_info.first->Bind(slot);
+					m_pShader->SetInt(param_info.Name, static_cast<int>(slot));
 				}
 				break;
 			case ParamType::Int:

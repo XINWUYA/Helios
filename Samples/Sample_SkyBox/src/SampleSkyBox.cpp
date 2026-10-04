@@ -26,7 +26,7 @@ void SampleSkyBox::OnAttached()
 
 		RenderRasterState raster_state;
 		raster_state.EnableDepthWrite = true;
-		raster_state.DepthCompareFunc = CompareFunc::LessEqual;
+		raster_state.DepthCompareFunc = CompareFunc::GreaterEqual;
 		raster_state.CullMode = CullMode::Cull_Front;
 
 		auto shader = ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));

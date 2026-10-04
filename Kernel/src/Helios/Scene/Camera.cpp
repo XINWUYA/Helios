@@ -2,6 +2,7 @@
 #include "Camera.h"
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
+#include <Helios/Common/Math.h>
 
 namespace Helios
 {
@@ -87,22 +88,25 @@ namespace Helios
 		switch (m_ProjectionType)
 		{
 		case CameraProjectionType::Perspective:
-			m_ProjectionMatrix = glm::perspective(
-				m_Fov,
+			/* m_Fov 以角度存储（构造函数默认 45），而 glm::perspective 要求弧度。
+			 * ShadowMapManager 构造子视锥时同样按 glm::radians(fov) 处理，
+			 * 此处必须保持一致，否则阴影图覆盖范围与真实渲染视锥对不上。 */
+			m_ProjectionMatrix = MakeReversedZProjection(glm::perspective(
+				glm::radians(m_Fov),
 				m_AspectRatio,
 				m_NearClip,
 				m_FarClip
-			);
+			));
 			break;
 		case CameraProjectionType::Orthographic:
-			m_ProjectionMatrix = glm::ortho(
+			m_ProjectionMatrix = MakeReversedZProjection(glm::ortho(
 				-m_HeightSize * m_AspectRatio * 0.5f,
 				m_HeightSize * m_AspectRatio * 0.5f,
 				-m_HeightSize * 0.5f,
 				m_HeightSize * 0.5f,
 				m_NearClip,
 				m_FarClip
-			);
+			));
 			break;
 		}
 

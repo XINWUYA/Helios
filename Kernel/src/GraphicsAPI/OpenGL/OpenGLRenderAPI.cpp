@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "OpenGLRenderAPI.h"
 #include "OpenGLCommon.h"
+#include <Helios/VirtualDevice/DeviceTexture.h>
 #include <glad/glad.h>
 
 namespace Helios
@@ -173,6 +174,15 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		glFlush();
+	}
+
+	void OpenGLRenderAPI::GenerateMipmap(const SharedPtr<DeviceTexture>& texture)
+	{
+		PROFILE_FUNCTION();
+
+		/* OpenGL 的命令是立即执行的，烘焙后的绘制已经生效，直接生成即可 */
+		if (texture)
+			texture->GenerateMipmap();
 	}
 
 	void OpenGLRenderAPI::PushDebugGroup(const char* name)

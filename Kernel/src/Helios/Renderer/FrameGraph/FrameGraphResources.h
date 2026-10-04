@@ -46,7 +46,7 @@ namespace Helios
 
 	private:
 		/* 从FrameGraph中获取资源 */
-		[[nodiscard]] const SharedPtr<IResource>& GetResource(FrameGraphResourceHandle handle) const;
+		[[nodiscard]] SharedPtr<IResource> GetResource(FrameGraphResourceHandle handle) const;
 
 		/* 所属FrameGraph */
 		FrameGraph& m_FrameGraph;
