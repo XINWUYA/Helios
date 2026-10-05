@@ -20,10 +20,15 @@ namespace Helios
 		/* 资源浏览器要跟同一条编辑历史打交道：它的文件操作（新建 / 重命名 / 删除）
 		 * 要进这条历史，菜单与主工具栏的撤销 / 重做才管得着它们。
 		 * 通道接到 EditorContext（Layer 的解析留在它内部），面板因此不认识 Layer / CommandStack。 */
-		m_ResourceBrowser.SetCommandSink([this](UniquePtr<ICommand> command)
-			{
-				m_Context.Execute(std::move(command));
-			});
+		EditorResourceBrowser::HistorySink history;
+		history.Execute = [this](UniquePtr<ICommand> command) { m_Context.Execute(std::move(command)); };
+		history.Undo = [this] { return m_Context.Undo(); };
+		history.Redo = [this] { return m_Context.Redo(); };
+		history.CanUndo = [this] { return m_Context.CanUndo(); };
+		history.CanRedo = [this] { return m_Context.CanRedo(); };
+		history.UndoLabel = [this] { return m_Context.GetUndoLabel(); };
+		history.RedoLabel = [this] { return m_Context.GetRedoLabel(); };
+		m_ResourceBrowser.SetHistorySink(std::move(history));
 	}
 
 	void MainEditorLayer::OnDetached()

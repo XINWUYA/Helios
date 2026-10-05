@@ -26,9 +26,13 @@ namespace Helios
 	/* 校验用户输入的资源名：合法返回空串，否则返回给人看的原因 */
 	std::string AssetNameError(const std::string& name);
 
-	/* 在 dir 下取一个不冲突的路径：被占了就依次试 "name 2"、"name 3"…
-	 * 扩展名待在它该在的位置（`.png` 在序号之后）。新建文件夹与回收站落点都用它。 */
-	std::filesystem::path MakeUniquePath(const std::filesystem::path& dir, const std::string& file_name);
+/* 在 dir 下取一个不冲突的路径：被占了就依次试 "name 2"、"name 3"…
+ * 扩展名待在它该在的位置（`.png` 在序号之后）。新建文件夹与回收站落点都用它。 */
+std::filesystem::path MakeUniquePath(const std::filesystem::path& dir, const std::string& file_name);
+
+/* 新建资源文件的初始内容：按扩展名给一份最小可用模板（认不出的就给空文件）。模板是
+ * "能被现有加载器读进去"的最简形态（空场景 / 空材质图）。extension 形如 ".scn"，空串 = 无扩展名。 */
+std::string AssetFileTemplate(const std::string& extension);
 
 	/* 移到回收站：落到 <trash_root>/<扁平化的相对路径>[ 序号]。
 	 * 失败（源不存在 / 建不了回收站 / 移动失败）返回 false 并写原因。 */

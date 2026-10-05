@@ -18,6 +18,12 @@ namespace Helios
 		m_Desc.Name = name;
 	}
 
+	EntityTemplateRegistrar& EntityTemplateRegistrar::Icon(Icons::Id icon)
+	{
+		m_Desc.Icon = icon;
+		return *this;
+	}
+
 	EntityTemplateRegistrar& EntityTemplateRegistrar::Component(AddFunc add)
 	{
 		m_Desc.Components.push_back(add);
@@ -39,33 +45,41 @@ namespace Helios
 			BuiltinEntityTemplateRegistration()
 			{
 				EntityTemplateRegistrar("Empty")
+					.Icon(Icons::Id::Entity)
 					.Register();
 
 				EntityTemplateRegistrar("Sprite")
+					.Icon(Icons::Id::Sprite)
 					.Component([](Entity& entity) { entity.AddComponent<SpriteComponent>(); })
 					.Register();
 
 				EntityTemplateRegistrar("Camera")
+					.Icon(Icons::Id::Camera)
 					.Component([](Entity& entity) { entity.AddComponent<CameraComponent>(); })
 					.Register();
 
 				EntityTemplateRegistrar("Model")
+					.Icon(Icons::Id::Model)
 					.Component([](Entity& entity) { entity.AddComponent<ModelComponent>(); })
 					.Register();
 
 				EntityTemplateRegistrar("Reflection Probe")
+					.Icon(Icons::Id::ReflectionProbe)
 					.Component([](Entity& entity) { entity.AddComponent<ReflectionProbeComponent>(); })
 					.Register();
 
 				EntityTemplateRegistrar("Directional Light")
+					.Icon(Icons::Id::LightDirectional)
 					.Component([](Entity& entity) { entity.AddComponent<LightComponent>(LightType::Directional); })
 					.Register();
 
 				EntityTemplateRegistrar("Point Light")
+					.Icon(Icons::Id::LightPoint)
 					.Component([](Entity& entity) { entity.AddComponent<LightComponent>(LightType::Point); })
 					.Register();
 
 				EntityTemplateRegistrar("Spot Light")
+					.Icon(Icons::Id::LightSpot)
 					.Component([](Entity& entity) { entity.AddComponent<LightComponent>(LightType::Spot); })
 					.Register();
 			}

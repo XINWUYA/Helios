@@ -135,6 +135,20 @@ namespace Helios
 			return Icons::Id::None;
 		}
 
+		/* 「添加组件」菜单条目的图标：光源的三种形态按注册的 Variant 名判断（lambda 里拿不到
+		 * 类型信息）—— 改名的时候这里要跟着改；其余组件按类型判断（跟组件卡同一套）。 */
+		Icons::Id ResolveComponentMenuIcon(const ComponentDesc& desc, const ComponentVariant& variant)
+		{
+			if (desc.Type == typeid(LightComponent) && variant.MenuName != nullptr)
+			{
+				if (std::strcmp(variant.MenuName, "Directional Light") == 0) return Icons::Id::LightDirectional;
+				if (std::strcmp(variant.MenuName, "Spot Light") == 0)        return Icons::Id::LightSpot;
+				if (std::strcmp(variant.MenuName, "Point Light") == 0)       return Icons::Id::LightPoint;
+			}
+
+			return ResolveComponentIcon(desc, nullptr);
+		}
+
 		/* 大小写无关的子串匹配（ToLowercase / ContainsCaseInsensitive）与树行内容
 		 * （PanelChrome::DrawTreeRowLabel）都走 Editor 侧的共用实现，各面板语义一致。 */
 
@@ -996,13 +1010,14 @@ namespace Helios
 	}
 
 	/* 增加组件按钮：菜单项来自注册表（bAddable == false 的组件不出现，如 Name / Transform）。
-	 * 组件一多，菜单很难找 —— 顶部给一个过滤框，打开即自动聚焦。 */
+	 * 组件一多，菜单很难找 —— 顶部给一个过滤框，打开即自动聚焦。
+	 * 图标是全编辑器「新建 / 添加」入口统一的那枚加号。 */
 	void SceneHierarchy::ShowAddComponentButton()
 	{
 		PROFILE_FUNCTION();
 
 		const float button_size = ImGui::GetFrameHeight();
-		if (Icons::IconButton(Icons::Id::Add, ImVec2(button_size, button_size), false, "Add Component"))
+		if (Icons::IconButton(Icons::Id::NewAsset, ImVec2(button_size, button_size), false, "Add Component"))
 			ImGui::OpenPopup("AddComponentPopup");
 
 		if (!ImGui::BeginPopup("AddComponentPopup"))
@@ -1038,7 +1053,7 @@ namespace Helios
 
 				any_match = true;
 
-				if (ImGui::MenuItem(label))
+				if (PanelChrome::MenuItemWithIcon(ResolveComponentMenuIcon(desc, variant), label))
 				{
 					if (m_pCommandStack != nullptr)
 					{

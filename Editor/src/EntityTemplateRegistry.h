@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include "EditorIcons.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 
 namespace Helios
@@ -9,6 +10,7 @@ namespace Helios
 	struct EntityTemplateDesc
 	{
 		const char*           Name{ nullptr };   /* 预设名，同时用作新建实体的名字 */
+		Icons::Id             Icon{ Icons::Id::Entity };   /* 「新建实体」下拉里的条目图标 */
 		std::vector<AddFunc>  Components;        /* 依次添加到新实体上的组件 */
 	};
 
@@ -32,6 +34,9 @@ namespace Helios
 	{
 	public:
 		explicit EntityTemplateRegistrar(const char* name);
+
+		/* 「新建实体」下拉里的条目图标（不设则用通用实体图标） */
+		EntityTemplateRegistrar& Icon(Icons::Id icon);
 
 		/* 追加一个组件（含需要构造参数的情形） */
 		EntityTemplateRegistrar& Component(AddFunc add);

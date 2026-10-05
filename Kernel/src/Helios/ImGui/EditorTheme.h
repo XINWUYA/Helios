@@ -52,6 +52,13 @@ namespace Helios::EditorTheme
         inline const ImVec4 CardHeaderBg      = Neutral4;
         inline const ImVec4 CardHeaderHovered = Neutral5;
 
+        /* 滑动条（细线 + 圆点，ImGuiExt::DrawDotSliderFloat）：
+         * 细轨用中性灰；点亮段与圆点一起表示"当前值"——当前值在强调色白名单里，
+         * 故用 Accent；悬停 / 拖动时整条再亮一档，状态的差异只在这三个颜色里。 */
+        inline const ImVec4 SliderTrack = Neutral6;      /* #465363 细轨（值右侧那一段） */
+        inline const ImVec4 SliderValue = Accent;        /* #55D6C2 点亮段 + 圆点（常态） */
+        inline const ImVec4 SliderHover = AccentHover;   /* #83E7D6 点亮段 + 圆点（悬停 / 拖动） */
+
         inline const ImVec4 Clear   = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
         inline const ImVec4 White06 = ImVec4(1.0f, 1.0f, 1.0f, 0.06f);
         inline const ImVec4 White12 = ImVec4(1.0f, 1.0f, 1.0f, 0.12f);
@@ -66,6 +73,11 @@ namespace Helios::EditorTheme
         /* 分组卡片背景的外扩留白（PanelChrome::CardPad）：容器内边距取这个值就贴住容器两边。
          * 注意：必须是常量（早先按"当前窗口内边距 × 0.6"现算，容器设过内边距后就永远差一截）。 */
         inline constexpr float CardPad = 6.0f;
+
+        /* 滑动条（细线 + 圆点）：线要细、点要粗，"点在线上"才有主次。
+         * 圆点直径同时是拖动行程的基准（控件把它压给 GrabMinSize），改这里两端会等量内收。 */
+        inline constexpr float SliderTrackThickness = 3.0f;
+        inline constexpr float SliderDotRadius      = 5.0f;
     }
 
     inline ImVec4 WithAlpha(const ImVec4& color, float alpha)

@@ -714,4 +714,121 @@ namespace Helios::ImGuiExt
 		return result;
 	}
 
+	/* 圆点滑动条：细轨 + 圆点（当前值），交互全部沿用 ImGui 的 SliderBehavior（跟 SliderFloat
+	 * 一字不差），区别只在绘制：没有控件框、没有矩形 grab、不在轨道上叠数值。两个量要对上：
+	 * 圆点直径通过 GrabMinSize 压给 SliderBehavior（决定行程端点），细轨画在两端点之间 ——
+	 * 拖到极值时圆点正好压住线头。 */
+	bool DrawDotSliderFloat(const char* label, float& value, float v_min, float v_max,
+		const char* format, ImGuiSliderFlags flags)
+	{
+		PROFILE_FUNCTION();
+
+		ImGuiWindow* window = ImGui::GetCurrentWindow();
+		if (window->SkipItems)
+			return false;
+
+		ImGuiContext& g = *ImGui::GetCurrentContext();
+		const ImGuiStyle& style = g.Style;
+		const ImGuiID id = window->GetID(label);
+		const float width = ImGui::CalcItemWidth();
+
+		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
+		const ImRect frame_bb(window->DC.CursorPos,
+			window->DC.CursorPos + ImVec2(width, label_size.y + style.FramePadding.y * 2.0f));
+		const ImRect total_bb(frame_bb.Min, frame_bb.Max
+			+ ImVec2(label_size.x > 0.0f ? style.ItemInnerSpacing.x + label_size.x : 0.0f, 0.0f));
+
+		/* 命中区仍给足整个控件高（细线本身只有 3px，不然点不中） */
+		const bool temp_input_allowed = (flags & ImGuiSliderFlags_NoInput) == 0;
+		ImGui::ItemSize(total_bb, style.FramePadding.y);
+		if (!ImGui::ItemAdd(total_bb, id, &frame_bb, temp_input_allowed ? ImGuiItemFlags_Inputable : 0))
+			return false;
+
+		if (format == nullptr)
+			format = "%.0f";
+
+		/* 激活与"转输入框"的判定照 SliderScalar：Ctrl+左键 / Tab 聚焦进入输入态 */
+		const bool hovered = ImGui::ItemHoverable(frame_bb, id);
+		bool temp_input_is_active = temp_input_allowed && ImGui::TempInputIsActive(id);
+		if (!temp_input_is_active)
+		{
+			const bool input_requested_by_tabbing = temp_input_allowed
+				&& (g.LastItemData.StatusFlags & ImGuiItemStatusFlags_FocusedByTabbing) != 0;
+			const bool clicked = (hovered && g.IO.MouseClicked[0]);
+			if (input_requested_by_tabbing || clicked || g.NavActivateId == id || g.NavActivateInputId == id)
+			{
+				ImGui::SetActiveID(id, window);
+				ImGui::SetFocusID(id, window);
+				ImGui::FocusWindow(window);
+				g.ActiveIdUsingNavDirMask |= (1 << ImGuiDir_Left) | (1 << ImGuiDir_Right);
+				if (input_requested_by_tabbing || (clicked && g.IO.KeyCtrl) || g.NavActivateInputId == id)
+					temp_input_is_active = true;
+			}
+		}
+
+		if (temp_input_is_active)
+		{
+			/* 与官方一致：只有 AlwaysClamp 才钳范围，否则输入可以越界 */
+			const bool clamp_input = (flags & ImGuiSliderFlags_AlwaysClamp) != 0;
+			return ImGui::TempInputScalar(frame_bb, id, label, ImGuiDataType_Float, &value, format,
+				clamp_input ? &v_min : nullptr, clamp_input ? &v_max : nullptr);
+		}
+
+		/* 圆点直径 = 行程基准：压给 GrabMinSize，SliderBehavior 才知道圆点该停在哪儿 */
+		const float dot_radius = EditorTheme::Token::SliderDotRadius;
+		const float dot_diameter = dot_radius * 2.0f;
+
+		ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, dot_diameter);
+
+		ImRect grab_bb;
+		const bool value_changed = ImGui::SliderBehavior(frame_bb, id, ImGuiDataType_Float,
+			&value, &v_min, &v_max, format, flags, &grab_bb);
+
+		ImGui::PopStyleVar();
+
+		if (value_changed)
+			ImGui::MarkItemEdited(id);
+
+		/* 键盘焦点用细框：默认那档会向外扩出 4px，对一条细线来说太重 */
+		ImGui::RenderNavHighlight(frame_bb, id, ImGuiNavHighlightFlags_TypeThin);
+
+		const bool hot = hovered || g.ActiveId == id;
+		const float track_y = (frame_bb.Min.y + frame_bb.Max.y) * 0.5f;
+		const float track_h = EditorTheme::Token::SliderTrackThickness;
+
+		/* 行程端点 = SliderBehaviorT 的 usable 区间（bb 两端各内收 grab_padding + 半个 grab） */
+		constexpr float kGrabPadding = 2.0f; /* imgui_widgets.cpp: const float grab_padding = 2.0f; */
+		const float grab_sz = ImMin(dot_diameter, frame_bb.GetWidth() - kGrabPadding * 2.0f);
+		const float track_left = frame_bb.Min.x + kGrabPadding + grab_sz * 0.5f;
+		const float track_right = frame_bb.Max.x - kGrabPadding - grab_sz * 0.5f;
+
+		if (track_right > track_left)
+		{
+			const float dot_x = ImClamp((grab_bb.Min.x + grab_bb.Max.x) * 0.5f, track_left, track_right);
+			const float y0 = track_y - track_h * 0.5f;
+			const float y1 = track_y + track_h * 0.5f;
+			const ImU32 track_col = ImGui::GetColorU32(EditorTheme::Token::SliderTrack);
+			const ImU32 value_col = ImGui::GetColorU32(
+				hot ? EditorTheme::Token::SliderHover : EditorTheme::Token::SliderValue);
+			ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+			/* 顺序即遮挡：细轨 → 点亮段 → 圆点 */
+			draw_list->AddRectFilled(ImVec2(track_left, y0), ImVec2(track_right, y1),
+				track_col, track_h * 0.5f);
+
+			/* 点亮段：行程左端 → 圆点中心；右端藏进圆点里，不用收口 */
+			if (dot_x > track_left + 0.5f)
+				draw_list->AddRectFilled(ImVec2(track_left, y0), ImVec2(dot_x, y1),
+					value_col, track_h * 0.5f);
+
+			draw_list->AddCircleFilled(ImVec2(dot_x, track_y), dot_radius, value_col);
+		}
+
+		if (label_size.x > 0.0f)
+			ImGui::RenderText(ImVec2(frame_bb.Max.x + style.ItemInnerSpacing.x,
+				frame_bb.Min.y + style.FramePadding.y), label);
+
+		return value_changed;
+	}
+
 }

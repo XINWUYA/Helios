@@ -24,10 +24,22 @@ namespace Helios
 		/* 渲染UI */
 		void OnImGuiRenderer();
 
-		/* 文件操作的落地口：把命令交给编辑历史（主壳层注入 m_Context 转发）。
-		 * 由外壳注入而不是面板自己去查 Layer —— 面板因此不认识 Layer/CommandStack，
-		 * 单独跑（headless 测试）时也不为空：没有 sink 就直接执行，功能一样，只是没有历史。 */
-		void SetCommandSink(std::function<void(UniquePtr<ICommand>)> sink) { m_CommandSink = std::move(sink); }
+		/* 编辑历史通道（跨面板能力，由主壳层注入）：面板不认识 Layer / CommandStack，只把命令交
+		 * 出去。没注入时就直接执行命令（headless 测试能用，只是没有历史）。 */
+		struct HistorySink
+		{
+			/* 把命令交给编辑历史（撤销 / 重做从此也管着它） */
+			std::function<void(UniquePtr<ICommand>)> Execute;
+			std::function<bool()> Undo;
+			std::function<bool()> Redo;
+			std::function<bool()> CanUndo;
+			std::function<bool()> CanRedo;
+			/* 历史里下一步要撤销 / 重做的操作名（拿不到就返回 null），只用在 tooltip 上 */
+			std::function<const char*()> UndoLabel;
+			std::function<const char*()> RedoLabel;
+		};
+
+		void SetHistorySink(HistorySink sink) { m_History = std::move(sink); }
 
 		/* 资源改动的观察者（IAssetChangeSink）：文件命令做完 —— 含撤销与重做 —— 通知它，
 		 * 界面据此同步当前目录与选中项，并立刻重建文件树（不用等目录轮询）。 */
@@ -53,6 +65,15 @@ namespace Helios
 			Scene,
 			MtlGraph,
 			COUNT
+		};
+
+		/* 名字输入弹层的三种来路。只有标题、后缀约束与"确认后建什么"不同 ——
+		 * 输入框、校验、唯一取名、按钮全都是同一套，所以不拆成三个函数。 */
+		enum class NamePopupMode : uint8_t
+		{
+			NewFolder = 0,
+			NewFile,       /* 新建资源文件：后缀由菜单里的那一项定（m_PendingNewFileExtension） */
+			Rename,
 		};
 
 		/* 资源目录下的文件节点，包含文件夹和文件 */
@@ -93,15 +114,15 @@ namespace Helios
 
 		/* 主体：左「Folders」目录树卡 + 可拖分隔条 + 右栏（上面内容区 / 下面钉住的路径栏）。两栏
 		 * 子窗口各自把上下内边距加回来（面板自己不带，顶栏要贴面板上边）。 */
-		void ShowBrowserBody(float reserved_footer, float pane_padding);
+		void ShowBrowserBody();
 		/* 目录树（左栏）：只列文件夹（文件是右栏的事） */
 		void DrawFolderNode(const SharedPtr<FileNode>& node);
 
-		/* 顶部一行：左 = 类型筛选 + 搜索（找东西），右 = 计数 + 缩放 + 视图菜单（看状态 / 调视图）。
-		 * 当前目录名不在这里显示 —— 底部路径栏说得更清楚，首行不必重复。
-		 * 原来是「标题行」与「控制行」两行，各自只用掉一半宽度 —— 合成一行省出一行高给内容区。 */
-		void ShowBrowserTopBar();
-		/* 底部栏：上一级 + 当前路径面包屑（每级可点）+ 选中的项 */
+	/* 资源浏览器：顶部一行（搜索 + 四枚图标：回退 / 重进 / 筛选 / 新建）+ 左右两栏（目录树 |
+	 * 内容区）+ 右栏底部路径栏（面包屑 + 缩放滑条 + 统计数）。文件操作（新建 / 重命名 / 删除）
+	 * 做成 ICommand 进编辑历史，所以 Ctrl+Z / Ctrl+Y 对文件操作同样有效。 */
+		void ShowBrowserTopBar(const ImVec2& theme_padding);
+		/* 底部栏：当前路径面包屑（每级可点）+ 选中的项（右端是滑动条与统计数） */
 		void ShowBrowserFooter();
 		/* 内容区（右栏）：缩略图网格 / 详细列表两种模式。
 		 * 先算出这一帧的可见项（显示顺序），网格、列表、范围选择、全选、计数都用它，
@@ -151,27 +172,34 @@ namespace Helios
 		/* node 是否等于 target 或它的祖先（用于判断要不要把某个目录展开） */
 		static bool IsAncestorOrSelf(const SharedPtr<FileNode>& node, const SharedPtr<FileNode>& target);
 
-		/* ---- 文件操作（新建文件夹 / 重命名 / 删除）----
-		 * 三件都在右键菜单里（内容区与目录树都有），执行前要弹一个输入 / 确认层。
-		 * 待办目标一律按相对 Assets 的路径记：文件树会重建，节点指针不保险。 */
+		/* ---- 文件操作（新建 / 重命名 / 删除）----
+		 * 除了新建资源走顶栏「新建」按钮，其余都在右键菜单里（内容区和目录树都有），执行前弹输入 /
+		 * 确认层。待办目标一律按相对 Assets 的路径记（文件树会重建，节点指针不保险）。 */
 
 		/* 右键菜单的条目（在已经开好的 popup 里画） */
 		void DrawAssetContextMenuItems(const std::string& path, bool is_folder);
 		/* 空处右键：在当前目录下新建 */
 		void DrawBackgroundContextMenuItems();
-		/* 三个弹层（新建 / 重命名 / 删除确认）：画在面板根作用域，
-		 * 因为右键菜单在内容栏与目录树两个子窗口里，各自算 ID 会得到不同的值。 */
-		void DrawAssetOperationPopups();
+		/* 各弹层（新建资源 / 新建文件夹 / 新建文件 / 重命名 / 删除确认）都画在面板根作用域（右键
+		 * 菜单在子窗口里，各自算出来的 ID 不同）。theme_padding 是主题的窗口内边距（面板压成了 0），
+		 * 弹层用它补回上下内边距。 */
+		void DrawAssetOperationPopups(const ImVec2& theme_padding);
+		/* 顶栏「新建」按钮的下拉菜单：文件夹 + 几种可建的资源文件（见 .cpp 里的表） */
+		void DrawNewAssetMenu();
 
 		/* 打开弹层：路径都是相对 Assets 的 */
 		void OpenNewFolderPopup(const std::string& parent_path);
+		/* 新建资源文件：extension 形如 ".scn"（空 = 不限后缀，用户自己写）；
+		 * default_stem 是预填的名字（不带后缀），parent_path 是新建在哪个目录下 */
+		void OpenNewFilePopup(const std::string& extension, const std::string& default_stem,
+			const std::string& parent_path);
 		void OpenRenamePopup(const std::string& path);
 		void OpenDeletePopup(std::vector<std::string> paths);
 
-		/* 名字输入弹层（新建与重命名共用：m_PendingIsRename 决定标题与确认按钮的文案） */
-		void DrawNamePopup(ImGuiID popup_id, bool is_rename);
+		/* 名字输入弹层（新建与重命名共用：mode 决定标题、后缀约束与确认后建什么） */
+		void DrawNamePopup(ImGuiID popup_id, NamePopupMode mode);
 
-		/* 把命令塞进编辑历史（m_Context 为空时直接执行） */
+		/* 把命令塞进编辑历史（没有注入通道时直接执行） */
 		void ExecuteCommand(UniquePtr<ICommand> command);
 
 		/* 相对 Assets 的路径 → 绝对路径 */
@@ -180,12 +208,18 @@ namespace Helios
 		/* 待办：新建时是父目录，重命名时是被改名的目标；两个都空 = 没有待办 */
 		std::string m_PendingParentPath;
 		std::string m_PendingRenamePath;
+		/* 新建资源文件要求的后缀（含点，如 ".scn"；空 = 不限后缀），只在 NamePopupMode::NewFile 用 */
+		std::string m_PendingNewFileExtension;
 		/* 删除确认里的目标 */
 		std::vector<std::string> m_PendingDeletePaths;
 		/* 名字输入框的内容（新建 / 重命名共用） */
 		char m_NameBuffer[128]{};
+		/* 「新建」菜单的过滤词（与层级、属性面板的菜单同款：打开即清空并聚焦） */
+		char m_NewAssetFilter[64]{};
 		/* 面板根作用域上算好的弹层 ID（见 OnImGuiRenderer） */
+		ImGuiID m_PopupNewMenu{ 0 };
 		ImGuiID m_PopupNewFolder{ 0 };
+		ImGuiID m_PopupNewFile{ 0 };
 		ImGuiID m_PopupRename{ 0 };
 		ImGuiID m_PopupDelete{ 0 };
 
@@ -195,8 +229,9 @@ namespace Helios
 		std::string m_RemapTo;
 		std::string m_PendingSelectPath;
 
-		/* 跨面板通道：只为"把文件操作塞进编辑历史"这一个用途（主壳层注入） */
-		std::function<void(UniquePtr<ICommand>)> m_CommandSink;
+		/* 跨面板通道：编辑历史（文件操作要进同一条历史、顶栏的撤销 / 重做按钮要问状态）。
+		 * 只为这一个用途，由主壳层注入。 */
+		HistorySink m_History;
 
 		/* 资源目录是否被改动（新增 / 删除资源，或编辑器之外的操作） */
 		[[nodiscard]] bool HasDirectoryChanged() const;

@@ -47,6 +47,19 @@ namespace Helios
 		/* 绘制图标本体（不进入交互；按钮请用 IconButton） */
 		void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color);
 
+
+		/* 前置图标（输入框 / 下拉框左端的小图标）：用 Begin/End 包住控件、图标画在左端中部（控件
+		 * 矩形由调用方给 —— 下拉弹层打开时 GetItemRect 取到的是弹层项）。注意：Begin/End 靠撑大
+		 * FramePadding 让位，而弹层的内边距正是取自 FramePadding.x —— 带弹层的下拉框别用（自己画预览），
+		 * 只给输入框这类没弹层的控件用。 */
+		void BeginLeadingIcon();
+		void DrawLeadingIcon(Id id, const ImVec2& frame_min, const ImVec2& frame_max);
+		void EndLeadingIcon();
+
+		/* 前置图标占掉的横向宽度：自己排版的控件（如下拉框）要把这一档算进自己的宽度里，
+		 * 否则文字会被挤到箭头底下。 */
+		float LeadingIconSpace();
+
 		/* 统一图标按钮：集中尺寸、扁平底色、checked 高亮与 tooltip */
 		bool IconButton(Id id, const ImVec2& size, bool checked = false, const char* tooltip = nullptr);
 	}

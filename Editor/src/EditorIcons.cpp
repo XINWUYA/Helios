@@ -655,6 +655,46 @@ namespace Helios::Icons
 			desc.Draw(draw_list, center, size, color);
 	}
 
+	/* 前置图标（输入框 / 下拉框左端那个小图标）的摆法：图标中心距控件左端多远，
+	 * 以及控件要为此额外留出的横向内边距（留宽一点，文字才不会贴着图标）。
+	 * 搜索框与类型筛选共用这一组数 —— 两个控件的图标位置才对得齐。 */
+	constexpr float kLeadingIconX = 11.0f;
+	constexpr float kLeadingIconPad = 20.0f;
+
+	inline float LeadingIconSize()
+	{
+		return std::min(ImGui::GetFontSize(), 14.0f);
+	}
+
+	/* 预留图标占的横向空间（包住控件，之后用 Pop 还原）。
+	 * 撑大的是 `FramePadding`，而 `BeginComboPopup` 会把弹层的横向内边距取成它 ——
+	 * 带弹层的控件（下拉框）别用这一对，会连带把弹层撑开；输入框这类没有弹层的才用它。 */
+	void BeginLeadingIcon()
+	{
+		const ImVec2 frame_padding = ImGui::GetStyle().FramePadding;
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+			ImVec2(frame_padding.x + kLeadingIconPad, frame_padding.y));
+	}
+
+	/* 把图标画在控件左端中部：用弱化色（跟搜索框的放大镜同一个色，都是"这东西是干嘛的"的提示）。
+	 * 矩形由调用方给（不用 GetItemRect*）：下拉框弹层打开时当前窗口已经切到弹层了。 */
+	void DrawLeadingIcon(Id id, const ImVec2& frame_min, const ImVec2& frame_max)
+	{
+		Draw(ImGui::GetWindowDrawList(), id,
+			ImVec2(frame_min.x + kLeadingIconX, (frame_min.y + frame_max.y) * 0.5f),
+			LeadingIconSize(), ImGui::GetColorU32(ImGuiCol_TextDisabled));
+	}
+
+	void EndLeadingIcon()
+	{
+		ImGui::PopStyleVar();
+	}
+
+	float LeadingIconSpace()
+	{
+		return kLeadingIconPad;
+	}
+
 	bool IconButton(Id id, const ImVec2& size, bool checked, const char* tooltip)
 	{
 		ImGui::PushID(static_cast<int>(id));

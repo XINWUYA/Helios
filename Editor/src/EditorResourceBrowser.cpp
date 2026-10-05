@@ -5,11 +5,13 @@
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Command/AssetFileOps.h"
+#include "Command/CreateAssetFileCommand.h"
 #include "Command/CreateAssetFolderCommand.h"
 #include "Command/DeleteAssetsCommand.h"
 #include "Command/RenameAssetCommand.h"
 #include "Helios/Application/FileDialog.h"
 #include "Helios/ImGui/EditorTheme.h"
+#include "Helios/ImGui/ImGuiExtensions.h"
 #include <utility>
 #include <vector>
 
@@ -31,24 +33,96 @@ namespace Helios
 		constexpr float kMinThumbnailSize = 16.0f;
 		constexpr float kMaxThumbnailSize = 128.0f;
 
-		/* 网格里两格之间的横向间距：定死，不做成可调项（原本有个 Spacing 滑动条，
-		 * 它和缩放滑动条是两套"调版式"的手感，值调到 0 也只是把格子挤在一起）。 */
+		/* 网格里两格之间的最小横向间距：定死，不做成可调项（原本有个 Spacing 滑动条，
+		 * 它和缩放滑动条是两套"调版式"的手感，值调到 0 也只是把格子挤在一起）。
+		 * 它只决定"这一栏最多分几列"；实际间距 = 它 + 富余宽度均分到格子之间的那一份。 */
 		constexpr float kThumbnailGap = 32.0f;
 
-		/* 底栏右端那组（统计数 + 缩放滑动条）：滑动条的标称宽度与退让下限 */
+		/* 缩略图网格在内容栏左右各留的余地。取 5 是因为它正好等于「选中框的外扩 +
+		 * 半个描边」（kGridSelectionPad + 0.75）：最外侧那两格的选中框因此刚好落在
+		 * 内容栏内沿、不会被它的裁剪矩形切掉一条边（上边那一档是 kGridTopInset）。 */
+		constexpr float kGridSideInset = 5.0f;
+
+		/* 路径栏右端那组（缩放的滑动条 + 统计数）：滑动条的标称宽度与退让下限 */
 		constexpr float kZoomSliderWidth = 96.0f;
 		constexpr float kMinZoomSliderWidth = 48.0f;
 
-		/* 底栏留给路径（上一级按钮 + 面包屑）的最小宽度：右端那组退让时按它算 */
-		constexpr float kMinCrumbWidth = 96.0f;
+		/* 路径栏留给路径（面包屑）的最小宽度。注意：路径栏只占右栏宽度，这一档要抠着给 ——
+		 * 只保证"至少放得下一段短目录名"，给宽了右端的统计数会被早早挤掉。 */
+		constexpr float kMinCrumbWidth = 72.0f;
 
-		/* 底栏给"选中的项"这类摘要留的最小宽度：低于它就整段不画 ——
-		 * 留着只会被裁成两三个字母的碎片，比不显示更像出了 bug。 */
+		/* 一段面包屑至少要放得下这么宽才画：再窄就整级不画，
+		 * 别在那一行里留一个看不见却还能点的"点"。 */
+		constexpr float kMinCrumbLabelWidth = 8.0f;
+
+		/* 路径栏给"选中的项"摘要留的最小宽度：比这还窄就整段不画（留着也只会被裁成碎片）。
+		 * 它不算进 path_min —— 摘要本来就可省，不用一直预留。 */
 		constexpr float kMinSelectionWidth = 56.0f;
 
 		/* 文件操作弹层（新建 / 重命名 / 删除确认）里的控件尺寸：两个按钮等宽，排一行 */
 		constexpr float kPopupButtonSize = 84.0f;
 		constexpr float kPopupInputWidth = 240.0f;
+
+		/* 顶栏「新建」菜单里能建的文件类型（文件夹单列，不算文件）。这张表是"能建哪些资源"
+		 * 的唯一来源：菜单项、名字预填、后缀约束、初始内容全靠它。只列资源树认得出类型的格式；
+		 * 最后一项是兜底的不限后缀（.glsl / .mat 自己写后缀）。 */
+		struct CreatableFileType
+		{
+			const char* MenuLabel;
+			const char* Extension;    /* 含点；空 = 不限后缀（用户自己写） */
+			const char* DefaultStem;  /* 弹层里预填的名字（不带后缀） */
+			Icons::Id   Icon;         /* 「新建」下拉里的条目图标 */
+		};
+
+		constexpr CreatableFileType kCreatableFiles[] =
+		{
+			{ "Scene",          ".scn",      "New Scene",          Icons::Id::FileScene },
+			{ "Material Graph", ".mtlgraph", "New Material Graph", Icons::Id::FileMtlGraph },
+			{ "File...",        "",          "New File",           Icons::Id::File },
+		};
+
+		/* 忽略大小写的"以 suffix 结尾"：新建文件时判断用户有没有自己把后缀写上。
+		 * 后缀都短，直接按字符比，省得为它引入一份大小写无关的字符串设施。 */
+		bool EndsWithIgnoreCase(const std::string& text, const std::string& suffix)
+		{
+			if (suffix.empty() || text.size() < suffix.size())
+				return false;
+
+			const size_t offset = text.size() - suffix.size();
+			for (size_t index = 0; index < suffix.size(); ++index)
+			{
+				char left = text[offset + index];
+				char right = suffix[index];
+
+				if (left >= 'A' && left <= 'Z')
+					left = static_cast<char>(left - 'A' + 'a');
+				if (right >= 'A' && right <= 'Z')
+					right = static_cast<char>(right - 'A' + 'a');
+
+				if (left != right)
+					return false;
+			}
+
+			return true;
+		}
+
+		/* 编辑历史按钮的 tooltip："Undo Rename hero.png  (Ctrl+Z)"。
+		 * 操作名拿不到（历史是空的）就只写动作与快捷键。 */
+		std::string HistoryTooltip(const char* action, const char* label, const char* shortcut)
+		{
+			std::string text(action);
+
+			if (label != nullptr && label[0] != '\0')
+			{
+				text += ' ';
+				text += label;
+			}
+
+			text += "  (";
+			text += shortcut;
+			text += ')';
+			return text;
+		}
 
 		/* 面包屑的分隔符是矢量三角（见 ShowBrowserFooter），这是它占位的方框边长 ——
 		 * 与卡片折叠箭头一样按字号取比例，字号变了不会走形。 */
@@ -68,10 +142,11 @@ namespace Helios
 		 * 会整条被切掉（框画得出来，只是少一条边）。 */
 		constexpr float kGridTopInset = kGridSelectionPad + 4.0f;
 
-		/* 顶栏 / 底栏与主体之间的那条分隔线（1px，自绘） */
+		/* 栏与主体之间那条分隔线（1px，自绘） */
 		constexpr float kBarDivider = 1.0f;
 
-		/* 底栏（分隔线 + 一行）的总高：主体预留与底栏自己定位都用它 */
+		/* 路径栏（分隔线 + 一行）的总高：右栏里的内容区按它让出位置，
+		 * 路径栏自己也按它定位 —— 一处算，两处用，对得上。 */
 		inline float FooterBandHeight()
 		{
 			return ImGui::GetFrameHeight() + kBarDivider;
@@ -419,43 +494,43 @@ namespace Helios
 
 			/* 弹层 ID 在面板根作用域上算一次：右键菜单在内容栏与目录树两个子窗口里，
 			 * 各自算 ID 会得到不同的值，弹层就对不上了（见 DrawAssetOperationPopups）。 */
+			m_PopupNewMenu = ImGui::GetID("##NewAssetMenu");
 			m_PopupNewFolder = ImGui::GetID("##NewAssetFolder");
+			m_PopupNewFile = ImGui::GetID("##NewAssetFile");
 			m_PopupRename = ImGui::GetID("##RenameAsset");
 			m_PopupDelete = ImGui::GetID("##DeleteAssets");
 
-			/* 底栏（分隔线 + 一行）钉在面板底边上，主体只要让出它的高度 ——
-			 * 这个数由我们自己定（栏高 + 1px 分隔线），不用猜 ImGui::Separator() 吃掉多少，
-			 * 因此既不会少一像素长出滚动条，也不会多留一条空带。 */
-			const float reserved_footer = FooterBandHeight();
+			/* 布局：顶栏（贴着面板上边）+ 左右两栏；路径栏在右栏的下边（见 ShowBrowserBody），
+			 * 所以这里不再为它预留面板级的高度。 */
+			ShowBrowserTopBar(pane_padding);
+			ShowBrowserBody();
 
-			ShowBrowserTopBar();
-			ShowBrowserBody(reserved_footer, pane_padding.y);
-			ShowBrowserFooter();
-
-			/* 文件操作弹层画在面板根：三件都在右键菜单里点开 */
-			DrawAssetOperationPopups();
+			/* 文件操作弹层画在面板根：右键菜单与顶栏的「新建」按钮都在这里开弹层。
+			 * 把主题的窗口内边距带进去 —— 面板为了贴上下边把它压成了 0，
+			 * 弹层要的是主题那一档（不补的话首末条目紧贴弹层的上下边）。 */
+			DrawAssetOperationPopups(pane_padding);
 		}
 		ImGui::End();
 
 		ImGui::PopStyleVar();
 	}
 
-	/* 主体：左右两栏 —— 左「Folders」目录树、中间可拖的分隔条、右内容区。
+	/* 主体：左右两栏 —— 左「Folders」目录树、中间可拖的分隔条、右内容区（含底部的路径栏）。
 	 * 两栏都是子窗口：内容区的缩略图网格用的是 ImGui::Columns，而 Columns 以「当前窗口」
 	 * 为界（窗口的 WorkRect / Indent），不套子窗口的话它会横跨整个面板、压到目录树上。 */
-	void EditorResourceBrowser::ShowBrowserBody(float reserved_footer, float pane_padding)
+	void EditorResourceBrowser::ShowBrowserBody()
 	{
 		PROFILE_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
+		const ImVec2 pane_padding = style.WindowPadding;
 
-		/* 主体的高度按绝对几何算：从当前光标一直到底栏上边（面板底边 - 底栏高度）。
-		 * 不用 GetContentRegionAvail()：顶栏与底栏都是贴边画的，面板的内边距/内容区
-		 * 那套账不参与，两头的数用绝对量才对得上（否则主体会短一截，栏底空出一条）。 */
+		/* 主体高度按绝对几何算：从光标到面板底边（不用 GetContentRegionAvail —— 顶栏贴边画、
+		 * 内边距这笔账不掺和）。底栏不从这扣：它只占右栏底部，左栏撑满整个主体高度。 */
 		ImGuiWindow* window = ImGui::GetCurrentWindow();
 		const float panel_bottom = window->Pos.y + window->Size.y;
 		const ImVec2 body(ImGui::GetContentRegionAvail().x,
-			ImMax(panel_bottom - reserved_footer - ImGui::GetCursorScreenPos().y,
+			ImMax(panel_bottom - ImGui::GetCursorScreenPos().y,
 				ImGui::GetFrameHeight() * 2.0f));
 		const float body_height = body.y;
 		const float bar_width = ImMax(style.ItemSpacing.x, 4.0f);
@@ -498,15 +573,28 @@ namespace Helios
 		PanelChrome::HorizontalSplitter(m_TreePaneRatio, body.x,
 			kMinTreePaneRatio, kMaxTreePaneRatio, bar_width, body_height);
 
-		/* ---- 右栏：内容区 ----
-		 * 同样要 AlwaysUseWindowPadding：缩略图与表格才不贴着分隔条与面板边线 */
+		/* ---- 右栏：内容区 + 底部路径栏 ----
+		 * 路径栏挂在右栏下边（描述右栏正在浏览的目录）；内容区自己滚、路径栏钉住。注意：宽度再加
+		 * 一档（面板横向内边距），让右栏吃满到面板右缘，不然滚动条会停在离边界差两档内边距的地方。 */
 		ImGui::SameLine(0.0f, 0.0f);
-		/* 这里要传 ImVec2：函数参数 `pane_padding` 是 float（只表示上下内边距），
-		 * 传它会被隐式选到 PushStyleVar 的 float 重载，运行时直接断言挂掉。 */
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, style.WindowPadding);
-		ImGui::BeginChild("##BrowserContentPane", ImVec2(ImGui::GetContentRegionAvail().x, body_height), false,
-			ImGuiWindowFlags_AlwaysUseWindowPadding);
-		ShowBrowserContent();
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pane_padding.x, 0.0f));
+		ImGui::BeginChild("##BrowserRightPane", ImVec2(ImGui::GetContentRegionAvail().x, body_height), false,
+			ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+		{
+			/* 内容区的高度要把路径栏那一档让出来：底栏高 = 行高 + 1px 分隔线，
+			 * 让出的正是这一档，两者之间那条线才不会压到内容上、也不会空出一条。 */
+			const float content_height = ImMax(
+				ImGui::GetContentRegionAvail().y - FooterBandHeight(), ImGui::GetFrameHeight());
+
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, pane_padding.y));
+			ImGui::BeginChild("##BrowserContentPane", ImVec2(0.0f, content_height), false,
+				ImGuiWindowFlags_AlwaysUseWindowPadding);
+			ShowBrowserContent();
+			ImGui::EndChild();
+			ImGui::PopStyleVar();
+
+			ShowBrowserFooter();
+		}
 		ImGui::EndChild();
 		ImGui::PopStyleVar();
 	}
@@ -679,7 +767,9 @@ namespace Helios
 			return;
 
 		/* 弹层由面板根作用域上的 ID 开的，这里也用那套 ID 判"开着没有" */
-		if (ImGui::IsPopupOpen(m_PopupNewFolder, ImGuiPopupFlags_None)
+		if (ImGui::IsPopupOpen(m_PopupNewMenu, ImGuiPopupFlags_None)
+			|| ImGui::IsPopupOpen(m_PopupNewFolder, ImGuiPopupFlags_None)
+			|| ImGui::IsPopupOpen(m_PopupNewFile, ImGuiPopupFlags_None)
 			|| ImGui::IsPopupOpen(m_PopupRename, ImGuiPopupFlags_None)
 			|| ImGui::IsPopupOpen(m_PopupDelete, ImGuiPopupFlags_None))
 			return;
@@ -707,8 +797,8 @@ namespace Helios
 		}
 	}
 
-	/* ---- 文件操作：新建文件夹 / 重命名 / 删除 ----
-	 * 三件都做成 ICommand 走编辑历史，于是 Ctrl+Z / Ctrl+Y、菜单与工具栏的撤销 / 重做
+	/* ---- 文件操作：新建文件夹 / 新建资源文件 / 重命名 / 删除 ----
+	 * 都做成 ICommand 走编辑历史，于是 Ctrl+Z / Ctrl+Y、菜单与工具栏的撤销 / 重做
 	 * 对它们同样有效 —— 这也是"资源管理器支持撤销"的全部意义：不是另开一套历史。 */
 
 	std::filesystem::path EditorResourceBrowser::AbsoluteAssetPath(const std::string& relative_path)
@@ -721,14 +811,14 @@ namespace Helios
 		if (command == nullptr)
 			return;
 
-		if (m_CommandSink)
+		if (m_History.Execute)
 		{
-			/* 交给编辑历史：撤销 / 重做（含工具栏按钮与 Ctrl+Z）都归它管 */
-			m_CommandSink(std::move(command));
+			/* 交给编辑历史：撤销 / 重做（含工具栏按钮、Ctrl+Z 与顶栏那两个按钮）都归它管 */
+			m_History.Execute(std::move(command));
 			return;
 		}
 
-		/* 没有 sink（面板单独跑 / headless 测试）：直接执行 —— 功能对，只是没有历史 */
+		/* 没有注入通道（面板单独跑 / headless 测试）：直接执行 —— 功能对，只是没有历史 */
 		command->Do();
 	}
 
@@ -758,10 +848,23 @@ namespace Helios
 	{
 		m_PendingParentPath = parent_path;
 		m_PendingRenamePath.clear();
+		m_PendingNewFileExtension.clear();   /* 清掉上一个弹层的后缀约束：文件夹没有后缀 */
 
 		snprintf(m_NameBuffer, sizeof(m_NameBuffer), "%s", "New Folder");
 
 		ImGui::OpenPopup(m_PopupNewFolder);
+	}
+
+	void EditorResourceBrowser::OpenNewFilePopup(const std::string& extension, const std::string& default_stem,
+		const std::string& parent_path)
+	{
+		m_PendingParentPath = parent_path;
+		m_PendingRenamePath.clear();
+		m_PendingNewFileExtension = extension;
+
+		snprintf(m_NameBuffer, sizeof(m_NameBuffer), "%s", default_stem.c_str());
+
+		ImGui::OpenPopup(m_PopupNewFile);
 	}
 
 	void EditorResourceBrowser::OpenRenamePopup(const std::string& path)
@@ -783,14 +886,94 @@ namespace Helios
 		ImGui::OpenPopup(m_PopupDelete);
 	}
 
-	void EditorResourceBrowser::DrawAssetOperationPopups()
+	/* 顶栏「新建」下拉：文件夹 + 表里那几种资源文件；目标目录 = 右栏当前浏览的目录。
+	 * 版式跟「添加组件」菜单一样（搜索框 + 列表，打开就清空重聚焦）。
+	 * 注意：选中的项要等 EndPopup 之后再执行（名字弹层得开在面板根层）。 */
+	void EditorResourceBrowser::DrawNewAssetMenu()
 	{
-		DrawNamePopup(m_PopupNewFolder, false);
-		DrawNamePopup(m_PopupRename, true);
+		const std::string current = (m_CurrentFileNode != nullptr) ? m_CurrentFileNode->FilePath : std::string();
+		int chosen = -1;   /* -1 = 没选；0 = 文件夹；其余 = kCreatableFiles 的下标 + 1 */
+
+		/* BeginPopupEx 不会自动加 NoTitleBar（BeginPopup 才加）——漏了弹层顶上
+		 * 会多出一条空标题栏与折叠钮。 */
+		if (ImGui::BeginPopupEx(m_PopupNewMenu,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+				| ImGuiWindowFlags_NoTitleBar))
+		{
+			if (ImGui::IsWindowAppearing())
+			{
+				m_NewAssetFilter[0] = '\0';
+				ImGui::SetKeyboardFocusHere();
+			}
+
+			ImGui::SetNextItemWidth(220.0f);
+			Icons::BeginSearchInput();
+			ImGui::InputTextWithHint("##NewAssetSearch", "Search...", m_NewAssetFilter,
+				sizeof(m_NewAssetFilter));
+			Icons::EndSearchInput();
+			ImGui::Separator();
+
+			const std::string needle = ToLowercase(m_NewAssetFilter);
+			bool any_match = false;
+
+			if (ContainsCaseInsensitive("Folder", needle))
+			{
+				any_match = true;
+
+				if (PanelChrome::MenuItemWithIcon(Icons::Id::Directory, "Folder"))
+					chosen = 0;
+			}
+
+			/* 文件类型们：后缀与初始内容都从表里取（AssetFileTemplate 按后缀给模板） */
+			for (int index = 0; index < IM_ARRAYSIZE(kCreatableFiles); ++index)
+			{
+				if (!ContainsCaseInsensitive(kCreatableFiles[index].MenuLabel, needle))
+					continue;
+
+				any_match = true;
+
+				if (PanelChrome::MenuItemWithIcon(kCreatableFiles[index].Icon,
+						kCreatableFiles[index].MenuLabel))
+					chosen = index + 1;
+			}
+
+			if (!any_match)
+				ImGui::TextDisabled("No matching asset");
+
+			ImGui::EndPopup();
+		}
+
+		if (chosen < 0)
+			return;
+
+		if (chosen == 0)
+		{
+			OpenNewFolderPopup(current);
+			return;
+		}
+
+		const CreatableFileType& type = kCreatableFiles[chosen - 1];
+		OpenNewFilePopup(type.Extension, type.DefaultStem, current);
+	}
+
+	void EditorResourceBrowser::DrawAssetOperationPopups(const ImVec2& theme_padding)
+	{
+		/* 弹层的内边距：面板把 WindowPadding.y 压成了 0（顶栏 / 底栏要贴面板的上下边），
+		 * 弹层要的却是主题那一档 —— 不补的话首末条目紧贴弹层的上下边（下拉框那边
+		 * 已经踩过一次，见 ShowBrowserTopBar）。四个弹层一起补，它们才是一套。 */
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, theme_padding);
+
+		DrawNewAssetMenu();
+		DrawNamePopup(m_PopupNewFolder, NamePopupMode::NewFolder);
+		DrawNamePopup(m_PopupNewFile, NamePopupMode::NewFile);
+		DrawNamePopup(m_PopupRename, NamePopupMode::Rename);
 
 		/* ---- 删除确认 ---- */
+		/* BeginPopupEx 不会自动加 NoTitleBar（BeginPopup 才加）——漏了弹层顶上
+		 * 会多出一条空标题栏与折叠钮。 */
 		if (ImGui::BeginPopupEx(m_PopupDelete,
-				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+				| ImGuiWindowFlags_NoTitleBar))
 		{
 			ImGui::TextUnformatted(m_PendingDeletePaths.size() == 1
 				? "Delete this item?" : "Delete these items?");
@@ -832,15 +1015,25 @@ namespace Helios
 
 			ImGui::EndPopup();
 		}
+
+		ImGui::PopStyleVar();
 	}
 
-	/* 名字输入弹层：新建文件夹与重命名共用（只有文案与"确认后做什么"不同） */
-	void EditorResourceBrowser::DrawNamePopup(ImGuiID popup_id, bool is_rename)
+	/* 名字输入弹层：新建文件夹 / 新建资源文件 / 重命名共用
+	 * （只有标题、后缀约束与"确认后建什么"不同，输入与校验是一套） */
+	void EditorResourceBrowser::DrawNamePopup(ImGuiID popup_id, NamePopupMode mode)
 	{
-		if (!ImGui::BeginPopupEx(popup_id, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+		/* BeginPopupEx 不会自动加 NoTitleBar（BeginPopup 才加）——漏了弹层顶上
+		 * 会多出一条空标题栏与折叠钮。 */
+		if (!ImGui::BeginPopupEx(popup_id,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+				| ImGuiWindowFlags_NoTitleBar))
 			return;
 
-		ImGui::TextUnformatted(is_rename ? "Rename" : "New Folder");
+		const bool is_rename = (mode == NamePopupMode::Rename);
+		const bool is_file = (mode == NamePopupMode::NewFile);
+
+		ImGui::TextUnformatted(is_rename ? "Rename" : (is_file ? "New File" : "New Folder"));
 
 		/* 名字非法时把原因写在输入框下面，并禁用确认按钮 —— 别让用户点了没反应 */
 		const std::string typed = m_NameBuffer;
@@ -851,8 +1044,15 @@ namespace Helios
 			? AbsoluteAssetPath(m_PendingRenamePath) : std::filesystem::path();
 		const std::filesystem::path parent = is_rename
 			? pending_source.parent_path() : AbsoluteAssetPath(m_PendingParentPath);
-		const std::filesystem::path requested = parent / PathFromUtf8(typed);
-		const std::filesystem::path target = MakeUniquePath(parent, typed);
+
+		/* 新建资源文件时后缀由菜单项定：用户没写就替他补上（"Scene"这一项已经说明要建什么，
+		 * 是补上而不是报错）；写了别的后缀也照样补，最终名字会显示在提示行。 */
+		std::string final_name = typed;
+		if (is_file && !m_PendingNewFileExtension.empty() && !EndsWithIgnoreCase(typed, m_PendingNewFileExtension))
+			final_name += m_PendingNewFileExtension;
+
+		const std::filesystem::path requested = parent / PathFromUtf8(final_name);
+		const std::filesystem::path target = MakeUniquePath(parent, final_name);
 
 		ImGui::SetNextItemWidth(kPopupInputWidth);
 
@@ -868,11 +1068,12 @@ namespace Helios
 		{
 			ImGui::Text("名字不合法：%s", error.c_str());
 		}
-		else if (target != requested)
+		else if (target != requested || final_name != typed)
 		{
-			/* 同名被占了：说清会建成什么名字，免得用户以为没生效 */
+			/* 最终名字与输入的不一样：说清会建成什么，免得用户以为没生效
+			 * （两种来路 —— 同名被占了要让开，后缀被自动补上）。 */
 			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
-			ImGui::Text("%s 已被占用，将创建为 %s", typed.c_str(), PathToUtf8(target.filename()).c_str());
+			ImGui::Text("将创建为 %s", PathToUtf8(target.filename()).c_str());
 			ImGui::PopStyleColor();
 		}
 
@@ -889,6 +1090,13 @@ namespace Helios
 			if (is_rename)
 			{
 				ExecuteCommand(CreateUniquePtr<RenameAssetCommand>(this, pending_source, target));
+			}
+			else if (is_file)
+			{
+				/* 初始内容按最终后缀取：补出来的后缀也算（.scn 给一份空场景的骨架） */
+				const std::string extension = PathToUtf8(target.extension());
+				ExecuteCommand(CreateUniquePtr<CreateAssetFileCommand>(
+					this, target, AssetFileTemplate(extension)));
 			}
 			else
 			{
@@ -965,29 +1173,80 @@ namespace Helios
 	/* 顶栏：左端搜索框，右端「后退 / 前进 / 筛选 / 新建」四枚图标按钮（新建贴最右，依次
 	 * 向左）。放不下就压窄搜索框（下限 80；固定阈值总会在某个宽度上算错、控件重叠）；右端
 	 * 四枚不参与退让。筛选是纯图标按钮，点击弹类型单选菜单，生效时高亮。 */
-	void EditorResourceBrowser::ShowBrowserTopBar()
+	void EditorResourceBrowser::ShowBrowserTopBar(const ImVec2& theme_padding)
 	{
 		PROFILE_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 
 		/* 顶栏就画在面板的客户端顶边上（面板本身不带上下内边距，见 OnImGuiRenderer），
-		 * 这一栏的高因此正好等于里面的控件高；横向仍按内容区左端对齐。 */
-		const PanelChrome::HeaderRow row = PanelChrome::BeginHeaderRow(Icons::Id::Directory);
+		 * 横向按内容区左端对齐。左上角不再画面板图标（目录名在底栏、面板名在窗口标题里，
+		 * 那枚文件夹图标只是重复），改成「新建 + 撤销 / 重做」三个按钮。 */
+		PanelChrome::HeaderRow row = PanelChrome::BeginHeaderRow(Icons::Id::None);
+
+		/* 控件上下各留 1px：栏高因此比控件高 2px。留白的用处是"贴边画"的两个毛病 ——
+		 * 控件顶边压在面板上边上、底边又压在下面那条分隔线上，看着像缺了一条边框。 */
+		constexpr float kBarInset = 1.0f;
+		row.Height += kBarInset * 2.0f;
+
 		const float control_height = ImGui::GetFrameHeight();
-		const float control_y = row.Min.y + (row.Height - control_height) * 0.5f;
+		const float control_y = row.Min.y + kBarInset;
 		const float gap = style.ItemInnerSpacing.x;
+
+	/* 顶栏：左端搜索框，右端「后退 / 前进 / 筛选 / 新建」四枚图标按钮（新建贴最右，依次
+	 * 向左）。放不下就压窄搜索框（下限 80；固定阈值总会在某个宽度上算错、控件重叠）；右端
+	 * 四枚不参与退让。筛选是纯图标按钮，点击弹类型单选菜单，生效时高亮。 */
+		const float action_size = control_height;
+		const float action_step = action_size + gap;          /* 按钮的步长（含它们之间的间隙） */
+		const float left_cluster = action_size * 3.0f + gap * 2.0f;
+
+		ImGui::SetCursorScreenPos(ImVec2(row.Min.x, control_y));
+		if (Icons::IconButton(Icons::Id::Add, ImVec2(action_size, action_size), false,
+			"New asset  (folder / scene / material graph / file)"))
+		{
+			ImGui::OpenPopup(m_PopupNewMenu);
+		}
+
+		const bool can_undo = m_History.CanUndo && m_History.CanUndo();
+		const bool can_redo = m_History.CanRedo && m_History.CanRedo();
+		const std::string undo_tip = HistoryTooltip("Undo",
+			m_History.UndoLabel ? m_History.UndoLabel() : nullptr, "Ctrl+Z");
+		const std::string redo_tip = HistoryTooltip("Redo",
+			m_History.RedoLabel ? m_History.RedoLabel() : nullptr, "Ctrl+Y");
+
+		ImGui::SetCursorScreenPos(ImVec2(row.Min.x + action_step, control_y));
+		ImGui::BeginDisabled(!can_undo);
+		if (Icons::IconButton(Icons::Id::Undo, ImVec2(action_size, action_size), false, undo_tip.c_str())
+			&& m_History.Undo)
+		{
+			m_History.Undo();
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SetCursorScreenPos(ImVec2(row.Min.x + action_step * 2.0f, control_y));
+		ImGui::BeginDisabled(!can_redo);
+		if (Icons::IconButton(Icons::Id::Redo, ImVec2(action_size, action_size), false, redo_tip.c_str())
+			&& m_History.Redo)
+		{
+			m_History.Redo();
+		}
+		ImGui::EndDisabled();
 
 		/* ---- 尺寸 ----
 		 * 类型筛选的宽度按 BeginCombo 自己的账算：文字从「控件左端 + FramePadding.x」起、
 		 * 到「控件右端 − 箭头区(GetFrameHeight)」为止，前面还要给前置图标留一档 ——
 		 * 少算哪一笔，最长的类型名就会被箭头区裁掉一截（"Mtl Graphs" 是最长的那个）。 */
-		const float type_width = ImGui::CalcTextSize("Mtl Graphs").x + control_height * 1.5f;
+		const float arrow_width = control_height;
+		const float type_width = ImGui::CalcTextSize("Mtl Graphs").x + arrow_width
+			+ style.FramePadding.x + Icons::LeadingIconSpace() + gap;
 		/* ---- 左端：搜索框（贴左端）----
 		 * 搜索框不撑满：够用就好，宽度多出来的部分留给中间那一段留白，
 		 * 也不至于窄到看不清输入的内容；放不下时跟着可用宽度缩，下限 80。 */
 		const float search_preferred = 220.0f;
 		const float search_min = 80.0f;
+
+		/* 右端那组能用的宽度：从左边那组之后算起（中间隔一格） */
+		const float group_room = row.Right - (row.Min.x + left_cluster + gap);
 
 		bool show_type = true;
 		float search_width = search_preferred;
@@ -997,21 +1256,41 @@ namespace Helios
 			show_type = (step < 2);
 			search_width = (step == 0) ? search_preferred : search_min;
 
-			const float needed = (show_type ? type_width + gap : 0.0f) + search_width;
-			if (needed <= row.Right - row.TitleX)
+			const float needed = search_width + (show_type ? gap + type_width : 0.0f);
+			if (needed <= group_room)
 				break;
 		}
 
-		const float search_x = row.Right - search_width;
-		const float type_x = search_x - gap - type_width;
+		/* 两件都靠右端：类型筛选贴最右，搜索紧挨在它左边 —— 留白全留在中间那一段，
+		 * "找东西"这一组因此是贴着右边缘的。筛选被舍掉时（面板太窄）搜索自己贴到右端。 */
+		const float type_x = show_type ? (row.Right - type_width) : row.Right;
+		const float search_x = (show_type ? type_x - gap : row.Right) - search_width;
 
 		/* 类型筛选：与文本过滤一起决定内容区显示什么（计数用的是同一条判据）。
 		 * 只影响右栏 —— 左栏是导航，把要进去的目录藏掉就没法用了。 */
 		if (show_type)
 		{
-			ImGui::SetCursorScreenPos(ImVec2(type_x, control_y));
+			const ImVec2 frame_min(type_x, control_y);
+			const ImVec2 frame_max(type_x + type_width, control_y + control_height);
+
+			/* 顶栏所在窗口的绘制列表：现在就取。弹层打开后"当前窗口"会切到弹层，
+			 * 那时 GetWindowDrawList() 拿到的是弹层的列表（前缀图标会画进去、被裁掉 = 图标凭空消失），
+			 * 所以下面自己画的东西一律用这一份。 */
+			ImDrawList* const row_draw = ImGui::GetWindowDrawList();
+
+			ImGui::SetCursorScreenPos(frame_min);
 			ImGui::SetNextItemWidth(type_width);
-			if (ImGui::BeginCombo("##AssetTypeFilter", TypeFilterName(m_TypeFilter)))
+
+			/* 预览（图标 + 名字 + 下箭头）自己画，所以给 BeginCombo 传空预览、不要它自带的箭头：
+			 * 它的预览文字钉在 FramePadding 上，要给前置图标让位就得把 FramePadding 撑大，
+			 * 而弹层的横向内边距正是取自 FramePadding（BeginComboPopup 把
+			 * WindowPadding.x 取成当时的 FramePadding.x）—— 撑大它会让弹层条目又挤又偏。
+			 * 自己画则两件事互不干扰：控件里怎么摆随我们，弹层拿到的还是主题那一档。
+			 * PushStyleVar(WindowPadding) 是给弹层补回上下内边距用的（见函数头注释）。 */
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, theme_padding);
+			const bool type_open = ImGui::BeginCombo("##AssetTypeFilter", "", ImGuiComboFlags_NoArrowButton);
+
+			if (type_open)
 			{
 				for (int i = 0; i < static_cast<int>(TypeFilter::COUNT); ++i)
 				{
@@ -1028,11 +1307,32 @@ namespace Helios
 				ImGui::EndCombo();
 			}
 
+			ImGui::PopStyleVar();
+
+			/* 预览画在弹层关掉之后：这时当前窗口已经回到面板，装饰才落在面板的绘制列表上
+			 * （也就压在弹层下面，不会糊到弹层上）。 */
+			const float icon_room = style.FramePadding.x + Icons::LeadingIconSpace();
+			const float arrow_size = ImGui::GetFontSize() * 0.55f;   /* 与卡片折叠箭头同一档 */
+			const ImVec2 arrow_center(frame_max.x - style.FramePadding.x - arrow_size * 0.5f,
+				(frame_min.y + frame_max.y) * 0.5f);
+
+			Icons::DrawLeadingIcon(Icons::Id::Filter, frame_min, frame_max);
+			PanelChrome::DrawDisclosureArrow(row_draw, arrow_center, arrow_size, true,
+				ImGui::GetColorU32(EditorTheme::Token::TextDim));
+
+			/* 名字：与图标同一条基线（行内居中），并裁到箭头区之前 —— 类型名将来变长也不会压到箭头上 */
+			row_draw->PushClipRect(ImVec2(frame_min.x + icon_room, frame_min.y),
+				ImVec2(arrow_center.x - arrow_size, frame_max.y), true);
+			row_draw->AddText(
+				ImVec2(frame_min.x + icon_room, (frame_min.y + frame_max.y - ImGui::GetFontSize()) * 0.5f),
+				ImGui::GetColorU32(EditorTheme::Token::Text), TypeFilterName(m_TypeFilter));
+			row_draw->PopClipRect();
+
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("Filter by asset type");
 		}
 
-		/* ---- 搜索框：贴最右端，类型筛选紧挨在它左边 ---- */
+		/* ---- 搜索框：紧挨类型筛选的左边（面板太窄、筛选被舍掉时它自己贴右端） ---- */
 		ImGui::SetCursorScreenPos(ImVec2(search_x, control_y));
 		ImGui::SetNextItemWidth(search_width);
 		ImGui::InputTextWithHint("##ResourceFilter", "Search assets...", m_Filter, sizeof(m_Filter));
@@ -1040,9 +1340,9 @@ namespace Helios
 		PanelChrome::EndHeaderRow(row);
 	}
 
-	/* 底部栏：上一级 + 当前路径（面包屑，每级可点，级间用矢量三角）+ 选中的文件，
-	 * 右端是统计数与缩放的滑动条（从顶栏搬下来）。
-	 * 路径过长时从最前面开始省略：越靠后越接近当前位置，越有用。 */
+	/* 路径栏：当前路径的面包屑（每级可点，级间是矢量三角）+ 选中的文件，右端是缩放滑条和
+	 * 统计数。挂在右栏下边。路径太长就从最前面省（越靠后越有用）。没有"上一级"按钮了 ——
+	 * 点面包屑上一段就行（那枚图标白占行首一格）。 */
 	void EditorResourceBrowser::ShowBrowserFooter()
 	{
 		PROFILE_FUNCTION();
@@ -1052,8 +1352,8 @@ namespace Helios
 
 		/* 定位：贴所在栏（右栏）的下边（分隔线在行的正上方），连下内边距一起用掉 ——
 		 * 与顶栏对称，栏的高都等于控件高，不额外留空带。 */
-		const float panel_bottom = window->Pos.y + window->Size.y;
-		const float footer_top = panel_bottom - ImGui::GetFrameHeight();
+		const float pane_bottom = window->Pos.y + window->Size.y;
+		const float footer_top = pane_bottom - ImGui::GetFrameHeight();
 		ImGui::SetCursorScreenPos(ImVec2(window->DC.CursorStartPos.x, footer_top));
 
 		/* 上边线自绘而不是用 ImGui::Separator()：Separator 会吃掉「1px + 行距」，
@@ -1069,9 +1369,20 @@ namespace Helios
 		const float control_y = row.Min.y + (row.Height - control_height) * 0.5f;
 		const float gap = style.ItemInnerSpacing.x;
 
-		/* ---- 右端的缩放滑动条 + 统计数 ----
-		 * 绝对定位在右端、不参与这一行的排版（面包屑可以省，这俩不行）。滑条是「圆点在细线上」
-		 * 那版：没有控件框、当前值就用圆点表示、数值走 tooltip。 */
+		/* 这一栏是"横条"：所有文本都在行内垂直居中（ImGui 的 Text 贴着行顶画，看起来会高半个
+		 * 内边距，所以自己算居中 y；面包屑的居中量跟 text_y 取同一个值，两种画法落在同一条基线）。 */
+		const float text_y = row.Min.y + (row.Height - ImGui::GetFontSize()) * 0.5f;
+		/* 把光标放到居中处再画文本；顺带清掉"基线偏移"——同一行前面若是按钮 / Selectable，
+		 * 它会为了基线对齐把后面的文字整体下移，居中值就被顶掉了。 */
+		const auto place_text = [&](float x)
+		{
+			ImGui::SetCursorScreenPos(ImVec2(x, text_y));
+			window->DC.CurrLineTextBaseOffset = 0.0f;
+		};
+
+		/* ---- 右端一组：缩放的滑动条 + 统计数（统计数贴最右）----
+		 * 这两件原本在顶栏，移到路径栏的右端：路径栏平时只有一条路径，右端这点空间正好装下。
+		 * 放不下时的退让阶梯见下面 show_count 那一段。 */
 		char count_text[48] = {};
 		{
 			int total_count = 0;
@@ -1089,20 +1400,25 @@ namespace Helios
 				snprintf(count_text, sizeof(count_text), "%d / %d", matched_count, total_count);
 		}
 		const float count_width = ImGui::CalcTextSize(count_text).x;
-		const float return_width = control_height;
-		/* 路径那一侧至少要装下：上一级按钮 + 一段面包屑 + 一段选中项摘要 */
-		const float path_min = return_width + gap + kMinCrumbWidth + gap * 2.0f + kMinSelectionWidth;
+		/* 路径那一侧至少要装下一段面包屑（撤销了"上一级"按钮之后它就从行首开始）
+		 * （选中项摘要不进这笔账：它放不下时整段不画，见下面画它的那一段） */
+		const float path_min = kMinCrumbWidth;
 		const float group_gap = gap * 2.0f;                          /* 路径与右端那组之间的空隙 */
 		const float bar_span = row.Right - row.Min.x;
 
-		const bool show_count = (bar_span - path_min - group_gap - count_width - gap - kZoomSliderWidth >= 0.0f);
+		/* 退让阶梯：① 先把滑动条压窄（放到下限也要保住统计数）→ ② 实在放不下才舍掉统计数
+		 * → ③ 滑动条自己退回下限。缩放是回到网格视图的唯一入口，最先挨压的是它的宽度；
+		 * 统计数是"这一层里有多少东西"的状态，能留就留。 */
+		const bool show_count = (bar_span - path_min - group_gap - count_width - gap - kMinZoomSliderWidth >= 0.0f);
 		const float zoom_width = ImClamp(
 			bar_span - path_min - group_gap - (show_count ? count_width + gap : 0.0f),
 			kMinZoomSliderWidth, kZoomSliderWidth);
 
-		const float zoom_x = row.Right - zoom_width;
-		const float count_x = zoom_x - gap - count_width;
-		const float right_group_x = show_count ? count_x : zoom_x;
+		/* 统计数贴最右端、滑动条紧挨在它左边：计数文字宽度随目录内容变化，
+		 * 让它贴边，滑动条才不会跟着文字变宽而左右跳。 */
+		const float count_x = row.Right - count_width;
+		const float zoom_x = (show_count ? count_x - gap : row.Right) - zoom_width;
+		const float right_group_x = zoom_x;                          /* 摘要最多画到它左边 */
 
 		/* 当前目录的祖先链（根 → 当前） */
 		std::vector<SharedPtr<FileNode>> chain;
@@ -1124,7 +1440,8 @@ namespace Helios
 		const float selection_right = right_group_x - gap;            /* 摘要最多画到这儿 */
 		const float crumb_right = selection_right - selected_width;   /* 面包屑再让出它 */
 
-		/* 放不下就从最前面省：先量总宽，再决定从第几级开始画 */
+		/* 放不下就从最前面省：先量总宽、再决定从第几级开始画。注意：省掉前几级会多出
+		 * 「… + 三角」这一截，也要算进阈值（路径栏只占右栏宽，容易漏算）。 */
 		const float separator_size = CrumbSeparatorSize();
 
 		const auto crumb_width = [&](const SharedPtr<FileNode>& node)
@@ -1133,32 +1450,24 @@ namespace Helios
 				+ separator_size + gap;
 		};
 
+		const float ellipsis_width = ImGui::CalcTextSize("...").x + gap + separator_size + gap;
+		/* 面包屑从行首（row.Min.x）开始排 —— 上一级按钮去掉之后，这一行的左端就是它的 */
+		const float crumbs_room = crumb_right - row.Min.x;
+
 		float crumbs_width = 0.0f;
 		for (const SharedPtr<FileNode>& node : chain)
 			crumbs_width += crumb_width(node);
 
 		size_t first = 0;
-		while (first + 1 < chain.size() && crumbs_width > crumb_right - row.Min.x - return_width - gap)
+		while (first + 1 < chain.size())
 		{
+			/* 第一级不省略时没有"…"那一截，从第二级起才算它 */
+			const float extra = (first > 0) ? ellipsis_width : 0.0f;
+			if (crumbs_width + extra <= crumbs_room)
+				break;
+
 			crumbs_width -= crumb_width(chain[first]);
 			++first;
-		}
-
-		/* ---- 上一级（贴最左；已在根目录时置灰而不是隐藏，按钮位置才不跳动） ---- */
-		const bool at_root = (*m_CurrentFileNode) == (*m_RootFileNodeTree);
-		if (at_root)
-		{
-			ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, style.Alpha * style.DisabledAlpha);
-		}
-
-		if (Icons::IconButton(Icons::Id::Return, ImVec2(return_width, return_width), false, "Parent folder"))
-			SetCurrentNode(m_CurrentFileNode->ParentNode.lock());
-
-		if (at_root)
-		{
-			ImGui::PopStyleVar();
-			ImGui::PopItemFlag();
 		}
 
 		/* ---- 面包屑 ----
@@ -1172,6 +1481,15 @@ namespace Helios
 		{
 			ImGui::SameLine(0.0f, gap);
 			ImGui::GetCurrentWindow()->DC.CurrLineTextBaseOffset = 0.0f;
+		};
+
+		/* 这一行的第一个控件（省略号或第一级面包屑）的位置自己钉在行首：
+		 * SameLine 的参考点是"上一个项的右端"，而这一行还没有上一个项 ——
+		 * 上一级按钮去掉之后，行首不再有东西替它把光标定位好。 */
+		const auto start_row = [&]()
+		{
+			ImGui::SetCursorScreenPos(ImVec2(row.Min.x, row.Min.y));
+			window->DC.CurrLineTextBaseOffset = 0.0f;
 		};
 
 		/* 级间分隔符：矢量三角（与卡片折叠箭头同一套画法，朝右）。
@@ -1201,15 +1519,20 @@ namespace Helios
 			{
 				/* 前面被省略了：用省略号说明这段路径不是从根开始的。注意：它是这一行的第一个控件，
 				 * 位置得自己钉到行首；少了这一步 "..." 会掉到下一行、这栏变两行高（窄面板下才暴露）。 */
-				continue_row();
+				start_row();
 				ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
+				place_text(row.Min.x);
 				ImGui::TextUnformatted("...");
 				ImGui::PopStyleColor();
 
 				draw_separator();
 			}
 
-			continue_row();
+			/* 第一级且没被省略：它也是这一行的开头，位置同样自己钉（见 start_row） */
+			if (i == first && first == 0)
+				start_row();
+			else
+				continue_row();
 			ImGui::PushID(node.get());
 
 			/* 选中态（当前目录）用 Selectable 的选中高亮，其余可点跳转 */
@@ -1217,19 +1540,29 @@ namespace Helios
 				is_current ? EditorTheme::Token::Text : EditorTheme::Token::TextDim);
 
 			const std::string name = DisplayNodeName(*node);
-			if (ImGui::Selectable(name.c_str(), is_current, ImGuiSelectableFlags_None,
-					ImVec2(ImGui::CalcTextSize(name.c_str()).x, control_height)))
+			/* 这一级最多画到右端那组左侧：算得再准，也可能有一级特别长的目录名挤不下 ——
+			 * 兜这一刀（Selectable 会把标签裁到给定的宽度，悬停的 tooltip 里仍有全名），
+			 * 否则它会画到滑动条底下。连一个字母都放不下就整级不画。 */
+			const float crumb_room = ImMax(right_group_x - gap - ImGui::GetCursorScreenPos().x, 0.0f);
+
+			if (crumb_room >= kMinCrumbLabelWidth)
 			{
-				SetCurrentNode(node);
+				const float label_width = ImMin(ImGui::CalcTextSize(name.c_str()).x, crumb_room);
+
+				if (ImGui::Selectable(name.c_str(), is_current, ImGuiSelectableFlags_None,
+						ImVec2(label_width, control_height)))
+				{
+					SetCurrentNode(node);
+				}
+
+				if (ImGui::IsItemHovered() && !is_current)
+				{
+					/* 悬停给完整相对路径：面包屑会被省略、也可能被截断，tooltip 补全 */
+					ImGui::SetTooltip("%s", node->FilePath.empty() ? name.c_str() : node->FilePath.c_str());
+				}
 			}
 
 			ImGui::PopStyleColor();
-
-			if (ImGui::IsItemHovered() && !is_current)
-			{
-				/* 悬停给完整相对路径：面包屑会被省略，tooltip 补全 */
-				ImGui::SetTooltip("%s", node->FilePath.empty() ? name.c_str() : node->FilePath.c_str());
-			}
 
 			ImGui::PopID();
 		}
@@ -1245,9 +1578,14 @@ namespace Helios
 			ImGui::SameLine(0.0f, gap * 2.0f);
 			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::Accent);
 
-			const float selected_width_clip = ImMax(selection_right - ImGui::GetCursorScreenPos().x, 1.0f);
-			ImGui::PushClipRect(ImGui::GetCursorScreenPos(),
-				ImVec2(ImGui::GetCursorScreenPos().x + selected_width_clip, row.Min.y + row.Height), true);
+			/* 文本的落点先量下来再定位：place_text 会把光标挪到行内居中处，
+			 * 之后的裁剪矩形要按居中后的位置算（按居中前的光标算会差半个内边距）。 */
+			const float selection_x = ImGui::GetCursorScreenPos().x;
+			const float selected_width_clip = ImMax(selection_right - selection_x, 1.0f);
+
+			place_text(selection_x);
+			ImGui::PushClipRect(ImVec2(selection_x, text_y),
+				ImVec2(selection_x + selected_width_clip, text_y + ImGui::GetFontSize()), true);
 			ImGui::TextUnformatted(selection_text.c_str());
 			ImGui::PopClipRect();
 
@@ -1269,28 +1607,27 @@ namespace Helios
 			ImGui::PopStyleColor();
 		}
 
-		/* ---- 右端的统计数 + 缩放滑动条 ----
-		 * 绝对定位在右端（与顶栏里的控件同一套摆法），不参与这一行的排版：
-		 * 面包屑是可省的、它俩不是；贴右端也保证拖动时滑动条不跟着计数文字一起挪。 */
+		/* ---- 右端的缩放滑动条 + 统计数 ----
+		 * 绝对定位在右端、不参与这一行的排版（面包屑可以省，这俩不行）。滑条是「圆点在细线上」
+		 * 那版：没有控件框、当前值就用圆点表示、数值走 tooltip。 */
+		ImGui::SetCursorScreenPos(ImVec2(zoom_x, control_y));
+		ImGui::PushID("AssetZoom");
+
+		ImGui::SetNextItemWidth(zoom_width);
+		ImGuiExt::DrawDotSliderFloat("##ThumbnailSize", m_ThumbnailSize,
+			kMinThumbnailSize, kMaxThumbnailSize, "%.0f");
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Thumbnail size: %.0f px — 拖到 32 以下内容区退回详细列表", m_ThumbnailSize);
+
+		ImGui::PopID();
+
 		if (show_count)
 		{
-			ImGui::SetCursorScreenPos(ImVec2(count_x, control_y));
 			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
+			place_text(count_x);
 			ImGui::TextUnformatted(count_text);
 			ImGui::PopStyleColor();
 		}
-
-		ImGui::SetCursorScreenPos(ImVec2(zoom_x, control_y));
-		ImGui::PushID("AssetZoom");
-		ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
-
-		ImGui::SetNextItemWidth(zoom_width);
-		ImGui::SliderFloat("##ThumbnailSize", &m_ThumbnailSize, kMinThumbnailSize, kMaxThumbnailSize, "%.0f");
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Thumbnail size (px) — 拖到 32 以下内容区退回详细列表");
-
-		ImGui::PopStyleVar();
-		ImGui::PopID();
 
 		PanelChrome::EndHeaderRow(row, false);
 	}
@@ -1301,6 +1638,9 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		const float panel_width = ImGui::GetContentRegionAvail().x;
+		/* 内容区左上角（绝对屏幕坐标）：网格的横向起点按它算 ——
+		 * 不能按 `GetCursorPosX()`（进了 Columns 之后它带着列的偏移，比内容区左沿多一档）。 */
+		const float content_left_x = ImGui::GetCursorScreenPos().x;
 
 		/* 这一帧的可见项（顺序 = 显示顺序）：网格 / 列表照它画，范围选择、全选、计数也用它 ——
 		 * 只有一个判据（PassesContentFilter），四处各过滤一遍的话迟早会走样。 */
@@ -1322,35 +1662,68 @@ namespace Helios
 
 		if (m_ThumbnailSize > 32.0f)
 		{
-			/* 一列要装得下「单元格 + 选中框两侧外扩」，还得和邻格隔开一点 ——
-			 * 只按缩略图算列宽的话，最右一列的选中框会从列的裁剪矩形里探出去被切掉一条边。 */
-			const float cell_footprint = m_ThumbnailSize
-				+ ImMax(kThumbnailGap, kGridSelectionPad * 2.0f + kMinCellGap);
-			int column_count = static_cast<int>(panel_width / cell_footprint);
+			/* 两格之间至少要隔开这么远：得装得下「选中框两侧外扩」，并留一点余量 ——
+			 * 只按缩略图算的话，相邻两格的选中框会贴在一起、甚至互相压上。 */
+			const float min_gap = ImMax(kThumbnailGap, kGridSelectionPad * 2.0f + kMinCellGap);
+
+			/* 网格可用的宽度 = 内容栏去掉左右各 kGridSideInset（选中框就画在内沿里） */
+			const float grid_width = ImMax(panel_width - kGridSideInset * 2.0f, m_ThumbnailSize);
+
+			/* 列数 = grid_width 里放得下、且相邻两格仍隔得开 min_gap 的最大值：
+			 * n 个格子之间只有 n-1 道缝，所以下限里只算 n-1 个 min_gap（+min_gap 是凑那个数）。 */
+			int column_count = static_cast<int>((grid_width + min_gap) / (m_ThumbnailSize + min_gap));
 			if (column_count < 1)
 				column_count = 1;
+
+			/* 相邻两格中轴的间距：多出来的宽度均分到格子之间，首末两格因此贴着内沿。
+			 * 只有一列时没有"格间"可分，格子就摆在左内沿上。 */
+			const float cell_step = (column_count > 1)
+				? (grid_width - m_ThumbnailSize) / static_cast<float>(column_count - 1) : 0.0f;
+
+			/* 文件名的换行宽度：正好是「格子 + 左右各一档内沿」——
+			 * 名字以格子中轴居中，最外侧那两格的名字因此恰好在内容栏内沿收住，
+			 * 既不会顶到栏外被裁，也不会和邻格的名字连成一片。 */
+			const float name_width = m_ThumbnailSize + kGridSideInset * 2.0f;
 
 			/* 第一行上方让出选中框外扩的那点高度（见 kGridTopInset）：
 			 * 留在内容里而不是加在内容栏的内边距上 —— 滚动范围也要跟着算进去，
 			 * 否则滚到顶时框的上边还是会被裁。 */
 			ImGui::Dummy(ImVec2(0.0f, kGridTopInset));
 
+			/* 进 Columns 之前把内容栏自己的裁剪矩形与内容区范围记下来：Columns 会把
+			 * window->ClipRect / WorkRect 换成"当前列"的（NextColumn 还会改 WorkRect.Max.x）。 */
+			ImGuiWindow* const content_window = ImGui::GetCurrentWindow();
+			const ImVec2 content_clip_min = content_window->ClipRect.Min;
+			const ImVec2 content_clip_max = content_window->ClipRect.Max;
+			const float content_right_x = content_window->InnerRect.Max.x;
+
 			ImGui::Columns(column_count, nullptr, false);
+
+			/* 网格自己的裁剪矩形：横向 = 内容区、纵向沿用内容栏。ImGui Columns 的列裁剪正好卡在列宽
+			 * 上，而格子是"首末贴边"铺开 —— 最外两格的选中框会探出列边界被切。注意：每个格子都要
+			 * 自己 push（BeginColumns / NextColumn 会替换裁剪栈顶，在循环外 push 对第二列就失效了）。 */
+			ImDrawList* const grid_draw = ImGui::GetWindowDrawList();
+			const ImVec2 grid_clip_min(content_left_x, content_clip_min.y);
+			const ImVec2 grid_clip_max(content_right_x, content_clip_max.y);
+
+			/* 格子的 x：首格贴内容栏左内沿，往后依次加 cell_step、末格贴右内沿 —— 富余的宽度均分到
+			 * 格子之间（以前是把每列居中，两侧留下 15~36px 死区、格子浮在中间）。 */
+			const float grid_left = content_left_x + kGridSideInset;
+			size_t cell_index = 0;
 
 			for (const SharedPtr<FileNode>& child_node : visible)
 			{
 				ImGui::PushID(child_node->FilePath.c_str());
 				{
-					const float column_start_x = ImGui::GetCursorPosX();
-					const float column_width = ImGui::GetColumnWidth();
+					const int column_index = static_cast<int>(cell_index) % column_count;
+					const float cell_left = grid_left + cell_step * static_cast<float>(column_index);
 					const bool is_selected = IsNodeSelected(child_node.get());
 					const ImVec2 cell_rect(m_ThumbnailSize, m_ThumbnailSize);
 					const SharedPtr<DeviceTexture> thumbnail = ThumbnailOf(*child_node);
 
-					/* 缩略图在列里居中：列宽是「面板宽度 ÷ 列数」，比单元格宽（除不尽时会多出一点），
-					 * 而下面的文件名是按列宽居中画的 —— 缩略图若贴着列左端，名字就会整体偏右，
-					 * 看着像"名字没对齐在图标下边"。两者共用列的中轴，名字才落在选中框的正下方。 */
-					ImGui::SetCursorPosX(column_start_x + (column_width - m_ThumbnailSize) * 0.5f);
+					grid_draw->PushClipRect(grid_clip_min, grid_clip_max, false);
+
+					ImGui::SetCursorScreenPos(ImVec2(cell_left, ImGui::GetCursorScreenPos().y));
 
 					/* 命中区恒为 ThumbnailSize 的正方形，图片和图标共用（选中框从它推出，两种格子才会一样大）。
 					 * 注意：图片别用 ImageButton —— 它的控件矩形 = 图片 + 2×FramePadding，命中区大一圈、选中框
@@ -1418,11 +1791,17 @@ namespace Helios
 						ImGui::EndPopup();
 					}
 
-					/* 文件名逐行居中，长名称仍按列宽换行；保持列起点以免受按钮提交位置影响。 */
-					ImGui::SetCursorPosX(column_start_x);
-					DrawCenteredWrappedText(child_node->FileName, column_width,
+					/* 文件名以格子中轴居中（和缩略图同轴），长名称按 name_width 换行；
+					 * 光标一起摆：绘制区与它后面那个 Dummy 都从这一档算起。
+					 * 正在改名的那一项换成输入框 —— 同一落点、同宽，看起来就在原地。 */
+					ImGui::SetCursorScreenPos(ImVec2(
+						cell_left + (m_ThumbnailSize - name_width) * 0.5f, ImGui::GetCursorScreenPos().y));
+					DrawCenteredWrappedText(child_node->FileName, name_width,
 						ImGui::GetColorU32(is_selected ? EditorTheme::Token::Accent : EditorTheme::Token::Text));
 
+					grid_draw->PopClipRect();
+
+					++cell_index;
 					ImGui::NextColumn();
 				}
 				ImGui::PopID();

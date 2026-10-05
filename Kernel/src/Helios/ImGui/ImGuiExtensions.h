@@ -53,6 +53,10 @@ namespace ImGuiExt
 	bool DrawDirectionIndicator(const std::string& label, glm::vec3& direction, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个询问弹窗UI(todo: 还不能用，需要调试) */
 	bool DrawModalUI(const std::string& label, const std::string& content_text, bool& never_ask);
+	/* 绘制「圆点在细线上」的滑动条（紧凑场景用）：交互跟 SliderFloat 一致，外观 = 细轨 + 点亮段 +
+	 * 圆点；数值文本不画在轨道上（用 tooltip，或者画在控件外面）。宽度走 SetNextItemWidth / ItemWidth。 */
+	bool DrawDotSliderFloat(const char* label, float& value, float v_min, float v_max,
+		const char* format = "%.0f", ImGuiSliderFlags flags = 0);
 }
 
 }

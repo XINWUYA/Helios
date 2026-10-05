@@ -144,6 +144,45 @@ namespace Helios::PanelChrome
 			dot_radius, ImGui::GetColorU32(EditorTheme::Token::Text));
 	}
 
+	/* ==================== 菜单行内容 ==================== */
+
+	/* 带图标的菜单行（下拉条目）：整行命中 / 悬停高亮 / 点击收起都跟 MenuItem 一样，
+	 * 只是文字前多一枚矢量图标；行宽要自己算（弹层是 AlwaysAutoResize，控件多宽弹层就多宽）。 */
+	inline bool MenuItemWithIcon(Icons::Id icon, const char* label)
+	{
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float icon_size = ImGui::GetFontSize();
+		const float icon_gap = style.ItemInnerSpacing.x;
+
+		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
+		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x;
+
+		ImGui::PushID(label);
+		const bool clicked = ImGui::Selectable("##row", false,
+			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover
+				| ImGuiSelectableFlags_SpanAvailWidth,
+			ImVec2(width, 0.0f));
+		ImGui::PopID();
+
+		const ImVec2 min = ImGui::GetItemRectMin();
+		const ImVec2 max = ImGui::GetItemRectMax();
+		const float center_y = (min.y + max.y) * 0.5f;
+
+		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+
+		/* 图标与文字都画在 Selectable 之后：悬停底色已经落好，不会被盖住 */
+		Icons::Draw(draw_list, icon,
+			ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
+			icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
+
+		draw_list->AddText(
+			ImVec2(min.x + style.FramePadding.x + icon_size + icon_gap,
+				center_y - ImGui::GetFontSize() * 0.5f),
+			ImGui::GetColorU32(EditorTheme::Token::Text), label);
+
+		return clicked;
+	}
+
 	/* ==================== 可拖拽分隔条 ==================== */
 
 	/* 左右两块之间的拖拽分隔条：按住左右拖，按 delta.x 改「左块占比」。

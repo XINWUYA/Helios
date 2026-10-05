@@ -79,6 +79,45 @@ namespace Helios
 		return candidate;
 	}
 
+	std::string AssetFileTemplate(const std::string& extension)
+	{
+		/* 扩展名比较一律大小写不敏感：资源树认类型时也这么做（BuildFileNodeTree 把扩展名转大写） */
+		std::string ext = extension;
+		for (char& character : ext)
+		{
+			if (character >= 'A' && character <= 'Z')
+				character = static_cast<char>(character - 'A' + 'a');
+		}
+
+		/* 空场景：跟 Serializer 写出的"没有任何实体"的场景同构 —— 加载器只要求 <Scene>/<Entities>，
+		 * 实体循环一次都不进。跟 File > New Scene 是同一个状态，只是这一步直接落盘。 */
+		if (ext == ".scn")
+		{
+			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+				"<Scene>\n"
+				"    <Entities>\n"
+				"    </Entities>\n"
+				"</Scene>\n";
+		}
+
+		/* 空材质图：节点与连线都为 0（Asset 里的样例文件就是这套元素：
+		 * MaterialGraph 带 NodeCount / LinkCount，下面是 Nodes / Links 两个列表）。 */
+		if (ext == ".mtlgraph")
+		{
+			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+				"<MaterialGraph NodeCount=\"0\" LinkCount=\"0\">\n"
+				"    <Nodes>\n"
+				"    </Nodes>\n"
+				"    <Links>\n"
+				"    </Links>\n"
+				"</MaterialGraph>\n";
+		}
+
+		/* 认不出的（.glsl / .txt / .mat …）：空文件。模板内容不该由我们凭空发明，
+		 * 用户要什么自己写 —— 至少文件已经在正确的目录里了。 */
+		return {};
+	}
+
 	bool MoveAssetToTrash(const std::filesystem::path& trash_root, const std::filesystem::path& target,
 		std::filesystem::path& out_trashed, std::string& out_error)
 	{
