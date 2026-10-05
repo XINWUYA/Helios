@@ -2,11 +2,13 @@
 #include "Scene.h"
 #include <tinyxml2.h>
 #include <algorithm>
+#include <unordered_map>
 #include <vector>
 #include "Components.h"
 #include "Entity.h"
 #include "Material.h"
 #include "Helios/Common/Utils.h"
+#include "Helios/Common/Math.h"
 #include "Camera.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderView.h"
@@ -15,6 +17,12 @@
 
 namespace Helios
 {
+	namespace
+	{
+		/* 父链深度上限：兜住畸形场景文件里可能出现的环（正常层级远小于此） */
+		constexpr size_t kMaxHierarchyDepth = 64;
+	}
+
 	Scene::Scene()
 	{
 		m_pReflectionProbeManager = CreateSharedPtr<ReflectionProbeManager>();
@@ -51,7 +59,114 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 子节点先脱离并保持世界位置：父实体的句柄马上会失效，
+		 * 子节点若继续指向它就会从层级树里消失，空间位置也会跟着跳变。 */
+		std::vector<entt::entity> children;
+		const auto parent_view = m_Registry.view<ParentComponent>();
+		for (const entt::entity candidate : parent_view)
+		{
+			if (parent_view.get<ParentComponent>(candidate).m_Parent == static_cast<entt::entity>(entity))
+				children.emplace_back(candidate);
+		}
+
+		/* 提升层级会改写 ParentComponent（结构变更），必须与遍历分开做 */
+		for (const entt::entity child : children)
+			SetParent(child, entt::null);
+
 		m_Registry.destroy(entity);
+	}
+
+	entt::entity Scene::GetParent(entt::entity entity) const
+	{
+		if (!m_Registry.valid(entity))
+			return entt::null;
+
+		const auto* parent_component = m_Registry.try_get<ParentComponent>(entity);
+		if (parent_component == nullptr || !m_Registry.valid(parent_component->m_Parent))
+			return entt::null;
+
+		return parent_component->m_Parent;
+	}
+
+	bool Scene::IsAncestor(entt::entity ancestor, entt::entity entity) const
+	{
+		if (ancestor == entt::null)
+			return false;
+
+		/* 沿父链上溯；深度上限兜住畸形场景文件里可能出现的环 */
+		entt::entity current = entity;
+		for (size_t depth = 0; current != entt::null && depth < kMaxHierarchyDepth; ++depth)
+		{
+			if (current == ancestor)
+				return true;
+
+			current = GetParent(current);
+		}
+		return false;
+	}
+
+	glm::mat4 Scene::GetWorldTransform(entt::entity entity) const
+	{
+		/* 先自下而上收集父链，再自顶向下累积：一趟 O(深度)，不需要递归 */
+		entt::entity chain[kMaxHierarchyDepth];
+		size_t depth = 0;
+
+		entt::entity current = entity;
+		while (current != entt::null && depth < kMaxHierarchyDepth && m_Registry.valid(current))
+		{
+			chain[depth++] = current;
+			current = GetParent(current);
+		}
+
+		glm::mat4 world{ 1.0f };
+		while (depth > 0)
+		{
+			if (const auto* transform_component = m_Registry.try_get<TransformComponent>(chain[--depth]))
+				world *= transform_component->GetTransform();
+		}
+		return world;
+	}
+
+	bool Scene::SetParent(entt::entity child, entt::entity parent)
+	{
+		if (!m_Registry.valid(child))
+			return false;
+
+		/* child 是 parent 自身或祖先：挂上去会成环（IsAncestor 含自身，覆盖了自挂） */
+		if (IsAncestor(child, parent))
+			return false;
+
+		const glm::mat4 world = GetWorldTransform(child);
+		const glm::mat4 parent_world = GetWorldTransform(parent);
+
+		SetParentLink(child, parent);
+
+		/* 换父空间后本地变换重算：世界变换保持不变，挂上去不会跳位置 */
+		if (auto* transform_component = m_Registry.try_get<TransformComponent>(child))
+		{
+			TransformComponent reparented = *transform_component;
+			if (DecomposeTransform(glm::inverse(parent_world) * world,
+				reparented.m_Position, reparented.m_Rotation, reparented.m_Scale))
+			{
+				*transform_component = reparented;
+			}
+		}
+		return true;
+	}
+
+	void Scene::SetParentLink(entt::entity child, entt::entity parent)
+	{
+		if (!m_Registry.valid(child))
+			return;
+
+		/* 回到根层级就不留组件：没有父节点的实体不该带着这条记录 */
+		if (parent == entt::null || !m_Registry.valid(parent))
+		{
+			m_Registry.remove<ParentComponent>(child);
+			return;
+		}
+
+		m_Registry.emplace_or_replace<ParentComponent>(child, parent);
 	}
 
 	void Scene::ClearAllEntities()
@@ -71,23 +186,24 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		/* 统一将 TransformComponent 同步给所有 SceneObject（Model / Light / Camera）。
+		 * 传下去的是世界变换（沿父链累积），SceneObject 只认识世界空间。
 		 * 具体变换如何写入由各 SceneObject 重写的 SetTransform 决定（多态）。 */
 		const auto transform_view = m_Registry.view<TransformComponent>();
 		for (auto entity : transform_view)
 		{
-			const auto& transform_component = transform_view.get<TransformComponent>(entity);
+			const glm::mat4 world_transform = GetWorldTransform(entity);
 
 			if (auto* model_component = m_Registry.try_get<ModelComponent>(entity); model_component && model_component->m_Model)
-				model_component->m_Model->SetTransform(transform_component.GetTransform());
+				model_component->m_Model->SetTransform(world_transform);
 
 			if (auto* light_component = m_Registry.try_get<LightComponent>(entity); light_component && light_component->m_Light)
-				light_component->m_Light->SetTransform(transform_component.GetTransform());
+				light_component->m_Light->SetTransform(world_transform);
 
 			if (auto* camera_component = m_Registry.try_get<CameraComponent>(entity); camera_component && camera_component->m_Camera)
-				camera_component->m_Camera->SetTransform(transform_component.GetTransform());
+				camera_component->m_Camera->SetTransform(world_transform);
 
 			if (auto* probe_component = m_Registry.try_get<ReflectionProbeComponent>(entity); probe_component && probe_component->m_ReflectionProbe)
-				probe_component->m_ReflectionProbe->SetTransform(transform_component.GetTransform());
+				probe_component->m_ReflectionProbe->SetTransform(world_transform);
 		}
 
 		/* 收集RenderView，并在收集前更新 Camera 的视图/投影矩阵 */
@@ -211,9 +327,15 @@ namespace Helios
 		 * 先确认文件可加载再清空，加载失败时当前内容不受影响。 */
 		ClearAllEntities();
 
+		/* 父子关系存的是父实体的句柄，加载后句柄会重新分配，
+		 * 所以先建完所有实体并记下「文件里的 ID → 新实体」，再统一还原层级。 */
+		std::vector<std::pair<const tinyxml2::XMLElement*, Entity>> loaded_entities;
+		std::unordered_map<uint64_t, Entity> entities_by_file_id;
+
 		for (tinyxml2::XMLElement* entity_root = entities_root->FirstChildElement(); entity_root; entity_root = entity_root->NextSiblingElement("Entity"))
 		{
-			if (entity_root->FindAttribute("ID") == nullptr)
+			const tinyxml2::XMLAttribute* id_attribute = entity_root->FindAttribute("ID");
+			if (id_attribute == nullptr)
 				continue;
 
 			const char* name = entity_root->Attribute("Name");
@@ -239,6 +361,28 @@ namespace Helios
 				if (component != nullptr)
 					LoadComponentFromXml(desc, component, element);
 			}
+
+			entities_by_file_id.emplace(id_attribute->Unsigned64Value(), entity);
+			loaded_entities.emplace_back(entity_root, entity);
+		}
+
+		/* 第二遍：还原父子关系。局部变换已经在第一遍按原样读入，
+		 * 所以这里只补链接，不重算变换（否则世界位置会变）。 */
+		for (const auto& [entity_root, entity] : loaded_entities)
+		{
+			const tinyxml2::XMLAttribute* parent_attribute = entity_root->FindAttribute("Parent");
+			if (parent_attribute == nullptr)
+				continue;
+
+			const auto parent = entities_by_file_id.find(parent_attribute->Unsigned64Value());
+			if (parent == entities_by_file_id.end())
+				continue; /* 指向不存在的实体：按根节点处理 */
+
+			/* 文件被改坏到出现环时直接断开，避免层级遍历无限上溯 */
+			if (IsAncestor(static_cast<entt::entity>(entity), static_cast<entt::entity>(parent->second)))
+				continue;
+
+			SetParentLink(entity, static_cast<entt::entity>(parent->second));
 		}
 
 		return true;
@@ -256,6 +400,11 @@ namespace Helios
 		/* Name 由实体自身的属性承载 */
 		if (entity.HasComponent<NameComponent>())
 			entity_root->SetAttribute("Name", entity.GetComponent<NameComponent>().m_Name.c_str());
+
+		/* 父节点写在实体自己的属性上（同 ID / Name）：它是场景图结构，不是某个组件的字段。
+		 * 存的是父实体的句柄，加载时按 ID 重新映射（见 Deserializer）。 */
+		if (const entt::entity parent = GetParent(entity); parent != entt::null)
+			entity_root->SetAttribute("Parent", static_cast<uint32_t>(parent));
 
 		/* 其余组件由注册表驱动，元素名即组件名 */
 		for (const ComponentDesc& desc : ComponentRegistry::Instance().All())

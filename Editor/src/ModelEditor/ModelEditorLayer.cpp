@@ -1,12 +1,50 @@
 ﻿#include "Pch.h"
 #include "ModelEditorLayer.h"
-#include <glm/gtc/type_ptr.hpp>
 #include "Helios/Application/Application.h"
 #include "EditorCommon.h"
+#include "EditorIcons.h"
+#include "PanelChrome.h"
 #include "PanelRegistry.h"
 
 namespace Helios
 {
+	namespace
+	{
+		/* 向量显示成一行紧凑文本：属性行里数字比括号更重要 */
+		std::string FormatVec3(const glm::vec3& value)
+		{
+			char buffer[64] = {};
+			snprintf(buffer, sizeof(buffer), "%.3f, %.3f, %.3f", value.x, value.y, value.z);
+			return buffer;
+		}
+
+		/* 材质参数的类型名：magic_enum 给的名字顺序就是枚举声明顺序，
+		 * 因此下标即 ParamType 的取值 —— 不用再手抄一张数组。 */
+		const std::vector<std::string>& ParamTypeNames()
+		{
+			static const std::vector<std::string> names = GetEnumNames<ParamType>();
+			return names;
+		}
+
+		/* 切换参数类型：按新类型填一个默认值（原先散在面板里的逻辑，抽出来一处定义） */
+		void ApplyParamTypeChange(const SharedPtr<Material>& material,
+		                          const MaterialParamInfo& param_info, ParamType type)
+		{
+			switch (type)
+			{
+			case ParamType::Texture:
+				material->SetTexture(param_info.Name,
+					TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Default.png")));
+				break;
+			case ParamType::Int:   material->SetParameters(ParamType::Int, param_info.Name, 0); break;
+			case ParamType::Float: material->SetParameters(ParamType::Float, param_info.Name, 0.0f); break;
+			case ParamType::Vec2:  material->SetParameters(ParamType::Vec2, param_info.Name, glm::vec2(0.0f)); break;
+			case ParamType::Vec3:  material->SetParameters(ParamType::Vec3, param_info.Name, glm::vec3(0.0f)); break;
+			case ParamType::Vec4:  material->SetParameters(ParamType::Vec4, param_info.Name, glm::vec4(0.0f)); break;
+			case ParamType::Mat4:  material->SetParameters(ParamType::Mat4, param_info.Name, glm::mat4(0.0f)); break;
+			}
+		}
+	}
 	ModelEditorLayer::ModelEditorLayer()
 		: ILayer("ModelEditorLayer")
 	{
@@ -140,278 +178,218 @@ namespace Helios
 		ImGui::PopStyleVar();
 	}
 
-	/* 显示模型编辑UI */
+	/* 显示模型编辑UI：头部（模型文件名）+ 基本信息卡 + 每个子模型一张卡。
+	 * 材质参数不再各占一层 Tree：参数名是可折叠标题，类型选择器贴右端，
+	 * 值走属性行 —— 与组件字段同一套布局。 */
 	void ModelEditorLayer::ShowModelParamsUI()
 	{
 		PROFILE_FUNCTION();
 
-		if (m_pModelInfo->m_SubModelInfos.empty())
-			return;
+		const bool has_model = (m_pModelInfo != nullptr) && !m_pModelInfo->m_SubModelInfos.empty();
 
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 		ImGui::Begin(Panel::kModelHelper);
 		{
-			const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_AllowItemOverlap | ImGuiTreeNodeFlags_FramePadding;
-			
-			/* 显示模型基本信息 */
+			/* 面板头部给出上下文：当前加载的是哪个文件 */
+			const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(Icons::Id::Model);
+			PanelChrome::DrawHeaderTitle(header,
+				has_model ? ExtractFilename(m_pModelInfo->m_Path) : std::string("No model"));
+			PanelChrome::EndHeaderRow(header);
+
+			if (has_model)
 			{
-				ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2{ 4, 4 });
-				//float lineHeight = GImGui->Font->FontSize + GImGui->Style.FramePadding.y * 2.0f;
-				ImGui::Separator();
-				bool open = ImGui::TreeNodeEx(ExtractFilename(m_pModelInfo->m_Path).c_str(), flags);
-				ImGui::PopStyleVar();
-
-				/* 展开时显示组件内容 */
-				if (open)
-				{
-					/* 基本信息 */
-					ImGui::Text("Base Info:");
-
-					{
-						ImGui::BulletText("Path: %s", m_pModelInfo->m_Path.c_str());
-						const auto& aabb_min = m_pModelInfo->m_AABB.first;
-						const auto& aabb_max = m_pModelInfo->m_AABB.second;
-						ImGui::BulletText("AABB Min: (%f, %f, %f)", aabb_min.x, aabb_min.y, aabb_min.z);
-						ImGui::BulletText("AABB Max: (%f, %f, %f)", aabb_max.x, aabb_max.y, aabb_max.z);
-						ImGui::BulletText("Total Vertex Cnt: %llu", m_pModelInfo->m_Attributes.vertices.size() / 3);
-						ImGui::BulletText("MeshSegment Cnt: %llu", m_pModelInfo->m_SubModelInfos.size());
-					}
-
-					/* 显示各子模型信息 */
-					for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-					{
-						auto& sub_model_info = m_pModelInfo->m_SubModelInfos[i];
-						auto& material = m_pMaterialGroup->GetMaterialByIndex(i);
-
-						ImGui::Separator();
-
-						if (ImGui::TreeNode(sub_model_info->Name.empty() ? "Unnamed" : sub_model_info->Name.c_str()))
-						{
-							/* 基本信息 */
-							ImGui::Text("Base Info:");
-							{
-								const auto& aabb_min = sub_model_info->AABB.first;
-								const auto& aabb_max = sub_model_info->AABB.second;
-								ImGui::BulletText("AABB Min: (%f, %f, %f)", aabb_min.x, aabb_min.y, aabb_min.z);
-								ImGui::BulletText("AABB Max: (%f, %f, %f)", aabb_max.x, aabb_max.y, aabb_max.z);
-								ImGui::BulletText("Vertex Cnt: %d", sub_model_info->VertexArray->GetVertexCount());
-							}
-
-							/* 材质参数信息 */
-							auto& parameters = material->GetAllParameters();
-							for (auto& param : parameters)
-							{
-								auto& param_info = param.second;
-
-								if (ImGui::TreeNode(param_info.Name.c_str()))
-								{
-									/* 参数类型 */
-									const char* data_types[] = { "Texture", "Int", "Float", "Vec2", "Vec3", "Vec4" };
-									int current_type_idx = static_cast<int>(param_info.Type);
-									const char* preview_value = data_types[current_type_idx];
-									if (ImGui::BeginCombo("DataType", preview_value))
-									{
-										for (int selected_idx = 0; selected_idx < IM_ARRAYSIZE(data_types); ++selected_idx)
-										{
-											/* 切换数据类型时，设置新类型的默认值 */
-											const bool is_selected = (current_type_idx == selected_idx);
-											if (ImGui::Selectable(data_types[selected_idx], is_selected))
-											{
-												current_type_idx = selected_idx;
-												auto param_type = static_cast<ParamType>(selected_idx);
-												switch (param_type)
-												{
-												case ParamType::Texture:
-													{
-														/* 填入默认值 */
-														const auto& default_texture = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Default.png"));
-														material->SetTexture(param_info.Name, default_texture);
-													}
-													break;
-												case ParamType::Int:
-													material->SetParameters(ParamType::Int, param_info.Name, 0);
-													break;
-												case ParamType::Float: 
-													material->SetParameters(ParamType::Float, param_info.Name, 0.0f);
-													break;
-												case ParamType::Vec2: 
-													material->SetParameters(ParamType::Vec2, param_info.Name, glm::vec2(0.0f));
-													break;
-												case ParamType::Vec3: 
-													material->SetParameters(ParamType::Vec3, param_info.Name, glm::vec3(0.0f));
-													break;
-												case ParamType::Vec4: 
-													material->SetParameters(ParamType::Vec4, param_info.Name, glm::vec4(0.0f));
-													break;
-												}
-											}
-
-											// Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
-											if (is_selected)
-												ImGui::SetItemDefaultFocus();
-										}
-										ImGui::EndCombo();
-									}
-
-									/* 显示当前参数 */
-									switch (param_info.Type)
-									{
-									case ParamType::Texture:
-										{
-											auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(param_info.Value);
-											auto& texture = texture_info.first;
-											auto load_config = texture->GetTextureLoadConfig();
-
-											/* Show texture image */
-											ImGui::PushID(param_info.Name.c_str());
-											ImGui::Columns(2);
-
-											ImGui::SetColumnWidth(0, 100);
-											ImGui::ImageButton((ImTextureID)texture.get(), ImVec2(80, 80), ImVec2(0, 1), ImVec2(1, 0), 0);
-											if (ImGui::BeginDragDropTarget())
-											{
-												if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
-												{
-													const wchar_t* path = (const wchar_t*)payload->Data;
-													const std::filesystem::path texture_path = path;
-
-													material->SetTexture(param_info.Name, TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(texture_path), load_config));
-													sub_model_info->MaterialParams.AmbientTexPath = texture_path.string();
-												}
-												ImGui::EndDragDropTarget();
-											}
-
-											/* Hovered */
-											if (ImGui::IsItemHovered())
-											{
-												ImGui::BeginTooltip();
-												ImGui::Image((ImTextureID)texture.get(), ImVec2(240, 240), ImVec2(0, 1), ImVec2(1, 0));
-												ImGui::EndTooltip();
-											}
-
-											ImGui::NextColumn();
-
-											/* Show texture path */
-											ImGui::TextWrapped(texture->GetPath().c_str());
-											/* Show texture load config */
-											ImGui::Checkbox("IsFlipV", &load_config.IsFlipV);
-											ImGui::Checkbox("IsGenMips", &load_config.IsGenMips);
-
-											/* 加载选项发生改动时，立即重新加载贴图 */
-											if (load_config != texture->GetTextureLoadConfig())
-											{
-												auto new_texture = TextureAssetManager::Instance().GetOrCreateTexture(texture->GetPath(), load_config);
-												material->SetTexture(param_info.Name, new_texture);
-											}
-
-											ImGui::Columns(1);
-											ImGui::PopID();
-										}
-										break;
-									case ParamType::Int:
-										{
-											ImGui::PushID(param_info.Name.c_str());
-
-											/* Show int controller */
-											int value = std::any_cast<int>(param.second.Value);
-											ImGui::DragInt(param_info.Name.c_str(), &value);
-											material->SetParameters(ParamType::Int, param_info.Name, value);
-
-											ImGui::PopID();
-										}
-										break;
-									case ParamType::Float:
-										{
-											ImGui::PushID(param_info.Name.c_str());
-
-											/* Show float controller */
-											float value = std::any_cast<float>(param.second.Value);
-											ImGui::DragFloat(param_info.Name.c_str(), &value);
-											material->SetParameters(ParamType::Float, param_info.Name, value);
-
-											ImGui::PopID();
-										}
-										break;
-									case ParamType::Vec2:
-										{
-											ImGui::PushID(param_info.Name.c_str());
-
-											/* Show glm::vec2 controller */
-											glm::vec2 value = std::any_cast<glm::vec2>(param.second.Value);
-											ImGui::DragFloat2(param_info.Name.c_str(), glm::value_ptr(value));
-											material->SetParameters(ParamType::Vec2, param_info.Name, value);
-
-											ImGui::PopID();
-										}
-										break;
-									case ParamType::Vec3:
-										{
-											ImGui::PushID(param_info.Name.c_str());
-
-											/* Show glm::vec3 controller */
-											glm::vec3 value = std::any_cast<glm::vec3>(param.second.Value);
-											ImGui::DragFloat3(param_info.Name.c_str(), glm::value_ptr(value));
-											material->SetParameters(ParamType::Vec3, param_info.Name, value);
-
-											ImGui::PopID();
-										}
-										break;
-									case ParamType::Vec4:
-										{
-											ImGui::PushID(param_info.Name.c_str());
-
-											/* Show glm::vec4 controller */
-											glm::vec4 value = std::any_cast<glm::vec4>(param.second.Value);
-											ImGui::DragFloat4(param_info.Name.c_str(), glm::value_ptr(value));
-											material->SetParameters(ParamType::Vec4, param_info.Name, value);
-
-											ImGui::PopID();
-										}
-										break;
-									}
-
-									ImGui::TreePop();
-								}
-							}
-
-							ImGui::TreePop();
-						}
-					}
-
-					/*for (const auto& mesh_segment : m_pModel->GetMeshSegments())
-					{
-						if (ImGui::CollapsingHeader(mesh_segment->GetDebugName().empty() ? "Unnamed" : mesh_segment->GetDebugName().c_str()))
-						{
-							const auto& aabb_min = mesh_segment->GetAABBMin();
-							const auto& aabb_max = mesh_segment->GetAABBMax();
-							ImGui::BulletText("AABB Min: (%f, %f, %f)", aabb_min.x, aabb_min.y, aabb_min.z);
-							ImGui::BulletText("AABB Max: (%f, %f, %f)", aabb_max.x, aabb_max.y, aabb_max.z);
-							ImGui::BulletText("Vertex Cnt: %d", mesh_segment->GetVertexArray()->GetVertexCount());
-							const auto& material = mesh_segment->GetMaterial();
-							ImGui::BulletText("Material Path: %s", material->GetShader()->GetPath().c_str());
-							ImGui::Separator();
-
-							for (uint8_t slot = 0; slot < TextureSlot::ValidSlotCnt; ++slot)
-							{
-								SharedPtr<DeviceTexture> tex = material->GetTextureBySlot(slot);
-								float factor = 1.0f;
-								if (ImGui::TreeNode("Test"))
-								{
-									PackedUIFuncs::DrawTextureUI(TextureSlot::GetSlotName(slot), tex, factor);
-									material->SetTexture(tex, slot);
-									ImGui::TreePop();
-								}
-							}
-						}
-						ImGui::Separator();
-					}*/
-
-					ImGui::TreePop();
-				}
+				ShowModelBaseInfoCard();
+				ShowSubModelCards();
+			}
+			else
+			{
+				ShowEmptyModelHint();
 			}
 		}
 		ImGui::End();
-		ImGui::PopStyleVar();
+	}
+
+	/* 基本信息：整份模型的路径、包围盒与规模 */
+	void ModelEditorLayer::ShowModelBaseInfoCard()
+	{
+		PROFILE_FUNCTION();
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("Base Info", Icons::Id::Model);
+
+		if (card.Open)
+		{
+			ImGuiExt::DrawCommonTextUI("Path", m_pModelInfo->m_Path);
+			ImGuiExt::DrawCommonTextUI("AABB Min", FormatVec3(m_pModelInfo->m_AABB.first));
+			ImGuiExt::DrawCommonTextUI("AABB Max", FormatVec3(m_pModelInfo->m_AABB.second));
+			ImGuiExt::DrawCommonTextUI("Vertices",
+				std::to_string(m_pModelInfo->m_Attributes.vertices.size() / 3));
+			ImGuiExt::DrawCommonTextUI("Mesh Segments",
+				std::to_string(m_pModelInfo->m_SubModelInfos.size()));
+		}
+
+		PanelChrome::EndCard(card);
+	}
+
+	/* 每个子模型一张卡：规模信息 + 它的材质参数 */
+	void ModelEditorLayer::ShowSubModelCards()
+	{
+		PROFILE_FUNCTION();
+
+		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
+		{
+			const auto& sub_model_info = m_pModelInfo->m_SubModelInfos[i];
+			const auto& material = m_pMaterialGroup->GetMaterialByIndex(i);
+			if (sub_model_info == nullptr || material == nullptr)
+				continue;
+
+			ImGui::PushID(static_cast<int>(i));
+
+			const PanelChrome::Card card = PanelChrome::BeginCard(
+				sub_model_info->Name.empty() ? "Unnamed" : sub_model_info->Name.c_str(), Icons::Id::Model);
+
+			if (card.Open)
+			{
+				ImGuiExt::DrawCommonTextUI("AABB Min", FormatVec3(sub_model_info->AABB.first));
+				ImGuiExt::DrawCommonTextUI("AABB Max", FormatVec3(sub_model_info->AABB.second));
+				ImGuiExt::DrawCommonTextUI("Vertices",
+					std::to_string(sub_model_info->VertexArray->GetVertexCount()));
+
+				/* 参数区：一行的分组标题 + 每个参数一个可折叠块 */
+				ImGui::Separator();
+				ImGui::TextColored(EditorTheme::Token::TextLabel, "Material Parameters");
+
+				for (const auto& param : material->GetAllParameters())
+					ShowMaterialParameter(material, sub_model_info, param.second);
+			}
+
+			PanelChrome::EndCard(card);
+			ImGui::PopID();
+		}
+	}
+
+	/* 一个材质参数：参数名是可折叠标题，卡身里先是类型选择器、再是值。
+	 * 值按类型走属性行 —— 与组件字段同一套布局。 */
+	void ModelEditorLayer::ShowMaterialParameter(const SharedPtr<Material>& material,
+	                                            const SharedPtr<SubModelInfo>& sub_model_info,
+	                                            const MaterialParamInfo& param_info)
+	{
+		PROFILE_FUNCTION();
+
+		ImGui::PushID(param_info.Name.c_str());
+
+		if (ImGui::TreeNodeEx(param_info.Name.c_str(),
+			ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			/* 类型选择器放最上面：它是这个参数的"元信息"，值才是内容 */
+			const std::vector<std::string>& type_names = ParamTypeNames();
+			int type_index = static_cast<int>(param_info.Type);
+			if (type_index < 0 || type_index >= static_cast<int>(type_names.size()))
+				type_index = 0;
+
+			ImGuiExt::DrawComboUI("DataType", type_names, type_index,
+				[material, &param_info](int selected)
+				{
+					ApplyParamTypeChange(material, param_info, static_cast<ParamType>(selected));
+				});
+
+			if (param_info.Type == ParamType::Texture)
+			{
+				/* 贴图参数的 Value 是 pair<贴图, 绑定点>：按值取出来，改完再写回材质 */
+				auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(param_info.Value);
+				auto& texture = texture_info.first;
+				TextureLoadConfig load_config = texture->GetTextureLoadConfig();
+
+				const SharedPtr<DeviceTexture> previous = texture;
+				ImGuiExt::DrawTextureUI("Texture", texture);
+
+				/* 拖入新贴图：应用到材质。Ambient 另外记下路径 —— 材质导出走这条路径 */
+				if (texture != previous)
+				{
+					material->SetTexture(param_info.Name, texture);
+					if (param_info.Name == "Ambient")
+						sub_model_info->MaterialParams.AmbientTexPath = RELATIVE_PATH(texture->GetPath());
+				}
+
+				const bool flip_changed = ImGuiExt::DrawCheckboxUI("Flip V", load_config.IsFlipV);
+				const bool mips_changed = ImGuiExt::DrawCheckboxUI("Gen Mips", load_config.IsGenMips);
+
+				/* 加载选项变了就按新选项重新加载贴图 */
+				if (flip_changed || mips_changed)
+				{
+					material->SetTexture(param_info.Name,
+						TextureAssetManager::Instance().GetOrCreateTexture(texture->GetPath(), load_config));
+				}
+			}
+			else
+			{
+				switch (param_info.Type)
+				{
+				case ParamType::Int:
+				{
+					int value = std::any_cast<int>(param_info.Value);
+					ImGuiExt::DrawDragIntUI("Value", value);
+					material->SetParameters(ParamType::Int, param_info.Name, value);
+					break;
+				}
+				case ParamType::Float:
+				{
+					float value = std::any_cast<float>(param_info.Value);
+					ImGuiExt::DrawDragFloatUI("Value", value);
+					material->SetParameters(ParamType::Float, param_info.Name, value);
+					break;
+				}
+				case ParamType::Vec2:
+				{
+					glm::vec2 value = std::any_cast<glm::vec2>(param_info.Value);
+					ImGuiExt::DrawDragFloat2UI("Value", value);
+					material->SetParameters(ParamType::Vec2, param_info.Name, value);
+					break;
+				}
+				case ParamType::Vec3:
+				{
+					glm::vec3 value = std::any_cast<glm::vec3>(param_info.Value);
+					ImGuiExt::DrawVec3ControlUI("Value", value, 0.0f);
+					material->SetParameters(ParamType::Vec3, param_info.Name, value);
+					break;
+				}
+				case ParamType::Vec4:
+				{
+					glm::vec4 value = std::any_cast<glm::vec4>(param_info.Value);
+					ImGuiExt::DrawDragFloat4UI("Value", value);
+					material->SetParameters(ParamType::Vec4, param_info.Name, value);
+					break;
+				}
+				default:
+					/* Mat4 还没有对应的行控件：明确说"没有编辑器"，
+					 * 而不是画一片空白让人以为参数丢了 */
+					ImGuiExt::DrawCommonTextUI("Value", "(no editor)");
+					break;
+				}
+			}
+
+			ImGui::TreePop();
+		}
+
+		ImGui::PopID();
+	}
+
+	/* 未导入模型时的提示：空面板要说清"为什么是空的、该怎么办" */
+	void ModelEditorLayer::ShowEmptyModelHint()
+	{
+		PROFILE_FUNCTION();
+
+		static constexpr const char* kHint = "Drag an .obj file into the viewport to load a model";
+
+		const float wrap_width = ImGui::GetContentRegionAvail().x;
+		const float text_width = ImGui::CalcTextSize(kHint).x;
+
+		ImGui::Dummy(ImVec2(0.0f, ImGui::GetContentRegionAvail().y * 0.3f));
+
+		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap_width);
+		ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImMax(0.0f, (wrap_width - text_width) * 0.5f));
+		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
+		ImGui::TextUnformatted(kHint);
+		ImGui::PopStyleColor();
+		ImGui::PopTextWrapPos();
 	}
 
 	/* 响应拖拽文件到主窗口 */

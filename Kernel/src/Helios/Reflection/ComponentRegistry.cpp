@@ -361,16 +361,8 @@ namespace Helios
 			if (!model)
 				return;
 
-			ImGui::PushID("ModelPath");
-			ImGui::Columns(2);
-
-			ImGui::SetColumnWidth(0, 100);
-			ImGui::Text("ModelPath");
-			ImGui::NextColumn();
-			ImGui::TextWrapped("%s", model->GetPath().c_str());
-
-			ImGui::Columns(1);
-			ImGui::PopID();
+			/* 模型路径是只读信息，交给属性行的通用布局画（保持与其他行对齐） */
+			ImGuiExt::DrawCommonTextUI("ModelPath", model->GetPath());
 		}
 
 		/* 光源类型决定持有哪个 Light 对象，切换时必须重建；
@@ -475,36 +467,34 @@ namespace Helios
 
 			ImGui::Separator();
 
-			/* 烘焙结果随「保存场景」一并落盘，这里只显示状态。
-			 * 写盘要等 GPU 执行完，因此不是存档当帧就完成。 */
+			/* 烘焙结果是只读状态：它随「保存场景」一并落盘，写盘要等 GPU 执行完，
+			 * 所以不是存档当帧就完成。状态行与上面的资源行共用同一套属性行布局。 */
 			using WriteState = ReflectionProbe::BakeCacheWriteState;
-			switch (probe->GetBakeCacheWriteState())
-			{
-			case WriteState::Requested:
-				ImGui::TextUnformatted("Baking...");
-				break;
-			case WriteState::WaitingForGPU:
-				ImGui::TextUnformatted("Saving...");
-				break;
-			default:
-				if (probe->IsBaked())
-				{
-					const std::string& cache_path = probe->GetBakeCachePath();
-					ImGui::Text("Baked: true");
-					ImGui::Text("BakeCache: %s", cache_path.empty() ? "(saved with the scene)" : cache_path.c_str());
-				}
-				else
-				{
-					ImGui::TextUnformatted("Baked: false");
-				}
+			const WriteState state = probe->GetBakeCacheWriteState();
 
-				if (ImGui::Button("Rebake"))
-					probe->Reset();
-				break;
+			const char* status = "Not baked";
+			if (state == WriteState::Requested)
+				status = "Baking...";
+			else if (state == WriteState::WaitingForGPU)
+				status = "Saving...";
+			else if (probe->IsBaked())
+				status = "Baked";
+
+			ImGuiExt::DrawCommonTextUI("Status", status);
+
+			if (state == WriteState::Idle && probe->IsBaked())
+			{
+				const std::string& cache_path = probe->GetBakeCachePath();
+				ImGuiExt::DrawCommonTextUI("BakeCache",
+					cache_path.empty() ? "(written with the scene)" : cache_path);
 			}
 
+			/* 写盘失败不隐藏：否则用户会以为已经存下来了 */
 			if (probe->HasBakeCacheWriteFailed())
-				ImGui::TextUnformatted("BakeCache: write failed");
+				ImGuiExt::DrawCommonTextUI("BakeCache", "write failed");
+
+			if (state == WriteState::Idle && ImGui::Button("Rebake"))
+				probe->Reset();
 		}
 
 		/* 探针为空时整个组件块不显示 */

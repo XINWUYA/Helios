@@ -36,6 +36,11 @@ namespace Helios
 		[[nodiscard]] const char* GetUndoLabel() const { return m_CommandStack.GetUndoLabel(); }
 		[[nodiscard]] const char* GetRedoLabel() const { return m_CommandStack.GetRedoLabel(); }
 
+		/* 场景有没有未保存的改动（层级面板根节点据此显示脏标记）。
+		 * 主判据是编辑历史的位置与上次保存时是否一致 —— 撤销回保存点即视为干净；
+		 * 少量不走命令栈的改动（如拖入模型）由 m_HasUnrecordedChange 兜底。 */
+		[[nodiscard]] bool IsSceneDirty() const;
+
 		void Active(bool active = true) { m_IsActivated = active; }
 		bool IsActivated() const { return m_IsActivated; }
 
@@ -52,6 +57,11 @@ namespace Helios
 		/* 切换到指定场景并重置一切与「旧场景内容」绑定的状态。
 		 * 新建 / 打开 / 拖拽导入都必须经过这里，否则容易漏掉其中一项。 */
 		void SetActiveScene(const SharedPtr<Scene>& scene, const std::string& path);
+		/* 当前场景文件路径的唯一写入口：层级面板根节点显示的场景名跟着它走，
+		 * 新建 / 打开 / 首次保存 / 另存为都从这里改，避免两处状态不同步。 */
+		void SetActiveScenePath(const std::string& path);
+		/* 把「干净点」记在当前编辑历史位置上：保存成功、以及切场景（历史被清空）后调用 */
+		void MarkSceneSaved();
 		/* 更新视口 */
 		void UpdateViewport();
 		/* 响应键盘 */
@@ -67,6 +77,8 @@ namespace Helios
 		void ShowSceneViewportUI();
 		/* 显示渲染统计信息 */
 		void ShowStatisticInfoUI();
+		/* GPU 计时卡片（开关 + 逐层耗时表） */
+		void ShowGPUTimingsCard();
 		/* 选中Entity时显示操作Gizmo */
 		void ShowOperationGizmoUI();
 
@@ -78,12 +90,16 @@ namespace Helios
 
 		/* 主场景 */
 		SharedPtr<Scene> m_pMainScene;
-		/* 当前场景路径 */
+		/* 当前场景路径（只经 SetActiveScenePath 改） */
 		std::string m_ActiveScenePath{};
 		/* 场景实体管理窗口 */
 		SceneHierarchy m_SceneHierarchy;
 		/* 编辑历史：所有改动经命令栈落地 */
 		CommandStack m_CommandStack;
+		/* 上次保存（或加载）时的编辑历史位置：与当前位置不一致即表示有未保存的改动 */
+		size_t m_SavedHistoryIndex{ 0 };
+		/* 发生过不走命令栈的场景改动（如拖入模型） */
+		bool m_HasUnrecordedChange{ false };
 		/* Gizmo 拖拽进行中（拖拽期间的逐帧改动合并为一条历史） */
 		bool m_IsGizmoDragging{ false };
 		/* 选中实体 */

@@ -1,6 +1,10 @@
 ﻿#pragma once
 #include <filesystem>
+#include <string>
+#include <unordered_set>
 #include <vector>
+#include <imgui.h>
+#include "EditorIcons.h"
 
 namespace Helios
 {
@@ -63,6 +67,15 @@ namespace Helios
 		/* 构建文件节点UI(简洁) */
 		void BuildFileUIListTreeSimple(const SharedPtr<FileNode>& node);
 
+		/* 资源浏览器：头部（当前目录名 + 项数 + 视图菜单）与工具行（上一级 + 过滤框） */
+		void ShowBrowserHeader();
+		void ShowBrowserToolbar();
+		/* 资源浏览器的主体：缩略图网格 / 详细列表两种模式 */
+		void ShowBrowserContent();
+
+		/* 文件类型 -> 图标：与层级面板共用同一套矢量图标语言 */
+		static Icons::Id ResolveFileIcon(FileType type);
+
 		/* 在树中按相对路径查找节点：重建后据此恢复浏览位置 */
 		static SharedPtr<FileNode> FindNode(const SharedPtr<FileNode>& node, const std::string& path);
 
@@ -81,6 +94,17 @@ namespace Helios
 
 		/* 只有文件夹文件变化时才更新的文件节点树 */
 		bool m_IsDirty{ true };
+
+		/* 过滤词（空 = 全部显示） */
+		char m_Filter[64]{};
+		/* 本帧的过滤结果：小写化的过滤词 + 通过过滤的节点（命中项 + 它们的全部祖先）。
+		 * 每帧现算一次，不留第二份"是否显示"的缓存。 */
+		std::string m_FilterNeedle;
+		std::unordered_set<const FileNode*> m_VisibleNodes;
+		void FillBrowserFilter();
+		/* 缩略图尺寸与间距：视图菜单里可调，属于"用户偏好"，所以留在实例上 */
+		float m_ThumbnailSize{ 64.0f };
+		float m_ThumbnailPadding{ 32.0f };
 
 		/* 目录状态指纹：目录数量 + 最新的目录写入时间 */
 		size_t m_DirectoryCount{ 0 };

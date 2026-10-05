@@ -30,6 +30,28 @@ namespace Helios
 		}
 	}
 
+	/* 删除前记录父子关系：销毁会把子节点提升到根层级，销毁后再问就晚了 */
+	void DeleteEntityCommand::CaptureHierarchy(Entity entity)
+	{
+		m_Parent = m_Scene->GetParent(entity);
+
+		const auto parent_view = m_Scene->GetRegistry().view<ParentComponent>();
+		for (const entt::entity candidate : parent_view)
+		{
+			if (parent_view.get<ParentComponent>(candidate).m_Parent != static_cast<entt::entity>(entity))
+				continue;
+
+			ChildLink link;
+			link.Child = candidate;
+
+			Entity child{ candidate, m_Scene };
+			if (child.HasComponent<TransformComponent>())
+				link.Local = child.GetComponent<TransformComponent>();
+
+			m_Children.emplace_back(link);
+		}
+	}
+
 	void DeleteEntityCommand::Do()
 	{
 		if (m_Scene == nullptr || !m_Entity)
@@ -39,6 +61,7 @@ namespace Helios
 		if (!m_Captured)
 		{
 			CaptureComponents(m_Entity);
+			CaptureHierarchy(m_Entity);
 			m_Captured = true;
 		}
 
@@ -59,5 +82,23 @@ namespace Helios
 		}
 
 		m_Entity = recreated;
+
+		/* 层级一并还原：父节点可能已经不在了，这时退化为根节点 */
+		if (m_Scene->IsEntityValid(m_Parent))
+			m_Scene->SetParentLink(m_Entity, m_Parent);
+
+		for (const ChildLink& link : m_Children)
+		{
+			if (!m_Scene->IsEntityValid(link.Child))
+				continue;
+
+			/* 先还原本地变换再挂回去：要的是"层级与位置都回到删除前"，
+			 * 而不是按当前状态反推（子节点的世界变换在删除时已按根层级重算过）。 */
+			Entity child{ link.Child, m_Scene };
+			if (child.HasComponent<TransformComponent>())
+				child.GetComponent<TransformComponent>() = link.Local;
+
+			m_Scene->SetParentLink(child, m_Entity);
+		}
 	}
 }

@@ -2,6 +2,8 @@
 #include "SceneEditorLayer.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "EditorBuiltinCamera.h"
+#include "EditorIcons.h"
+#include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Command/TransformCommand.h"
 #include "Helios/Application/Application.h"
@@ -51,6 +53,10 @@ namespace Helios
 		
 		/* 统计信息 */
 		ShowStatisticInfoUI();
+
+		/* 脏标记每帧推送：场景名旁的圆点必须和编辑历史同步，不能缓存成独立状态 */
+		m_SceneHierarchy.SetSceneDirty(IsSceneDirty());
+
 		/* 场景管理及属性窗口 */
 		m_SceneHierarchy.OnImGuiRender();
 
@@ -185,9 +191,33 @@ namespace Helios
 			auto& model_component = entity.AddComponent<ModelComponent>();
 			model_component.m_Model = Model::Create(path.generic_string());
 
+			/* 这条改动不走命令栈（没有对应的撤销），脏标记只能在这里显式补上 */
+			m_HasUnrecordedChange = true;
+
 			return;
 		}
 		
+	}
+
+	void SceneEditorLayer::SetActiveScenePath(const std::string& path)
+	{
+		PROFILE_FUNCTION();
+
+		m_ActiveScenePath = path;
+
+		/* 层级面板的根节点就是当前场景名：路径改了必须同步，否则另存为之后显示的仍是旧名字 */
+		m_SceneHierarchy.SetScenePath(path);
+	}
+
+	bool SceneEditorLayer::IsSceneDirty() const
+	{
+		return m_HasUnrecordedChange || m_CommandStack.GetNextIndex() != m_SavedHistoryIndex;
+	}
+
+	void SceneEditorLayer::MarkSceneSaved()
+	{
+		m_SavedHistoryIndex = m_CommandStack.GetNextIndex();
+		m_HasUnrecordedChange = false;
 	}
 
 	void SceneEditorLayer::SetActiveScene(const SharedPtr<Scene>& scene, const std::string& path)
@@ -195,7 +225,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		m_pMainScene = scene;
-		m_ActiveScenePath = path;
+		SetActiveScenePath(path);
 
 		/* 层级面板与 RenderView 都要指向新场景 */
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
@@ -205,6 +235,9 @@ namespace Helios
 		m_HoveredEntity = {};
 		m_CommandStack.Clear();
 		m_IsGizmoDragging = false;
+
+		/* 历史刚被清空（没保存过的新场景也一样）：当前位置就是干净点 */
+		MarkSceneSaved();
 
 		/* 新建 / 打开场景后场景视口必须可见：它同时是视口窗口被关闭后的恢复入口，
 		 * 否则用户新建了一个空场景却看不到它。 */
@@ -237,13 +270,16 @@ namespace Helios
 
 		/* 若当前场景从未保存过，需要先确定一个保存路径 */
 		if (m_ActiveScenePath.empty())
-			m_ActiveScenePath = FileDialog::SaveFile("scene(*.scn)\0*.scn\0");
+			SetActiveScenePath(FileDialog::SaveFile("scene(*.scn)\0*.scn\0"));
 
 		/* 用户取消了路径选择：不写出空路径 */
 		if (m_ActiveScenePath.empty())
 			return;
 
 		m_pMainScene->Serializer(m_ActiveScenePath);
+
+		/* 场景内容与文件一致了：当前位置成为新的干净点 */
+		MarkSceneSaved();
 	}
 
 	/* 保存场景到指定路径 */
@@ -260,7 +296,8 @@ namespace Helios
 		m_pMainScene->Serializer(file_path);
 
 		/* 保存成功后，当前场景路径切换为新路径 */
-		m_ActiveScenePath = file_path;
+		SetActiveScenePath(file_path);
+		MarkSceneSaved();
 	}
 
 	bool SceneEditorLayer::Undo()
@@ -347,68 +384,93 @@ namespace Helios
 
 		ImGui::Begin(Panel::kStatInfo);
 		{
-			if (ImGui::CollapsingHeader("GPU Stats"))
-			{
-				/* GPU Timer开关 */
-				bool enableGPUTimer = RenderQueryProfiler::Instance().IsEnabled();
-				if (ImGui::Checkbox("Enable GPU Timer", &enableGPUTimer))
-					RenderQueryProfiler::Instance().SetEnabled(enableGPUTimer);
+			const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(Icons::Id::Stats);
+			PanelChrome::DrawHeaderTitle(header, "Render Stats");
+			PanelChrome::EndHeaderRow(header);
 
-				std::function<void(const ResultGPUTimerNode&)> ShowGPUTimeResultRecursively;
-				ShowGPUTimeResultRecursively = [&ShowGPUTimeResultRecursively](const ResultGPUTimerNode& timerNode)
+			ShowGPUTimingsCard();
+		}
+		ImGui::End();
+	}
+
+	/* GPU 计时：开关 + 逐层耗时表。
+	 * 表放在卡片里，耗时列右对齐 —— 数字对得齐，才一眼看得出哪一级最贵。 */
+	void SceneEditorLayer::ShowGPUTimingsCard()
+	{
+		PROFILE_FUNCTION();
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("GPU Timings", Icons::Id::Stats);
+
+		if (card.Open)
+		{
+			/* GPU 计时器的开关：面板级开关，占卡身的一行 */
+			bool timer_enabled = RenderQueryProfiler::Instance().IsEnabled();
+			if (ImGuiExt::DrawCheckboxUI("GPU Timer", timer_enabled))
+				RenderQueryProfiler::Instance().SetEnabled(timer_enabled);
+
+			const ResultGPUTimerNode& timer_root = Renderer::GetGPUTimerRoot();
+			if (timer_root.Label.empty())
+			{
+				ImGuiExt::DrawCommonTextUI("Timers", "No data");
+			}
+			else
+			{
+				std::function<void(const ResultGPUTimerNode&)> show_node_recursively;
+				show_node_recursively = [&show_node_recursively](const ResultGPUTimerNode& timer_node)
 					{
-						if (timerNode.Label.empty())
+						if (timer_node.Label.empty())
 							return;
-						static constexpr int strLen = 40;
-						char labelStr[strLen];
-						snprintf(labelStr, strLen, "(%d)%s", timerNode.QueryIndex, timerNode.Label.c_str());
-						labelStr[strLen - 1] = 0;
 
 						ImGui::TableNextRow();
 						ImGui::TableNextColumn();
-						if (!timerNode.Children.empty())
-						{
-							static auto flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth;
-							const bool open = ImGui::TreeNodeEx((void*)(intptr_t)(timerNode.QueryIndex), flags, labelStr);
-							ImGui::TableNextColumn();
-							ImGui::Text("%.2f", timerNode.GPUTime);
 
-							if (open)
-							{
-								for (const auto& child : timerNode.Children)
-									ShowGPUTimeResultRecursively(child);
+						char label[64] = {};
+						snprintf(label, sizeof(label), "(%d) %s", timer_node.QueryIndex, timer_node.Label.c_str());
+						label[sizeof(label) - 1] = 0;
 
-								ImGui::TreePop();
-							}
-						}
+						const bool has_children = !timer_node.Children.empty();
+						ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_DefaultOpen;
+						if (!has_children)
+							flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
 						else
+							flags |= ImGuiTreeNodeFlags_OpenOnArrow;
+
+						const bool is_opened = ImGui::TreeNodeEx(
+							reinterpret_cast<void*>(static_cast<intptr_t>(timer_node.QueryIndex)), flags, "%s", label);
+
+						ImGui::TableNextColumn();
+						ImGui::Text("%.2f", timer_node.GPUTime);
+
+						if (is_opened && has_children)
 						{
-							static auto flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanFullWidth;
-							ImGui::TreeNodeEx((void*)(intptr_t)(timerNode.QueryIndex), flags, labelStr);
-							ImGui::TableNextColumn();
-							ImGui::Text("%.2f", timerNode.GPUTime);
+							for (const auto& child : timer_node.Children)
+								show_node_recursively(child);
+
+							ImGui::TreePop();
 						}
 					};
 
-				static auto tableFlag = ImGuiTableFlags_BordersV | ImGuiTableFlags_BordersOuterH | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_NoBordersInBody;
-				const auto& GPUTimerRoot = Renderer::GetGPUTimerRoot();
-				if (ImGui::BeginTable("2Columes", 2, tableFlag))
+				/* 表头 + 行背景由主题配色；耗时列按"最长数字"定宽，避免列宽随帧抖动 */
+				const ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg
+					| ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoBordersInBody
+					| ImGuiTableFlags_SizingFixedFit;
+
+				if (ImGui::BeginTable("GPUTimings", 2, table_flags))
 				{
-					ImGui::TableSetupColumn("Scope", ImGuiTableColumnFlags_NoHide);
-					ImGui::TableSetupColumn("GPU-Times(us)", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize("A").x);
+					ImGui::TableSetupColumn("Scope", ImGuiTableColumnFlags_WidthStretch);
+					ImGui::TableSetupColumn("us", ImGuiTableColumnFlags_WidthFixed,
+						ImGui::CalcTextSize("00000.00").x);
+
 					ImGui::TableHeadersRow();
-					ShowGPUTimeResultRecursively(GPUTimerRoot);
+					show_node_recursively(timer_root);
 					ImGui::EndTable();
 				}
 			}
-
-			// Renderer3D Stats
-			if (ImGui::CollapsingHeader("3D"))
-			{
-				// todo: 三角形、模型数量
-			}
 		}
-		ImGui::End();
+
+		PanelChrome::EndCard(card);
+
+		// todo: 3D 统计（三角形数 / DrawCall / 模型数）准备好数据源后在这里补一张卡
 	}
 
 	void SceneEditorLayer::ShowOperationGizmoUI()
@@ -425,11 +487,15 @@ namespace Helios
 
 		Entity selected_entity = m_SceneHierarchy.GetSelectedEntity();
 		/* 组件可被移除，缺少 Transform 时本帧不画 Gizmo */
-		if (selected_entity && m_GizmoType != -1 && selected_entity.HasComponent<TransformComponent>())
+		if (selected_entity && m_GizmoType != -1 && m_pMainScene && selected_entity.HasComponent<TransformComponent>())
 		{
 			// Entity transform
 			auto& transform_component = selected_entity.GetComponent<TransformComponent>();
-			glm::mat4 transform_mat = transform_component.GetTransform();
+
+			/* Gizmo 作用在世界变换上：实体挂在父节点下时，本地变换不能直接当世界位置用。
+			 * 无父节点时父世界变换是单位阵，与既有行为完全一致。 */
+			glm::mat4 transform_mat = m_pMainScene->GetWorldTransform(selected_entity);
+			const glm::mat4 parent_world = m_pMainScene->GetWorldTransform(m_pMainScene->GetParent(selected_entity));
 
 			// Snapping
 			bool snap = Input::IsKeyPressed(Key::LeftControl);
@@ -455,9 +521,10 @@ namespace Helios
 
 			if (is_using)
 			{
-				/* 从变换矩阵中恢复 */
+				/* 从变换矩阵中恢复：ImGuizmo 给的是世界变换，先按父空间换算回本地再分解，
+				 * 否则挂在父节点下的实体会随父节点一起偏移。 */
 				glm::vec3 position, rotation, scale;
-				DecomposeTransform(transform_mat, position, rotation, scale);
+				DecomposeTransform(glm::inverse(parent_world) * transform_mat, position, rotation, scale);
 
 				/* 旋转按增量叠加（ImGuizmo 给出的是绝对量） */
 				TransformComponent next = transform_component;

@@ -29,15 +29,39 @@ namespace Helios::EditorTheme
 
         inline const ImVec4 Text    = ImVec4(0.902f, 0.914f, 0.929f, 1.00f); /* #E6E9ED 正文 */
         inline const ImVec4 TextDim = ImVec4(0.431f, 0.463f, 0.506f, 1.00f); /* #6E7681 次要 / 禁用 */
+        /* 属性行标签：比正文弱、比禁用强 —— 标签是"说明"，值才是内容 */
+        inline const ImVec4 TextLabel = ImVec4(0.725f, 0.753f, 0.792f, 1.00f); /* #B9C0CA */
 
         /* 强调色：只允许出现在 选中 / 激活 / 当前值 / 焦点 / 拖拽预览 */
         inline const ImVec4 Accent      = ImVec4(0.298f, 0.604f, 1.000f, 1.00f); /* #4C9AFF */
         inline const ImVec4 AccentHover = ImVec4(0.435f, 0.682f, 1.000f, 1.00f); /* #6FAEFF */
         inline const ImVec4 AccentDown  = ImVec4(0.239f, 0.518f, 0.910f, 1.00f); /* #3D84E8 */
 
+        /* 分量色：X/Y/Z 的身份标识（业界约定 红/绿/蓝），与"状态"无关，
+         * 因此只出现在「分量重置按钮」这一处；深色界面下取降饱和版本，避免抢眼。
+         * 四分量（W）没有约定俗成的颜色，用中性灰，不让它冒充分量语义。 */
+        inline const ImVec4 AxisX      = ImVec4(0.784f, 0.396f, 0.373f, 1.00f); /* #C8655F */
+        inline const ImVec4 AxisXHover = ImVec4(0.851f, 0.482f, 0.459f, 1.00f); /* #D97B75 */
+        inline const ImVec4 AxisY      = ImVec4(0.435f, 0.667f, 0.353f, 1.00f); /* #6FAA5A */
+        inline const ImVec4 AxisYHover = ImVec4(0.522f, 0.749f, 0.439f, 1.00f); /* #85BF70 */
+        inline const ImVec4 AxisZ      = ImVec4(0.353f, 0.549f, 0.831f, 1.00f); /* #5A8CD4 */
+        inline const ImVec4 AxisZHover = ImVec4(0.443f, 0.639f, 0.914f, 1.00f); /* #71A3E9 */
+
+        /* 组件卡：面板(Neutral2) < 卡身(Neutral3) < 卡头(Neutral4)，用明度递增表达"抬起" */
+        inline const ImVec4 CardBg            = Neutral3;
+        inline const ImVec4 CardHeaderBg      = Neutral4;
+        inline const ImVec4 CardHeaderHovered = Neutral5;
+
         inline const ImVec4 Clear   = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
         inline const ImVec4 White06 = ImVec4(1.0f, 1.0f, 1.0f, 0.06f);
         inline const ImVec4 White12 = ImVec4(1.0f, 1.0f, 1.0f, 0.12f);
+
+        /* ---- 尺寸 ---- */
+
+        /* 属性面板标签列宽：全面板共用一档，所有组件卡的字段左边界因此对齐。
+         * 取值覆盖当前注册表里最长的字段名（PrefilterMipLevels）；行内仍会按实际
+         * 文本做一次下限保护，将来出现更长的名字只会撑宽自己那一行而不会重叠。 */
+        inline constexpr float PropertyLabelWidth = 108.0f;
     }
 
     inline ImVec4 WithAlpha(const ImVec4& color, float alpha)

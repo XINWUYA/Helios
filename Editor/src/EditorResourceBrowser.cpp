@@ -1,6 +1,8 @@
 ﻿#include "Pch.h"
 #include "EditorResourceBrowser.h"
+#include "EditorCommon.h"
 #include "EditorIcons.h"
+#include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Helios/ImGui/EditorTheme.h"
 
@@ -10,6 +12,13 @@ namespace Helios
 	{
 		/* 目录状态检查间隔：兼顾刷新及时性与遍历开销 */
 		constexpr float kDirectoryCheckInterval = 0.5f;
+
+		/* 资源根目录的显示名：取最后一级目录名（路径以分隔符结尾时 filename() 为空） */
+		std::string AssetsRootName()
+		{
+			const std::string folder_name = g_AssetsPath.filename().string();
+			return folder_name.empty() ? g_AssetsPath.string() : folder_name;
+		}
 
 		/* 统计资源目录（含根目录）的目录数量与最新写入时间。
 		 * 新增 / 删除文件会更新其所在目录的时间戳，因此只需读目录，不必 stat 每个文件。 */
@@ -35,6 +44,48 @@ namespace Helios
 					out_newest = write_time;
 			}
 		}
+	}
+
+	/* 文件类型 -> 图标：与层级面板共用同一套图标语言，
+	 * 图片用矢量图（缩略图在 14px 行高下糊成一团） */
+	Icons::Id EditorResourceBrowser::ResolveFileIcon(FileType type)
+	{
+		switch (type)
+		{
+		case FileType::Folder:   return Icons::Id::Directory;
+		case FileType::Image:    return Icons::Id::Sprite;
+		case FileType::Scene:    return Icons::Id::FileScene;
+		case FileType::MtlGraph: return Icons::Id::FileMtlGraph;
+		default:                 return Icons::Id::File;
+		}
+	}
+
+	/* 本帧的过滤结果：自底向上一次遍历，命中的节点与它们的祖先都算可见
+	 * （祖先不留下的话，命中的文件会挂在看不见的目录里）。
+	 * 过滤词为空时全部命中 —— 于是「不显示」只有"不在集合里"这一条判据。 */
+	void EditorResourceBrowser::FillBrowserFilter()
+	{
+		PROFILE_FUNCTION();
+
+		m_FilterNeedle = ToLowercase(m_Filter);
+		m_VisibleNodes.clear();
+
+		std::function<bool(const SharedPtr<FileNode>&)> visit = [&](const SharedPtr<FileNode>& node) -> bool
+		{
+			if (node == nullptr)
+				return false;
+
+			bool visible = ContainsCaseInsensitive(node->FilePath.c_str(), m_FilterNeedle);
+			for (const auto& child : node->ChildNodes)
+				visible = visit(child) || visible; /* 注意顺序：先把孩子算完 */
+
+			if (visible)
+				m_VisibleNodes.insert(node.get());
+
+			return visible;
+		};
+
+		visit(m_RootFileNodeTree);
 	}
 
 	bool EditorResourceBrowser::HasDirectoryChanged() const
@@ -97,14 +148,18 @@ namespace Helios
 				m_CurrentFileNode = m_RootFileNodeTree;   /* 未浏览过，或原目录已被删除 */
 		}
 
-		/* 文件目录列表窗口 */
+		/* 过滤结果每帧现算：过滤词与目录树两者都可能变 */
+		FillBrowserFilter();
+
+		/* 文件目录树窗口：头部给出资源根目录名，树里按文件类型给图标 */
 		ImGui::Begin(Panel::kFileList);
 		{
-			if (ImGui::CollapsingHeader(g_AssetsPath.string().c_str()))
-			{
-				/* 遍历文件节点构建UI */
-				BuildFileUIListTreeSimple(m_RootFileNodeTree);
-			}
+			const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(Icons::Id::Directory);
+			PanelChrome::DrawHeaderTitle(header, AssetsRootName());
+			PanelChrome::EndHeaderRow(header);
+
+			/* 遍历文件节点构建UI */
+			BuildFileUIListTreeSimple(m_RootFileNodeTree);
 		}
 		ImGui::End();
 
@@ -114,166 +169,172 @@ namespace Helios
 			if (!m_CurrentFileNode)
 				m_CurrentFileNode = m_RootFileNodeTree; /* 默认为根节点 */
 
-			/* 上一级目录图标 */
-			{
-				const bool disable_return_btn = (*m_CurrentFileNode) == (*m_RootFileNodeTree);
-
-                /* Button样式 */
-                float button_alpha = 0.5f;
-				if (disable_return_btn)
-				{
-					ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
-					button_alpha = 0.25f;
-				}
-
-				START_STYLE_ALPHA(button_alpha);
-				if (Icons::IconButton(Icons::Id::Return, ImVec2(20, 20)))
-					m_CurrentFileNode = m_CurrentFileNode->ParentNode.lock();
-				END_STYLE_ALPHA;
-
-				/* 取消当前禁用样式 */
-				if (disable_return_btn)
-                    ImGui::PopItemFlag();
-			}
-
-			/* 计算面板宽度 */
-			const float panel_width = ImGui::GetContentRegionAvail().x;
-
-			/* 图标大小图标 */
-			static float thumbnail_size = 64.0f;
-			static float padding = 32.0f;
-
-			/* 透明Button样式 */
-			START_TRANSPARENT_BUTTON;
-
-			/* 筛选控件 */
-			static ImGuiTextFilter filter;
-			{
-				ImGui::SameLine(40, 20);
-				filter.Draw("##", 200);
-
-				/* 筛选图标是装饰性的，不接收点击 */
-				ImGui::SameLine(236);
-				ImGui::Dummy(ImVec2(20.0f, 20.0f));
-				const ImVec2 icon_min = ImGui::GetItemRectMin();
-				const ImVec2 icon_max = ImGui::GetItemRectMax();
-
-				START_STYLE_ALPHA(0.5f);
-				Icons::Draw(ImGui::GetWindowDrawList(), Icons::Id::Filter,
-					ImVec2((icon_min.x + icon_max.x) * 0.5f, (icon_min.y + icon_max.y) * 0.5f), 16.0f,
-					ImGui::GetColorU32(EditorTheme::Token::Text));
-				END_STYLE_ALPHA;
-			}
-
-			/* 图标大小图标控件 */
-			{
-				ImGui::SameLine(panel_width - 15);
-				START_STYLE_ALPHA(0.5f);
-				if (Icons::IconButton(Icons::Id::Menu, ImVec2(20, 20)))
-					ImGui::OpenPopup("SettingPopup");
-				END_STYLE_ALPHA;
-
-				/* 展开菜单时才显示控件 */
-				if (ImGui::BeginPopup("SettingPopup"))
-                {
-					ImGui::PushItemWidth(120);
-
-					ImGui::SliderFloat("Size", &thumbnail_size, 16, 128);
-					ImGui::Separator();
-					ImGui::SliderFloat("Padding", &padding, 0, 32);
-
-					ImGui::PopItemWidth();
-					ImGui::EndPopup();
-				}
-			}
-
-			/* 取消当前透明样式 */
-			END_TRANSPARENT_BUTTON;
-			/* 分隔线 */
-			ImGui::Separator();
-
-			/* 文件UI, 足够大时显示图标，否则采用单列表显示 */
-			if (thumbnail_size > 32)
-			{
-				const float cell_size = thumbnail_size + padding;
-				int column_count = static_cast<int>(panel_width / cell_size);
-				if (column_count < 1)
-					column_count = 1;
-
-				ImGui::Columns(column_count, 0, false);
-
-				for (const auto& child_node : m_CurrentFileNode->ChildNodes)
-				{
-					auto filepath = std::filesystem::path(child_node->FilePath);
-
-					/* 通过筛选的才需要显示 */
-					if (filter.PassFilter(child_node->FilePath.c_str()))
-					{
-						ImGui::PushID(child_node->FileName.c_str());
-						{
-							ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-                            {
-                                /* 图标 */
-                                ImGui::ImageButton((ImTextureID)child_node->Icon.get(), ImVec2(thumbnail_size, thumbnail_size), ImVec2(0, 1), ImVec2(1, 0));
-                                
-                                /* 拖拽 */
-                                if (ImGui::BeginDragDropSource())
-                                {
-                                    const char* item_path = child_node->FilePath.c_str();
-                                    ImGui::SetDragDropPayload("RESOURCE_BROWSER_ITEM", item_path, strlen(item_path) + 1);
-                                    ImGui::EndDragDropSource();
-                                }
-                            }
-                            ImGui::PopStyleColor();
-
-							/* 双击响应 */
-							if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-							{
-                                if (child_node->Type == FileType::Folder)
-									m_CurrentFileNode = child_node;
-							}
-
-							/* 右键选中菜单 */
-							if (ImGui::BeginPopupContextItem())
-							{
-								/* 在系统文件夹中显示 */
-								if (ImGui::MenuItem("Show in file explorer"))
-								{
-									auto path = g_AssetsPath / child_node->FilePath;
-									path = absolute(path).make_preferred();
-									OpenFileExplorer(path.string().c_str());
-								}
-
-								ImGui::EndPopup();
-							}
-
-							/* 文件名 */
-							ImGui::TextWrapped(child_node->FileName.c_str());
-
-							/* 下一个文件 */
-							ImGui::NextColumn();
-						}
-						ImGui::PopID();
-					}
-				}
-				ImGui::Columns(1);
-			}
-			else /* 当图标大小时，转换为列表模式 */
-			{
-				ImGui::BeginTable("Assets List", 3);
-				{
-					ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_NoHide);
-					ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed);
-					ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed);
-					ImGui::TableHeadersRow();
-
-					/* 遍历文件节点构建UI */
-					BuildFileUIListTreeDetail(m_CurrentFileNode);
-				}
-				ImGui::EndTable();
-			}
+			ShowBrowserHeader();
+			ShowBrowserToolbar();
+			ShowBrowserContent();
 		}
 		ImGui::End();
+	}
+
+	/* 资源浏览器头部：当前目录名 + 项数 + 视图菜单（缩略图尺寸 / 间距） */
+	void EditorResourceBrowser::ShowBrowserHeader()
+	{
+		PROFILE_FUNCTION();
+
+		const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(Icons::Id::Directory);
+		const float button_size = header.Height;
+
+		/* 项数贴右端，与视图菜单各占一个动作位 */
+		char count_text[32] = {};
+		snprintf(count_text, sizeof(count_text), "%d items",
+			static_cast<int>(m_CurrentFileNode->ChildNodes.size()));
+
+		const float count_width = ImGui::CalcTextSize(count_text).x;
+		PanelChrome::PlaceHeaderAction(header, count_width, 1);
+		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
+		ImGui::TextUnformatted(count_text);
+		ImGui::PopStyleColor();
+
+		/* 目录名：按到计数文字左侧为止裁剪 */
+		PanelChrome::DrawHeaderTitle(header, m_CurrentFileNode->FileName,
+			header.Right - header.TitleX - PanelChrome::HeaderActionWidth(count_width)
+				- PanelChrome::HeaderActionWidth(button_size) - ImGui::GetStyle().ItemInnerSpacing.x);
+
+		/* 视图菜单：缩略图尺寸与间距 */
+		PanelChrome::PlaceHeaderAction(header, button_size);
+		if (Icons::IconButton(Icons::Id::Menu, ImVec2(button_size, button_size), false, "View options"))
+			ImGui::OpenPopup("BrowserViewOptions");
+
+		if (ImGui::BeginPopup("BrowserViewOptions"))
+		{
+			ImGui::SetNextItemWidth(140.0f);
+			ImGui::SliderFloat("Thumbnail", &m_ThumbnailSize, 16.0f, 128.0f);
+			ImGui::SetNextItemWidth(140.0f);
+			ImGui::SliderFloat("Spacing", &m_ThumbnailPadding, 0.0f, 32.0f);
+			ImGui::EndPopup();
+		}
+
+		PanelChrome::EndHeaderRow(header);
+	}
+
+	/* 工具行：上一级 + 过滤框 */
+	void EditorResourceBrowser::ShowBrowserToolbar()
+	{
+		PROFILE_FUNCTION();
+
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const PanelChrome::HeaderRow toolbar = PanelChrome::BeginHeaderRow(Icons::Id::None);
+		const float button_size = toolbar.Height;
+
+		/* 已经在根目录时把按钮置灰而不是隐藏 —— 位置固定，按钮才不会跳动 */
+		const bool at_root = (*m_CurrentFileNode) == (*m_RootFileNodeTree);
+		if (at_root)
+		{
+			ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+			ImGui::PushStyleVar(ImGuiStyleVar_Alpha, style.Alpha * style.DisabledAlpha);
+		}
+
+		if (Icons::IconButton(Icons::Id::Return, ImVec2(button_size, button_size), false, "Parent folder"))
+			m_CurrentFileNode = m_CurrentFileNode->ParentNode.lock();
+
+		if (at_root)
+		{
+			ImGui::PopStyleVar();
+			ImGui::PopItemFlag();
+		}
+
+		/* 过滤框吃掉工具行剩下的宽度 */
+		ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+		ImGui::InputTextWithHint("##ResourceFilter", "Filter assets...", m_Filter, sizeof(m_Filter));
+
+		PanelChrome::EndHeaderRow(toolbar);
+	}
+
+	/* 主体：缩略图够大就用网格，否则退回详细列表 */
+	void EditorResourceBrowser::ShowBrowserContent()
+	{
+		PROFILE_FUNCTION();
+
+		const std::string needle = ToLowercase(m_Filter);
+		const float panel_width = ImGui::GetContentRegionAvail().x;
+
+		if (m_ThumbnailSize > 32.0f)
+		{
+			const float cell_size = m_ThumbnailSize + m_ThumbnailPadding;
+			int column_count = static_cast<int>(panel_width / cell_size);
+			if (column_count < 1)
+				column_count = 1;
+
+			ImGui::Columns(column_count, nullptr, false);
+
+			for (const auto& child_node : m_CurrentFileNode->ChildNodes)
+			{
+				/* 通过筛选的才需要显示 */
+				if (!ContainsCaseInsensitive(child_node->FilePath.c_str(), needle))
+					continue;
+
+				ImGui::PushID(child_node->FileName.c_str());
+				{
+					ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Token::Clear);
+					{
+						/* 图标（图片文件直接用缩略图） */
+						ImGui::ImageButton((ImTextureID)child_node->Icon.get(),
+							ImVec2(m_ThumbnailSize, m_ThumbnailSize), ImVec2(0, 1), ImVec2(1, 0));
+
+						/* 拖拽 */
+						if (ImGui::BeginDragDropSource())
+						{
+							const char* item_path = child_node->FilePath.c_str();
+							ImGui::SetDragDropPayload("RESOURCE_BROWSER_ITEM", item_path, strlen(item_path) + 1);
+							ImGui::EndDragDropSource();
+						}
+					}
+					ImGui::PopStyleColor();
+
+					/* 双击进入文件夹 */
+					if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+					{
+						if (child_node->Type == FileType::Folder)
+							m_CurrentFileNode = child_node;
+					}
+
+					/* 右键菜单 */
+					if (ImGui::BeginPopupContextItem())
+					{
+						if (ImGui::MenuItem("Show in file explorer"))
+						{
+							auto path = g_AssetsPath / child_node->FilePath;
+							path = absolute(path).make_preferred();
+							OpenFileExplorer(path.string().c_str());
+						}
+
+						ImGui::EndPopup();
+					}
+
+					/* 文件名 */
+					ImGui::TextWrapped("%s", child_node->FileName.c_str());
+
+					ImGui::NextColumn();
+				}
+				ImGui::PopID();
+			}
+
+			ImGui::Columns(1);
+			return;
+		}
+
+		/* 列表模式：三列（名字 / 类型 / 大小），名字列带文件类型图标 */
+		ImGui::BeginTable("Assets List", 3);
+		{
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_NoHide);
+			ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed);
+			ImGui::TableHeadersRow();
+
+			BuildFileUIListTreeDetail(m_CurrentFileNode);
+		}
+		ImGui::EndTable();
 	}
 
 	void EditorResourceBrowser::BuildFileNodeTree(const SharedPtr<FileNode>& parent_node)
@@ -338,69 +399,56 @@ namespace Helios
 	{
 		for (const auto& child_node : node->ChildNodes)
 		{
+			if (m_VisibleNodes.count(child_node.get()) == 0)
+				continue;
+
+			const auto file_ext = ExtractFileSuffix(child_node->FileName);
+			const bool is_folder = (child_node->Type == FileType::Folder);
+
+			if (is_folder && !m_FilterNeedle.empty())
+				ImGui::SetNextItemOpen(true, ImGuiCond_Always); /* 过滤时全展开，否则搜到了也看不见 */
+
+			ImGui::PushID(child_node.get());
+
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 
-			const auto file_ext = ExtractFileSuffix(child_node->FileName);
+			/* 空标签 + 自绘"图标 + 名字"：与层级树、文件树同一套行内容 */
+			const ImGuiTreeNodeFlags flags = is_folder
+				? ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanFullWidth
+				: ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+			const bool is_opened = ImGui::TreeNodeEx("##node", flags, "%s", "");
 
-            if (child_node->Type == FileType::Folder) /* 文件夹 */
-            {
-                /* 文件夹节点 */
-                bool open = ImGui::TreeNodeEx(child_node->FileName.c_str(), ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanFullWidth);
-
-                /* 点击目录时，设置为当前文件目录 */
-                /* 文件类型 */
-				ImGui::TableNextColumn();
-				ImGui::SetNextItemWidth(100);
-				ImGui::TextUnformatted(file_ext.c_str());
-
-                /* 文件大小 */
-				ImGui::TableNextColumn();
-				ImGui::SetNextItemWidth(300);
-				ImGui::TextUnformatted("");
-
-				/* 展开文件夹节点 */
-				if (open)
-				{
-					BuildFileUIListTreeDetail(child_node);
-					ImGui::TreePop();
-				}
-			}
-			else
+			/* 右键菜单：在系统文件夹中显示 */
+			if (ImGui::BeginPopupContextItem())
 			{
-                /* 文件节点 */
-                ImGui::TreeNodeEx(child_node->FileName.c_str(), ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen);
-
-                /* todo: 点击文件时做响应 */
-                if (ImGui::IsItemClicked() && ImGui::IsItemToggledOpen())
+				if (ImGui::MenuItem("Show in file explorer"))
 				{
-					/**/
+					auto path = g_AssetsPath / child_node->FilePath;
+					path = absolute(path).make_preferred();
+					OpenFileExplorer(path.string().c_str());
 				}
 
-				/* 右键选中菜单 */
-				if (ImGui::BeginPopupContextItem())
-				{
-					/* 在系统文件夹中显示 */
-					if (ImGui::MenuItem("Show in file explorer"))
-					{
-						auto path = g_AssetsPath / child_node->FilePath;
-						path = absolute(path).make_preferred();
-						OpenFileExplorer(path.string().c_str());
-					}
-
-					ImGui::EndPopup();
-				}
-
-				/* 文件类型 */
-				ImGui::TableNextColumn();
-				ImGui::SetNextItemWidth(160);
-				ImGui::TextUnformatted(file_ext.c_str());
-
-				/* 文件大小 */
-				ImGui::TableNextColumn();
-				ImGui::SetNextItemWidth(300);
-				ImGui::TextUnformatted((ToString(child_node->FileSize, 2) + "KB").c_str());
+				ImGui::EndPopup();
 			}
+
+			PanelChrome::DrawTreeRowLabel(ResolveFileIcon(child_node->Type), child_node->FileName);
+
+			/* 文件类型 */
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(file_ext.c_str());
+
+			/* 文件大小 */
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(is_folder ? "" : (ToString(child_node->FileSize, 2) + "KB").c_str());
+
+			if (is_folder && is_opened)
+			{
+				BuildFileUIListTreeDetail(child_node);
+				ImGui::TreePop();
+			}
+
+			ImGui::PopID();
 		}
 	}
 
@@ -408,33 +456,34 @@ namespace Helios
 	{
 		for (const auto& child_node : node->ChildNodes)
 		{
-			if (child_node->Type == FileType::Folder) /* 文件夹 */
+			if (m_VisibleNodes.count(child_node.get()) == 0)
+				continue;
+
+			const bool is_folder = (child_node->Type == FileType::Folder);
+
+			if (is_folder && !m_FilterNeedle.empty())
+				ImGui::SetNextItemOpen(true, ImGuiCond_Always); /* 过滤时全展开 */
+
+			ImGui::PushID(child_node.get());
+
+			const ImGuiTreeNodeFlags flags = is_folder
+				? ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanFullWidth
+				: ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+			const bool is_opened = ImGui::TreeNodeEx("##node", flags, "%s", "");
+
+			/* 点目录（不是点展开箭头）时把它设为当前浏览目录 */
+			if (is_folder && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+				m_CurrentFileNode = child_node;
+
+			PanelChrome::DrawTreeRowLabel(ResolveFileIcon(child_node->Type), child_node->FileName);
+
+			if (is_folder && is_opened)
 			{
-				/* 文件夹节点 */
-				bool open = ImGui::TreeNodeEx(child_node->FileName.c_str(), ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanFullWidth);
-
-				/* 点击目录时，设置为当前文件目录 */
-				if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
-					m_CurrentFileNode = child_node;
-
-				/* 展开文件夹节点 */
-				if (open)
-				{
-					BuildFileUIListTreeSimple(child_node);
-					ImGui::TreePop();
-				}
+				BuildFileUIListTreeSimple(child_node);
+				ImGui::TreePop();
 			}
-			else
-			{
-				/* 文件节点 */
-				ImGui::TreeNodeEx(child_node->FileName.c_str(), ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen);
 
-				/* todo: 点击文件时做响应 */
-				if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
-				{
-					/**/
-				}
-			}
+			ImGui::PopID();
 		}
 	}
 

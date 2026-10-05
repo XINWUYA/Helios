@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>
 
 namespace tinyxml2
 {
@@ -30,6 +31,31 @@ namespace Helios
 		/* 销毁指定类型的实体 */
 		template <typename T>
 		void DestroyTargetEntities() { m_Registry.clear<T>(); }
+
+		/* ---- 实体层级 ----
+		 * 父子关系存在子实体的 ParentComponent 里，Scene 是唯一读写入口。
+		 * 所有涉及层级的写入都必须走这里，否则世界变换与层级会脱节。 */
+
+		/* 实体是否还存在（句柄非空不代表实体还在） */
+		[[nodiscard]] bool IsEntityValid(entt::entity entity) const { return m_Registry.valid(entity); }
+
+		/* 父节点；没有父节点（或父节点已失效）时返回 entt::null */
+		[[nodiscard]] entt::entity GetParent(entt::entity entity) const;
+
+		/* ancestor 是否为 entity 的祖先（含 entity 自身），用于拒绝成环的挂接 */
+		[[nodiscard]] bool IsAncestor(entt::entity ancestor, entt::entity entity) const;
+
+		/* 世界变换 = 沿父链累积的局部变换；没有父节点时就是局部变换。
+		 * 句柄无效时返回单位阵。 */
+		[[nodiscard]] glm::mat4 GetWorldTransform(entt::entity entity) const;
+
+		/* 把 child 挂到 parent 下（parent 为 entt::null 表示回到根层级）。
+		 * 保持世界变换不变：局部变换按新的父空间重算（矩阵不可分解时保留原本地变换）。
+		 * child 是 parent 自身或祖先（会成环）、child 已不存在时不做改动并返回 false。 */
+		bool SetParent(entt::entity child, entt::entity parent);
+
+		/* 只改父子链接、不动局部变换：反序列化与命令重放使用（变换由调用方负责） */
+		void SetParentLink(entt::entity child, entt::entity parent);
 
 		/* 获取场景的Registry */
 		entt::registry& GetRegistry() { return m_Registry; }

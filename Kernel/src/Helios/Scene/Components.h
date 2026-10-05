@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
@@ -55,6 +56,21 @@ namespace Helios
 			return glm::translate(glm::mat4(1.0f), m_Position)
 				* rotation_mat
 				* glm::scale(glm::mat4(1.0f), m_Scale);
+		}
+	};
+
+	/* 父子层级：只有子实体持有。父子关系只有这一处数据源，子节点列表按需从注册表遍历出来
+	 * （不额外维护）；根节点不挂。Transform 存相对父节点的局部变换，世界变换沿父链累积，
+	 * 读写一律走 Scene 的层级接口。 */
+	struct ParentComponent : ComponentBase
+	{
+		entt::entity m_Parent{ entt::null };
+
+		ParentComponent() = default;
+		ParentComponent(const ParentComponent&) = default;
+		ParentComponent(entt::entity parent)
+			: m_Parent(parent)
+		{
 		}
 	};
 

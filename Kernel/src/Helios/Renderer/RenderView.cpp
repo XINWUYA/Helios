@@ -116,16 +116,18 @@ namespace Helios
 		const auto model_entity_view = owner_scene->GetRegistry().view<TransformComponent, ModelComponent>();
 		for (auto& entity : model_entity_view)
 		{
-			auto [transform_component, model_component] = model_entity_view.get<TransformComponent, ModelComponent>(entity);
+			const auto& model_component = model_entity_view.get<ModelComponent>(entity);
 			if (!model_component.m_Model)
 				 continue;
 
+			/* 组件里存的是相对父节点的局部变换，画到世界里的必须是沿父链累积的结果 */
+			const glm::mat4 local_2_world = owner_scene->GetWorldTransform(entity);
+
 			for (const auto& mesh_segment : model_component.m_Model->GetMeshSegments())
 			{
-				const auto& world_position = transform_component.m_Position;
 				// todo: 执行剔除
 				//if ()
-				m_VisibleMeshObjects.emplace_back((int)entity, transform_component.GetTransform(), mesh_segment);
+				m_VisibleMeshObjects.emplace_back((int)entity, local_2_world, mesh_segment);
 			}
 		}
 

@@ -322,44 +322,148 @@ namespace Helios::ImGuiExt
 		return color1;
 	}
 
+	/* ==================== 属性行的统一布局 ====================
+	 * 一行 = 左列标签（弱化色、定宽）+ 右列控件（占满剩余宽度）。不用 ImGui::Columns：
+	 * 卡片背景靠 draw list 通道延后绘制，而 Columns 会把通道占死（俩没法共存）。
+	 * 改用 SameLine(绝对偏移) 手工分列，效果一样、还不占通道。 */
+
+	float BeginPropertyRow(const char* label, float label_width)
+	{
+		PROFILE_FUNCTION();
+
+		const ImGuiStyle& style = ImGui::GetStyle();
+
+		ImGui::PushID(label);
+
+		const float start_x = ImGui::GetCursorPosX();
+		const float available = ImGui::GetContentRegionAvail().x;
+
+		/* 标签列宽取"设计宽度"和"实际文本所需"里更大的那个：正常都等于设计宽度（各卡左边界对齐）；
+		 * 超长字段名就撑宽自己那一行；面板窄到挤不下时按列宽裁剪，不画到控件上。 */
+		const float label_col = ImMin(
+			ImMax(label_width, ImGui::CalcTextSize(label).x + style.ItemInnerSpacing.x),
+			available * 0.6f);
+
+		const ImVec2 label_min = ImGui::GetCursorScreenPos();
+		ImGui::PushClipRect(label_min, ImVec2(label_min.x + label_col, FLT_MAX), true);
+		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextLabel);
+		ImGui::TextUnformatted(label);
+		ImGui::PopStyleColor();
+		ImGui::PopClipRect();
+
+		const float value_col = ImMax(available - label_col, 1.0f);
+		ImGui::SameLine(start_x + label_col, 0.0f);
+
+		return value_col;
+	}
+
+	void EndPropertyRow()
+	{
+		ImGui::PopID();
+	}
+
+	namespace
+	{
+		/* 分量色表：与多分量行的分量顺序一一对应（X / Y / Z / W） */
+		struct AxisStyle
+		{
+			const char*  Letter;
+			const char*  Id;
+			ImVec4       Base;
+			ImVec4       Hover;
+		};
+
+		const AxisStyle& Axis(int index)
+		{
+			static const AxisStyle kAxes[4] = {
+				{ "X", "##X", EditorTheme::Token::AxisX, EditorTheme::Token::AxisXHover },
+				{ "Y", "##Y", EditorTheme::Token::AxisY, EditorTheme::Token::AxisYHover },
+				{ "Z", "##Z", EditorTheme::Token::AxisZ, EditorTheme::Token::AxisZHover },
+				/* 四分量（如权重）没有约定俗成的颜色，用中性灰 */
+				{ "W", "##W", EditorTheme::Token::Neutral7, EditorTheme::Token::Neutral8 },
+			};
+			return kAxes[ImClamp(index, 0, 3)];
+		}
+
+		/* 分量重置按钮：点一下把该分量恢复成默认值（拖拽框上直接改造也可以） */
+		bool DrawAxisButton(const AxisStyle& axis, float height)
+		{
+			ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+			ImGui::PushStyleColor(ImGuiCol_Button, axis.Base);
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, axis.Hover);
+			ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::Token::Neutral6);
+
+			const bool clicked = ImGui::Button(axis.Letter, ImVec2(height + 3.0f, height));
+
+			ImGui::PopStyleColor(3);
+			ImGui::PopStyleVar();
+
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Reset %s", axis.Letter);
+
+			return clicked;
+		}
+
+		/* 多分量数值行：每个分量 = 一个彩色的重置按钮 + 一个拖拽框，两者贴合。
+		 * 2/3/4 分量共用这一处实现，分量色与语义只在 Axis() 里定义一次。 */
+		void DrawVectorRow(const char* label, float* values, int component_count,
+		                   float reset_value, float label_width, const char* format)
+		{
+			const float value_width = BeginPropertyRow(label, label_width);
+			const float frame_height = ImGui::GetFrameHeight();
+
+			const float button_width = frame_height + 3.0f;
+			const float box_width = ImMax(12.0f,
+				value_width / static_cast<float>(component_count) - button_width);
+
+			/* 按钮与拖拽框贴合：靠 ItemSpacing = 0，不靠负偏移 */
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+
+			for (int i = 0; i < component_count; ++i)
+			{
+				const AxisStyle& axis = Axis(i);
+
+				if (i > 0)
+					ImGui::SameLine();
+
+				if (DrawAxisButton(axis, frame_height))
+					values[i] = reset_value;
+
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(box_width);
+				ImGui::DragFloat(axis.Id, &values[i], 0.1f, 0.0f, 0.0f, format);
+			}
+
+			ImGui::PopStyleVar();
+			EndPropertyRow();
+		}
+	}
+
 	/* 绘制一个普通的文本UI */
 	void DrawCommonTextUI(const std::string& label, const std::string& value, float label_width)
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::PushID(label.c_str());
-		ImGui::Columns(2);
+		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label.c_str());
+		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + value_width);
+		ImGui::TextUnformatted(value.c_str());
+		ImGui::PopTextWrapPos();
 
-		/* Text */
-		ImGui::NextColumn();
-		ImGui::TextWrapped(value.c_str());
-
-		ImGui::Columns(1);
-		ImGui::PopID();
+		EndPropertyRow();
 	}
-	
+
 	/* 绘制一个Color UI */
 	void DrawColorUI(const std::string& label, glm::vec4& color, float label_width)
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::PushID(label.c_str());
-		ImGui::Columns(2);
+		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label.c_str());
+		ImGui::SetNextItemWidth(value_width);
+		ImGui::ColorEdit4("##Color", glm::value_ptr(color), ImGuiColorEditFlags_AlphaBar);
 
-		/* Color */
-		ImGui::NextColumn();
-		ImGui::ColorEdit4("##Color", glm::value_ptr(color));
-
-		ImGui::Columns(1);
-		ImGui::PopID();
+		EndPropertyRow();
 	}
 
 	/* 绘制一个资源引用UI */
@@ -367,53 +471,52 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::PushID(label.c_str());
-		ImGui::Columns(2);
+		BeginPropertyRow(label.c_str(), label_width);
 
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label.c_str());
+		/* 缩略图与文件名分两行：值列通常只有一二百像素，并排会把路径挤成一条竖线 */
+		const float value_x = ImGui::GetCursorPosX();
 
-		/* Texture */
-		ImGui::NextColumn();
+		const auto& show_texture = texture ? texture : TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Default.png"));
+
+		/* Image：ImTextureID 统一存放 DeviceTexture 指针，
+		 * 由渲染后端自行解析为硬件句柄（避免 32 位 GetTextureID 截断指针）。 */
+		const float thumbnail = 72.0f;
+		ImGui::ImageButton((ImTextureID)show_texture.get(), ImVec2(thumbnail, thumbnail),
+			ImVec2(0, 1), ImVec2(1, 0), 1, ImVec4(0, 0, 0, 0), ImVec4(1, 1, 1, 1));
+
+		if (ImGui::BeginDragDropTarget())
 		{
-			const auto& show_texture = texture ? texture : TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Default.png"));
-
-			/* Image：ImTextureID 统一存放 DeviceTexture 指针，
-			 * 由渲染后端自行解析为硬件句柄（避免 32 位 GetTextureID 截断指针）。 */
-			ImGui::ImageButton((ImTextureID)show_texture.get(), ImVec2(80, 80), ImVec2(0, 1), ImVec2(1, 0), 0);
-			if (ImGui::BeginDragDropTarget())
+			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
 			{
-				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
+				const wchar_t* path = (const wchar_t*)payload->Data;
+				const auto new_texture = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(path));
+				if (new_texture->IsLoaded())
+					texture = new_texture;
+				else
 				{
-					const wchar_t* path = (const wchar_t*)payload->Data;
-					const auto new_texture = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(path));
-					if (new_texture->IsLoaded())
-						texture = new_texture;
-					else
-					{
-						const std::filesystem::path texture_path = g_AssetsPath / path;
-						EDITOR_LOG_WARN("Failed to load texture {0}.", texture_path.filename().string());
-					}
+					const std::filesystem::path texture_path = g_AssetsPath / path;
+					EDITOR_LOG_WARN("Failed to load texture {0}.", texture_path.filename().string());
 				}
-				ImGui::EndDragDropTarget();
 			}
-
-			/* Hovered */
-			if (ImGui::IsItemHovered())
-			{
-				ImGui::BeginTooltip();
-				ImGui::Image((ImTextureID)show_texture.get(), ImVec2(240, 240), ImVec2(0, 1), ImVec2(1, 0));
-				ImGui::EndTooltip();
-			}
-
-			/* Path */
-			ImGui::SameLine();
-			ImGui::TextWrapped(RELATIVE_PATH(show_texture->GetPath()).c_str());
+			ImGui::EndDragDropTarget();
 		}
 
-		ImGui::Columns(1);
-		ImGui::PopID();
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::BeginTooltip();
+			ImGui::Image((ImTextureID)show_texture.get(), ImVec2(240, 240), ImVec2(0, 1), ImVec2(1, 0));
+			ImGui::EndTooltip();
+		}
+
+		/* 文件名对齐到值列，弱化显示：它是"当前值"的说明而不是内容主体 */
+		ImGui::SetCursorPosX(value_x);
+		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
+		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
+		ImGui::TextUnformatted(RELATIVE_PATH(show_texture->GetPath()).c_str());
+		ImGui::PopStyleColor();
+		ImGui::PopTextWrapPos();
+
+		EndPropertyRow();
 	}
 
 	/* 绘制一个可拖动的Int UI */
@@ -421,19 +524,12 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::PushID(label);
-		ImGui::Columns(2);
+		const float value_width = BeginPropertyRow(label, label_width);
 
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label);
-
-		/* DragFloat */
-		ImGui::NextColumn();
+		ImGui::SetNextItemWidth(value_width);
 		ImGui::DragInt("##Int", &value);
 
-		ImGui::Columns(1);
-		ImGui::PopID();
+		EndPropertyRow();
 	}
 
 	/* 绘制一个可拖动的Float UI */
@@ -441,19 +537,12 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::PushID(label.c_str());
-		ImGui::Columns(2);
+		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label.c_str());
-
-		/* DragFloat */
-		ImGui::NextColumn();
+		ImGui::SetNextItemWidth(value_width);
 		ImGui::DragFloat("##Float", &value);
 
-		ImGui::Columns(1);
-		ImGui::PopID();
+		EndPropertyRow();
 	}
 
 	/* 绘制一个可拖动的Float2 UI */
@@ -461,55 +550,7 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		ImGuiIO& io = ImGui::GetIO();
-		const auto bold_font = io.Fonts->Fonts[0];
-
-		ImGui::PushID(label);
-		ImGui::Columns(2);
-
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label);
-		ImGui::NextColumn();
-
-		ImGui::PushMultiItemsWidths(2, ImGui::CalcItemWidth());
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{ 0, 0 });
-
-		const float line_height = ImGui::GetCurrentContext()->Font->FontSize + ImGui::GetCurrentContext()->Style.FramePadding.y * 2.0f;
-		const ImVec2 button_size = { line_height + 3.0f, line_height };
-
-		/* X */
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.9f, 0.2f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("X", button_size))
-			value.x = 0;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##X", &value.x, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		/* Y */
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.3f, 0.8f, 0.3f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("Y", button_size))
-			value.y = 0;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Y", &value.y, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		ImGui::PopStyleVar();
-		ImGui::Columns(1);
-		ImGui::PopID();
+		DrawVectorRow(label, glm::value_ptr(value), 2, 0.0f, label_width, "%.3f");
 	}
 
 	/* 绘制一个可拖动的Float3 UI */
@@ -517,70 +558,7 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		ImGuiIO& io = ImGui::GetIO();
-		const auto bold_font = io.Fonts->Fonts[0];
-
-		ImGui::PushID(label);
-
-		/* Label */
-		ImGui::Columns(2);
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label);
-		ImGui::NextColumn();
-
-		ImGui::PushMultiItemsWidths(3, ImGui::CalcItemWidth());
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{ 0, 0 });
-
-		const float line_height = ImGui::GetCurrentContext()->Font->FontSize + ImGui::GetCurrentContext()->Style.FramePadding.y * 2.0f;
-		const ImVec2 button_size = { line_height + 3.0f, line_height };
-
-		/* X */
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.9f, 0.2f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("X", button_size))
-			value.x = 0.0f;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##X", &value.x, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		/* Y */
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.3f, 0.8f, 0.3f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("Y", button_size))
-			value.y = 0.0f;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Y", &value.y, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		/* Z */
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.2f, 0.35f, 0.9f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("Z", button_size))
-			value.z = 0.0f;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Z", &value.z, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		ImGui::PopStyleVar();
-		ImGui::Columns(1);
-		ImGui::PopID();
+		DrawVectorRow(label, glm::value_ptr(value), 3, 0.0f, label_width, "%.3f");
 	}
 
 	/* 绘制一个可拖动的Float4 UI */
@@ -588,85 +566,7 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		ImGuiIO& io = ImGui::GetIO();
-		const auto bold_font = io.Fonts->Fonts[0];
-
-		ImGui::PushID(label);
-
-		/* Label */
-		ImGui::Columns(2);
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label);
-		ImGui::NextColumn();
-
-		ImGui::PushMultiItemsWidths(4, ImGui::CalcItemWidth());
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{ 0, 0 });
-
-		const float line_height = ImGui::GetCurrentContext()->Font->FontSize + ImGui::GetCurrentContext()->Style.FramePadding.y * 2.0f;
-		const ImVec2 button_size = { line_height + 3.0f, line_height };
-
-		/* X */
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.9f, 0.2f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("X", button_size))
-			value.x = 0.0f;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##X", &value.x, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		/* Y */
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.3f, 0.8f, 0.3f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("Y", button_size))
-			value.y = 0.0f;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Y", &value.y, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		/* Z */
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.2f, 0.35f, 0.9f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("Z", button_size))
-			value.z = 0.0f;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Z", &value.z, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		/* W */
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.2f, 0.35f, 0.9f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("W", button_size))
-			value.z = 0.0f;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##W", &value.w, 0.1f, 0.0f, 0.0f, "%.3f");
-		ImGui::PopItemWidth();
-
-		ImGui::PopStyleVar();
-		ImGui::Columns(1);
-		ImGui::PopID();
+		DrawVectorRow(label, glm::value_ptr(value), 4, 0.0f, label_width, "%.3f");
 	}
 
 	/* 绘制一个vec3 UI， 带XYZ */
@@ -674,72 +574,8 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		ImGuiIO& io = ImGui::GetIO();
-		const auto bold_font = io.Fonts->Fonts[0];
-
-		ImGui::PushID(label.c_str());
-
-		/* Label */
-		ImGui::Columns(2);
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label.c_str());
-		ImGui::NextColumn();
-
-		ImGui::PushMultiItemsWidths(3, ImGui::CalcItemWidth());
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{ 0, 0 });
-
-		const float line_height = ImGui::GetCurrentContext()->Font->FontSize + ImGui::GetCurrentContext()->Style.FramePadding.y * 2.0f;
-		const ImVec2 button_size = { line_height + 3.0f, line_height };
-
-		/* X */
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.9f, 0.2f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.8f, 0.1f, 0.15f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("X", button_size))
-			values.x = reset_value;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##X", &values.x, 0.1f, 0.0f, 0.0f, "%.2f");
-		ImGui::PopItemWidth();
-
-		/* Y */
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.3f, 0.8f, 0.3f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.2f, 0.7f, 0.2f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("Y", button_size))
-			values.y = reset_value;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Y", &values.y, 0.1f, 0.0f, 0.0f, "%.2f");
-		ImGui::PopItemWidth();
-
-		/* Z */
-		ImGui::SameLine();
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{ 0.2f, 0.35f, 0.9f, 1.0f });
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4{ 0.1f, 0.25f, 0.8f, 1.0f });
-		ImGui::PushFont(bold_font);
-		if (ImGui::Button("Z", button_size))
-			values.z = reset_value;
-		ImGui::PopFont();
-		ImGui::PopStyleColor(3);
-
-		ImGui::SameLine();
-		ImGui::DragFloat("##Z", &values.z, 0.1f, 0.0f, 0.0f, "%.2f");
-		ImGui::PopItemWidth();
-
-		ImGui::PopStyleVar();
-
-		ImGui::Columns(1);
-
-		ImGui::PopID();
+		/* 重置值由组件声明（如 Scale 复位成 1），点分量按钮即恢复 */
+		DrawVectorRow(label.c_str(), glm::value_ptr(values), 3, reset_value, label_width, "%.2f");
 	}
 
 	/* 绘制带选中的图像按钮UI */
@@ -774,23 +610,16 @@ namespace Helios::ImGuiExt
 	}
 
 	/* 绘制一个Checkbox */
-	void DrawCheckboxUI(const std::string& label, bool& value, float label_width)
+	bool DrawCheckboxUI(const std::string& label, bool& value, float label_width)
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::PushID(label.c_str());
-		ImGui::Columns(2);
+		BeginPropertyRow(label.c_str(), label_width);
 
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label.c_str());
+		const bool changed = ImGui::Checkbox("##Checkbox", &value);
 
-		/* Checkbox */
-		ImGui::NextColumn();
-		ImGui::Checkbox("##Checkbox", &value);
-
-		ImGui::Columns(1);
-		ImGui::PopID();
+		EndPropertyRow();
+		return changed;
 	}
 
 	/* 绘制一个Combo */
@@ -800,42 +629,35 @@ namespace Helios::ImGuiExt
 
 		ASSERT(!options.empty());
 
-		ImGui::PushID(label.c_str());
-		ImGui::Columns(2);
+		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label.c_str());
+		std::vector<const char*> option_strs;
+		for (const auto& option : options)
+			option_strs.emplace_back(option.c_str());
 
-		/* Combo */
-		ImGui::NextColumn();
+		const char* selected_option = option_strs[selected_idx];
+
+		ImGui::SetNextItemWidth(value_width);
+		if (ImGui::BeginCombo("##Combo", selected_option))
 		{
-			std::vector<const char*> option_strs;
-			for (const auto& option : options)
-				option_strs.emplace_back(option.c_str());
-			const char* selected_option = option_strs[selected_idx];
-			if (ImGui::BeginCombo("##Combo", selected_option))
+			for (int i = 0; i < (int)options.size(); i++)
 			{
-				for (int i = 0; i < (int)options.size(); i++)
+				bool is_selectd = selected_option == option_strs[i];
+				if (ImGui::Selectable(option_strs[i], is_selectd))
 				{
-					bool is_selectd = selected_option == option_strs[i];
-					if (ImGui::Selectable(option_strs[i], is_selectd))
-					{
-						selected_option = option_strs[i];
-						selected_idx = i;
-						callback(i);
-					}
-
-					if (is_selectd)
-						ImGui::SetItemDefaultFocus();
+					selected_option = option_strs[i];
+					selected_idx = i;
+					callback(i);
 				}
 
-				ImGui::EndCombo();
+				if (is_selectd)
+					ImGui::SetItemDefaultFocus();
 			}
+
+			ImGui::EndCombo();
 		}
 
-		ImGui::Columns(1);
-		ImGui::PopID();
+		EndPropertyRow();
 	}
 
 	/* 绘制一个方向指示 */
@@ -843,28 +665,14 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::PushID(label.c_str());
-		ImGui::Columns(2);
+		BeginPropertyRow(label.c_str(), label_width);
 
-		/* Label */
-		ImGui::SetColumnWidth(0, label_width);
-		ImGui::Text(label.c_str());
+		ArrowWidget widget(glm::normalize(direction));
+		const bool changed = widget.Draw();
+		if (changed)
+			direction = widget.GetDirection();
 
-		bool changed = false;
-
-		/* Arrow */
-		ImGui::NextColumn();
-		{
-			ArrowWidget widget(glm::normalize(direction));
-			if (widget.Draw()) 
-			{
-				changed = true;
-				direction = widget.GetDirection();
-			}
-		}
-
-		ImGui::Columns(1);
-		ImGui::PopID();
+		EndPropertyRow();
 
 		return changed;
 	}

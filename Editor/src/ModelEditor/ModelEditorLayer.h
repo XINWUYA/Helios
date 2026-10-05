@@ -41,6 +41,15 @@ namespace Helios
 		void ShowSceneViewportUI();
 		/* 显示模型编辑UI */
 		void ShowModelParamsUI();
+		/* 模型信息：基本信息卡 + 每个子模型一张卡 */
+		void ShowModelBaseInfoCard();
+		void ShowSubModelCards();
+		/* 一个材质参数：参数名做成可折叠标题，类型选择器贴右端，值走属性行 */
+		void ShowMaterialParameter(const SharedPtr<Material>& material,
+		                          const SharedPtr<SubModelInfo>& sub_model_info,
+		                          const MaterialParamInfo& param_info);
+		/* 未导入模型时的空状态提示 */
+		void ShowEmptyModelHint();
 		/* 响应拖拽文件到主窗口 */
 		void OnDragItemToScene(const std::filesystem::path& path);
 

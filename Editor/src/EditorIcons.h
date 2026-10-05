@@ -24,6 +24,12 @@ namespace Helios
 			Play, Stop,
 			/* 通用 */
 			Menu, Add, Return, Filter, Visible,
+			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
+			Scene, Camera, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Model, Sprite, Entity,
+			/* 组件卡头部：与实体类型图标分开，按"这是个什么组件"造型 */
+			Transform, Tag,
+			/* 面板/分组：统计类面板用 */
+			Stats,
 			/* 内容（位图） */
 			Directory, File, FileScene, FileMtlGraph,
 			COUNT
@@ -42,7 +48,11 @@ namespace Helios
 		/* 元数据表：新增图标只在这里加一行（Id 与表项一一对应） */
 		const IconDesc& Get(Id id);
 
-		/* 绘制图标本体（按钮内、装饰处均可直接调用） */
+		/* 绘制图标本体（矢量或位图，自动二选一；不会进入交互） */
+		void DrawIcon(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color);
+
+		/* 绘制矢量图标本体（按钮内、装饰处均可直接调用）。
+		 * 位图图标（文件 / 文件夹）不在这里画 —— 用 DrawIcon。 */
 		void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color);
 
 		/* 取位图图标贴图（内部集中缓存，同一图标全局只加载一次）。

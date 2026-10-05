@@ -233,28 +233,249 @@ namespace Helios::Icons
 			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.145f), color, 0, t);
 		}
 
+		/* ---- 场景树节点 ----
+		 * "场景 / 实体类型"图标，用在层级树节点前面；只描必要的外形、细部靠实心小图元点缀，
+		 * 正文行高（约 14px）下也能一眼区分。 */
+
+		void DrawScene(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 透视地面网格 = 一片"世界"：与模型（立体方块）、图片精灵（画框）都不撞 */
+			static constexpr float kFloor[4][2] = {
+				{ 0.34f, 0.40f }, { 0.66f, 0.40f }, { 0.94f, 0.90f }, { 0.06f, 0.90f }
+			};
+			StrokePolyline(dl, c, kFloor, t, color, true);
+
+			dl->AddLine(c.At(0.42f, 0.40f), c.At(0.30f, 0.90f), color, t);
+			dl->AddLine(c.At(0.58f, 0.40f), c.At(0.70f, 0.90f), color, t);
+			dl->AddLine(c.At(0.22f, 0.62f), c.At(0.78f, 0.62f), color, t);
+		}
+
+		void DrawCamera(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 机身 + 右侧楔形镜头 */
+			dl->AddRect(c.At(0.06f, 0.30f), c.At(0.62f, 0.86f), color, c.Len(0.10f), 0, t);
+
+			static constexpr float kLens[4][2] = {
+				{ 0.62f, 0.44f }, { 0.94f, 0.24f }, { 0.94f, 0.92f }, { 0.62f, 0.72f }
+			};
+			StrokePolyline(dl, c, kLens, t, color, true);
+		}
+
+		void DrawDirectionalLight(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 太阳 + 一束平行光：区分于点光（四向射线）、聚光（锥形） */
+			dl->AddCircle(c.At(0.30f, 0.30f), c.Len(0.17f), color, 0, t);
+
+			dl->AddLine(c.At(0.46f, 0.46f), c.At(0.68f, 0.68f), color, t);
+			dl->AddLine(c.At(0.56f, 0.34f), c.At(0.90f, 0.68f), color, t);
+			dl->AddLine(c.At(0.34f, 0.56f), c.At(0.68f, 0.90f), color, t);
+		}
+
+		void DrawPointLight(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 发光球 + 四向短射线 */
+			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.22f), color, 0, t);
+
+			dl->AddLine(c.At(0.50f, 0.04f), c.At(0.50f, 0.18f), color, t);
+			dl->AddLine(c.At(0.50f, 0.82f), c.At(0.50f, 0.96f), color, t);
+			dl->AddLine(c.At(0.04f, 0.50f), c.At(0.18f, 0.50f), color, t);
+			dl->AddLine(c.At(0.82f, 0.50f), c.At(0.96f, 0.50f), color, t);
+		}
+
+		void DrawSpotLight(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 灯源 + 向下张开的光锥（不封底，才读得出是"投出去的光"） */
+			dl->AddCircleFilled(c.At(0.50f, 0.16f), c.Len(0.11f), color);
+
+			dl->AddLine(c.At(0.40f, 0.32f), c.At(0.14f, 0.92f), color, t);
+			dl->AddLine(c.At(0.60f, 0.32f), c.At(0.86f, 0.92f), color, t);
+		}
+
+		void DrawReflectionProbe(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 球体 + 左上高光弧 + 反射亮点 */
+			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.40f), color, 0, t);
+
+			dl->PathArcTo(c.At(0.50f, 0.50f), c.Len(0.22f), 3.34f, 4.56f, 16);
+			dl->PathStroke(color, 0, t);
+
+			dl->AddCircleFilled(c.At(0.66f, 0.66f), c.Len(0.08f), color);
+		}
+
+		void DrawModel(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 等轴测线框立方体：六边形轮廓 + 中心三条棱 */
+			static constexpr float kCube[6][2] = {
+				{ 0.50f, 0.08f }, { 0.92f, 0.30f }, { 0.92f, 0.70f },
+				{ 0.50f, 0.92f }, { 0.08f, 0.70f }, { 0.08f, 0.30f }
+			};
+			StrokePolyline(dl, c, kCube, t, color, true);
+
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.08f), color, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.92f, 0.70f), color, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.08f, 0.70f), color, t);
+		}
+
+		void DrawSprite(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 画框 + 山 + 太阳：图片图标的通用语言 */
+			dl->AddRect(c.At(0.08f, 0.16f), c.At(0.92f, 0.84f), color, c.Len(0.08f), 0, t);
+
+			dl->AddTriangleFilled(c.At(0.18f, 0.74f), c.At(0.46f, 0.40f), c.At(0.72f, 0.74f), color);
+			dl->AddCircleFilled(c.At(0.70f, 0.34f), c.Len(0.08f), color);
+		}
+
+		void DrawEntity(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 只有 Transform 的实体没有可视形态：用取景框四角表示"一个空对象"。
+			 * 同一个直角括号镜像四次，形状只有一份定义。 */
+			static constexpr float kBracket[3][2] = {
+				{ 0.12f, 0.36f }, { 0.12f, 0.12f }, { 0.36f, 0.12f }
+			};
+
+			for (int corner = 0; corner < 4; ++corner)
+			{
+				const float flip_x = (corner & 1) ? -1.0f : 1.0f;
+				const float flip_y = (corner & 2) ? -1.0f : 1.0f;
+
+				for (int i = 0; i < 3; ++i)
+				{
+					const float x = 0.5f + flip_x * (kBracket[i][0] - 0.5f);
+					const float y = 0.5f + flip_y * (kBracket[i][1] - 0.5f);
+					dl->PathLineTo(c.At(x, y));
+				}
+
+				dl->PathStroke(color, 0, t);
+			}
+		}
+
+		/* ---- 组件卡头部 ----
+		 * 与"实体类型"图标分开：这两枚表达的是「组件」本身，
+		 * 与场景树里按实体持有的可视内容判定类型的图标不是同一套概念。 */
+
+		void DrawTransform(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 三轴变换 gizmo：从同一原点伸出 X（右）/ Y（上）/ Z（斜向），
+			 * 与「移动」（四向对称箭头）在造型上就不会混淆。 */
+			const ImVec2 origin = c.At(0.26f, 0.76f);
+			static constexpr float kTips[3][2] = {
+				{ 0.94f, 0.76f }, { 0.26f, 0.08f }, { 0.78f, 0.28f }
+			};
+
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				const ImVec2 tip = c.At(kTips[axis][0], kTips[axis][1]);
+				dl->AddLine(origin, tip, color, t);
+
+				const ImVec2 dir(tip.x - origin.x, tip.y - origin.y);
+				const float length = std::sqrt(dir.x * dir.x + dir.y * dir.y);
+				if (length <= 0.0f)
+					continue;
+
+				/* 沿轴方向画一个实心箭头 */
+				const ImVec2 along(dir.x / length, dir.y / length);
+				const ImVec2 normal(-along.y, along.x);
+				const float head = c.Len(0.17f);
+				const float half = c.Len(0.105f);
+
+				dl->AddTriangleFilled(tip,
+					ImVec2(tip.x - along.x * head + normal.x * half, tip.y - along.y * head + normal.y * half),
+					ImVec2(tip.x - along.x * head - normal.x * half, tip.y - along.y * head - normal.y * half),
+					color);
+			}
+		}
+
+		void DrawTag(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+
+			/* 标签牌：左端平、右端收成尖角，左端一个孔 —— 名字/标识的通用造型 */
+			static constexpr float kTag[5][2] = {
+				{ 0.10f, 0.24f }, { 0.62f, 0.24f }, { 0.92f, 0.50f }, { 0.62f, 0.76f }, { 0.10f, 0.76f }
+			};
+			StrokePolyline(dl, c, kTag, StrokeWidth(size), color, true);
+
+			dl->AddCircleFilled(c.At(0.31f, 0.50f), c.Len(0.095f), color);
+		}
+
+		void DrawStats(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 基线 + 三根高低不同的柱子：一眼读出"统计/数据" */
+			dl->AddLine(c.At(0.10f, 0.88f), c.At(0.90f, 0.88f), color, t);
+
+			const float radius = c.Len(0.04f);
+			dl->AddRectFilled(c.At(0.18f, 0.60f), c.At(0.36f, 0.88f), color, radius);
+			dl->AddRectFilled(c.At(0.41f, 0.28f), c.At(0.59f, 0.88f), color, radius);
+			dl->AddRectFilled(c.At(0.64f, 0.46f), c.At(0.82f, 0.88f), color, radius);
+		}
+
 		/* 元数据表：Id 与表项一一对应。PngPath 与 Draw 二选一。 */
 		constexpr IconDesc s_Icons[] = {
-			{ "None",         nullptr,                             nullptr },
-			{ "NewScene",     nullptr,                             &DrawNewScene },
-			{ "OpenScene",    nullptr,                             &DrawOpenScene },
-			{ "Save",         nullptr,                             &DrawSave },
-			{ "Undo",         nullptr,                             &DrawUndo },
-			{ "Redo",         nullptr,                             &DrawRedo },
-			{ "Translate",    nullptr,                             &DrawTranslate },
-			{ "Rotate",       nullptr,                             &DrawRotate },
-			{ "Scale",        nullptr,                             &DrawScale },
-			{ "Play",         nullptr,                             &DrawPlay },
-			{ "Stop",         nullptr,                             &DrawStop },
-			{ "Menu",         nullptr,                             &DrawMenu },
-			{ "Add",          nullptr,                             &DrawAdd },
-			{ "Return",       nullptr,                             &DrawReturn },
-			{ "Filter",       nullptr,                             &DrawFilter },
-			{ "Visible",      nullptr,                             &DrawVisible },
-			{ "Directory",    "EditorRes/icons/directory.png",     nullptr },
-			{ "File",         "EditorRes/icons/file.png",          nullptr },
-			{ "FileScene",    "EditorRes/icons/file_scn.png",      nullptr },
-			{ "FileMtlGraph", "EditorRes/icons/file_mtlgraph.png", nullptr },
+			{ "None",             nullptr,                             nullptr },
+			{ "NewScene",         nullptr,                             &DrawNewScene },
+			{ "OpenScene",        nullptr,                             &DrawOpenScene },
+			{ "Save",             nullptr,                             &DrawSave },
+			{ "Undo",             nullptr,                             &DrawUndo },
+			{ "Redo",             nullptr,                             &DrawRedo },
+			{ "Translate",        nullptr,                             &DrawTranslate },
+			{ "Rotate",           nullptr,                             &DrawRotate },
+			{ "Scale",            nullptr,                             &DrawScale },
+			{ "Play",             nullptr,                             &DrawPlay },
+			{ "Stop",             nullptr,                             &DrawStop },
+			{ "Menu",             nullptr,                             &DrawMenu },
+			{ "Add",              nullptr,                             &DrawAdd },
+			{ "Return",           nullptr,                             &DrawReturn },
+			{ "Filter",           nullptr,                             &DrawFilter },
+			{ "Visible",          nullptr,                             &DrawVisible },
+			{ "Scene",            nullptr,                             &DrawScene },
+			{ "Camera",           nullptr,                             &DrawCamera },
+			{ "LightDirectional", nullptr,                             &DrawDirectionalLight },
+			{ "LightPoint",       nullptr,                             &DrawPointLight },
+			{ "LightSpot",        nullptr,                             &DrawSpotLight },
+			{ "ReflectionProbe",  nullptr,                             &DrawReflectionProbe },
+			{ "Model",            nullptr,                             &DrawModel },
+			{ "Sprite",           nullptr,                             &DrawSprite },
+			{ "Entity",           nullptr,                             &DrawEntity },
+			{ "Transform",        nullptr,                             &DrawTransform },
+			{ "Tag",              nullptr,                             &DrawTag },
+			{ "Stats",            nullptr,                             &DrawStats },
+			{ "Directory",        "EditorRes/icons/directory.png",     nullptr },
+			{ "File",             "EditorRes/icons/file.png",          nullptr },
+			{ "FileScene",        "EditorRes/icons/file_scn.png",      nullptr },
+			{ "FileMtlGraph",     "EditorRes/icons/file_mtlgraph.png", nullptr },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),
@@ -279,6 +500,31 @@ namespace Helios::Icons
 		const IconDesc& desc = s_Icons[index];
 		if (desc.Draw != nullptr)
 			desc.Draw(draw_list, center, size, color);
+	}
+
+	void DrawIcon(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color)
+	{
+		if (draw_list == nullptr || size <= 0.0f)
+			return;
+
+		const auto index = static_cast<size_t>(id);
+		if (index >= static_cast<size_t>(Id::COUNT))
+			return;
+
+		if (s_Icons[index].Draw != nullptr)
+		{
+			s_Icons[index].Draw(draw_list, center, size, color);
+			return;
+		}
+
+		/* 位图图标（文件 / 文件夹）：贴图原点在左下，UV 上下翻转 */
+		if (const auto texture = GetTexture(id))
+		{
+			draw_list->AddImage((ImTextureID)texture.get(),
+				ImVec2(center.x - size * 0.5f, center.y - size * 0.5f),
+				ImVec2(center.x + size * 0.5f, center.y + size * 0.5f),
+				ImVec2(0, 1), ImVec2(1, 0), color);
+		}
 	}
 
 	std::shared_ptr<DeviceTexture> GetTexture(Id id)
@@ -326,19 +572,7 @@ namespace Helios::Icons
 		/* GetColorU32 会把 Style.Alpha 乘进去，禁用态（调用方压低 Alpha）自动变淡 */
 		const ImU32 color = ImGui::GetColorU32(checked ? EditorTheme::Token::AccentHover : EditorTheme::Token::Text);
 
-		const IconDesc& desc = Get(id);
-		if (desc.Draw != nullptr)
-		{
-			Draw(ImGui::GetWindowDrawList(), id, center, icon_size, color);
-		}
-		else if (const auto texture = GetTexture(id))
-		{
-			/* 位图图标：贴图原点在左下，UV 上下翻转 */
-			ImGui::GetWindowDrawList()->AddImage((ImTextureID)texture.get(),
-				ImVec2(center.x - icon_size * 0.5f, center.y - icon_size * 0.5f),
-				ImVec2(center.x + icon_size * 0.5f, center.y + icon_size * 0.5f),
-				ImVec2(0, 1), ImVec2(1, 0), color);
-		}
+		DrawIcon(ImGui::GetWindowDrawList(), id, center, icon_size, color);
 
 		if (tooltip != nullptr && ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", tooltip);
