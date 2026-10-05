@@ -15,7 +15,7 @@ namespace Helios
 		inline constexpr const char* kModel           = "Model";
 		inline constexpr const char* kModelHelper     = "Model Helper";
 		inline constexpr const char* kStatInfo        = "Stat Info";
-		inline constexpr const char* kFileList        = "File List";
+		/* 资源浏览器：目录树 + 目录内容合成一个面板（原先 File List / Resource Browser 是两个页签） */
 		inline constexpr const char* kResourceBrowser = "Resource Browser";
 
 		/* 默认停靠的语义槽位，与 BuildDefaultLayout 里的 DockNode 划分一一对应 */
@@ -38,7 +38,6 @@ namespace Helios
 		inline constexpr Desc kDefaultLayout[] = {
 			{ kSceneHierarchy,  DockSlot::LeftTop     },
 			{ kResourceBrowser, DockSlot::LeftBottom  },
-			{ kFileList,        DockSlot::LeftBottom  },
 			{ kScene,           DockSlot::Center      },
 			{ kModel,           DockSlot::Center      },
 			{ kProperties,      DockSlot::RightTop    },

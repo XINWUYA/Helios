@@ -62,6 +62,10 @@ namespace Helios::EditorTheme
          * 取值覆盖当前注册表里最长的字段名（PrefilterMipLevels）；行内仍会按实际
          * 文本做一次下限保护，将来出现更长的名字只会撑宽自己那一行而不会重叠。 */
         inline constexpr float PropertyLabelWidth = 108.0f;
+
+        /* 分组卡片背景的外扩留白（PanelChrome::CardPad）：容器内边距取这个值就贴住容器两边。
+         * 注意：必须是常量（早先按"当前窗口内边距 × 0.6"现算，容器设过内边距后就永远差一截）。 */
+        inline constexpr float CardPad = 6.0f;
     }
 
     inline ImVec4 WithAlpha(const ImVec4& color, float alpha)

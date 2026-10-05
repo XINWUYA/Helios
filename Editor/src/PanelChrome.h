@@ -5,6 +5,8 @@
 
 #include <string>
 #include <imgui.h>
+/* 卡片背景要用 ImGuiWindow::InnerRect（滚动条之外的可用区域），故需要内部头 */
+#include <imgui_internal.h>
 #include "EditorIcons.h"
 #include "Helios/ImGui/EditorTheme.h"
 
@@ -119,7 +121,7 @@ namespace Helios::PanelChrome
 
 		const ImVec2 icon_min = ImGui::GetItemRectMin();
 		const ImVec2 icon_max = ImGui::GetItemRectMax();
-		Icons::DrawIcon(ImGui::GetWindowDrawList(), icon,
+		Icons::Draw(ImGui::GetWindowDrawList(), icon,
 			ImVec2((icon_min.x + icon_max.x) * 0.5f, (icon_min.y + icon_max.y) * 0.5f),
 			icon_size, ImGui::GetColorU32(icon_color));
 
@@ -142,7 +144,48 @@ namespace Helios::PanelChrome
 			dot_radius, ImGui::GetColorU32(EditorTheme::Token::Text));
 	}
 
+	/* ==================== 可拖拽分隔条 ==================== */
+
+	/* 左右两块之间的拖拽分隔条：按住左右拖，按 delta.x 改「左块占比」。
+	 * ratio 由调用方持久化，钳在 [min_ratio, max_ratio] 之间；height 是命中区高度（给足整栏就行）。 */
+	inline bool HorizontalSplitter(float& ratio, float total_width, float min_ratio, float max_ratio,
+	                               float width, float height)
+	{
+		ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+		const ImVec2 min = ImGui::GetCursorScreenPos();
+		const float bar_width = ImMax(width, 1.0f);
+		const float bar_height = ImMax(height, 1.0f);
+
+		ImGui::InvisibleButton("##PanelSplitter", ImVec2(bar_width, bar_height));
+
+		const bool hovered = ImGui::IsItemHovered();
+		const bool active = ImGui::IsItemActive();
+
+		if (hovered || active)
+			ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+
+		if (active && total_width > 0.0f)
+			ratio = ImClamp(ratio + ImGui::GetIO().MouseDelta.x / total_width, min_ratio, max_ratio);
+
+		/* 常态是一条与背景边框同色的细线，只有指向它时才显形（悬停加亮、拖动用强调色） */
+		const ImVec4 color = active ? EditorTheme::Token::Accent
+			: (hovered ? EditorTheme::Token::TextDim : EditorTheme::Token::Border);
+		const float line_x = min.x + bar_width * 0.5f;
+		draw_list->AddLine(ImVec2(line_x, min.y), ImVec2(line_x, min.y + bar_height),
+			ImGui::GetColorU32(color));
+
+		return active;
+	}
+
 	/* ==================== 分组卡片 ==================== */
+
+	/* 卡片背景往外扩的留白；容器内边距取这个值，卡片背景就贴住容器两边。
+	 * 要用主题常量、别现算（按窗口内边距 × 0.6 现算的话，容器设过内边距后就不对了）。 */
+	inline float CardPad()
+	{
+		return EditorTheme::Token::CardPad;
+	}
 
 	struct Card
 	{
@@ -187,7 +230,7 @@ namespace Helios::PanelChrome
 		card.Width = ImGui::GetContentRegionAvail().x;
 		card.Right = card.Min.x + card.Width;
 		card.HeaderHeight = ImGui::GetFrameHeight();
-		card.Pad = style.WindowPadding.x * 0.6f;
+		card.Pad = CardPad();
 
 		bool* open = ImGui::GetStateStorage()->GetBoolRef(ImGui::GetID("##CardOpen"), default_open);
 
@@ -263,6 +306,14 @@ namespace Helios::PanelChrome
 
 		draw_list->ChannelsSetCurrent(0);
 
+		/* 卡背景和边框用卡片自己的裁剪矩形（再跟窗口内框求交）。ImGui 的绘制裁剪会内缩半格内边距，
+		 * 贴容器边缘的卡片最外几像素会被悄悄裁掉；换成卡片自己的矩形就能贴边、也不会画到滚动条上。 */
+		const ImGuiWindow* window = ImGui::GetCurrentWindow();
+		draw_list->PushClipRect(
+			ImVec2(ImMax(card_lo.x, window->InnerRect.Min.x), ImMax(card_lo.y, window->InnerRect.Min.y)),
+			ImVec2(ImMin(card_far.x, window->InnerRect.Max.x), ImMin(card_far.y, window->InnerRect.Max.y)),
+			false);
+
 		draw_list->AddRectFilled(card_lo, card_far,
 			ImGui::GetColorU32(EditorTheme::Token::CardBg), rounding);
 
@@ -276,6 +327,8 @@ namespace Helios::PanelChrome
 			ImGui::GetColorU32(header_fill), rounding, header_corners);
 		draw_list->AddRect(card_lo, card_far,
 			ImGui::GetColorU32(EditorTheme::Token::Border), rounding);
+
+		draw_list->PopClipRect();
 
 		draw_list->ChannelsMerge();
 
