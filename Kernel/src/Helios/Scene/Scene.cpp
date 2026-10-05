@@ -236,11 +236,10 @@ namespace Helios
 			});
 	}
 
+	/* 执行本帧收集到的所有渲染视图。
+	 * 帧级准备（GPU 计时器等）由帧循环统一做一次，见 Application::Run。 */
 	void Scene::Render()
 	{
-		Renderer::Update();
-
-		/* 绘制所有View */
 		for (const auto& view : m_RenderViews)
 		{
 			Renderer::RenderAView(view);

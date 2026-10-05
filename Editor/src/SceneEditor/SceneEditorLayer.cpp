@@ -604,10 +604,13 @@ namespace Helios
 				m_pMainScene->OnUpdate(delta_time, m_pEditorCamera.get());
 				break;
 			case PlayMode::Runtime:
-				/* 更新场景 */
-				m_pMainScene->OnUpdate(delta_time);
+				/* 运行模式下编辑器相机不响应输入，但编辑器视口仍要由它呈现 */
+				m_pMainScene->OnUpdate(delta_time, m_pEditorCamera.get());
 				break;
 			}
+
+			/* 执行本帧收集到的渲染视图：场景视口的内容在这里产生 */
+			m_pMainScene->Render();
 		}
 	}
 }

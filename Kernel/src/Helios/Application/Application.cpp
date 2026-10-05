@@ -70,6 +70,10 @@ namespace Helios
 					render_api->PrepareNextFrame();
 				}
 
+				/* 帧级渲染准备：GPU 计时器的帧边界。
+				 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
+				Renderer::Update();
+
 				/* 先更新逻辑层和渲染层 */
 				{
 					PROFILE_SCOPE("Update Layers");

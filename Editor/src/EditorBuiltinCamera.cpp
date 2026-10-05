@@ -102,17 +102,18 @@ namespace Helios
 		UpdateProjectionMatrix();
 	}
 
-	/* 构建内置的FrameGraph */
+	/* 构建内置的FrameGraph（延迟渲染：GBuffer + Lighting）
+	 * 由 RenderView 在执行时回调，故渲染图每帧按当前视口尺寸重建。 */
 	bool EditorCamera::ConstructRenderView(RenderView& render_view)
 	{
 		PROFILE_FUNCTION();
 
-		(void)render_view;
-
+		/* 视口尺寸无效时不组织渲染图：这里必须返回 true（表示"本相机负责组织"），
+		 * 否则会回落到默认前向图并沿用 0 尺寸的渲染目标。渲染图为空时输出为空。 */
 		if (m_ViewportRegion.Width <= 0 || m_ViewportRegion.Height <= 0)
-			return false;
+			return true;
 
-		auto& frame_graph = m_pRenderView->GetFrameGraph();
+		auto& frame_graph = render_view.GetFrameGraph();
 		frame_graph->Reset();
 
 		FrameGraphTexture::Descriptor color_target_desc;
@@ -179,7 +180,7 @@ namespace Helios
 			[&](const FrameGraphResources& resources, const GBufferPassData& data)
 			{
 				const auto render_pass_info = resources.GetPassRenderTarget();
-				m_pRenderView->EmplacePassFrameBuffer("GBufferPass", render_pass_info);
+				render_view.EmplacePassFrameBuffer("GBufferPass", render_pass_info);
 
 				render_pass_info->Bind();
 				{
@@ -189,7 +190,7 @@ namespace Helios
 					int32_t clear_data = -1;
 					render_pass_info->ClearAttachment(6, 0, { PixelFormat::R_Integer, PixelType::Int }, &clear_data);
 
-					for (const auto& mesh_object : m_pRenderView->GetVisibleMeshObjects())
+					for (const auto& mesh_object : render_view.GetVisibleMeshObjects())
 					{
 						/* Fill object uniform buffer */
 						Renderer::FillObjectUniformBuffer(mesh_object);
@@ -254,12 +255,12 @@ namespace Helios
 			[&](const FrameGraphResources& resources, const LightingPassData& data)
 			{
 				const auto render_pass_info = resources.GetPassRenderTarget();
-				m_pRenderView->EmplacePassFrameBuffer("LightingPass", render_pass_info);
+				render_view.EmplacePassFrameBuffer("LightingPass", render_pass_info);
 
 				render_pass_info->Bind();
 				{
 					Renderer::GetRenderAPI()->Clear();
-					for (const auto& light : m_pRenderView->GetValidLights())
+					for (const auto& light : render_view.GetValidLights())
 					{
 						/* Fill light uniform buffer */
 						Renderer::FillLightUniformBuffer(light);
@@ -291,10 +292,10 @@ namespace Helios
 		frame_graph->GetBlackboard()["LightingPassOutput"] = lighting_pass->GetData().LightingResult;
 
 		// frame_graph->ExportGraphviz("framegraph.txt");
-		m_pRenderView->Prepare();
+		render_view.Prepare();
 
 		/* 输出 */
-		m_pRenderView->SetRenderTargetHandle(lighting_pass->GetData().LightingResult);
+		render_view.SetRenderTargetHandle(lighting_pass->GetData().LightingResult);
 
 		return true;
 	}

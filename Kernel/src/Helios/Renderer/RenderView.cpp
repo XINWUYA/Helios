@@ -42,7 +42,8 @@ namespace Helios
 		if (!m_RenderTargetHandle.IsInitialized())
 			return nullptr;
 
-		return DynamicPtrCast<Resource<FrameGraphTexture>>(m_pFrameGraph->GetResource(m_RenderTargetHandle))->GetResource().Texture;
+		const auto& resource = DynamicPtrCast<Resource<FrameGraphTexture>>(m_pFrameGraph->GetResource(m_RenderTargetHandle));
+		return (resource != nullptr) ? resource->GetResource().Texture : nullptr;
 	}
 
 	/* 存储各Pass的FrameBuffer */
@@ -174,6 +175,10 @@ namespace Helios
 
 		/* 重置FrameGraph */
 		m_pFrameGraph->Reset();
+
+		/* 渲染图已销毁，旧的输出句柄随之失效。
+		 * 重置它，未重新指定输出的渲染图（如相机在视口尺寸无效时不组织渲染图）不会读到悬垂资源。 */
+		m_RenderTargetHandle.Reset();
 
         auto scene = m_pOwnerScene.lock();
 

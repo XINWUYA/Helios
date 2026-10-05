@@ -88,6 +88,9 @@ namespace Helios
 
 		m_pEditorCamera->OnUpdate(delta_time);
 		m_pDefaultScene->OnUpdate(delta_time, m_pEditorCamera.get());
+
+		/* 执行本帧收集到的渲染视图：模型视口的内容在这里产生 */
+		m_pDefaultScene->Render();
 	}
 
 	void ModelEditorLayer::OnImGuiRender()
