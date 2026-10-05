@@ -1,5 +1,7 @@
 #pragma once
 #include "EditorCommon.h"
+#include "Helios/Command/Command.h"
+#include "Helios/Common/Common.h"
 
 namespace Helios
 {
@@ -27,6 +29,10 @@ namespace Helios
 		[[nodiscard]] bool CanRedo();
 		[[nodiscard]] const char* GetUndoLabel();
 		[[nodiscard]] const char* GetRedoLabel();
+
+		/* 往同一条编辑历史里塞一条命令：资源浏览器的新建 / 重命名 / 删除都走这里 —— 所以 Ctrl+Z 对
+		 * 文件操作同样有效。命令不涉及场景改动时，自己声明 AffectsSceneDocument() 为假。 */
+		void Execute(UniquePtr<ICommand> command);
 
 		/* ---- 运行 / Gizmo 状态（本类持有权威值，再转发给场景面板）---- */
 		[[nodiscard]] int GetGizmoType() const { return m_GizmoType; }

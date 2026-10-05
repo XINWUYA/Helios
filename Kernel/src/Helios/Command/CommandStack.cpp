@@ -75,6 +75,17 @@ namespace Helios
 		return CanUndo() ? m_Commands[m_NextIndex - 1]->GetLabel() : nullptr;
 	}
 
+	size_t CommandStack::GetSceneEditCount() const
+	{
+		size_t count = 0;
+		for (size_t index = 0; index < m_NextIndex; ++index)
+		{
+			if (m_Commands[index]->AffectsSceneDocument())
+				++count;
+		}
+		return count;
+	}
+
 	const char* CommandStack::GetRedoLabel() const
 	{
 		return CanRedo() ? m_Commands[m_NextIndex]->GetLabel() : nullptr;

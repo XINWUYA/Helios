@@ -1,24 +1,37 @@
 ﻿#pragma once
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <unordered_set>
 #include <vector>
 #include <imgui.h>
 #include "EditorIcons.h"
+#include "Command/AssetFileOps.h"
+#include "Helios/Command/Command.h"
+#include "Helios/Common/Common.h"
 
 namespace Helios
 {
 	/* 资源浏览器：顶部一行（搜索 + 四枚图标：回退 / 重进 / 筛选 / 新建）+ 左右两栏（目录树 |
 	 * 内容区）+ 右栏底部路径栏（面包屑 + 缩放滑条 + 统计数）。文件操作（新建 / 重命名 / 删除）
 	 * 做成 ICommand 进编辑历史，所以 Ctrl+Z / Ctrl+Y 对文件操作同样有效。 */
-	class EditorResourceBrowser
+	class EditorResourceBrowser final : public IAssetChangeSink
 	{
 	public:
 		EditorResourceBrowser() = default;
-		~EditorResourceBrowser() = default;
+		~EditorResourceBrowser() override = default;
 
 		/* 渲染UI */
 		void OnImGuiRenderer();
+
+		/* 文件操作的落地口：把命令交给编辑历史（主壳层注入 m_Context 转发）。
+		 * 由外壳注入而不是面板自己去查 Layer —— 面板因此不认识 Layer/CommandStack，
+		 * 单独跑（headless 测试）时也不为空：没有 sink 就直接执行，功能一样，只是没有历史。 */
+		void SetCommandSink(std::function<void(UniquePtr<ICommand>)> sink) { m_CommandSink = std::move(sink); }
+
+		/* 资源改动的观察者（IAssetChangeSink）：文件命令做完 —— 含撤销与重做 —— 通知它，
+		 * 界面据此同步当前目录与选中项，并立刻重建文件树（不用等目录轮询）。 */
+		void OnAssetPathChanged(const std::string& from, const std::string& to) override;
 
 	private:
 		/* 文件类型，确定文件后缀是否正确 */
@@ -137,6 +150,53 @@ namespace Helios
 		static SharedPtr<FileNode> FindNode(const SharedPtr<FileNode>& node, const std::string& path);
 		/* node 是否等于 target 或它的祖先（用于判断要不要把某个目录展开） */
 		static bool IsAncestorOrSelf(const SharedPtr<FileNode>& node, const SharedPtr<FileNode>& target);
+
+		/* ---- 文件操作（新建文件夹 / 重命名 / 删除）----
+		 * 三件都在右键菜单里（内容区与目录树都有），执行前要弹一个输入 / 确认层。
+		 * 待办目标一律按相对 Assets 的路径记：文件树会重建，节点指针不保险。 */
+
+		/* 右键菜单的条目（在已经开好的 popup 里画） */
+		void DrawAssetContextMenuItems(const std::string& path, bool is_folder);
+		/* 空处右键：在当前目录下新建 */
+		void DrawBackgroundContextMenuItems();
+		/* 三个弹层（新建 / 重命名 / 删除确认）：画在面板根作用域，
+		 * 因为右键菜单在内容栏与目录树两个子窗口里，各自算 ID 会得到不同的值。 */
+		void DrawAssetOperationPopups();
+
+		/* 打开弹层：路径都是相对 Assets 的 */
+		void OpenNewFolderPopup(const std::string& parent_path);
+		void OpenRenamePopup(const std::string& path);
+		void OpenDeletePopup(std::vector<std::string> paths);
+
+		/* 名字输入弹层（新建与重命名共用：m_PendingIsRename 决定标题与确认按钮的文案） */
+		void DrawNamePopup(ImGuiID popup_id, bool is_rename);
+
+		/* 把命令塞进编辑历史（m_Context 为空时直接执行） */
+		void ExecuteCommand(UniquePtr<ICommand> command);
+
+		/* 相对 Assets 的路径 → 绝对路径 */
+		static std::filesystem::path AbsoluteAssetPath(const std::string& relative_path);
+
+		/* 待办：新建时是父目录，重命名时是被改名的目标；两个都空 = 没有待办 */
+		std::string m_PendingParentPath;
+		std::string m_PendingRenamePath;
+		/* 删除确认里的目标 */
+		std::vector<std::string> m_PendingDeletePaths;
+		/* 名字输入框的内容（新建 / 重命名共用） */
+		char m_NameBuffer[128]{};
+		/* 面板根作用域上算好的弹层 ID（见 OnImGuiRenderer） */
+		ImGuiID m_PopupNewFolder{ 0 };
+		ImGuiID m_PopupRename{ 0 };
+		ImGuiID m_PopupDelete{ 0 };
+
+		/* 文件操作（含撤销 / 重做）改过路径后，下一次重建文件树时按它对齐：
+		 * from 为空 = 新建（顺带选中新建的那一项），to 为空 = 删除（找不到就丢掉）。 */
+		std::string m_RemapFrom;
+		std::string m_RemapTo;
+		std::string m_PendingSelectPath;
+
+		/* 跨面板通道：只为"把文件操作塞进编辑历史"这一个用途（主壳层注入） */
+		std::function<void(UniquePtr<ICommand>)> m_CommandSink;
 
 		/* 资源目录是否被改动（新增 / 删除资源，或编辑器之外的操作） */
 		[[nodiscard]] bool HasDirectoryChanged() const;

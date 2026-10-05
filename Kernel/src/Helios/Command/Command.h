@@ -23,5 +23,10 @@ namespace Helios
 
 		/* 历史记录里显示的名称 */
 		[[nodiscard]] virtual const char* GetLabel() const = 0;
+
+		/* 这条命令有没有改动场景文档：场景的"未保存"标记按它为真来数（见 GetSceneEditCount）。
+		 * 资源浏览器的新建 / 重命名 / 删除也进同一条历史，但改的是磁盘资源、不是场景内容 —— 不该让
+		 * 标题栏和层级面板跳出"场景已修改"。 */
+		[[nodiscard]] virtual bool AffectsSceneDocument() const { return true; }
 	};
 }

@@ -37,6 +37,11 @@ namespace Helios
 		[[nodiscard]] size_t GetHistorySize() const { return m_Commands.size(); }
 		[[nodiscard]] size_t GetNextIndex() const { return m_NextIndex; }
 
+		/* [0, m_NextIndex) 里"改动场景文档"的命令条数。场景脏标记拿它跟保存时的计数比：资源操作
+		 * （新建目录 / 重命名 / 删除）不改场景内容，按位置比会带出假的"未保存"，按条数比才不受影响。
+		 * 现算、不维护计数器（历史也就几百条，每帧一次不值得多一份状态）。 */
+		[[nodiscard]] size_t GetSceneEditCount() const;
+
 		/* 供菜单显示 "Undo <标签>"；不可撤销时返回 nullptr */
 		[[nodiscard]] const char* GetUndoLabel() const;
 		[[nodiscard]] const char* GetRedoLabel() const;

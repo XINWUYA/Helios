@@ -31,6 +31,9 @@ namespace Helios
 		/* 编辑历史 */
 		bool Undo();
 		bool Redo();
+		/* 往同一条历史里塞一条命令（资源浏览器的新建 / 重命名 / 删除走这里，
+		 * 于是工具栏与菜单的撤销 / 重做对文件操作同样有效） */
+		void ExecuteCommand(UniquePtr<ICommand> command) { m_CommandStack.Execute(std::move(command)); }
 		[[nodiscard]] bool CanUndo() const { return m_CommandStack.CanUndo(); }
 		[[nodiscard]] bool CanRedo() const { return m_CommandStack.CanRedo(); }
 		[[nodiscard]] const char* GetUndoLabel() const { return m_CommandStack.GetUndoLabel(); }
@@ -96,8 +99,10 @@ namespace Helios
 		SceneHierarchy m_SceneHierarchy;
 		/* 编辑历史：所有改动经命令栈落地 */
 		CommandStack m_CommandStack;
-		/* 上次保存（或加载）时的编辑历史位置：与当前位置不一致即表示有未保存的改动 */
-		size_t m_SavedHistoryIndex{ 0 };
+		/* 上次保存（或加载）时的场景改动条数：与当前条数不一致即表示有未保存的改动。
+		 * 用条数而不是历史位置：资源操作（新建 / 重命名 / 删除）也入同一条历史，
+		 * 它们不改场景内容，按位置比对会被它们带出假的"未保存"（见 CommandStack::GetSceneEditCount）。 */
+		size_t m_SavedSceneEditCount{ 0 };
 		/* 发生过不走命令栈的场景改动（如拖入模型） */
 		bool m_HasUnrecordedChange{ false };
 		/* Gizmo 拖拽进行中（拖拽期间的逐帧改动合并为一条历史） */

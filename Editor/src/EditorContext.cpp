@@ -88,6 +88,12 @@ namespace Helios
 		return layer != nullptr ? layer->GetRedoLabel() : nullptr;
 	}
 
+	void EditorContext::Execute(UniquePtr<ICommand> command)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->ExecuteCommand(std::move(command));
+	}
+
 	void EditorContext::SetGizmoType(int type)
 	{
 		m_GizmoType = type;

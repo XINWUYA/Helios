@@ -211,12 +211,12 @@ namespace Helios
 
 	bool SceneEditorLayer::IsSceneDirty() const
 	{
-		return m_HasUnrecordedChange || m_CommandStack.GetNextIndex() != m_SavedHistoryIndex;
+		return m_HasUnrecordedChange || m_CommandStack.GetSceneEditCount() != m_SavedSceneEditCount;
 	}
 
 	void SceneEditorLayer::MarkSceneSaved()
 	{
-		m_SavedHistoryIndex = m_CommandStack.GetNextIndex();
+		m_SavedSceneEditCount = m_CommandStack.GetSceneEditCount();
 		m_HasUnrecordedChange = false;
 	}
 
@@ -357,8 +357,10 @@ namespace Helios
 			{
 				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
 				{
-					const auto path = static_cast<const char *>(payload->Data);
-					OnDragItemToScene(g_AssetsPath / path);
+					std::filesystem::path relative_path;
+					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
+						payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
+						OnDragItemToScene(g_AssetsPath / relative_path);
 				}
 				ImGui::EndDragDropTarget();
 			}

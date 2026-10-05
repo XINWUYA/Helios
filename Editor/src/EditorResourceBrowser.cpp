@@ -4,6 +4,11 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "Command/AssetFileOps.h"
+#include "Command/CreateAssetFolderCommand.h"
+#include "Command/DeleteAssetsCommand.h"
+#include "Command/RenameAssetCommand.h"
+#include "Helios/Application/FileDialog.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include <utility>
 #include <vector>
@@ -40,6 +45,10 @@ namespace Helios
 		/* 底栏给"选中的项"这类摘要留的最小宽度：低于它就整段不画 ——
 		 * 留着只会被裁成两三个字母的碎片，比不显示更像出了 bug。 */
 		constexpr float kMinSelectionWidth = 56.0f;
+
+		/* 文件操作弹层（新建 / 重命名 / 删除确认）里的控件尺寸：两个按钮等宽，排一行 */
+		constexpr float kPopupButtonSize = 84.0f;
+		constexpr float kPopupInputWidth = 240.0f;
 
 		/* 面包屑的分隔符是矢量三角（见 ShowBrowserFooter），这是它占位的方框边长 ——
 		 * 与卡片折叠箭头一样按字号取比例，字号变了不会走形。 */
@@ -347,7 +356,18 @@ namespace Helios
 			BuildFileNodeTree(m_RootFileNodeTree);
 			UpdateDirectoryStamp();
 
-			m_CurrentFileNode = current_path.empty() ? nullptr : FindNode(m_RootFileNodeTree, current_path);
+			/* 文件操作（含撤销 / 重做）改过路径：先把要找回的路径对齐到新位置。
+			 * 按前缀替换而不是全等 —— 改名的是一个目录时，它下面的路径也一起变了
+			 * （当前目录就可能在它里面）。删除的项对齐后找不到，自然被丢掉。 */
+			const auto remap = [this](const std::string& path)
+			{
+				if (m_RemapFrom.empty() || path.rfind(m_RemapFrom, 0) != 0)
+					return path;
+				return m_RemapTo + path.substr(m_RemapFrom.size());
+			};
+
+			const std::string remapped_current = remap(current_path);
+			m_CurrentFileNode = remapped_current.empty() ? nullptr : FindNode(m_RootFileNodeTree, remapped_current);
 			if (!m_CurrentFileNode)
 				m_CurrentFileNode = m_RootFileNodeTree;   /* 未浏览过，或原目录已被删除 */
 
@@ -357,13 +377,27 @@ namespace Helios
 			reselected.reserve(m_Selection.size());
 			for (const SharedPtr<FileNode>& selected : m_Selection)
 			{
-				if (SharedPtr<FileNode> found = FindNode(m_RootFileNodeTree, selected->FilePath))
+				if (SharedPtr<FileNode> found = FindNode(m_RootFileNodeTree, remap(selected->FilePath)))
 					reselected.push_back(found);
 			}
 
 			m_Selection = std::move(reselected);
 			m_SelectionAnchor = (m_SelectionAnchor != nullptr)
-				? FindNode(m_RootFileNodeTree, m_SelectionAnchor->FilePath) : nullptr;
+				? FindNode(m_RootFileNodeTree, remap(m_SelectionAnchor->FilePath)) : nullptr;
+
+			/* 刚新建的那一项：建完就选中它，用户不用自己去找（否则"新建成功了但看不出来"） */
+			if (!m_PendingSelectPath.empty())
+			{
+				if (SharedPtr<FileNode> created = FindNode(m_RootFileNodeTree, m_PendingSelectPath))
+				{
+					m_Selection = { created };
+					m_SelectionAnchor = created;
+				}
+				m_PendingSelectPath.clear();
+			}
+
+			m_RemapFrom.clear();
+			m_RemapTo.clear();
 
 			/* 目录树按新节点重画，把当前目录重新露出来（展开祖先 + 滚到可见） */
 			m_RevealCurrentNode = true;
@@ -383,6 +417,12 @@ namespace Helios
 			if (!m_CurrentFileNode)
 				m_CurrentFileNode = m_RootFileNodeTree; /* 默认为根节点 */
 
+			/* 弹层 ID 在面板根作用域上算一次：右键菜单在内容栏与目录树两个子窗口里，
+			 * 各自算 ID 会得到不同的值，弹层就对不上了（见 DrawAssetOperationPopups）。 */
+			m_PopupNewFolder = ImGui::GetID("##NewAssetFolder");
+			m_PopupRename = ImGui::GetID("##RenameAsset");
+			m_PopupDelete = ImGui::GetID("##DeleteAssets");
+
 			/* 底栏（分隔线 + 一行）钉在面板底边上，主体只要让出它的高度 ——
 			 * 这个数由我们自己定（栏高 + 1px 分隔线），不用猜 ImGui::Separator() 吃掉多少，
 			 * 因此既不会少一像素长出滚动条，也不会多留一条空带。 */
@@ -391,6 +431,9 @@ namespace Helios
 			ShowBrowserTopBar();
 			ShowBrowserBody(reserved_footer, pane_padding.y);
 			ShowBrowserFooter();
+
+			/* 文件操作弹层画在面板根：三件都在右键菜单里点开 */
+			DrawAssetOperationPopups();
 		}
 		ImGui::End();
 
@@ -498,6 +541,14 @@ namespace Helios
 			/* 点目录名（不是点展开箭头）= 切换当前目录 */
 			if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
 				SetCurrentNode(child_node);
+
+			/* 目录树里也能新建 / 改名 / 删除：改名的目标是点到的这一项，
+			 * 与内容区的选中项无关（右键不动选中项 —— 只想改个目录名，不该把选择清掉） */
+			if (ImGui::BeginPopupContextItem())
+			{
+				DrawAssetContextMenuItems(child_node->FilePath, true);
+				ImGui::EndPopup();
+			}
 
 			/* 只在"跳过来"的那一帧滚过去：每帧都滚就再也拖不动滚动条了 */
 			if (is_current && m_RevealCurrentNode)
@@ -622,8 +673,15 @@ namespace Helios
 	{
 		const ImGuiIO& io = ImGui::GetIO();
 
-		/* 光看悬停还不够：键盘焦点可能在搜索框里，所以正在输入文字（WantTextInput）时一律不抢键 */
+		/* 光看悬停还不够：键盘焦点可能在搜索框里，所以正在输入文字（WantTextInput）时一律不抢键；
+		 * 文件操作的弹层开着时更不抢 —— 里面就有输入框与按钮，Delete / Esc 会误伤 */
 		if (!ImGui::IsWindowHovered() || io.WantTextInput)
+			return;
+
+		/* 弹层由面板根作用域上的 ID 开的，这里也用那套 ID 判"开着没有" */
+		if (ImGui::IsPopupOpen(m_PopupNewFolder, ImGuiPopupFlags_None)
+			|| ImGui::IsPopupOpen(m_PopupRename, ImGuiPopupFlags_None)
+			|| ImGui::IsPopupOpen(m_PopupDelete, ImGuiPopupFlags_None))
 			return;
 
 		if ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A))
@@ -634,6 +692,260 @@ namespace Helios
 
 		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
 			ClearSelection();
+
+		/* Delete / Backspace = 删除选中（先弹确认）。macOS 上标 delete 的键其实就是 Backspace，
+		 * 两个都收。重命名没有快捷键（ImGui 没有 F2 枚举），走右键菜单。 */
+		if (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace))
+		{
+			std::vector<std::string> paths;
+			paths.reserve(m_Selection.size());
+			for (const SharedPtr<FileNode>& node : m_Selection)
+				paths.push_back(node->FilePath);
+
+			if (!paths.empty())
+				OpenDeletePopup(std::move(paths));
+		}
+	}
+
+	/* ---- 文件操作：新建文件夹 / 重命名 / 删除 ----
+	 * 三件都做成 ICommand 走编辑历史，于是 Ctrl+Z / Ctrl+Y、菜单与工具栏的撤销 / 重做
+	 * 对它们同样有效 —— 这也是"资源管理器支持撤销"的全部意义：不是另开一套历史。 */
+
+	std::filesystem::path EditorResourceBrowser::AbsoluteAssetPath(const std::string& relative_path)
+	{
+		return g_AssetsPath / PathFromUtf8(relative_path);
+	}
+
+	void EditorResourceBrowser::ExecuteCommand(UniquePtr<ICommand> command)
+	{
+		if (command == nullptr)
+			return;
+
+		if (m_CommandSink)
+		{
+			/* 交给编辑历史：撤销 / 重做（含工具栏按钮与 Ctrl+Z）都归它管 */
+			m_CommandSink(std::move(command));
+			return;
+		}
+
+		/* 没有 sink（面板单独跑 / headless 测试）：直接执行 —— 功能对，只是没有历史 */
+		command->Do();
+	}
+
+	void EditorResourceBrowser::OnAssetPathChanged(const std::string& from, const std::string& to)
+	{
+		/* 撤销 / 重做也要立刻看到结果：不等 0.5s 的目录轮询 */
+		m_IsDirty = true;
+
+		if (from.empty())
+		{
+			/* 新建：重建后选中新建的那一项 */
+			m_PendingSelectPath = to;
+			return;
+		}
+
+		if (to.empty())
+		{
+			/* 删除：重建时按路径找不到就丢掉（选中项与当前目录都走同一条找回逻辑） */
+			return;
+		}
+
+		m_RemapFrom = from;
+		m_RemapTo = to;
+	}
+
+	void EditorResourceBrowser::OpenNewFolderPopup(const std::string& parent_path)
+	{
+		m_PendingParentPath = parent_path;
+		m_PendingRenamePath.clear();
+
+		snprintf(m_NameBuffer, sizeof(m_NameBuffer), "%s", "New Folder");
+
+		ImGui::OpenPopup(m_PopupNewFolder);
+	}
+
+	void EditorResourceBrowser::OpenRenamePopup(const std::string& path)
+	{
+		const std::filesystem::path name = PathFromUtf8(path).filename();
+
+		m_PendingRenamePath = path;
+		m_PendingParentPath.clear();
+
+		snprintf(m_NameBuffer, sizeof(m_NameBuffer), "%s", PathToUtf8(name).c_str());
+
+		ImGui::OpenPopup(m_PopupRename);
+	}
+
+	void EditorResourceBrowser::OpenDeletePopup(std::vector<std::string> paths)
+	{
+		m_PendingDeletePaths = std::move(paths);
+
+		ImGui::OpenPopup(m_PopupDelete);
+	}
+
+	void EditorResourceBrowser::DrawAssetOperationPopups()
+	{
+		DrawNamePopup(m_PopupNewFolder, false);
+		DrawNamePopup(m_PopupRename, true);
+
+		/* ---- 删除确认 ---- */
+		if (ImGui::BeginPopupEx(m_PopupDelete,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+		{
+			ImGui::TextUnformatted(m_PendingDeletePaths.size() == 1
+				? "Delete this item?" : "Delete these items?");
+
+			/* 说清"删到哪儿去了"：撤销能用 Ctrl+Z，但 File 菜单 / 工具栏的 Undo 也一样管用 */
+			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
+			ImGui::TextUnformatted("移到项目回收站 .helios-trash（Assets 旁边）");
+			ImGui::TextUnformatted("可用 Ctrl+Z 或工具栏的 Undo 还原");
+			ImGui::PopStyleColor();
+
+			constexpr size_t kMaxListed = 8;
+			for (size_t index = 0; index < m_PendingDeletePaths.size() && index < kMaxListed; ++index)
+				ImGui::BulletText("%s", PathToUtf8(PathFromUtf8(m_PendingDeletePaths[index]).filename()).c_str());
+
+			if (m_PendingDeletePaths.size() > kMaxListed)
+				ImGui::BulletText("... +%zu more", m_PendingDeletePaths.size() - kMaxListed);
+
+			ImGui::Separator();
+
+			if (ImGui::Button("Delete", ImVec2(kPopupButtonSize, 0.0f)))
+			{
+				std::vector<std::filesystem::path> paths;
+				paths.reserve(m_PendingDeletePaths.size());
+				for (const std::string& path : m_PendingDeletePaths)
+					paths.push_back(AbsoluteAssetPath(path));
+
+				/* 一整批只留一条历史：撤销一次全部回来 */
+				ExecuteCommand(CreateUniquePtr<DeleteAssetsCommand>(this, AssetTrashRoot(), std::move(paths)));
+				m_PendingDeletePaths.clear();
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(kPopupButtonSize, 0.0f)))
+			{
+				m_PendingDeletePaths.clear();
+				ImGui::CloseCurrentPopup();
+			}
+
+			ImGui::EndPopup();
+		}
+	}
+
+	/* 名字输入弹层：新建文件夹与重命名共用（只有文案与"确认后做什么"不同） */
+	void EditorResourceBrowser::DrawNamePopup(ImGuiID popup_id, bool is_rename)
+	{
+		if (!ImGui::BeginPopupEx(popup_id, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+			return;
+
+		ImGui::TextUnformatted(is_rename ? "Rename" : "New Folder");
+
+		/* 名字非法时把原因写在输入框下面，并禁用确认按钮 —— 别让用户点了没反应 */
+		const std::string typed = m_NameBuffer;
+		const std::string error = AssetNameError(typed);
+
+		/* 目标路径：重命名 = 同目录下换个名字；新建 = 父目录下新建 */
+		const std::filesystem::path pending_source = is_rename
+			? AbsoluteAssetPath(m_PendingRenamePath) : std::filesystem::path();
+		const std::filesystem::path parent = is_rename
+			? pending_source.parent_path() : AbsoluteAssetPath(m_PendingParentPath);
+		const std::filesystem::path requested = parent / PathFromUtf8(typed);
+		const std::filesystem::path target = MakeUniquePath(parent, typed);
+
+		ImGui::SetNextItemWidth(kPopupInputWidth);
+
+		/* 弹层一出现就选好名字，直接打字即可；只在出现的那一帧抢焦点，
+		 * 否则每帧都把焦点抢回输入框，底下的按钮就点不动了。 */
+		if (ImGui::IsWindowAppearing())
+			ImGui::SetKeyboardFocusHere();
+
+		const bool submitted = ImGui::InputText("##name", m_NameBuffer, sizeof(m_NameBuffer),
+			ImGuiInputTextFlags_AutoSelectAll | ImGuiInputTextFlags_EnterReturnsTrue);
+
+		if (!error.empty())
+		{
+			ImGui::Text("名字不合法：%s", error.c_str());
+		}
+		else if (target != requested)
+		{
+			/* 同名被占了：说清会建成什么名字，免得用户以为没生效 */
+			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
+			ImGui::Text("%s 已被占用，将创建为 %s", typed.c_str(), PathToUtf8(target.filename()).c_str());
+			ImGui::PopStyleColor();
+		}
+
+		ImGui::Separator();
+
+		const bool can_confirm = error.empty();
+
+		ImGui::BeginDisabled(!can_confirm);
+		const bool pressed = ImGui::Button(is_rename ? "Rename" : "Create", ImVec2(kPopupButtonSize, 0.0f)) || submitted;
+		ImGui::EndDisabled();
+
+		if (pressed && can_confirm)
+		{
+			if (is_rename)
+			{
+				ExecuteCommand(CreateUniquePtr<RenameAssetCommand>(this, pending_source, target));
+			}
+			else
+			{
+				ExecuteCommand(CreateUniquePtr<CreateAssetFolderCommand>(this, target));
+			}
+
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(kPopupButtonSize, 0.0f)))
+			ImGui::CloseCurrentPopup();
+
+		ImGui::EndPopup();
+	}
+
+	/* 右键菜单的条目：结点自己的操作（内容区的网格 / 列表与目录树共用同一份） */
+	void EditorResourceBrowser::DrawAssetContextMenuItems(const std::string& path, bool is_folder)
+	{
+		const std::filesystem::path absolute = AbsoluteAssetPath(path);
+
+		if (ImGui::MenuItem("Show in file explorer"))
+		{
+			std::filesystem::path shown = absolute;
+			shown = std::filesystem::absolute(shown).make_preferred();
+			const std::string shown_utf8 = PathToUtf8(shown);
+			OpenFileExplorer(shown_utf8.c_str());
+		}
+
+		if (is_folder)
+		{
+			if (ImGui::MenuItem("New Folder"))
+				OpenNewFolderPopup(path);
+		}
+
+		/* 重命名作用于点到的这一项（右键菜单本来就是"这一项"的菜单）：
+		 * 多选时也只改它一个，其余选中项不受影响 —— 不用先缩成单选才好操作 */
+		if (ImGui::MenuItem("Rename"))
+			OpenRenamePopup(path);
+
+		if (ImGui::MenuItem("Delete", "Del"))
+			OpenDeletePopup({ path });
+	}
+
+	void EditorResourceBrowser::DrawBackgroundContextMenuItems()
+	{
+		const std::string current = (m_CurrentFileNode != nullptr) ? m_CurrentFileNode->FilePath : std::string();
+
+		if (ImGui::MenuItem("New Folder"))
+			OpenNewFolderPopup(current);
+
+		if (ImGui::MenuItem("Show in file explorer"))
+		{
+			std::filesystem::path shown = std::filesystem::absolute(AbsoluteAssetPath(current)).make_preferred();
+			const std::string shown_utf8 = PathToUtf8(shown);
+			OpenFileExplorer(shown_utf8.c_str());
+		}
 	}
 
 	bool EditorResourceBrowser::IsAncestorOrSelf(const SharedPtr<FileNode>& node, const SharedPtr<FileNode>& target)
@@ -1102,14 +1414,7 @@ namespace Helios
 
 					if (ImGui::BeginPopupContextItem())
 					{
-						if (ImGui::MenuItem("Show in file explorer"))
-						{
-							auto path = g_AssetsPath / child_node->FilePath;
-							path = absolute(path).make_preferred();
-							const std::string path_utf8 = PathToUtf8(path);
-							OpenFileExplorer(path_utf8.c_str());
-						}
-
+						DrawAssetContextMenuItems(child_node->FilePath, child_node->Type == FileType::Folder);
 						ImGui::EndPopup();
 					}
 
@@ -1150,9 +1455,17 @@ namespace Helios
 		}
 
 		/* 点空白处 = 清空选择：条目一个都没被点到，而左键确实按在这一栏里
-		 * （走完所有条目再判，理由见上面 clicked_an_item 的说明）。 */
+	 * （走完所有条目再判，理由见上面 clicked_an_item 的说明）。 */
 		if (!clicked_an_item && ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 			ClearSelection();
+
+		/* 空处右键 = 在当前目录下操作（新建文件夹）；条目自己有一份菜单（NoOpenOverItems 分开） */
+		if (ImGui::BeginPopupContextWindow("##AssetBackground",
+				ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+		{
+			DrawBackgroundContextMenuItems();
+			ImGui::EndPopup();
+		}
 	}
 
 	void EditorResourceBrowser::BuildFileNodeTree(const SharedPtr<FileNode>& parent_node)
@@ -1163,11 +1476,18 @@ namespace Helios
 			const auto& path = directory_entry.path();
 			auto relative_path = GetRelativePath(g_AssetsPath, path);
 			auto filename = relative_path.filename();
+			const std::string file_name = PathToUtf8(filename);
+
+			/* 以 '.' 开头的（.DS_Store、.git、项目的回收站……）一律不进资源树：
+			 * 它们不是资源，列出来只会碍事（删除资源的回收站就放在 Assets 旁边，
+			 * 万一有人把 Assets 指到别处、回收站落进去，也不会被当成资产显示出来）。 */
+			if (file_name.empty() || file_name.front() == '.')
+				continue;
 
 			/* 创建一个文件节点 */
 			auto file_node = CreateSharedPtr<FileNode>();
 			file_node->ParentNode = parent_node;
-			file_node->FileName = PathToUtf8(filename);
+			file_node->FileName = file_name;
 			file_node->FilePath = PathToUtf8(relative_path);
 			file_node->Depth = parent_node->Depth + 1;
 
@@ -1247,14 +1567,7 @@ namespace Helios
 
 			if (ImGui::BeginPopupContextItem())
 			{
-				if (ImGui::MenuItem("Show in file explorer"))
-				{
-					auto path = g_AssetsPath / child_node->FilePath;
-					path = absolute(path).make_preferred();
-					const std::string path_utf8 = PathToUtf8(path);
-					OpenFileExplorer(path_utf8.c_str());
-				}
-
+				DrawAssetContextMenuItems(child_node->FilePath, is_folder);
 				ImGui::EndPopup();
 			}
 
