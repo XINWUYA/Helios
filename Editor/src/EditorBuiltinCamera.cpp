@@ -100,21 +100,17 @@ namespace Helios
 
 		m_AspectRatio = static_cast<float>(m_ViewportRegion.Width) / static_cast<float>(m_ViewportRegion.Height);
 		UpdateProjectionMatrix();
-
-		/* 更新视口区域时，需重新构建FrameGraph, 保证RenderTarget的size是正确的 */
-		m_IsFrameGraphDirty = true;
 	}
 
 	/* 构建内置的FrameGraph */
-	void EditorCamera::ConstructRenderView()
+	bool EditorCamera::ConstructRenderView(RenderView& render_view)
 	{
 		PROFILE_FUNCTION();
 
-		if (!m_IsFrameGraphDirty)
-			return;
+		(void)render_view;
 
 		if (m_ViewportRegion.Width <= 0 || m_ViewportRegion.Height <= 0)
-			return;
+			return false;
 
 		auto& frame_graph = m_pRenderView->GetFrameGraph();
 		frame_graph->Reset();
@@ -300,7 +296,7 @@ namespace Helios
 		/* 输出 */
 		m_pRenderView->SetRenderTargetHandle(lighting_pass->GetData().LightingResult);
 
-		m_IsFrameGraphDirty = false;
+		return true;
 	}
 
 	int32_t EditorCamera::PickingEntityByPixelPos(uint32_t x, uint32_t y) const

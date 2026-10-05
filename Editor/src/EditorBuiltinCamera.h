@@ -49,7 +49,7 @@ namespace Helios
 
 	private:
 		/* 构建内置的FrameGraph */
-		void ConstructRenderView() override;
+		bool ConstructRenderView(RenderView& render_view) override;
 
 		void UpdateProjectionMatrix();
 		void UpdateViewMatrix();
@@ -77,8 +77,6 @@ namespace Helios
 		bool m_IsFocus{ true };
 		/* 是否需要更新变换矩阵 */
 		bool m_IsDirty{ true };
-		/* 是否需要重新构建FrameGraph */
-		bool m_IsFrameGraphDirty = true;
 
 		glm::vec3 m_FocalPoint{ 0.0f, 0.0f, 0.0f };
 		glm::vec2 m_LastMousePosition{ 0.0f, 0.0f };

@@ -22,7 +22,6 @@ namespace Helios
 
 		UpdateViewMatrix();
 		UpdateProjectionMatrix();
-		ConstructRenderView();
 	}
 
 	void Camera::SetProjectionType(CameraProjectionType type)

@@ -74,11 +74,10 @@ namespace Helios
 		RenderView* GetRenderView() const { return m_pRenderView.get(); }
 
 	protected:
-		/* 为当前相机构建RenderView:
-		 * 在这里组织当前RenderView的FrameGraph,
-		 * 每个相机override该函数，以为不同的相机使用不同的FrameGraph。
-		 */
-		virtual void ConstructRenderView() {}
+		/* 为当前相机构建 RenderView：在这里组织它的 FrameGraph，各相机 override 来用不同管线。返回
+		 * true = 已自行组织；false = 用默认渲染图（跟管线选择一致）。调用时机 = 渲染视图执行、
+		 * FrameGraph 重置之后 —— 渲染图每帧按当前视口重建，相机不用维护"要不要重建"的状态。 */
+		virtual bool ConstructRenderView(RenderView& render_view) { return false; }
 		/* 更新相机视图矩阵 */
 		virtual void UpdateViewMatrix();
 		/* 更新相机投影矩阵 */
@@ -111,5 +110,8 @@ namespace Helios
 		/* 每个相机对应一个RenderView */
 		UniquePtr<RenderView> m_pRenderView{ nullptr };
 		bool m_IsDirty{ true };
+
+		/* RenderView 在执行时需要回调 ConstructRenderView 组织渲染图 */
+		friend class RenderView;
 	};
 }

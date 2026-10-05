@@ -175,20 +175,26 @@ namespace Helios
 
         auto scene = m_pOwnerScene.lock();
 
-		/* 根据是否有光源开启ShadowCast来注入ShadowPass */
-		if (m_IsHasShadowCast)
-			m_pShadowMapManager->AddShadowPass(*m_pFrameGraph, scene, this);
-
-		/* 烘焙ReflectionProbe */
-		auto probe_manager = scene->GetReflectionProbeManager();
-		if (probe_manager)
+		/* 相机可以自行组织渲染图（如编辑器相机用延迟渲染图，以便按像素拾取实体）。
+		 * 未自行组织的回落到默认的前向渲染图。 */
+		const bool organized_by_camera = (m_pOwnerCamera != nullptr) && m_pOwnerCamera->ConstructRenderView(*this);
+		if (!organized_by_camera)
 		{
-			probe_manager->Prepare();
-			probe_manager->AddBakeReflectionProbePass(this);
-		}
+			/* 根据是否有光源开启ShadowCast来注入ShadowPass */
+			if (m_IsHasShadowCast)
+				m_pShadowMapManager->AddShadowPass(*m_pFrameGraph, scene, this);
 
-		/* ScenePass */
-		Forward::AddScenePass(this, m_IsHasShadowCast);
+			/* 烘焙ReflectionProbe */
+			auto probe_manager = scene->GetReflectionProbeManager();
+			if (probe_manager)
+			{
+				probe_manager->Prepare();
+				probe_manager->AddBakeReflectionProbePass(this);
+			}
+
+			/* ScenePass */
+			Forward::AddScenePass(this, m_IsHasShadowCast);
+		}
 
 		/* 生成当前FrameGraph */
 		m_pFrameGraph->Build();
