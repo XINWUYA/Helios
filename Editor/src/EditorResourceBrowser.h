@@ -288,8 +288,10 @@ namespace Helios
 		std::unordered_set<const FileNode*> m_VisibleNodes;
 		void FillBrowserFilter();
 
-		/* 目录树占面板可用宽度的比例（可拖，用户偏好所以留在实例上） */
-		float m_TreePaneRatio{ 0.42f };
+		/* 目录树占面板可用宽度的比例（可拖，用户偏好所以留在实例上）。
+		 * 目录名都不长，默认收窄到三成二：左栏够放下嵌套几级的目录名即可，
+		 * 余下的宽度留给内容区（网格能多铺一列）。 */
+		float m_TreePaneRatio{ 0.32f };
 		/* 待办：把当前目录在目录树里露出来（展开祖先 + 滚到可见），下一次画完树即清 */
 		bool m_RevealCurrentNode{ true };
 		/* 缩略图尺寸与间距：视图菜单里可调，属于"用户偏好"，所以留在实例上 */

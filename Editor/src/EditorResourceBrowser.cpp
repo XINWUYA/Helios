@@ -583,9 +583,9 @@ namespace Helios
 		 * 内边距这笔账不掺和）。底栏不从这扣：它只占右栏底部，左栏撑满整个主体高度。 */
 		ImGuiWindow* window = ImGui::GetCurrentWindow();
 		const float panel_bottom = window->Pos.y + window->Size.y;
+		const ImVec2 body_start = ImGui::GetCursorScreenPos();
 		const ImVec2 body(ImGui::GetContentRegionAvail().x,
-			ImMax(panel_bottom - ImGui::GetCursorScreenPos().y,
-				ImGui::GetFrameHeight() * 2.0f));
+			ImMax(panel_bottom - body_start.y, ImGui::GetFrameHeight() * 2.0f));
 		const float body_height = body.y;
 		const float bar_width = ImMax(style.ItemSpacing.x, 4.0f);
 
@@ -632,7 +632,8 @@ namespace Helios
 		 * 一档（面板横向内边距），让右栏吃满到面板右缘，不然滚动条会停在离边界差两档内边距的地方。 */
 		ImGui::SameLine(0.0f, 0.0f);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pane_padding.x, 0.0f));
-		ImGui::BeginChild("##BrowserRightPane", ImVec2(ImGui::GetContentRegionAvail().x, body_height), false,
+		ImGui::BeginChild("##BrowserRightPane",
+			ImVec2(ImGui::GetContentRegionAvail().x + pane_padding.x, body_height), false,
 			ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		{
 			/* 内容区的高度要把路径栏那一档让出来：底栏高 = 行高 + 1px 分隔线，
@@ -641,16 +642,32 @@ namespace Helios
 				ImGui::GetContentRegionAvail().y - FooterBandHeight(), ImGui::GetFrameHeight());
 
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, pane_padding.y));
-			ImGui::BeginChild("##BrowserContentPane", ImVec2(0.0f, content_height), false,
+
+			/* 内容栏同样再吃一档（右栏的内边距）：右内沿贴死面板右缘 —— 网格贴着它铺满、
+			 * 滚动条也贴着它画。路径栏不跟着吃：底栏的文字 / 滑动条还要那圈内边距。 */
+			const ImVec2 content_pos = ImGui::GetCursorScreenPos();
+			const ImVec2 content_size(ImGui::GetContentRegionAvail().x + pane_padding.x, content_height);
+
+			/* 光顶到边还不够：ImGui 的绘制裁剪会向内缩"半格内边距"，滚动条最右几像素会被悄悄裁掉。
+			 * 用内容栏自己的矩形顶掉当前裁剪（intersect = false，跟 EndCard 同一手法）；内容仍然画在
+			 * 窗口 InnerClipRect 里，不会压到滚动条。 */
+			ImGui::PushClipRect(content_pos,
+				ImVec2(content_pos.x + content_size.x, content_pos.y + content_size.y), false);
+			ImGui::BeginChild("##BrowserContentPane", content_size, false,
 				ImGuiWindowFlags_AlwaysUseWindowPadding);
 			ShowBrowserContent();
 			ImGui::EndChild();
+			ImGui::PopClipRect();
 			ImGui::PopStyleVar();
 
 			ShowBrowserFooter();
 		}
 		ImGui::EndChild();
 		ImGui::PopStyleVar();
+
+		/* 右栏 / 内容栏是故意越过右沿、顶到面板右缘的 —— 但子窗口矩形会被算进面板的内容范围，
+		 * 面板就多出 12px 的横滑区。这里把横向内容范围钳回内容区右内沿（纵向不动）。 */
+		window->DC.CursorMaxPos.x = ImMin(window->DC.CursorMaxPos.x, body_start.x + body.x);
 	}
 
 	void EditorResourceBrowser::DrawFolderNode(const SharedPtr<FileNode>& node)
