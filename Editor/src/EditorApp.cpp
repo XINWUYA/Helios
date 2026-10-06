@@ -6,7 +6,7 @@
 
 namespace Helios
 {
-	EditorApp::EditorApp() : Application("Editor")
+	EditorApp::EditorApp() : Application("Editor", 1920, 1080, true)
 	{
 		PushLayer(CreateSharedPtr<MainEditorLayer>()); /* 要先添加 */
 		PushLayer(CreateSharedPtr<SceneEditorLayer>());

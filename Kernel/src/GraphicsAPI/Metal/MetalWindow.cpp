@@ -256,6 +256,7 @@ namespace Helios
         /* 配置GLFW不创建OpenGL上下文 */
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        glfwWindowHint(GLFW_MAXIMIZED, desc.IsMaximized ? GLFW_TRUE : GLFW_FALSE);
 
         /* 以主监视器缩放比将目标像素换算为 GLFW 逻辑点：点尺寸 = round(像素 / scale)，
          * 使帧缓冲得到请求的像素尺寸。 */
@@ -295,7 +296,7 @@ namespace Helios
             m_WindowInfo.Descriptor.Width = static_cast<uint32_t>(framebuffer_width);
             m_WindowInfo.Descriptor.Height = static_cast<uint32_t>(framebuffer_height);
         }
-        if (m_WindowInfo.Descriptor.Width != desc.Width || m_WindowInfo.Descriptor.Height != desc.Height)
+        if (!desc.IsMaximized && (m_WindowInfo.Descriptor.Width != desc.Width || m_WindowInfo.Descriptor.Height != desc.Height))
         {
             /* 窗口服务器可能将窗口约束到屏幕可视区，请求分辨率无法满足时告警 */
             CORE_LOG_WARN("Requested resolution {}x{} pixels was clamped to {}x{} pixels "

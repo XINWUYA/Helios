@@ -9,7 +9,8 @@ namespace Helios
 	class Application 
 	{
 	public:
-		Application(const std::string& window_title = "Unnamed App", uint32_t width = 1920, uint32_t height = 1080);
+		Application(const std::string& window_title = "Unnamed App", uint32_t width = 1920, uint32_t height = 1080,
+			bool start_maximized = false);
 		virtual ~Application();
 
 		static Application* Instance();

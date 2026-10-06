@@ -10,7 +10,7 @@ namespace Helios
 {
 	Application* Application::s_pInstance = nullptr;
 
-	Application::Application(const std::string& window_title, uint32_t width, uint32_t height)
+	Application::Application(const std::string& window_title, uint32_t width, uint32_t height, bool start_maximized)
 	{
 		PROFILE_FUNCTION();
 
@@ -18,7 +18,7 @@ namespace Helios
 		s_pInstance = this;
 		m_Name = window_title;
 
-		m_pWindow = DeviceWindow::Create({ window_title, width, height });
+		m_pWindow = DeviceWindow::Create({ window_title, width, height, false, start_maximized });
 		m_pWindow->SetEventCallback(BIND_EVENT_FUNC(Application::OnEvent));
 		Renderer::Init();
 		m_pWindow->InitGraphicsContext();

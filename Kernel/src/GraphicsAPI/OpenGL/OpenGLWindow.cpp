@@ -91,6 +91,7 @@ namespace Helios
 			const int window_width = static_cast<int>(desc.Width / monitor_scale_x + 0.5f);
 			const int window_height = static_cast<int>(desc.Height / monitor_scale_y + 0.5f);
 
+			glfwWindowHint(GLFW_MAXIMIZED, desc.IsMaximized ? GLFW_TRUE : GLFW_FALSE);
 			m_pGLFWWindow = glfwCreateWindow(
 				window_width < 1 ? 1 : window_width,
 				window_height < 1 ? 1 : window_height,
@@ -116,7 +117,7 @@ namespace Helios
 			m_WindowInfo.Descriptor.Width = static_cast<uint32_t>(framebuffer_width);
 			m_WindowInfo.Descriptor.Height = static_cast<uint32_t>(framebuffer_height);
 		}
-		if (m_WindowInfo.Descriptor.Width != desc.Width || m_WindowInfo.Descriptor.Height != desc.Height)
+		if (!desc.IsMaximized && (m_WindowInfo.Descriptor.Width != desc.Width || m_WindowInfo.Descriptor.Height != desc.Height))
 		{
 			CORE_LOG_WARN("Requested resolution {0}x{1} pixels was clamped to {2}x{3} pixels "
 				"(screen working area is smaller).", desc.Width, desc.Height,

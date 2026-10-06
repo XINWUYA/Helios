@@ -11,9 +11,11 @@ namespace Helios
 		uint32_t Width;		/* 窗口宽度（物理像素，即目标渲染分辨率） */
 		uint32_t Height;	/* 窗口高度（物理像素） */
 		bool IsVSync;		/* 垂直同步 */
+		bool IsMaximized;	/* 创建时是否最大化 */
 
-		WindowDesc(std::string title = "Wuya", uint32_t width = 1920, uint32_t height = 1080, bool is_vsync = false)
-			: Title(std::move(title)), Width(width), Height(height), IsVSync(is_vsync)
+		WindowDesc(std::string title = "Wuya", uint32_t width = 1920, uint32_t height = 1080,
+			bool is_vsync = false, bool is_maximized = false)
+			: Title(std::move(title)), Width(width), Height(height), IsVSync(is_vsync), IsMaximized(is_maximized)
 		{
 		}
 	};
