@@ -633,6 +633,10 @@ namespace Helios
 			 * get<> 取不到池（entt 的编译期约束） */
 			auto& registry = scene->GetRegistry();
 
+			/* 全局显隐（Scene 视口右上角 Gizmos 菜单控制的单一数据源）：
+			 * 关掉的类型在其循环内全部跳过、不产生任何提交 */
+			const auto& gizmo_options = GetViewportGizmoOptions();
+
 			/* 屏幕恒定尺寸：世界尺寸 = 像素尺度 × 标称像素 × 到相机的距离 */
 			const auto world_scale_at = [&](const glm::vec3& position, float nominal_pixel_size)
 				{
@@ -644,7 +648,7 @@ namespace Helios
 			for (const entt::entity entity : light_view)
 			{
 				const auto& light_component = light_view.get<LightComponent>(entity);
-				if (!light_component.m_Light)
+				if (!gizmo_options.ShowLight || !light_component.m_Light)
 					continue;
 
 				const GizmoTransformParts parts = DecomposeGizmoTransform(scene->GetWorldTransform(entity));
@@ -704,6 +708,9 @@ namespace Helios
 			const auto camera_view = registry.view<TransformComponent, CameraComponent>();
 			for (const entt::entity entity : camera_view)
 			{
+				if (!gizmo_options.ShowCamera)
+					continue;	/* 全局隐藏：相机图标整段不提交 */
+
 				const auto& camera_component = camera_view.get<CameraComponent>(entity);
 				const GizmoTransformParts parts = DecomposeGizmoTransform(scene->GetWorldTransform(entity));
 				const float world_scale = world_scale_at(parts.Translation, kCameraGizmoPixelSize);
@@ -748,6 +755,9 @@ namespace Helios
 			const auto probe_view = registry.view<TransformComponent, ReflectionProbeComponent>();
 			for (const entt::entity entity : probe_view)
 			{
+				if (!gizmo_options.ShowReflectionProbe)
+					continue;	/* 全局隐藏：探针盒整段不提交 */
+
 				const GizmoTransformParts parts = DecomposeGizmoTransform(scene->GetWorldTransform(entity));
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
 					BuildGizmoModel(parts, world_scale_at(parts.Translation, kProbeGizmoPixelSize),
@@ -759,6 +769,9 @@ namespace Helios
 			const auto sprite_view = registry.view<TransformComponent, SpriteComponent>();
 			for (const entt::entity entity : sprite_view)
 			{
+				if (!gizmo_options.ShowSprite)
+					continue;	/* 全局隐藏：精灵框整段不提交 */
+
 				const GizmoTransformParts parts = DecomposeGizmoTransform(scene->GetWorldTransform(entity));
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
 					BuildGizmoModel(parts, world_scale_at(parts.Translation, kSpriteGizmoPixelSize),
@@ -777,6 +790,13 @@ namespace Helios
 		constexpr float kMinFlySpeed = 0.5f;
 		constexpr float kMaxFlySpeed = 100.0f;
 	}
+	/* 视口 gizmo 显隐的单一数据源（声明见头文件）：绘制侧每帧读、UI 侧改写 */
+	ViewportGizmoOptions& GetViewportGizmoOptions()
+	{
+		static ViewportGizmoOptions options;
+		return options;
+	}
+
 	EditorCamera::EditorCamera(float fov, float aspect_ratio, float near_clip, float far_clip)
 		: Camera(CameraProjectionType::Perspective, fov, aspect_ratio, near_clip, far_clip)
 	{
@@ -1222,17 +1242,26 @@ namespace Helios
 
 				render_pass_info->Bind();
 				{
+					/* 视口 gizmo 的全局显隐（右上角 Gizmos 菜单控制的单一数据源） */
+					const auto& gizmo_options = GetViewportGizmoOptions();
+
 		/* 地面网格：patch 跟着相机平移、按格对齐（整数平移 → 线就一直落在世界整数坐标上）；
 		 * 远景淡出按到相机的水平距离在着色器里处理（见 Axis.glsl）。 */
-					const glm::vec3 camera_pos = GetPosition();
-					const glm::vec3 grid_origin(std::round(camera_pos.x), 0.0f, std::round(camera_pos.z));
-					Renderer::FillObjectUniformBuffer(VisibleMeshObject{
-						-1, glm::translate(glm::mat4(1.0f), grid_origin), nullptr, nullptr });
-					Renderer::Submit(grid_material, MeshPrimitive{ GetGridVertexArray(), PrimitiveType::Lines });
+					if (gizmo_options.ShowGrid)
+					{
+						const glm::vec3 camera_pos = GetPosition();
+						const glm::vec3 grid_origin(std::round(camera_pos.x), 0.0f, std::round(camera_pos.z));
+						Renderer::FillObjectUniformBuffer(VisibleMeshObject{
+							-1, glm::translate(glm::mat4(1.0f), grid_origin), nullptr, nullptr });
+						Renderer::Submit(grid_material, MeshPrimitive{ GetGridVertexArray(), PrimitiveType::Lines });
+					}
 
 					/* 坐标轴固定在世界原点（单位变换）；轴带是三角形 */
-					Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, glm::mat4(1.0f), nullptr, nullptr });
-					Renderer::Submit(axis_material, MeshPrimitive{ GetAxisVertexArray(), PrimitiveType::Triangles });
+					if (gizmo_options.ShowWorldAxis)
+					{
+						Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, glm::mat4(1.0f), nullptr, nullptr });
+						Renderer::Submit(axis_material, MeshPrimitive{ GetAxisVertexArray(), PrimitiveType::Triangles });
+					}
 
 					/* 各类型实体的类型 gizmo（光源 / 相机 / 反射探针 / 精灵） */
 					DrawEntityGizmos(render_view, entity_gizmo_material, GetPosition(), gizmo_screen_scale);

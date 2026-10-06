@@ -8,10 +8,19 @@
 #include "PanelRegistry.h"
 #include "Command/TransformCommand.h"
 #include "Helios/Application/Application.h"
+#include "Helios/ImGui/EditorTheme.h"
 #include "ImGuizmo.h"
 
 namespace Helios
 {
+	namespace
+	{
+		/* 视口右上角控件区的共享定位：视图指示器与 Gizmos 菜单按钮排布同一行 */
+		constexpr float kViewportToolBoxSize = 92.0f;	/* 指示器方框边长（逻辑像素） */
+		constexpr float kViewportToolMargin = 6.0f;		/* 距视口上 / 右边缘 */
+		constexpr float kViewportToolGap = 6.0f;		/* 按钮与指示器的间距 */
+	}
+
 	SceneEditorLayer::SceneEditorLayer()
 		: ILayer("SceneEditorLayer")
 	{
@@ -395,7 +404,9 @@ namespace Helios
 				ImGui::EndDragDropTarget();
 			}
 
-			/* 右上角视图指示器（点击 / 拖拽切换与旋转视角） */
+			/* 右上角控件区：Gizmos 显隐菜单（指示器左侧）+ 视图指示器
+			 * （点击 / 拖拽切换与旋转视角） */
+			ShowGizmoOptionsUI();
 			ShowViewGizmoUI();
 
 			/* Gizmos */
@@ -597,27 +608,25 @@ namespace Helios
 		if (m_PlayMode != PlayMode::Edit)
 			return;
 
-		constexpr float kBoxSize = 92.0f;		/* 指示器方框边长（逻辑像素） */
-		constexpr float kBoxMargin = 6.0f;		/* 距视口上 / 右边缘 */
 		constexpr float kClickSlop = 4.0f;		/* 累计位移超过它即算拖拽（转视角），否则算点击（切视角） */
 		constexpr float kQuarterTurn = glm::radians(90.0f);
 
-		if (m_ViewportRegion.Width < static_cast<uint32_t>(kBoxSize + 2.0f * kBoxMargin) ||
-			m_ViewportRegion.Height < static_cast<uint32_t>(kBoxSize + 2.0f * kBoxMargin))
+		if (m_ViewportRegion.Width < static_cast<uint32_t>(kViewportToolBoxSize + 2.0f * kViewportToolMargin) ||
+			m_ViewportRegion.Height < static_cast<uint32_t>(kViewportToolBoxSize + 2.0f * kViewportToolMargin))
 			return;
 
 		const ImVec2 box_min(
-			static_cast<float>(m_ViewportRegion.MinX) + static_cast<float>(m_ViewportRegion.Width) - kBoxMargin - kBoxSize,
-			static_cast<float>(m_ViewportRegion.MinY) + kBoxMargin);
-		const ImVec2 center(box_min.x + kBoxSize * 0.5f, box_min.y + kBoxSize * 0.5f);
-		const float orbit_radius = kBoxSize * 0.5f - ViewGizmo::kDiscRadius - 4.0f;
+			static_cast<float>(m_ViewportRegion.MinX) + static_cast<float>(m_ViewportRegion.Width) - kViewportToolMargin - kViewportToolBoxSize,
+			static_cast<float>(m_ViewportRegion.MinY) + kViewportToolMargin);
+		const ImVec2 center(box_min.x + kViewportToolBoxSize * 0.5f, box_min.y + kViewportToolBoxSize * 0.5f);
+		const float orbit_radius = kViewportToolBoxSize * 0.5f - ViewGizmo::kDiscRadius - 4.0f;
 
 		/* 六个轴盘：世界轴方向经视线旋转投影 + 深度排序（近者在后 = 后画、优先命中） */
 		ViewGizmo::Disc discs[ViewGizmo::kDiscCount];
 		ViewGizmo::ComputeDiscs(glm::mat3(m_pEditorCamera->GetViewMatrix()), center, orbit_radius, discs);
 
 		ImGui::SetCursorScreenPos(box_min);
-		ImGui::InvisibleButton("##ViewGizmo", ImVec2(kBoxSize, kBoxSize));
+		ImGui::InvisibleButton("##ViewGizmo", ImVec2(kViewportToolBoxSize, kViewportToolBoxSize));
 
 		/* 命中：指针落在轴盘圆内，从近到远取第一个（近者优先） */
 		const int32_t hovered_disc = ImGui::IsItemHovered()
@@ -665,6 +674,76 @@ namespace Helios
 
 		if (hovered_disc >= 0)
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+	}
+
+	/* 右上角的 Gizmos 显隐菜单：按钮 + 分项勾选弹层（场景辅助 / 实体图标）。
+	 * 状态存于全局 ViewportGizmoOptions —— 绘制侧（EditorBuiltinCamera）读同一份，
+	 * 这里只管改写。布局 = 视图指示器左侧、同一水平线顶对齐（共享定位常量）。 */
+	void SceneEditorLayer::ShowGizmoOptionsUI()
+	{
+		PROFILE_FUNCTION();
+
+		/* 与视图指示器同策略：运行模式下停用 */
+		if (m_PlayMode != PlayMode::Edit)
+			return;
+
+		constexpr float kButtonHeight = 24.0f;
+		constexpr float kButtonPaddingX = 10.0f;
+		constexpr float kPopupGap = 4.0f;		/* 弹层与按钮的间距 */
+
+		const char* const kButtonLabel = "Gizmos";
+		const ImVec2 label_size = ImGui::CalcTextSize(kButtonLabel);
+		const float button_width = label_size.x + kButtonPaddingX * 2.0f;
+
+		if (m_ViewportRegion.Width < static_cast<uint32_t>(
+				kViewportToolBoxSize + kViewportToolGap + button_width + 2.0f * kViewportToolMargin))
+			return;
+
+		/* 位置 = 右上角起、让开视图指示器（同一水平线顶对齐） */
+		const float button_right = static_cast<float>(m_ViewportRegion.MinX)
+			+ static_cast<float>(m_ViewportRegion.Width)
+			- kViewportToolMargin - kViewportToolBoxSize - kViewportToolGap;
+		const ImVec2 button_min(button_right - button_width,
+			static_cast<float>(m_ViewportRegion.MinY) + kViewportToolMargin);
+		const ImVec2 button_max(button_min.x + button_width, button_min.y + kButtonHeight);
+
+		/* 自绘按钮：底 = 输入框同色（FrameBg），悬停 / 弹层开着时提亮一档 ——
+		 * 与控件悬停的语言一致；文字水平以内边距对齐、垂直居中 */
+		ImGui::SetCursorScreenPos(button_min);
+		ImGui::InvisibleButton("##GizmoOptionsButton", ImVec2(button_width, kButtonHeight));
+		const bool hovered = ImGui::IsItemHovered();
+		const bool is_open = ImGui::IsPopupOpen("##GizmoMenu");
+
+		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+		draw_list->AddRectFilled(button_min, button_max,
+			ImGui::GetColorU32((hovered || is_open) ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg),
+			ImGui::GetStyle().FrameRounding);
+		draw_list->AddText(
+			ImVec2(button_min.x + kButtonPaddingX, button_min.y + (kButtonHeight - label_size.y) * 0.5f),
+			ImGui::GetColorU32(EditorTheme::Token::TextLabel), kButtonLabel);
+
+		/* 按下打开（菜单按钮惯例）；弹层已开时按下交给 ImGui 的点击外部关闭，
+		 * 不再重复 OpenPopup（否则会闪一帧重开） */
+		if (ImGui::IsItemClicked() && !is_open)
+			ImGui::OpenPopup("##GizmoMenu");
+		if (hovered)
+			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+
+		/* 弹层：分项勾选（MenuItem 自带勾选态）。BeginPopup 会自动加 NoTitleBar，
+		 * 无需手推 flags（BeginPopupEx 才需要手动加） */
+		ImGui::SetNextWindowPos(ImVec2(button_min.x, button_max.y + kPopupGap), ImGuiCond_Appearing);
+		if (ImGui::BeginPopup("##GizmoMenu"))
+		{
+			auto& options = GetViewportGizmoOptions();
+			ImGui::MenuItem("Grid", nullptr, &options.ShowGrid);
+			ImGui::MenuItem("World Axis", nullptr, &options.ShowWorldAxis);
+			ImGui::Separator();
+			ImGui::MenuItem("Lights", nullptr, &options.ShowLight);
+			ImGui::MenuItem("Cameras", nullptr, &options.ShowCamera);
+			ImGui::MenuItem("Reflection Probes", nullptr, &options.ShowReflectionProbe);
+			ImGui::MenuItem("Sprites", nullptr, &options.ShowSprite);
+			ImGui::EndPopup();
+		}
 	}
 
 	void SceneEditorLayer::CheckMouseSelectEntity()
