@@ -71,6 +71,8 @@ namespace Helios
 		/* 把 ShadowPass 注入指定的 FrameGraph：阴影纹理句柄会写进 Blackboard（"ShadowMapHandle"）供
 		 * 后续 Pass 使用；render_view 用于执行阶段取当前可见网格（RenderView 是 UniquePtr，所以传原始指针）。 */
 		void AddShadowPass(FrameGraph& frame_graph, const SharedPtr<Scene>& scene, RenderView* render_view);
+		/* 注册供 Probe 捕获及无阴影视图使用的中性深度数组。 */
+		void AddNoShadowMapPass(FrameGraph& frame_graph);
 
 		/* 获取阴影纹理 */
 		[[nodiscard]] SharedPtr<DeviceTexture> GetShadowMapTexture() const { return m_ShadowMapTexture; }

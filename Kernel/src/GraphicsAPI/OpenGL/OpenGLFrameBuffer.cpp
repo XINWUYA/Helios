@@ -72,6 +72,12 @@ namespace Helios
 
 			CHECK_GL_ERROR;
 		}
+		else
+		{
+			/* 深度-only FBO 必须显式禁用颜色读写缓冲，否则会因默认指向 COLOR_ATTACHMENT0 而不完整。 */
+			glDrawBuffer(GL_NONE);
+			glReadBuffer(GL_NONE);
+		}
 
 		/* 3. 创建Depth/Stencil Attachment */
 		bool is_depth_stencil = false; /* Depth和Stencil绑定到同一个RenderBuffer */

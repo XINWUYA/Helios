@@ -391,6 +391,9 @@ namespace Helios
             {
                 Renderer::FillObjectUniformBuffer(mesh_object);
                 auto& material = mesh_object.MeshSegment->GetMaterial();
+                if (material == nullptr || material->GetShader() == nullptr)
+                    continue;
+
                 material->SetParameters(ParamType::Int, "u_UseIBL", 0);
                 Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive());
             }
@@ -617,20 +620,29 @@ namespace Helios
         if (!frame_graph)
             return;
 
-        /* 遍历当前需要烘焙的反射探针 */
-        struct BakeProbePassData {};
+        /* Probe 捕获使用中性阴影图，不复用主相机的级联阴影。 */
+        const auto no_shadow_map_handle = frame_graph->GetBlackboard()
+            .GetResourceHandle<FrameGraphTexture>("NoShadowMapHandle");
+
+        struct BakeProbePassData
+        {
+            FrameGraphResourceHandleTyped<FrameGraphTexture> NoShadowMap;
+        };
         for (const auto& probe : m_NeedBakeProbes)
         {
             if (!probe)
                 continue;
 
             frame_graph->AddPass<BakeProbePassData>("BakeReflectionProbePass",
-                [&](FrameGraphBuilder& builder, BakeProbePassData&)
+                [no_shadow_map_handle](FrameGraphBuilder& builder, BakeProbePassData& data)
                 {
+                    data.NoShadowMap = no_shadow_map_handle;
+                    builder.BindInputResource(data.NoShadowMap, FrameGraphTexture::Usage::Sampleable);
                     builder.AsSideEffect(true);
                 },
-                [probe, render_view](const FrameGraphResources& resources, const BakeProbePassData&)
+                [probe, render_view](const FrameGraphResources& resources, const BakeProbePassData& data)
                 {
+                    ScopedShadowMapBinding shadow_map(resources.Get(data.NoShadowMap).Texture);
                     probe->Bake(render_view);
                 });
         }

@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <utility>
 #include "RenderAPI.h"
 #include "RenderQuery.h"
 
@@ -6,7 +7,9 @@ namespace Helios
 {
 	class RenderView;
 	class Material;
+	class DeviceTexture;
 	class DeviceUniformBuffer;
+	class ScopedShadowMapBinding;
 	struct VisibleMeshObject;
 	class Light;
 	struct MeshPrimitive;
@@ -47,7 +50,31 @@ namespace Helios
 		static void FillLightUniformBuffer(const SharedPtr<Light>& light);
 
 	private:
+		static SharedPtr<DeviceTexture> ExchangeCurrentShadowMap(SharedPtr<DeviceTexture> shadow_map);
+		friend class ScopedShadowMapBinding;
 		static SharedPtr<RenderAPI> m_pRenderAPI;
 		static ResultGPUTimerNode m_GPUTimerRoot;
+		static SharedPtr<DeviceTexture> m_pCurrentShadowMap;
+	};
+
+	/* 设置当前 Pass 的阴影纹理，并在作用域结束时恢复前值。 */
+	class ScopedShadowMapBinding final
+	{
+	public:
+		explicit ScopedShadowMapBinding(SharedPtr<DeviceTexture> shadow_map)
+			: m_Previous(Renderer::ExchangeCurrentShadowMap(std::move(shadow_map)))
+		{
+		}
+
+		~ScopedShadowMapBinding()
+		{
+			Renderer::ExchangeCurrentShadowMap(std::move(m_Previous));
+		}
+
+		ScopedShadowMapBinding(const ScopedShadowMapBinding&) = delete;
+		ScopedShadowMapBinding& operator=(const ScopedShadowMapBinding&) = delete;
+
+	private:
+		SharedPtr<DeviceTexture> m_Previous;
 	};
 }

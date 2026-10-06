@@ -157,13 +157,11 @@ namespace Helios
 				m_ValidLights.emplace_back(light_component.m_Light);
 
 				if (light_component.m_Light->IsCastShadow())
-				{
 					m_pShadowMapManager->RegisterShadowLight(light_component.m_Light);
-					m_IsHasShadowCast = true;
-				}
 			}
 		}
 
+		m_IsHasShadowCast = !m_pShadowMapManager->GetCascadeShadowMaps().empty();
 		if (m_IsHasShadowCast)
 			m_pShadowMapManager->PrepareForShadowMaps(owner_scene, GetCullingCamera());
 	}
@@ -187,9 +185,18 @@ namespace Helios
 		const bool organized_by_camera = (m_pOwnerCamera != nullptr) && m_pOwnerCamera->ConstructRenderView(*this);
 		if (!organized_by_camera)
 		{
-			/* 根据是否有光源开启ShadowCast来注入ShadowPass */
+			/* Probe 捕获使用无阴影图；ScenePass 有级联阴影时使用当前视图的阴影图。 */
+			m_pShadowMapManager->AddNoShadowMapPass(*m_pFrameGraph);
 			if (m_IsHasShadowCast)
+			{
 				m_pShadowMapManager->AddShadowPass(*m_pFrameGraph, scene, this);
+			}
+			else
+			{
+				const auto fallback_handle = m_pFrameGraph->GetBlackboard()
+					.GetResourceHandle<FrameGraphTexture>("NoShadowMapHandle");
+				m_pFrameGraph->GetBlackboard()["ShadowMapHandle"] = fallback_handle;
+			}
 
 			/* 烘焙ReflectionProbe */
 			auto probe_manager = scene->GetReflectionProbeManager();
@@ -200,7 +207,7 @@ namespace Helios
 			}
 
 			/* ScenePass */
-			Forward::AddScenePass(this, m_IsHasShadowCast);
+			Forward::AddScenePass(this);
 		}
 
 		/* 生成当前FrameGraph */

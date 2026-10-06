@@ -72,6 +72,7 @@ namespace Helios
 
 	SharedPtr<RenderAPI> Renderer::m_pRenderAPI = nullptr;
 	ResultGPUTimerNode Renderer::m_GPUTimerRoot{};
+	SharedPtr<DeviceTexture> Renderer::m_pCurrentShadowMap{};
 
 	void Renderer::Init()
 	{
@@ -149,6 +150,13 @@ namespace Helios
 		s_RenderData.pViewUniformBuffer->SetData(&s_RenderData.ViewUniformData, sizeof(ViewUniformData));
 	}
 
+	SharedPtr<DeviceTexture> Renderer::ExchangeCurrentShadowMap(SharedPtr<DeviceTexture> shadow_map)
+	{
+		auto previous = std::move(m_pCurrentShadowMap);
+		m_pCurrentShadowMap = std::move(shadow_map);
+		return previous;
+	}
+
 	void Renderer::Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive, uint32_t index_count)
 	{
 		PROFILE_FUNCTION();
@@ -162,6 +170,15 @@ namespace Helios
 	s_RenderData.pLightUniformBuffer->Bind();
 
 	material->Bind();
+
+	/* 按 Shader 声明绑定当前 Pass 的阴影纹理。 */
+	if (m_pCurrentShadowMap != nullptr)
+	{
+		const int shadow_binding = material->GetShader()->GetUniformBinding("u_ShadowMap");
+		if (shadow_binding >= 0)
+			m_pCurrentShadowMap->Bind(static_cast<uint32_t>(shadow_binding));
+	}
+
 	mesh_primitive.VertexArray->Bind();
 
 

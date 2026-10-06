@@ -5,9 +5,34 @@
 #include "Helios/Application/Application.h"
 #include "Helios/Common/Math.h"
 #include "Helios/ImGui/ImGuiLayer.h"
+#include "Helios/Scene/Material.h"
 
 namespace Helios
 {
+	namespace
+	{
+		SharedPtr<Material> CreateGBufferMaterial(
+			const SharedPtr<Material>& source, const SharedPtr<DeviceShader>& gbuffer_shader)
+		{
+			auto material = Material::Create(gbuffer_shader);
+			for (const auto& [_, parameter] : source->GetAllParameters())
+			{
+				if (parameter.Type == ParamType::Texture)
+				{
+					if (gbuffer_shader->GetUniformBinding(parameter.Name) < 0)
+						continue;
+					const auto texture = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(parameter.Value);
+					material->SetTexture(parameter.Name, texture.first);
+				}
+				else
+				{
+					material->SetParameters(parameter.Type, parameter.Name, parameter.Value);
+				}
+			}
+			material->SetRasterState(source->GetRasterState());
+			return material;
+		}
+	}
 	EditorCamera::EditorCamera(float fov, float aspect_ratio, float near_clip, float far_clip)
 		: Camera(CameraProjectionType::Perspective, fov, aspect_ratio, near_clip, far_clip)
 	{
@@ -131,6 +156,10 @@ namespace Helios
 		object_id_desc.Height = m_ViewportRegion.Height;
 		object_id_desc.TextureFormat = TextureFormat::R32I;
 
+		/* GBuffer Pass 使用 default.glsl；普通材质在提交前转换为该 shader 对应的临时材质。 */
+		const auto gbuffer_shader = ShaderAssetManager::Instance().GetOrLoad(
+			ABSOLUTE_PATH("Shaders/default.glsl"));
+
 		/* GBuffer Pass */
 		struct GBufferPassData
 		{
@@ -145,7 +174,7 @@ namespace Helios
 		};
 
 		auto gbuffer_pass = frame_graph->AddPass<GBufferPassData>("GBufferPass",
-			[&](FrameGraphBuilder& builder, GBufferPassData& data)
+			[&, gbuffer_shader](FrameGraphBuilder& builder, GBufferPassData& data)
 			{
 				data.GBufferTexture0 = builder.CreateTexture("GBufferTexture0", color_target_desc);
 				data.GBufferTexture1 = builder.CreateTexture("GBufferTexture1", color_target_desc);
@@ -179,8 +208,9 @@ namespace Helios
 				pass_desc.ViewportRegion = m_ViewportRegion;
 				builder.CreateRenderPass("GBufferPassRenderTarget", pass_desc);
 			},
-			[&](const FrameGraphResources& resources, const GBufferPassData& data)
+			[&, gbuffer_shader](const FrameGraphResources& resources, const GBufferPassData& data)
 			{
+				std::unordered_map<const Material*, SharedPtr<Material>> gbuffer_materials;
 				const auto render_pass_info = resources.GetPassRenderTarget();
 				render_view.EmplacePassFrameBuffer("GBufferPass", render_pass_info);
 
@@ -193,10 +223,19 @@ namespace Helios
 						/* Fill object uniform buffer */
 						Renderer::FillObjectUniformBuffer(mesh_object);
 
-						auto& material = mesh_object.MeshSegment->GetMaterial();
-						//material->SetParameters("u_Local2WorldMat", mesh_object.Local2WorldMat);
-						//material->SetParameters("u_ViewProjectionMat", GetViewProjectionMatrix());
-						Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive());
+						const auto& material = mesh_object.MeshSegment->GetMaterial();
+						if (material == nullptr)
+							continue;
+
+						auto gbuffer_material = material;
+						if (material->GetShader() != gbuffer_shader)
+						{
+							auto [cached, inserted] = gbuffer_materials.try_emplace(material.get());
+							if (inserted)
+								cached->second = CreateGBufferMaterial(material, gbuffer_shader);
+							gbuffer_material = cached->second;
+						}
+						Renderer::Submit(gbuffer_material, mesh_object.MeshSegment->GetMeshPrimitive());
 					}
 				}
 				render_pass_info->Unbind();

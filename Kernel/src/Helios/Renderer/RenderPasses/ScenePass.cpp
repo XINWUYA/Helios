@@ -17,7 +17,7 @@ namespace Helios
 			FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle; /* 阴影贴图 */
 		};
 
-		void AddScenePass(RenderView* render_view, bool shadow_pass_enabled)
+		void AddScenePass(RenderView* render_view)
 		{
 			if (!render_view) return;
 
@@ -28,18 +28,16 @@ namespace Helios
             if (!scene) return;
 
 			frame_graph->AddPass<ScenePassData>("ScenePass",
-				[&, shadow_pass_enabled](FrameGraphBuilder& builder, ScenePassData& data)
+				[&](FrameGraphBuilder& builder, ScenePassData& data)
 				{
-					if (shadow_pass_enabled)
-					{
-						data.ShadowMapHandle = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ShadowMapHandle");
-						builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
-					}
+					data.ShadowMapHandle = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ShadowMapHandle");
+					builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
 					builder.AsSideEffect();
 				},
-				[&, render_view, shadow_pass_enabled, scene](const FrameGraphResources& resources, const ScenePassData& data)
+				[&, render_view, scene](const FrameGraphResources& resources, const ScenePassData& data)
 				{
 					auto render_api = Renderer::GetRenderAPI();
+					ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
 					{
 						render_api->Clear();
 						auto& viewport_region = render_view->GetViewportRegion();
@@ -51,11 +49,8 @@ namespace Helios
 						{
 							Renderer::FillObjectUniformBuffer(mesh_object);
 							auto& material = mesh_object.MeshSegment->GetMaterial();
-							if (shadow_pass_enabled)
-							{
-								/* 指定阴影图 */
-								material->SetParameters(ParamType::Texture, "u_ShadowMap", resources.Get(data.ShadowMapHandle).Texture);
-							}
+							if (material == nullptr)
+								continue;
 							if (probe_manager && probe_manager->HasProbe())
 							{
 								/* 选择最近且已烘焙的探针 */

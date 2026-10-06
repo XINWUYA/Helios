@@ -19,6 +19,11 @@
 
 namespace Helios
 {
+	namespace
+	{
+		constexpr uint32_t kFallbackCascadeCount = 4;
+	}
+
 	ShadowMap::ShadowMap(const SharedPtr<Light>& light, uint16_t shadow_idx, uint8_t face_idx)
 		: m_pLight(light), m_ShadowIndex(shadow_idx), m_FaceIndex(face_idx)
 	{
@@ -389,6 +394,52 @@ namespace Helios
 		 * 同一 id 后再 glTexStorage3D 会报 "Texture is immutable"。深度格式用 Depth32F（跟 Reversed-Z
 		 * 搭配无定点量化损失，OpenGL 3.0+ 也保证它能作深度附件渲染）。 */
 		m_RequiredTextureDesc = { max_dimension, total_layer_num, 1, TextureFormat::Depth32F };
+	}
+
+	/* 创建全零深度数组，供不使用当前视图阴影的 Pass 采样。 */
+	void ShadowMapManager::AddNoShadowMapPass(FrameGraph& frame_graph)
+	{
+		struct NoShadowPassData
+		{
+			FrameGraphResourceHandleTyped<FrameGraphTexture> Texture;
+		};
+
+		auto pass = frame_graph.AddPass<NoShadowPassData>("NoShadowMapPass",
+			[](FrameGraphBuilder& builder, NoShadowPassData& data)
+			{
+				FrameGraphTexture::Descriptor texture_desc;
+				texture_desc.Width = 1;
+				texture_desc.Height = 1;
+				texture_desc.Depth = kFallbackCascadeCount;
+				texture_desc.Samples = 1;
+				texture_desc.TextureFormat = TextureFormat::Depth32F;
+				texture_desc.SamplerType = SamplerType::Sampler2DArray;
+				data.Texture = builder.CreateTexture("NoShadowMap", texture_desc);
+				builder.BindOutputResource(data.Texture,
+					FrameGraphTexture::Usage::DepthAttachment | FrameGraphTexture::Usage::Sampleable);
+
+				FrameGraphPassInfo::Descriptor pass_desc;
+				pass_desc.Attachments.DepthAttachment() = data.Texture;
+				pass_desc.ViewportRegion = { 0, 0, 1, 1 };
+				builder.CreateRenderPass("NoShadowMapRenderTarget", pass_desc);
+			},
+			[](const FrameGraphResources& resources, const NoShadowPassData& data)
+			{
+				const auto framebuffer = resources.GetPassRenderTarget();
+				RenderRasterState clear_state;
+				clear_state.EnableDepthWrite = true;
+				Renderer::GetRenderAPI()->ApplyRasterState(clear_state);
+				for (uint16_t layer = 0; layer < kFallbackCascadeCount; ++layer)
+				{
+					framebuffer->Bind(FrameBufferBindInfo::ToDepthLayer(layer));
+					Renderer::SetViewport(0, 0, 1, 1);
+					Renderer::GetRenderAPI()->SetScissor(0, 0, 1, 1);
+					Renderer::Clear();
+					framebuffer->Unbind();
+				}
+			});
+
+		frame_graph.GetBlackboard()["NoShadowMapHandle"] = pass->GetData().Texture;
 	}
 
 	/* 将ShadowPass注入到FrameGraph */
