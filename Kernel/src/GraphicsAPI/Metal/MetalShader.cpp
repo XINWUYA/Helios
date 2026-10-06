@@ -221,6 +221,35 @@ namespace Helios
                     out_values.emplace(name, std::move(bytes));
             }
         }
+
+        [[nodiscard]] bool IsIntegerColorFormat(MTL::PixelFormat format)
+        {
+            switch (format)
+            {
+            case MTL::PixelFormatR8Sint:
+            case MTL::PixelFormatR8Uint:
+            case MTL::PixelFormatR16Sint:
+            case MTL::PixelFormatR16Uint:
+            case MTL::PixelFormatR32Sint:
+            case MTL::PixelFormatR32Uint:
+            case MTL::PixelFormatRG8Sint:
+            case MTL::PixelFormatRG8Uint:
+            case MTL::PixelFormatRG16Sint:
+            case MTL::PixelFormatRG16Uint:
+            case MTL::PixelFormatRG32Sint:
+            case MTL::PixelFormatRG32Uint:
+            case MTL::PixelFormatRGBA8Sint:
+            case MTL::PixelFormatRGBA8Uint:
+            case MTL::PixelFormatRGB10A2Uint:
+            case MTL::PixelFormatRGBA16Sint:
+            case MTL::PixelFormatRGBA16Uint:
+            case MTL::PixelFormatRGBA32Sint:
+            case MTL::PixelFormatRGBA32Uint:
+                return true;
+            default:
+                return false;
+            }
+        }
     }
 
     uint64_t MetalPipelineDesc::Hash() const
@@ -737,9 +766,13 @@ namespace Helios
             attachment->setWriteMask(desc.RasterState.EnableColorWrite
                 ? MTL::ColorWriteMaskAll : MTL::ColorWriteMaskNone);
 
-            if (desc.RasterState.EnableBlend)
+            /* Metal 不支持整型颜色附件混合（如 GBuffer 的 R32Sint ObjectId），
+             * 即使材质开启全局混合，也必须按附件格式单独关闭。 */
+            const bool enable_blend = desc.RasterState.EnableBlend
+                && !IsIntegerColorFormat(desc.ColorFormats[i]);
+            attachment->setBlendingEnabled(enable_blend);
+            if (enable_blend)
             {
-                attachment->setBlendingEnabled(true);
                 attachment->setRgbBlendOperation(
                     ToMetalBlendOperation(desc.RasterState.BlendEquationRGB));
                 attachment->setAlphaBlendOperation(
@@ -752,10 +785,6 @@ namespace Helios
                     ToMetalBlendFactor(desc.RasterState.BlendFuncDstRGB));
                 attachment->setDestinationAlphaBlendFactor(
                     ToMetalBlendFactor(desc.RasterState.BlendFuncDstA));
-            }
-            else
-            {
-                attachment->setBlendingEnabled(false);
             }
         }
 

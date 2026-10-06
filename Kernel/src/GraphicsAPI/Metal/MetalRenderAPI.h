@@ -97,8 +97,8 @@ namespace Helios
          * RenderPass 或着色器后都需要重新应用。 */
         void ApplyEncoderRasterState();
 
-        /* 在绘制前解析并设置管线状态、深度状态与材质参数 */
-        void ApplyPipelineState(uint64_t vertex_layout_hash);
+        /* 在绘制前解析并设置管线状态、深度状态与材质参数；失败时调用方必须跳过 draw */
+        bool ApplyPipelineState(uint64_t vertex_layout_hash);
 
         /* 把当前清除色写入默认渲染目标的颜色附件。
          * 必须在 Pass 开始时而非 PrepareNextDrawable 时调用：SetClearColor 通常

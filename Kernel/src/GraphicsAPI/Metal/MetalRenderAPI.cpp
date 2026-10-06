@@ -349,18 +349,26 @@ namespace Helios
         return desc;
     }
 
-    void MetalRenderAPI::ApplyPipelineState(uint64_t vertex_layout_hash)
+    bool MetalRenderAPI::ApplyPipelineState(uint64_t vertex_layout_hash)
     {
         if (!m_CurrentRenderEncoder || !m_BoundShader)
-            return;
+            return false;
 
         const MetalPipelineDesc desc = BuildPipelineDesc(vertex_layout_hash);
         MTL::RenderPipelineState* pipeline = m_BoundShader->GetPipelineState(desc);
         if (!pipeline)
         {
-            CORE_LOG_ERROR("Failed to obtain pipeline state for shader '{}'",
-                m_BoundShader->GetDebugName());
-            return;
+            std::string attachment_formats;
+            for (size_t i = 0; i < desc.ColorFormats.size(); ++i)
+            {
+                if (!attachment_formats.empty())
+                    attachment_formats += ", ";
+                attachment_formats += std::to_string(i) + ":" +
+                    std::to_string(static_cast<uint32_t>(desc.ColorFormats[i]));
+            }
+            CORE_LOG_ERROR("Failed to obtain pipeline state for shader '{}' (color attachments [{}], vertex layout {})",
+                m_BoundShader->GetDebugName(), attachment_formats, vertex_layout_hash);
+            return false;
         }
 
         /* 管线状态本身与编码器状态相互独立：切换管线后仍需保证深度状态、
@@ -375,6 +383,7 @@ namespace Helios
 
         /* 材质参数（含着色器内嵌 uniform）逐次绘制都可能不同，必须每次提交 */
         m_BoundShader->CommitMaterialUniforms(m_CurrentRenderEncoder);
+        return true;
     }
 
     void MetalRenderAPI::DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count, uint32_t index_offset)
@@ -418,8 +427,9 @@ namespace Helios
         /* 绑定顶点缓冲区（占用 MetalBinding::VertexBufferBase 起的槽位） */
         metal_vertex_array->Bind(m_CurrentRenderEncoder);
 
-        /* 顶点布局决定顶点描述符，进而决定管线状态，故在绘制前统一落地 */
-        ApplyPipelineState(metal_vertex_array->GetVertexDescriptorHash());
+        /* 顶点布局决定顶点描述符，进而决定管线状态；无有效管线时不能提交 DrawCall */
+        if (!ApplyPipelineState(metal_vertex_array->GetVertexDescriptorHash()))
+            return;
 
         const uint32_t count = index_count > 0 ? index_count : index_buffer->GetCount();
 
@@ -461,7 +471,8 @@ namespace Helios
         }
 
         metal_vertex_array->Bind(m_CurrentRenderEncoder);
-        ApplyPipelineState(metal_vertex_array->GetVertexDescriptorHash());
+        if (!ApplyPipelineState(metal_vertex_array->GetVertexDescriptorHash()))
+            return;
 
         const uint32_t vertex_count = metal_vertex_array->GetVertexCount();
 
