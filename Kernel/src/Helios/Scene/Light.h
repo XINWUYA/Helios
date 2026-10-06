@@ -45,8 +45,8 @@ namespace Helios
 		void SetIntensity(float intensity) { m_Intensity = intensity; }
 		[[nodiscard]] float GetIntensity() const { return m_Intensity; }
 
-		/* 是否投影 */
-		void SetIsCastShadow(bool enable) { m_IsCastShadow = enable; }
+		/* 是否投影；打开时把阴影配置一并备好（实现见 Light.cpp） */
+		void SetIsCastShadow(bool enable);
 		[[nodiscard]] bool IsCastShadow() const { return m_IsCastShadow; }
 
 		/* 阴影信息 */

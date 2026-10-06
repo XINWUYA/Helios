@@ -1115,10 +1115,10 @@ namespace Helios
 			ImGuiExt::DrawCheckboxUI(field.Name, *reinterpret_cast<bool*>(field_ptr));
 			break;
 		case FieldType::Int:
-			ImGuiExt::DrawDragIntUI(field.Name, *reinterpret_cast<int*>(field_ptr));
+			ImGuiExt::DrawDragIntUI(field.Name, *reinterpret_cast<int*>(field_ptr), field.DragSpeed);
 			break;
 		case FieldType::Float:
-			ImGuiExt::DrawDragFloatUI(field.Name, *reinterpret_cast<float*>(field_ptr));
+			ImGuiExt::DrawDragFloatUI(field.Name, *reinterpret_cast<float*>(field_ptr), field.DragSpeed);
 			break;
 		case FieldType::Vec2:
 			ImGuiExt::DrawDragFloat2UI(field.Name, *reinterpret_cast<glm::vec2*>(field_ptr));

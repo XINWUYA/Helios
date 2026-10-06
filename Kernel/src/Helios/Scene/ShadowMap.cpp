@@ -76,11 +76,8 @@ namespace Helios
 		if (!light || !light->IsCastShadow())
 			return;
 
-		/* 场景里的光源不携带阴影配置（只有 Sample 程序显式 SetShadowMapInfo），
-		 * 首次注册阴影时补一份默认配置，使"勾选投影"即可用时序完整。 */
-		if (!light->GetShadowMapInfo())
-			light->SetShadowMapInfo(CreateSharedPtr<ShadowMapInfo>());
-
+		/* 阴影配置由 SetIsCastShadow(true) 备好（含场景加载与面板勾选两条路径）；
+		 * 仍为空时不注册，避免解引用空配置。 */
 		if (auto& shadow_map_info = light->GetShadowMapInfo())
 		{
 			switch (light->GetLightType())

@@ -238,7 +238,7 @@ namespace Helios
 		FieldType   Type{ FieldType::Float };
 		size_t      Offset{ 0 };             /* 相对组件起始地址的字节偏移（访问器字段不使用） */
 		size_t      ValueSize{ 0 };          /* 值的字节数 */
-		float       DragSpeed{ 0.1f };       /* 数值拖拽步长 */
+		float       DragSpeed{ 1.0f };       /* 数值拖拽速度：每像素单位数（对齐 ImGui 的 v_speed） */
 		float       ResetValue{ 0.0f };      /* 控件的重置值（如 Scale 用 1.0） */
 		/* 语义标记：表达「存储形式 ≠ 编辑形式」的字段。
 		 * 目前使用 "AngleDeg"：内部以弧度存储、Inspector 以角度显示与编辑。 */
@@ -373,7 +373,7 @@ namespace Helios
 
 		template <typename T, typename M>
 		ComponentRegistrar& Field(M T::* member, const char* name, FieldType type,
-		                          float drag_speed = 0.1f, float reset_value = 0.0f,
+		                          float drag_speed = 1.0f, float reset_value = 0.0f,
 		                          const char* semantics = nullptr)
 		{
 			FieldDesc desc;
@@ -390,7 +390,7 @@ namespace Helios
 
 		/* 访问器字段：值不在组件体内，由 MakeAccessor / MakeEnumAccessor 提供的回调读写 */
 		ComponentRegistrar& Field(FieldAccessor accessor, const char* name, FieldType type,
-		                          float drag_speed = 0.1f, float reset_value = 0.0f,
+		                          float drag_speed = 1.0f, float reset_value = 0.0f,
 		                          const char* semantics = nullptr);
 
 		ComponentRegistrar& Accessors(HasFunc has, GetPtrFunc get, RemoveFunc remove, AddFunc add);

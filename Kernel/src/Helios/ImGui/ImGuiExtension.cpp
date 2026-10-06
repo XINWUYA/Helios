@@ -524,27 +524,27 @@ namespace Helios::ImGuiExt
 	}
 
 	/* 绘制一个可拖动的Int UI */
-	void DrawDragIntUI(const char* label, int& value, float label_width)
+	void DrawDragIntUI(const char* label, int& value, float speed, float label_width)
 	{
 		PROFILE_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label, label_width);
 
 		ImGui::SetNextItemWidth(value_width);
-		ImGui::DragInt("##Int", &value);
+		ImGui::DragInt("##Int", &value, speed);
 
 		EndPropertyRow();
 	}
 
 	/* 绘制一个可拖动的Float UI */
-	void DrawDragFloatUI(const std::string& label, float& value, float label_width)
+	void DrawDragFloatUI(const std::string& label, float& value, float speed, float label_width)
 	{
 		PROFILE_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
 		ImGui::SetNextItemWidth(value_width);
-		ImGui::DragFloat("##Float", &value);
+		ImGui::DragFloat("##Float", &value, speed);
 
 		EndPropertyRow();
 	}
