@@ -40,6 +40,11 @@ namespace Helios
 			uint8_t Samples{ 1 };
 			/* 视口区域 */
 			ViewportRegion ViewportRegion{ 0,0,1,1 };
+
+			/* 叠加层 Pass：颜色 / 深度附件不清除，保留前序 Pass 写入的内容。
+			 * 用于在已有画面上继续绘制、且需要与已有深度做遮挡比较的通道
+			 * （如编辑器坐标轴：轴线被场景物体遮挡）。 */
+			bool PreserveContent{ false };
 		};
 
 		/* Pass索引 */

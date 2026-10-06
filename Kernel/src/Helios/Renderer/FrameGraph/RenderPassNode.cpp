@@ -109,6 +109,7 @@ namespace Helios
 			desc.Samples = render_pass_data->Descriptor.Samples;
 			desc.Usage = render_pass_data->RenderBufferUsage;
 			desc.ColorClearValues = render_pass_data->Descriptor.ColorClearValues;
+			desc.PreserveContent = render_pass_data->Descriptor.PreserveContent;
 
 			/* 准备Color Attachments */
 			desc.ColorRenderBuffers.reserve(MAX_COLOR_ATTACHMENT_NUM);

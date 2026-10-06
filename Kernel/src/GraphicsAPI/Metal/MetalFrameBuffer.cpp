@@ -463,11 +463,17 @@ namespace Helios
         if (!m_RenderPassDescriptor)
             return;
 
+        /* 叠加层 Pass：附件以 Load 方式进入，保留前序 Pass 写入的内容
+         * （颜色继续可见、深度继续参与遮挡比较），不再写入清除色。 */
+        const MTL::LoadAction load_action = m_FrameBufferDesc.PreserveContent
+            ? MTL::LoadActionLoad
+            : MTL::LoadActionClear;
+
         for (size_t i = 0; i < m_ColorAttachments.size(); ++i)
         {
             auto* attachment = m_RenderPassDescriptor->colorAttachments()->object(static_cast<NS::UInteger>(i));
             attachment->setTexture(m_ColorAttachments[i]);
-            attachment->setLoadAction(MTL::LoadActionClear);
+            attachment->setLoadAction(load_action);
 
             const glm::vec4 clear_value = i < m_FrameBufferDesc.ColorClearValues.size()
                 && m_FrameBufferDesc.ColorClearValues[i].has_value()
@@ -495,7 +501,7 @@ namespace Helios
         {
             auto* attachment = m_RenderPassDescriptor->depthAttachment();
             attachment->setTexture(m_DepthAttachment);
-            attachment->setLoadAction(MTL::LoadActionClear);
+            attachment->setLoadAction(load_action);
             /* Reversed-Z：远平面深度为 0，清零取 0 */
             attachment->setClearDepth(0.0);
 
@@ -514,7 +520,7 @@ namespace Helios
         {
             auto* attachment = m_RenderPassDescriptor->stencilAttachment();
             attachment->setTexture(m_StencilAttachment);
-            attachment->setLoadAction(MTL::LoadActionClear);
+            attachment->setLoadAction(load_action);
             attachment->setStoreAction(MTL::StoreActionStore);
             attachment->setClearStencil(0);
         }

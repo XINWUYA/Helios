@@ -76,6 +76,9 @@ namespace Helios
 		std::vector<std::optional<glm::vec4>> ColorClearValues;	/* Optional per-color-attachment clear values */
 		RenderBufferInfo DepthRenderBuffer;					/* Depth RenderBuffer */
 		RenderBufferInfo StencilRenderBuffer;				/* Stencil RenderBuffer */
+		/* 叠加层：颜色 / 深度附件以"加载已有内容"的方式进入（不清除），
+		 * 使前序 Pass 的结果继续可见并参与深度比较。 */
+		bool PreserveContent{ false };
 	};
 
 	/* 根据描述创建FrameBuffer */
