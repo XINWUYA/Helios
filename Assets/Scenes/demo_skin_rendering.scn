@@ -3,7 +3,7 @@
     <Entities>
         <Entity ID="1" Name="head">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="0.100000 0.100000 0.100000"/>
-            <Model ModelPath="assets/models/lps_head/head.mesh"/>
+            <Model ModelPath="Models/lps_head/head.mesh"/>
         </Entity>
         <Entity ID="0" Name="Directional Light">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>

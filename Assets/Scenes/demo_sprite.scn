@@ -3,7 +3,7 @@
     <Entities>
         <Entity ID="0" Name="New Sprite">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Sprite TexturePath="assets\textures\game-sky.jpg" BaseColor="1.000000 1.000000 1.000000 1.000000" TilingFactor="1"/>
+            <Sprite TexturePath="Textures/Grass2.png" BaseColor="1.000000 1.000000 1.000000 1.000000" TilingFactor="1"/>
         </Entity>
     </Entities>
 </Scene>
