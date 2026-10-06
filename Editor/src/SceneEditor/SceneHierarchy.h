@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <imgui.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -47,6 +48,21 @@ namespace Helios
 		 * 祖先不能丢 —— 命中的子节点得有地方挂，否则树会散成一堆根节点。 */
 		using FilterSet = std::unordered_set<entt::entity>;
 
+		/* 类型筛选（底栏左端下拉）：与资源浏览器是同一套交互；All = 不按类型筛。
+		 * 实体的"类型"取它在树里那枚图标所属的类（见 EntityCategory）——
+		 * 图标与筛选项永远是同一个问题的同一个答案。 */
+		enum class TypeFilter : uint8_t
+		{
+			All = 0,
+			Camera,
+			Light,
+			Model,
+			Sprite,
+			ReflectionProbe,
+			Other,   /* 没有任何可识别组件的实体（树里用通用实体图标） */
+			COUNT
+		};
+
 		/* 字段控件的绘制回调：拿到字段元数据与可写的存储。
 		 * 偏移字段拿到的是组件内的原位地址，访问器字段拿到的是栈上缓冲
 		 * （回写由 DrawEditableField 负责），两者对回调是透明的。 */
@@ -61,9 +77,25 @@ namespace Helios
 
 		/* 显示场景实体列表UI */
 		void ShowSceneHierarchyUI();
-		/* 层级面板头部：过滤框 + 实体计数（面板标题已在 Tab 上，不再重复场景名） */
-		void ShowHierarchyHeader(int shown_count, int total_count);
-		/* 过滤词命中的实体 + 它们的全部祖先（父链不能断） */
+		/* 顶栏：左端「新建实体」，右端搜索框（贴右端）。
+		 * 版式与资源浏览器的顶栏同一套：控件贴上边、上下各留 1px、放不下时把搜索框压窄。
+		 * （类型筛选不在这一栏：它搬到了底栏左端，见 ShowHierarchyFooter。） */
+		void ShowHierarchyTopBar();
+		/* 底栏：实体计数贴行右端（自绘分隔线 + 垂直居中，跟资源浏览器的统计数同一套）。计数含为
+		 * 挂住命中项留下的祖先 —— 就是屏幕上真能数出来的行数。 */
+		void ShowHierarchyFooter(const ImVec2& theme_padding, int shown_count, int total_count);
+		/* 顶栏「新建」按钮的下拉菜单（画在面板根作用域，条目来自实体预设注册表） */
+		void DrawNewEntityMenu();
+		/* 类型筛选下拉的显示名 */
+		static const char* TypeFilterName(TypeFilter filter);
+		/* 实体归到哪一类：取它在树里那枚图标所属的类（图标与筛选项不会各说各话） */
+		static TypeFilter EntityCategory(const Entity& entity);
+		/* 面板是否处于"有筛选"状态（名字或类型任一生效）—— 收集与绘制两处共用同一判据 */
+		[[nodiscard]] bool HasActiveFilter() const
+		{
+			return m_EntityFilter[0] != '\0' || m_TypeFilter != TypeFilter::All;
+		}
+		/* 过滤词 / 类型筛选命中的实体 + 它们的全部祖先（父链不能断） */
 		void CollectFilteredEntities(FilterSet& out) const;
 		/* 显示场景根节点（当前场景名）及其下的实体树 */
 		void ShowSceneRootNode(const std::vector<Entity>& roots, const EntityChildren& children,
@@ -123,8 +155,15 @@ namespace Helios
 		bool m_FieldEditTransactionOpen{ false };
 		/* 「添加组件」菜单的过滤词：组件一多，菜单需要能搜 */
 		char m_AddComponentFilter[64]{};
+		/* 顶栏「新建实体」菜单的过滤词（与添加组件菜单同款：打开即清空并聚焦） */
+		char m_NewEntityFilter[64]{};
 		/* 层级面板的过滤词（空 = 不过滤） */
 		char m_EntityFilter[64]{};
+		/* 类型筛选（底栏左端的下拉） */
+		TypeFilter m_TypeFilter{ TypeFilter::All };
+		/* 顶栏「新建」菜单的弹层 ID：在面板根作用域上算一次，
+		 * 按钮（开）与菜单（画）两边按同一个 ID 对接 */
+		ImGuiID m_PopupNewEntity{ 0 };
 	};
 }
 
