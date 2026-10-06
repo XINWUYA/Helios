@@ -1021,6 +1021,12 @@ namespace Helios
 
 		ImGui::Begin(Panel::kProperties);
 		{
+			/* 句柄非空 ≠ 实体存在（见 Entity::operator bool 的约定）：选中项可能来自
+			 * 撤销后的残留或失效的拾取句柄。组件 GetPtr 对不存在的实体是断言而不是
+			 * 返回空指针，所以这里先兜一道。 */
+			if (m_SelectedEntity && (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(m_SelectedEntity)))
+				m_SelectedEntity = {};
+
 			if (m_SelectedEntity)
 			{
 				ShowPropertiesHeader();
@@ -1050,6 +1056,10 @@ namespace Helios
 		{
 			if (!IsEditedInPanelHeader(desc) || desc.GetPtr == nullptr)
 				continue;
+
+			/* GetPtr 对没有该组件的实体是断言而不是返回空指针，必须先 Has 再取。 */
+			if (desc.Has == nullptr || !desc.Has(m_SelectedEntity))
+				break;
 
 			void* component = desc.GetPtr(m_SelectedEntity);
 			if (component == nullptr)

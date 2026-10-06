@@ -568,12 +568,37 @@ namespace Helios
 		mouse_y -= m_ViewportRegion.MinY;
 
 		const glm::vec2 viewport_size = glm::vec2(m_ViewportRegion.Width, m_ViewportRegion.Height);
-		mouse_y = viewport_size.y - mouse_y;
 
 		if (mouse_x > 0 && mouse_y > 0 && mouse_x < viewport_size.x && mouse_y < viewport_size.y)
 		{
-			int pixel_data = m_pEditorCamera->PickingEntityByPixelPos((int)mouse_x, (int)mouse_y);
-			m_HoveredEntity = pixel_data == -1 ? Entity() : Entity((entt::entity)pixel_data, m_pMainScene);
+			/* 拾取缓冲是物理像素：逻辑点 × 内容缩放后再翻到 GL 行序（纹理第 0 行在
+			 * 底部，见 MetalRenderAPI::ApplyViewport），并钳到有效范围。 */
+			const float content_scale = Application::Instance()->GetWindow().GetContentScale();
+			const ViewportRegion& picking_region = m_pEditorCamera->GetViewportRegion();
+
+			int pixel_data = -1;
+			if (picking_region.Width > 0 && picking_region.Height > 0)
+			{
+				const int32_t fb_width = static_cast<int32_t>(picking_region.Width);
+				const int32_t fb_height = static_cast<int32_t>(picking_region.Height);
+				const int32_t pixel_x = std::clamp(static_cast<int32_t>(mouse_x * content_scale), 0, fb_width - 1);
+				const int32_t pixel_y = std::clamp(
+					fb_height - 1 - static_cast<int32_t>(mouse_y * content_scale), 0, fb_height - 1);
+
+				pixel_data = m_pEditorCamera->PickingEntityByPixelPos(
+					static_cast<uint32_t>(pixel_x), static_cast<uint32_t>(pixel_y));
+			}
+
+			/* 回读的是上一帧的 GPU 内容，句柄可能已失效：「句柄非空」不等于实体存在
+			 * （见 Entity::operator bool 的约定），无效句柄一律当作点空。 */
+			m_HoveredEntity = {};
+			if (pixel_data != -1 && m_pMainScene != nullptr)
+			{
+				const Entity picked{ static_cast<entt::entity>(pixel_data), m_pMainScene };
+				if (m_pMainScene->IsEntityValid(picked))
+					m_HoveredEntity = picked;
+			}
+
 			EDITOR_LOG_DEBUG(pixel_data);
 		}
 	}
