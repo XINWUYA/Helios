@@ -1465,7 +1465,9 @@ namespace Helios
 		/* ---- 搜索框：紧挨类型筛选的左边（面板太窄、筛选被舍掉时它自己贴右端） ---- */
 		ImGui::SetCursorScreenPos(ImVec2(search_x, control_y));
 		ImGui::SetNextItemWidth(search_width);
-		ImGui::InputTextWithHint("##ResourceFilter", "Search assets...", m_Filter, sizeof(m_Filter));
+		Icons::BeginSearchInput();
+		ImGui::InputTextWithHint("##ResourceFilter", "Search...", m_Filter, sizeof(m_Filter));
+		Icons::EndSearchInput();
 
 		PanelChrome::EndHeaderRow(row);
 	}

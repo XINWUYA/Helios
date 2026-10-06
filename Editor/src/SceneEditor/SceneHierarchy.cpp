@@ -1030,8 +1030,10 @@ namespace Helios
 		}
 
 		ImGui::SetNextItemWidth(220.0f);
+		Icons::BeginSearchInput();
 		ImGui::InputTextWithHint("##AddComponentSearch", "Search...", m_AddComponentFilter,
 			sizeof(m_AddComponentFilter));
+		Icons::EndSearchInput();
 		ImGui::Separator();
 
 		const std::string needle = ToLowercase(m_AddComponentFilter);
