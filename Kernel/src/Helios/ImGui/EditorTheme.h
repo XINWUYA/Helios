@@ -13,29 +13,29 @@ namespace Helios::EditorTheme
 
     namespace Token
     {
-        /* 中性灰阶（冷调），由深到浅 —— 用明度差表达层级，不用彩色 */
-        inline const ImVec4 Neutral0 = ImVec4(0.078f, 0.086f, 0.102f, 1.00f); /* #14161A 工作区最深底 */
-        inline const ImVec4 Neutral1 = ImVec4(0.098f, 0.110f, 0.125f, 1.00f); /* #191C20 未选中 Tab */
-        inline const ImVec4 Neutral2 = ImVec4(0.118f, 0.129f, 0.149f, 1.00f); /* #1E2126 面板 / 窗口 */
-        inline const ImVec4 Neutral3 = ImVec4(0.149f, 0.165f, 0.192f, 1.00f); /* #262A31 菜单栏 / 表头 / 浮层 */
-        inline const ImVec4 Neutral4 = ImVec4(0.173f, 0.192f, 0.220f, 1.00f); /* #2C3138 控件底色 */
-        inline const ImVec4 Neutral5 = ImVec4(0.204f, 0.227f, 0.263f, 1.00f); /* #343A43 控件悬停 */
-        inline const ImVec4 Neutral6 = ImVec4(0.243f, 0.271f, 0.314f, 1.00f); /* #3E4550 控件按下 */
-        inline const ImVec4 Neutral7 = ImVec4(0.290f, 0.322f, 0.365f, 1.00f); /* #4A525D 滚动条把手 / 滑块 */
-        inline const ImVec4 Neutral8 = ImVec4(0.360f, 0.400f, 0.450f, 1.00f); /* #5C6673 滚动条拖拽中 */
+        /* 石墨蓝灰阶，由深到浅；用冷色明度差构建工作区层级 */
+        inline const ImVec4 Neutral0 = ImVec4(0.067f, 0.086f, 0.114f, 1.00f); /* #11161D 工作区最深底 */
+        inline const ImVec4 Neutral1 = ImVec4(0.090f, 0.118f, 0.153f, 1.00f); /* #171E27 未选中 Tab */
+        inline const ImVec4 Neutral2 = ImVec4(0.114f, 0.149f, 0.192f, 1.00f); /* #1D2631 面板 / 窗口 */
+        inline const ImVec4 Neutral3 = ImVec4(0.145f, 0.184f, 0.231f, 1.00f); /* #252F3B 菜单栏 / 表头 / 浮层 */
+        inline const ImVec4 Neutral4 = ImVec4(0.180f, 0.224f, 0.275f, 1.00f); /* #2E3946 控件底色 */
+        inline const ImVec4 Neutral5 = ImVec4(0.216f, 0.267f, 0.322f, 1.00f); /* #374452 控件悬停 */
+        inline const ImVec4 Neutral6 = ImVec4(0.275f, 0.325f, 0.388f, 1.00f); /* #465363 控件按下 */
+        inline const ImVec4 Neutral7 = ImVec4(0.365f, 0.420f, 0.482f, 1.00f); /* #5D6B7B 滚动条把手 / 滑块 */
+        inline const ImVec4 Neutral8 = ImVec4(0.459f, 0.518f, 0.588f, 1.00f); /* #758496 滚动条拖拽中 */
 
-        inline const ImVec4 Border    = ImVec4(0.227f, 0.251f, 0.282f, 0.72f); /* #3A4048 边框（全局唯一一档） */
-        inline const ImVec4 Separator = ImVec4(0.165f, 0.184f, 0.212f, 0.90f); /* #2A2F36 分隔线 */
+        inline const ImVec4 Border    = ImVec4(0.263f, 0.314f, 0.376f, 0.78f); /* #435060 边框（全局唯一一档） */
+        inline const ImVec4 Separator = ImVec4(0.169f, 0.212f, 0.267f, 0.94f); /* #2B3644 分隔线 */
 
-        inline const ImVec4 Text    = ImVec4(0.902f, 0.914f, 0.929f, 1.00f); /* #E6E9ED 正文 */
-        inline const ImVec4 TextDim = ImVec4(0.431f, 0.463f, 0.506f, 1.00f); /* #6E7681 次要 / 禁用 */
+        inline const ImVec4 Text    = ImVec4(0.910f, 0.933f, 0.957f, 1.00f); /* #E8EEF4 正文 */
+        inline const ImVec4 TextDim = ImVec4(0.545f, 0.600f, 0.671f, 1.00f); /* #8B99AB 次要 / 禁用 */
         /* 属性行标签：比正文弱、比禁用强 —— 标签是"说明"，值才是内容 */
-        inline const ImVec4 TextLabel = ImVec4(0.725f, 0.753f, 0.792f, 1.00f); /* #B9C0CA */
+        inline const ImVec4 TextLabel = ImVec4(0.765f, 0.808f, 0.863f, 1.00f); /* #C3CEDC */
 
-        /* 强调色：只允许出现在 选中 / 激活 / 当前值 / 焦点 / 拖拽预览 */
-        inline const ImVec4 Accent      = ImVec4(0.298f, 0.604f, 1.000f, 1.00f); /* #4C9AFF */
-        inline const ImVec4 AccentHover = ImVec4(0.435f, 0.682f, 1.000f, 1.00f); /* #6FAEFF */
-        inline const ImVec4 AccentDown  = ImVec4(0.239f, 0.518f, 0.910f, 1.00f); /* #3D84E8 */
+        /* 薄荷青强调色：只用于选中 / 激活 / 焦点 / 拖拽，不作为装饰色铺满界面 */
+        inline const ImVec4 Accent      = ImVec4(0.333f, 0.839f, 0.761f, 1.00f); /* #55D6C2 */
+        inline const ImVec4 AccentHover = ImVec4(0.514f, 0.906f, 0.839f, 1.00f); /* #83E7D6 */
+        inline const ImVec4 AccentDown  = ImVec4(0.208f, 0.718f, 0.624f, 1.00f); /* #35B79F */
 
         /* 分量色：X/Y/Z 的身份标识（业界约定 红/绿/蓝），与"状态"无关，
          * 因此只出现在「分量重置按钮」这一处；深色界面下取降饱和版本，避免抢眼。
@@ -85,6 +85,10 @@ namespace Helios::EditorTheme
         return ImVec4(color.x, color.y, color.z, alpha);
     }
 
+    /* 已选中行被悬停时的填充色：保住淡紫底、再亮一档。ImGui 对「悬停 + 选中」画的也是
+     * HeaderHovered（会把选中色整个盖掉）；选中行的调用点要显式 PushStyleColor 顶住。 */
+    inline const ImVec4 RowHoverSelected = WithAlpha(Token::Accent, 0.50f);
+
     /* ==================== 形状语言（Style 数值） ==================== */
 
     inline void ApplyMetrics(ImGuiStyle& style)
@@ -93,24 +97,24 @@ namespace Helios::EditorTheme
         style.DisabledAlpha  = 0.45f;             /* 禁用态更明确 */
 
         /* ---- 层级：面板直角贴停靠，浮层用圆角表达"悬浮" ---- */
-        style.WindowPadding        = ImVec2(10.0f, 8.0f);
+        style.WindowPadding        = ImVec2(12.0f, 9.0f);
         style.WindowRounding       = 0.0f;        /* 停靠面板保持直角（编辑器习惯） */
         style.WindowBorderSize     = 0.0f;        /* 边框交给背景明度差，不用描边 */
         style.WindowMinSize        = ImVec2(200.0f, 120.0f);
         style.WindowTitleAlign     = ImVec2(0.0f, 0.5f);
         style.WindowMenuButtonPosition = ImGuiDir_Right; /* 折叠/停靠按钮放右侧，避免误点 */
 
-        style.ChildRounding        = 4.0f;
+        style.ChildRounding        = 5.0f;
         style.ChildBorderSize      = 1.0f;
-        style.PopupRounding        = 6.0f;        /* 浮层 = 最大圆角 = 层级提示 */
+        style.PopupRounding        = 8.0f;        /* 浮层 = 最大圆角 = 层级提示 */
         style.PopupBorderSize      = 1.0f;
 
-        /* ---- 控件：统一的 4px 圆角 + 一档细边框 ---- */
-        style.FramePadding         = ImVec2(8.0f, 4.0f);  /* 控件更"厚实"，约 22px 行高 */
-        style.FrameRounding        = 4.0f;
+        /* ---- 控件：统一的 5px 圆角 + 一档细边框 ---- */
+        style.FramePadding         = ImVec2(8.0f, 5.0f);  /* 控件更舒展，约 24px 行高 */
+        style.FrameRounding        = 5.0f;
         style.FrameBorderSize      = 1.0f;        /* 输入框有清晰边界 */
-        style.ItemSpacing          = ImVec2(8.0f, 6.0f);  /* 行距呼吸感 */
-        style.ItemInnerSpacing     = ImVec2(6.0f, 4.0f);
+        style.ItemSpacing          = ImVec2(8.0f, 7.0f);  /* 行距呼吸感 */
+        style.ItemInnerSpacing     = ImVec2(7.0f, 5.0f);
         style.CellPadding          = ImVec2(6.0f, 3.0f);
         style.TouchExtraPadding    = ImVec2(0.0f, 0.0f);
 
@@ -120,13 +124,13 @@ namespace Helios::EditorTheme
         style.SelectableTextAlign  = ImVec2(0.0f, 0.5f); /* 行文本垂直居中（如不习惯改回 0,0） */
 
         /* ---- 滚动条：细 + 圆 ---- */
-        style.ScrollbarSize        = 11.0f;
+        style.ScrollbarSize        = 10.0f;
         style.ScrollbarRounding    = 6.0f;
         style.GrabMinSize          = 12.0f;
         style.GrabRounding         = 4.0f;
 
         /* ---- Tab ---- */
-        style.TabRounding          = 4.0f;
+        style.TabRounding          = 5.0f;
         style.TabBorderSize        = 0.0f;        /* Tab 不画描边，靠底色区分 */
         style.TabMinWidthForCloseButton = 0.0f;
         style.ColorButtonPosition  = ImGuiDir_Right;
@@ -184,10 +188,12 @@ namespace Helios::EditorTheme
         c[ImGuiCol_ButtonHovered]          = Token::Neutral5;
         c[ImGuiCol_ButtonActive]           = Token::Neutral6;
 
-        /* 列表行：选中 = 强调色浸染；悬停 = 中性提亮；按下 = 强调加强 */
-        c[ImGuiCol_Header]                 = WithAlpha(Token::Accent, 0.32f);
-        c[ImGuiCol_HeaderHovered]          = Token::White06;
-        c[ImGuiCol_HeaderActive]           = WithAlpha(Token::Accent, 0.48f);
+        /* 列表行：选中 = 强调色浸染 40%；悬停 = 中性提亮（White 12%）；按下 = 55%。
+         * 「悬停 + 选中」被 ImGui 也画成 HeaderHovered —— 那个组合由选中行的调用点
+         * 推 RowHoverSelected 顶住（见它的注释），不在这条色带里。 */
+        c[ImGuiCol_Header]                 = WithAlpha(Token::Accent, 0.40f);
+        c[ImGuiCol_HeaderHovered]          = Token::White12;
+        c[ImGuiCol_HeaderActive]           = WithAlpha(Token::Accent, 0.55f);
 
         c[ImGuiCol_Separator]              = Token::Separator;
         c[ImGuiCol_SeparatorHovered]       = WithAlpha(Token::Accent, 0.60f);

@@ -624,7 +624,15 @@ namespace Helios
 			if (is_current)
 				flags |= ImGuiTreeNodeFlags_Selected; /* 选中高亮由 ImGui 画，不必自绘整行 */
 
+			/* 悬停选中行时 ImGui 画的也是 HeaderHovered（会盖掉选中色）——
+			 * 推一档"更亮的选中色"顶住，见 EditorTheme::RowHoverSelected */
+			if (is_current)
+				ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorTheme::RowHoverSelected);
+
 			const bool is_opened = ImGui::TreeNodeEx("##node", flags, "%s", "");
+
+			if (is_current)
+				ImGui::PopStyleColor();
 
 			/* 点目录名（不是点展开箭头）= 切换当前目录 */
 			if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
@@ -1297,11 +1305,18 @@ namespace Helios
 					const auto filter = static_cast<TypeFilter>(i);
 					const bool selected = (filter == m_TypeFilter);
 
+					/* 悬停选中条目时 ImGui 画的也是 HeaderHovered —— 推"更亮的选中色"顶住 */
+					if (selected)
+						ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorTheme::RowHoverSelected);
+
 					if (ImGui::Selectable(TypeFilterName(filter), selected))
 						m_TypeFilter = filter;
 
 					if (selected)
+					{
+						ImGui::PopStyleColor();
 						ImGui::SetItemDefaultFocus();
+					}
 				}
 
 				ImGui::EndCombo();
@@ -1549,11 +1564,18 @@ namespace Helios
 			{
 				const float label_width = ImMin(ImGui::CalcTextSize(name.c_str()).x, crumb_room);
 
+				/* 当前级（选中）被悬停时 ImGui 画的也是 HeaderHovered —— 推"更亮的选中色"顶住 */
+				if (is_current)
+					ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorTheme::RowHoverSelected);
+
 				if (ImGui::Selectable(name.c_str(), is_current, ImGuiSelectableFlags_None,
 						ImVec2(label_width, control_height)))
 				{
 					SetCurrentNode(node);
 				}
+
+				if (is_current)
+					ImGui::PopStyleColor();
 
 				if (ImGui::IsItemHovered() && !is_current)
 				{

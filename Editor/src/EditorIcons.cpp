@@ -1691,15 +1691,17 @@ namespace Helios::Icons
 		ImGui::PushID(static_cast<int>(id));
 
 		/* 扁平无边框：默认近透明，悬停/按下由中性灰提供，checked 用强调色浸染。
-		 * 主题给所有 framed 控件设了 1px 边框（输入框需要），图标按钮这里要去掉。 */
+		 * 主题给所有 framed 控件设了 1px 边框（输入框需要），图标按钮这里要去掉。
+		 * 灰阶比主题的控件档各提一档：扁平按钮的底色是它唯一的状态反馈，控件档偏暗。 */
 		ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
 		ImGui::PushStyleColor(ImGuiCol_Button,
-			checked ? EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.32f) : EditorTheme::Token::Clear);
+			checked ? EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.34f) : EditorTheme::Token::Clear);
 		ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-			checked ? EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.44f)
-			        : EditorTheme::WithAlpha(EditorTheme::Token::Neutral5, 0.85f));
+			checked ? EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.46f)
+			        : EditorTheme::WithAlpha(EditorTheme::Token::Neutral6, 0.85f));
 		ImGui::PushStyleColor(ImGuiCol_ButtonActive,
-			checked ? EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.58f) : EditorTheme::Token::Neutral6);
+			checked ? EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.58f)
+			        : EditorTheme::WithAlpha(EditorTheme::Token::Neutral7, 0.70f));
 
 		const bool clicked = ImGui::Button("##icon", size);
 
@@ -1709,7 +1711,7 @@ namespace Helios::Icons
 		const ImVec2 min = ImGui::GetItemRectMin();
 		const ImVec2 max = ImGui::GetItemRectMax();
 		const ImVec2 center((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
-		const float icon_size = ImMin(size.x, size.y) * 0.62f;
+		const float icon_size = ImMin(size.x, size.y) * 0.66f;
 
 		/* GetColorU32 会把 Style.Alpha 乘进去，禁用态（调用方压低 Alpha）自动变淡 */
 		const ImU32 color = ImGui::GetColorU32(checked ? EditorTheme::Token::AccentHover : EditorTheme::Token::Text);
