@@ -632,9 +632,9 @@ namespace Helios
 					}
 				}
 
-				/* 渲染点光/聚光阴影层：
-				 * 单面矩阵作为材质参数下发（不占级联矩阵数组）；
-				 * u_CascadeIndex = -1 让 Shadow.glsl 走单矩阵分支。 */
+				/* 渲染点光 / 聚光阴影层：单面矩阵作为材质参数下发，u_CascadeIndex = -1 让 Shadow.glsl
+				 * 走单矩阵分支。注意：参数名必须跟 Shadow.glsl 的裸 uniform 一致（u_ShadowPassMat），
+				 * 也不能跟 LightUniformBuffer 成员重名（撞名编译不过）。 */
 				for (const auto& punctual_shadow_map : m_PunctualShadowMaps)
 				{
 					const uint8_t layer = punctual_shadow_map->GetLayer();
@@ -643,7 +643,7 @@ namespace Helios
 
 					auto shadow_material = make_caster_material();
 					shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", -1);
-					shadow_material->SetParameters(ParamType::Mat4, "u_PunctualShadowMat",
+					shadow_material->SetParameters(ParamType::Mat4, "u_ShadowPassMat",
 						punctual_shadow_map->GetLightViewProjectionMat());
 
 					render_shadow_layer(layer, shadow_material);
