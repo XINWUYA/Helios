@@ -28,6 +28,36 @@ namespace Helios
 		/* 层级面板内部的拖拽载荷类型：被拖动实体的句柄 */
 		constexpr const char* kEntityDragPayload = "SCENE_HIERARCHY_ENTITY";
 
+		class ComponentCustomDrawCommand final : public ICommand
+		{
+		public:
+			ComponentCustomDrawCommand(Entity entity, HasFunc has, ComponentRestoreFunc restore,
+				ComponentSnapshot before, ComponentSnapshot after, const char* component_name)
+				: m_Entity(entity), m_Has(has), m_Restore(restore),
+				  m_Before(std::move(before)), m_After(std::move(after)),
+				  m_Label(std::string("Edit ") + (component_name != nullptr ? component_name : "Component"))
+			{
+			}
+
+			void Do() override { Apply(m_After); }
+			void Undo() override { Apply(m_Before); }
+			[[nodiscard]] const char* GetLabel() const override { return m_Label.c_str(); }
+
+		private:
+			void Apply(const ComponentSnapshot& snapshot)
+			{
+				if (m_Has != nullptr && m_Has(m_Entity) && m_Restore != nullptr && snapshot.IsValid())
+					m_Restore(m_Entity, snapshot);
+			}
+
+			Entity m_Entity;
+			HasFunc m_Has{ nullptr };
+			ComponentRestoreFunc m_Restore{ nullptr };
+			ComponentSnapshot m_Before;
+			ComponentSnapshot m_After;
+			std::string m_Label;
+		};
+
 		/* ---- 场景树节点图标 ----
 		 * 按实体持有的组件判断它在树里"最像什么"，先匹配上的胜出。图标是编辑器表现层的东西，
 		 * 映射就留在编辑器侧；以后新增可建实体类型时，在这补一条规则。 */
@@ -956,7 +986,25 @@ namespace Helios
 		{
 			DrawComponentFieldsBySchema(desc, entity, component);
 			if (desc.CustomDraw != nullptr)
-				desc.CustomDraw(component);
+			{
+				ComponentSnapshot before;
+				const bool can_record_custom_edit = m_pCommandStack != nullptr
+					&& desc.Capture != nullptr && desc.Restore != nullptr;
+				if (can_record_custom_edit)
+					desc.Capture(entity, before);
+
+				const bool changed = desc.CustomDraw(component);
+				if (changed && can_record_custom_edit && before.IsValid())
+				{
+					ComponentSnapshot after;
+					desc.Capture(entity, after);
+					if (after.IsValid())
+					{
+						m_pCommandStack->Execute(CreateUniquePtr<ComponentCustomDrawCommand>(
+							entity, desc.Has, desc.Restore, std::move(before), std::move(after), desc.Name));
+					}
+				}
+			}
 		}
 
 		PanelChrome::EndCard(card);

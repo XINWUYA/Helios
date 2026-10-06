@@ -258,8 +258,8 @@ namespace Helios
 		EnumNamesFunc GetEnumNames{ nullptr };
 	};
 
-	/* 含嵌套对象/资源引用的字段无法用「偏移 + 类型」表达，改用回调整块自定义绘制 */
-	using ComponentDrawFunc = void (*)(void* component);
+	/* 含嵌套对象/资源引用的字段无法用「偏移 + 类型」表达，改用回调整块自定义绘制；返回 true 表示组件数据被改动 */
+	using ComponentDrawFunc = bool (*)(void* component);
 
 	/* 组件级可见性条件：返回 false 时整个组件块不显示（如组件持有的嵌套对象为空） */
 	using ComponentVisibleFunc = bool (*)(const void* component);

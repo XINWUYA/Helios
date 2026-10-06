@@ -5,6 +5,9 @@
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/ImGui/ImGuiExtensions.h"
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <imgui.h>
 #include <tinyxml2.h>
 
@@ -335,10 +338,11 @@ namespace Helios
 
 		/* 贴图是资源引用，需要拖入与悬停预览，故整块自定义绘制；
 		 * BaseColor 与 TilingFactor 走 schema 字段（见注册处）。 */
-		void DrawSpriteBlock(void* raw)
+		bool DrawSpriteBlock(void* raw)
 		{
 			auto& component = *static_cast<SpriteComponent*>(raw);
 			ImGuiExt::DrawTextureUI("Texture", component.m_Texture);
+			return false;
 		}
 
 		/* 投影类型决定哪些参数有意义：透视看 Fov，正交看 HeightSize */
@@ -354,15 +358,69 @@ namespace Helios
 			return camera != nullptr && camera->GetProjectionType() == CameraProjectionType::Orthographic;
 		}
 
-		void DrawModelBlock(void* raw)
+		bool DrawModelBlock(void* raw)
 		{
-			auto& component = *static_cast<ModelComponent*>(raw);
-			auto& model = component.m_Model;
-			if (!model)
-				return;
+			auto& model = static_cast<ModelComponent*>(raw)->m_Model;
+			bool changed = false;
 
-			/* 模型路径是只读信息，交给属性行的通用布局画（保持与其他行对齐） */
-			ImGuiExt::DrawCommonTextUI("ModelPath", model->GetPath());
+			if (model != nullptr)
+				ImGuiExt::DrawCommonTextUI("ModelPath", RELATIVE_PATH(model->GetPath()));
+
+			const float value_width = ImGuiExt::BeginPropertyRow("Model");
+			const float frame_height = ImGui::GetFrameHeight();
+			const float gap = ImGui::GetStyle().ItemInnerSpacing.x;
+			const float target_width = model != nullptr
+				? std::max(1.0f, value_width - frame_height - gap)
+				: value_width;
+
+			ImGui::Button(model != nullptr ? "Replace .mesh" : "Drop .mesh here",
+				ImVec2(target_width, frame_height));
+
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Drag a .mesh asset from the Resource Browser to assign or replace the model");
+
+			if (ImGui::BeginDragDropTarget())
+			{
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
+				{
+					std::filesystem::path relative_path;
+					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
+						payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
+					{
+						std::string extension = PathToUtf8(relative_path.extension());
+						std::transform(extension.begin(), extension.end(), extension.begin(),
+							[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+						if (extension == ".mesh")
+						{
+							const std::string absolute_path = PathToUtf8(g_AssetsPath / relative_path);
+							if (model == nullptr || model->GetPath() != absolute_path)
+							{
+								SharedPtr<Model> loaded_model = Model::Create(absolute_path);
+								if (loaded_model != nullptr)
+								{
+									model = std::move(loaded_model);
+									changed = true;
+								}
+							}
+						}
+					}
+				}
+				ImGui::EndDragDropTarget();
+			}
+
+			if (model != nullptr)
+			{
+				ImGui::SameLine(0.0f, gap);
+				if (ImGui::Button("Clear", ImVec2(frame_height, frame_height)))
+				{
+					model.reset();
+					changed = true;
+				}
+			}
+
+			ImGuiExt::EndPropertyRow();
+			return changed;
 		}
 
 		/* 光源类型决定持有哪个 Light 对象，切换时必须重建；
@@ -454,11 +512,11 @@ namespace Helios
 
 		/* 天空盒是资源引用，需要选择与悬停预览，故整块自定义绘制；
 		 * 烘焙参数走 schema 字段（见注册处）。 */
-		void DrawProbeBlock(void* raw)
+		bool DrawProbeBlock(void* raw)
 		{
 			auto& probe = static_cast<ReflectionProbeComponent*>(raw)->m_ReflectionProbe;
 			if (probe == nullptr)
-				return;
+				return false;
 
 			SharedPtr<DeviceTexture> skybox = probe->GetSkyBoxTexture();
 			ImGuiExt::DrawTextureUI("SkyBox", skybox);
@@ -495,6 +553,8 @@ namespace Helios
 
 			if (state == WriteState::Idle && ImGui::Button("Rebake"))
 				probe->Reset();
+
+			return false;
 		}
 
 		/* 探针为空时整个组件块不显示 */
