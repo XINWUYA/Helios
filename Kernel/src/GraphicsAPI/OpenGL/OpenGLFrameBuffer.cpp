@@ -7,6 +7,41 @@
 
 namespace Helios
 {
+	namespace
+	{
+		bool IsSignedIntegerFormat(TextureFormat format)
+		{
+			switch (format)
+			{
+			case TextureFormat::R8I:
+			case TextureFormat::R16I:
+			case TextureFormat::R32I:
+			case TextureFormat::RG8I:
+			case TextureFormat::RG16I:
+			case TextureFormat::RGB8I:
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		bool IsUnsignedIntegerFormat(TextureFormat format)
+		{
+			switch (format)
+			{
+			case TextureFormat::R8UI:
+			case TextureFormat::R16UI:
+			case TextureFormat::R32UI:
+			case TextureFormat::RG8UI:
+			case TextureFormat::RG16UI:
+			case TextureFormat::RGB8UI:
+				return true;
+			default:
+				return false;
+			}
+		}
+	}
+
 	constexpr uint32_t MAX_FRAME_TARGET_SIZE = 8192;
 
 	OpenGLFrameBuffer::OpenGLFrameBuffer(const std::string& name, const FrameBufferDesc& desc)
@@ -79,6 +114,41 @@ namespace Helios
 		/* Layered模式：将指定附件重新绑定到Texture2DArray/CubeMap的指定层/面/mip：用于CSM多Cascade渲染到同一数组纹理的不同切片，或分层渲染到Color数组纹理，或烘焙到CubeMap各面各mip */
 		if (bind_info.Mode == FrameBufferBindMode::Layered)
 			SetAttachmentLayer(bind_info.TargetAttachment, bind_info.ColorIndex, bind_info.LayerIndex, bind_info.MipLevel);
+
+		const size_t clear_count = std::min(
+			m_FrameBufferDesc.ColorClearValues.size(), m_FrameBufferDesc.ColorRenderBuffers.size());
+		if (clear_count > 0)
+		{
+			const GLboolean scissor_enabled = glIsEnabled(GL_SCISSOR_TEST);
+			glDisable(GL_SCISSOR_TEST);
+
+			for (size_t i = 0; i < clear_count; ++i)
+			{
+				if (!m_FrameBufferDesc.ColorClearValues[i].has_value())
+					continue;
+
+				const glm::vec4& value = *m_FrameBufferDesc.ColorClearValues[i];
+				const GLfloat float_values[4] = { value.r, value.g, value.b, value.a };
+				const GLint int_values[4] = {
+					static_cast<GLint>(value.r), static_cast<GLint>(value.g),
+					static_cast<GLint>(value.b), static_cast<GLint>(value.a) };
+				const GLuint uint_values[4] = {
+					static_cast<GLuint>(value.r), static_cast<GLuint>(value.g),
+					static_cast<GLuint>(value.b), static_cast<GLuint>(value.a) };
+				const TextureFormat format = m_FrameBufferDesc.ColorRenderBuffers[i].RenderTarget->GetTextureDesc().Format;
+
+				if (IsSignedIntegerFormat(format))
+					glClearBufferiv(GL_COLOR, static_cast<GLint>(i), int_values);
+				else if (IsUnsignedIntegerFormat(format))
+					glClearBufferuiv(GL_COLOR, static_cast<GLint>(i), uint_values);
+				else
+					glClearBufferfv(GL_COLOR, static_cast<GLint>(i), float_values);
+			}
+
+			if (scissor_enabled)
+				glEnable(GL_SCISSOR_TEST);
+			CHECK_GL_ERROR;
+		}
 	}
 
 	void OpenGLFrameBuffer::Unbind()
@@ -337,10 +407,9 @@ namespace Helios
 		if (!texture)
 			return;
 
-		/* 按纹理目标选择层绑定方式：
-		 * - Texture2DArray：layer 为数组切片，mip_level 指定 mip 层级，使用 glFramebufferTextureLayer
-		 * - CubeMap：layer 为 face 索引（0~5），mip_level 指定 mip 层级，使用 glFramebufferTexture2D + CUBE_MAP_POSITIVE_X + face
-		 *   典型场景：烘焙天空盒到 CubeMap 的 6 个面各 mip 级。 */
+		/* 按纹理目标选择层绑定方式：Texture2DArray 的 layer 是数组切片，用 glFramebufferTextureLayer；
+		 * CubeMap 的 layer 是面索引（0~5），用 glFramebufferTexture2D + CUBE_MAP_POSITIVE_X + face。
+		 * 典型场景：把天空盒烘焙到 CubeMap 的 6 个面、各 mip 级。 */
 		if (texture->m_TextureTarget == GL_TEXTURE_2D_ARRAY)
 		{
 			glFramebufferTextureLayer(GL_FRAMEBUFFER, gl_attachment, texture->GetTextureID(), mip_level, layer);

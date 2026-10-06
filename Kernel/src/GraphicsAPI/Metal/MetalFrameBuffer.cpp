@@ -468,7 +468,13 @@ namespace Helios
             auto* attachment = m_RenderPassDescriptor->colorAttachments()->object(static_cast<NS::UInteger>(i));
             attachment->setTexture(m_ColorAttachments[i]);
             attachment->setLoadAction(MTL::LoadActionClear);
-            attachment->setClearColor(MTL::ClearColor(0.0, 0.0, 0.0, 1.0));
+
+            const glm::vec4 clear_value = i < m_FrameBufferDesc.ColorClearValues.size()
+                && m_FrameBufferDesc.ColorClearValues[i].has_value()
+                ? *m_FrameBufferDesc.ColorClearValues[i]
+                : glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+            attachment->setClearColor(MTL::ClearColor(
+                clear_value.r, clear_value.g, clear_value.b, clear_value.a));
 
             MTL::Texture* resolve_target = i < m_ColorResolveTextures.size()
                 ? m_ColorResolveTextures[i]

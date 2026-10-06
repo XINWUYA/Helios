@@ -1,4 +1,6 @@
 ﻿#pragma once
+#include <optional>
+#include <vector>
 #include <glm/glm.hpp>
 #include "FrameGraphResources.h"
 
@@ -32,6 +34,8 @@ namespace Helios
 			TextureAttachments Attachments{};
 			/* ClearColor */
 			glm::vec4 ClearColor{ 0.0f,0.0f,0.0f,0.0f };
+			/* Optional per-color-attachment clear values */
+			std::vector<std::optional<glm::vec4>> ColorClearValues;
 			/* Sample */
 			uint8_t Samples{ 1 };
 			/* 视口区域 */

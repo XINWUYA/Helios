@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <optional>
 #include <Helios/Renderer/RenderCommon.h>
 
 namespace Helios
@@ -72,6 +73,7 @@ namespace Helios
 		ViewportRegion ViewportRegion;						/* 视域范围 */
 		RenderBufferUsage Usage;							/* RenderBuffer使用情况 */
 		std::vector<RenderBufferInfo> ColorRenderBuffers;	/* Color RenderBuffers */
+		std::vector<std::optional<glm::vec4>> ColorClearValues;	/* Optional per-color-attachment clear values */
 		RenderBufferInfo DepthRenderBuffer;					/* Depth RenderBuffer */
 		RenderBufferInfo StencilRenderBuffer;				/* Stencil RenderBuffer */
 	};

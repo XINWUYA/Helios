@@ -174,6 +174,8 @@ namespace Helios
 				pass_desc.Attachments.ColorAttachments(5) = data.GBufferTexture5;
 				pass_desc.Attachments.ColorAttachments(6) = data.ObjectId;
 				pass_desc.Attachments.DepthAttachment() = data.Depth;
+				pass_desc.ColorClearValues.resize(7);
+				pass_desc.ColorClearValues[6] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
 				pass_desc.ViewportRegion = m_ViewportRegion;
 				builder.CreateRenderPass("GBufferPassRenderTarget", pass_desc);
 			},
@@ -185,10 +187,6 @@ namespace Helios
 				render_pass_info->Bind();
 				{
 					Renderer::GetRenderAPI()->Clear();
-
-					/* Clear ObjectId Texture */
-					int32_t clear_data = -1;
-					render_pass_info->ClearAttachment(6, 0, { PixelFormat::R_Integer, PixelType::Int }, &clear_data);
 
 					for (const auto& mesh_object : render_view.GetVisibleMeshObjects())
 					{
