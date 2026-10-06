@@ -71,6 +71,8 @@ namespace Helios
 		bool OnKeyPressed(class KeyPressedEvent* event);
 		/* 响应鼠标 */
 		bool OnMouseButtonPressed(class MouseButtonPressedEvent* event);
+		/* 响应鼠标滚轮（缩放 / 飞行速度） */
+		bool OnMouseScrolled(class MouseScrolledEvent* event);
 		/* 切换运行模式 */
 		void OnPlayModeChanged();
 		/* 响应拖拽文件到主窗口 */
@@ -84,9 +86,14 @@ namespace Helios
 		void ShowGPUTimingsCard();
 		/* 选中Entity时显示操作Gizmo */
 		void ShowOperationGizmoUI();
+		/* 视口右上角的视图指示器：六轴盘，点击切视角 / 拖拽转视角 */
+		void ShowViewGizmoUI();
 
 		/* 鼠标选中Entity时的响应 */
 		void CheckMouseSelectEntity();
+
+		/* F：把视角聚焦到选中实体（按模型包围球取景） */
+		void FocusSelectedEntity();
 
 		/* 编辑器相机 */
 		UniquePtr<EditorCamera> m_pEditorCamera{ nullptr };
@@ -117,6 +124,9 @@ namespace Helios
 		bool m_IsViewportHovered{ false };
 		/* 移动，旋转，缩放UI */
 		int m_GizmoType = -1;
+		/* 视图指示器手势：按下沿命中的轴盘序号（-1 = 未命中）；累计位移用于区分点击 / 拖拽 */
+		int32_t m_ViewGizmoPressedDisc{ -1 };
+		float m_ViewGizmoDraggedDistance{ 0.0f };
 		/* 默认为编辑模式 */
 		PlayMode m_PlayMode{ PlayMode::Edit };
 		/* 当前编辑器是否被启用 */

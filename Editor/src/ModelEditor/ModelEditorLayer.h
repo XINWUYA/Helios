@@ -64,6 +64,8 @@ namespace Helios
 		UniquePtr<EditorCamera> m_pEditorCamera{ nullptr };
 		/* 视口范围: x: width_min; y: height_min; z: width_max; w: height_max */
 		ViewportRegion m_ViewportRegion{};
+		/* 指针停留在视口上（相机导航的起手授权） */
+		bool m_IsViewportHovered{ false };
 
 		/* 从文件中加载模型信息 */
 		UniquePtr<ModelInfo> m_pModelInfo{ nullptr };

@@ -86,6 +86,8 @@ namespace Helios
 		Renderer::SetClearColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
 		Renderer::Clear();
 
+		/* 相机导航：指针在视口上才授权起手 */
+		m_pEditorCamera->SetNavigationAllowed(m_IsViewportHovered);
 		m_pEditorCamera->OnUpdate(delta_time);
 		m_pDefaultScene->OnUpdate(delta_time, m_pEditorCamera.get());
 
@@ -115,8 +117,6 @@ namespace Helios
 
 		if (!event)
 			return;
-
-		m_pEditorCamera->OnEvent(event);
 	}
 
 	/* 显示主场景视口 */
@@ -148,10 +148,8 @@ namespace Helios
 				content_scale);
 			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
 
-			///* 若当前ImGui窗口不是主窗口，应阻塞事件传递 */
-			//m_IsViewportFocused = ImGui::IsWindowFocused();
-			//m_IsViewportHovered = ImGui::IsWindowHovered();
-			//Application::Instance()->GetImGuiLayer()->BlockEvents(!m_IsViewportFocused && !m_IsViewportHovered);
+			/* 指针悬停在视口上才允许相机起手导航（与场景编辑器同源） */
+			m_IsViewportHovered = ImGui::IsWindowHovered();
 
 			/* 绘制场景 */
 			auto output_rt = m_pEditorCamera->GetRenderView()->GetRenderTarget();
@@ -178,6 +176,11 @@ namespace Helios
 
 			///* Gizmos */
 			//ShowOperationGizmoUI();
+		}
+		else
+		{
+			/* 视口窗口不可见：清掉悬停，避免残留的起手授权 */
+			m_IsViewportHovered = false;
 		}
 		ImGui::End();
 		ImGui::PopStyleVar();

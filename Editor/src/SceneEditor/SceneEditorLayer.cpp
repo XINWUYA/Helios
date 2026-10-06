@@ -3,6 +3,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "EditorBuiltinCamera.h"
 #include "EditorIcons.h"
+#include "ViewGizmo.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Command/TransformCommand.h"
@@ -71,11 +72,10 @@ namespace Helios
 		if (!m_IsActivated || !event)
 			return;
 
-		m_pEditorCamera->OnEvent(event);
-
 		EventDispatcher dispatcher(event);
 		dispatcher.Dispatch<KeyPressedEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnKeyPressed));
 		dispatcher.Dispatch<MouseButtonPressedEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnMouseButtonPressed));
+		dispatcher.Dispatch<MouseScrolledEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnMouseScrolled));
 	}
 
 	void SceneEditorLayer::UpdateViewport()
@@ -144,6 +144,10 @@ namespace Helios
 			if (is_ctrl_pressed)
 				Redo();
 			return true;
+		case Key::F: /* F：视角聚焦到选中实体（指针需在视口上，且在输入文本时让位） */
+			if (m_PlayMode == PlayMode::Edit && m_IsViewportHovered && !ImGui::GetIO().WantCaptureKeyboard)
+				FocusSelectedEntity();
+			return true;
 		}
 
 		return false;
@@ -157,10 +161,34 @@ namespace Helios
 		{
 			CheckMouseSelectEntity();
 
-			if (m_IsViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(Key::LeftAlt))
+			/* 飞行中（按住 RMB）左键不作选择：避免飞行操作误改变选中；
+			 * 指针落在视口内控件（视图指示器）上时点击也不穿透到场景 */
+			if (m_IsViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(Key::LeftAlt)
+				&& !m_pEditorCamera->IsFlying() && !ImGui::IsAnyItemHovered())
 				m_SceneHierarchy.SetSelectedEntity(m_HoveredEntity);
 		}
 		return false;
+	}
+
+	/* 滚轮：飞行中调移动速度，其余情况拉近拉远。只在指针位于视口上时接管，
+	 * 其余窗口的滚轮留给 ImGui 自己处理。 */
+	bool SceneEditorLayer::OnMouseScrolled(MouseScrolledEvent* event)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_PlayMode != PlayMode::Edit || !m_IsViewportHovered)
+			return false;
+
+		const float wheel = event->GetYOffset();
+		if (wheel == 0.0f)
+			return false;
+
+		if (m_pEditorCamera->IsFlying())
+			m_pEditorCamera->AdjustMoveSpeed(wheel);
+		else
+			m_pEditorCamera->OnMouseWheelZoom(wheel);
+
+		return true;
 	}
 
 	/* 响应拖拽文件到主窗口 */
@@ -367,13 +395,16 @@ namespace Helios
 				ImGui::EndDragDropTarget();
 			}
 
+			/* 右上角视图指示器（点击 / 拖拽切换与旋转视角） */
+			ShowViewGizmoUI();
+
 			/* Gizmos */
 			ShowOperationGizmoUI();
 		}
 		else
 		{
-			/* 视口窗口不可见：清掉交互标志，否则残留的 focus / hover
-			 * 会让相机继续吃键鼠输入、点击也会被误判成视口内选择。 */
+			/* 视口窗口不可见：清掉交互标志，否则残留的 hover 会继续给相机授权、
+			 * 点击也会被误判成视口内选择。 */
 			m_IsViewportFocused = false;
 			m_IsViewportHovered = false;
 		}
@@ -490,8 +521,11 @@ namespace Helios
 		ImGuizmo::SetRect(m_ViewportRegion.MinX, m_ViewportRegion.MinY, m_ViewportRegion.Width, m_ViewportRegion.Height);
 
 		Entity selected_entity = m_SceneHierarchy.GetSelectedEntity();
-		/* 组件可被移除，缺少 Transform 时本帧不画 Gizmo */
-		if (selected_entity && m_GizmoType != -1 && m_pMainScene && selected_entity.HasComponent<TransformComponent>())
+		/* 组件可能被移除，缺 Transform 的话本帧就不画 Gizmo。轨道旋转（Alt+LMB）期间整块跳过：
+		 * ImGuizmo 只认左键，不跳过的话 Alt+LMB 起手落到轴上会同时拖动物体 —— 导航优先（跟 Godot /
+		 * Blender 一致）。 */
+		if (!m_pEditorCamera->IsOrbiting() && selected_entity && m_GizmoType != -1
+			&& m_pMainScene && selected_entity.HasComponent<TransformComponent>())
 		{
 			// Entity transform
 			auto& transform_component = selected_entity.GetComponent<TransformComponent>();
@@ -550,13 +584,87 @@ namespace Helios
 		//const auto identity_mat = glm::identity<glm::mat4>();
 		//ImGuizmo::DrawGrid(glm::value_ptr(view_mat), glm::value_ptr(projection_mat), glm::value_ptr(identity_mat), 100.f);
 
-		/* 右上角方位视图 */
-		/*if (!m_pEditorCamera->IsFocus())
-		{
-			ImGuizmo::ViewManipulate(glm::value_ptr(view_mat), m_pEditorCamera->GetDistance(), ImVec2(m_ViewportRegion.z - 128, ImGui::GetWindowPos().y), ImVec2(128, 128), 0x00000000);
-			m_pEditorCamera->SetViewMatrix(view_mat);
-		}*/
+	}
 
+	/* 右上角视图指示器：六个轴盘（X / Y / Z × ±）—— 点击切视角、拖拽轨道旋转。盘面样式和
+	 * 几何 / 命中算法在 ViewGizmo.h（位置 = 世界轴经视线旋转投影到屏幕、深度决定压盖顺序）；
+	 * 本函数只管交互。 */
+	void SceneEditorLayer::ShowViewGizmoUI()
+	{
+		PROFILE_FUNCTION();
+
+		/* 运行模式下编辑器相机不响应输入，指示器一并停用 */
+		if (m_PlayMode != PlayMode::Edit)
+			return;
+
+		constexpr float kBoxSize = 92.0f;		/* 指示器方框边长（逻辑像素） */
+		constexpr float kBoxMargin = 6.0f;		/* 距视口上 / 右边缘 */
+		constexpr float kClickSlop = 4.0f;		/* 累计位移超过它即算拖拽（转视角），否则算点击（切视角） */
+		constexpr float kQuarterTurn = glm::radians(90.0f);
+
+		if (m_ViewportRegion.Width < static_cast<uint32_t>(kBoxSize + 2.0f * kBoxMargin) ||
+			m_ViewportRegion.Height < static_cast<uint32_t>(kBoxSize + 2.0f * kBoxMargin))
+			return;
+
+		const ImVec2 box_min(
+			static_cast<float>(m_ViewportRegion.MinX) + static_cast<float>(m_ViewportRegion.Width) - kBoxMargin - kBoxSize,
+			static_cast<float>(m_ViewportRegion.MinY) + kBoxMargin);
+		const ImVec2 center(box_min.x + kBoxSize * 0.5f, box_min.y + kBoxSize * 0.5f);
+		const float orbit_radius = kBoxSize * 0.5f - ViewGizmo::kDiscRadius - 4.0f;
+
+		/* 六个轴盘：世界轴方向经视线旋转投影 + 深度排序（近者在后 = 后画、优先命中） */
+		ViewGizmo::Disc discs[ViewGizmo::kDiscCount];
+		ViewGizmo::ComputeDiscs(glm::mat3(m_pEditorCamera->GetViewMatrix()), center, orbit_radius, discs);
+
+		ImGui::SetCursorScreenPos(box_min);
+		ImGui::InvisibleButton("##ViewGizmo", ImVec2(kBoxSize, kBoxSize));
+
+		/* 命中：指针落在轴盘圆内，从近到远取第一个（近者优先） */
+		const int32_t hovered_disc = ImGui::IsItemHovered()
+			? ViewGizmo::HitTest(discs, ImGui::GetIO().MousePos) : -1;
+
+		/* 按下沿记录命中（供"点击 = 切视角"判定）；拖过阈值即转为轨道旋转 */
+		if (ImGui::IsItemActivated())
+		{
+			m_ViewGizmoPressedDisc = hovered_disc;
+			m_ViewGizmoDraggedDistance = 0.0f;
+		}
+
+		if (ImGui::IsItemActive())
+		{
+			const ImVec2 drag_delta = ImGui::GetIO().MouseDelta;
+			m_ViewGizmoDraggedDistance += std::fabs(drag_delta.x) + std::fabs(drag_delta.y);
+			if (m_ViewGizmoDraggedDistance > kClickSlop)
+				m_ViewGizmoPressedDisc = -1;
+
+			if (drag_delta.x != 0.0f || drag_delta.y != 0.0f)
+				m_pEditorCamera->OrbitByPixelDelta(glm::vec2(drag_delta.x, drag_delta.y));
+		}
+
+		if (ImGui::IsItemDeactivated())
+		{
+			/* 点击（未拖拽）落在轴盘上：切换到该视角；+Y / -Y 保留当前方位角 */
+			switch (m_ViewGizmoPressedDisc)
+			{
+			case 0: m_pEditorCamera->SetOrbitAngles(-kQuarterTurn, 0.0f); break;	/* 从 +X 看 */
+			case 1: m_pEditorCamera->SetOrbitAngles(kQuarterTurn, 0.0f); break;		/* 从 -X 看 */
+			case 2: m_pEditorCamera->SetOrbitAngles(m_pEditorCamera->GetYaw(), kQuarterTurn); break;	/* 俯视 */
+			case 3: m_pEditorCamera->SetOrbitAngles(m_pEditorCamera->GetYaw(), -kQuarterTurn); break;	/* 仰视 */
+			case 4: m_pEditorCamera->SetOrbitAngles(0.0f, 0.0f); break;				/* 从 +Z 看 */
+			case 5: m_pEditorCamera->SetOrbitAngles(glm::radians(180.0f), 0.0f); break;	/* 从 -Z 看 */
+			default: break;
+			}
+			m_ViewGizmoPressedDisc = -1;
+		}
+
+		/* 绘制：由远及近；正轴实心 / 负轴空心 + 字母，悬停 / 按下高亮一档。
+		 * 拖拽（轨道）进行中不给悬停高亮：轴盘在指针下穿行，逐帧换高亮会闪成一片；
+		 * 按下沿的高亮（m_ViewGizmoPressedDisc）不受影响，点击语义仍看得见 */
+		const int32_t highlight_disc = ImGui::IsItemActive() ? -1 : hovered_disc;
+		ViewGizmo::Draw(ImGui::GetWindowDrawList(), discs, highlight_disc, m_ViewGizmoPressedDisc);
+
+		if (hovered_disc >= 0)
+			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 	}
 
 	void SceneEditorLayer::CheckMouseSelectEntity()
@@ -603,6 +711,40 @@ namespace Helios
 		}
 	}
 
+	/* F：把轨道中心聚焦到选中实体，并按包围球取景 */
+	void SceneEditorLayer::FocusSelectedEntity()
+	{
+		PROFILE_FUNCTION();
+
+		Entity selected_entity = m_SceneHierarchy.GetSelectedEntity();
+		if (!selected_entity || m_pMainScene == nullptr || !selected_entity.HasComponent<TransformComponent>())
+			return;
+
+		const glm::mat4 world_transform = m_pMainScene->GetWorldTransform(selected_entity);
+		glm::vec3 focus_center = glm::vec3(world_transform[3]);
+		float focus_radius = 1.0f;
+
+		if (selected_entity.HasComponent<ModelComponent>())
+		{
+			const auto& model = selected_entity.GetComponent<ModelComponent>().m_Model;
+			if (model != nullptr)
+			{
+				/* 模型局部 AABB → 世界：中心随变换走，半径按世界缩放折算（包围球近似） */
+				const glm::vec3 local_center = (model->GetAABBMin() + model->GetAABBMax()) * 0.5f;
+				const glm::vec3 local_extents = (model->GetAABBMax() - model->GetAABBMin()) * 0.5f;
+				focus_center = glm::vec3(world_transform * glm::vec4(local_center, 1.0f));
+
+				const glm::vec3 world_scale{
+					glm::length(glm::vec3(world_transform[0])),
+					glm::length(glm::vec3(world_transform[1])),
+					glm::length(glm::vec3(world_transform[2])) };
+				focus_radius = glm::length(local_extents * world_scale);
+			}
+		}
+
+		m_pEditorCamera->FocusOn(focus_center, glm::max(focus_radius, 0.1f));
+	}
+
 	void SceneEditorLayer::OnUpdate(float delta_time)
 	{
 		PROFILE_FUNCTION();
@@ -623,11 +765,11 @@ namespace Helios
 			switch (m_PlayMode)
 			{
 			case PlayMode::Edit:
-				/* 更新相机信息 */
-				if (m_IsViewportFocused)
-				{
-					m_pEditorCamera->OnUpdate(delta_time);
-				}
+				/* 更新相机信息：指针悬停在视口上才授权起手导航（已起手的手势不受影响）；
+				 * Gizmo 拖拽中、指针落在视口内控件（视图指示器）上时都不让出输入 */
+				m_pEditorCamera->SetNavigationAllowed(
+					m_IsViewportHovered && !ImGuizmo::IsUsing() && !ImGui::IsAnyItemHovered());
+				m_pEditorCamera->OnUpdate(delta_time);
 
 				/* 更新场景中的实体 */
 				m_pMainScene->OnUpdate(delta_time, m_pEditorCamera.get());
