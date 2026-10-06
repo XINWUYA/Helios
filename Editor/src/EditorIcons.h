@@ -11,24 +11,27 @@ namespace Helios
 		enum class Id : uint16_t
 		{
 			None = 0,
-			/* 文件 */
-			NewScene, OpenScene, Save,
+			/* 文件与资源操作 */
+			NewScene, OpenScene, Save, Import, NewAsset,
 			/* 编辑历史 */
 			Undo, Redo,
+			/* 路径导航（资源管理器顶栏：回到上次路径 / 重进路径） */
+			Back, Forward,
 			/* 变换 */
 			Translate, Rotate, Scale,
 			/* 运行 */
 			Play, Stop,
 			/* 通用 */
-			Menu, Add, Remove, Return, Filter, Visible,
+			Menu, Add, Remove, Return, Filter, Search, Visible,
 			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
-			Scene, Camera, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Model, Sprite, Entity,
+			Scene, Entity, Model, Camera, Light, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Sprite,
+			Audio, Particle, Terrain,
 			/* 组件卡头部：与实体类型图标分开，按"这是个什么组件"造型 */
 			Transform, Tag,
 			/* 面板/分组：统计类面板用 */
 			Stats,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
-			Directory, File, FileImage, FileScene, FileMtlGraph,
+			Directory, File, FileImage, FileScene, FileMtlGraph, FileShader, FileModel,
 			COUNT
 		};
 
@@ -39,6 +42,7 @@ namespace Helios
 		{
 			const char*  Name;      /* 语义名：用于调试与阅读 */
 			IconDrawFunc Draw;
+			float OpticalScale;     /* 最终 SVG 预览中的逐图光学尺寸 */
 		};
 
 		/* 元数据表：新增图标只在这里加一行（Id 与表项一一对应） */
@@ -47,6 +51,9 @@ namespace Helios
 		/* 绘制图标本体（不进入交互；按钮请用 IconButton） */
 		void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color);
 
+		/* 搜索框前置放大镜；Begin/End 包住对应的 InputText，自动预留图标空间。 */
+		void BeginSearchInput();
+		void EndSearchInput();
 
 		/* 前置图标（输入框 / 下拉框左端的小图标）：用 Begin/End 包住控件、图标画在左端中部（控件
 		 * 矩形由调用方给 —— 下拉弹层打开时 GetItemRect 取到的是弹层项）。注意：Begin/End 靠撑大

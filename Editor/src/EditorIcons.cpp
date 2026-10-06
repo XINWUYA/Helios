@@ -1,8 +1,16 @@
 #include "Pch.h"
 #include "EditorIcons.h"
+#include "EditorIconsSvg.h"
 #include "Helios/ImGui/EditorTheme.h"
+#include <tinyxml2.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <string>
+#include <vector>
 
 namespace Helios::Icons
 {
@@ -13,7 +21,7 @@ namespace Helios::Icons
 		/* 统一描边语言：所有矢量图标共用同一线宽比例，视觉重量一致 */
 		inline float StrokeWidth(float size)
 		{
-			return std::max(1.0f, size * 0.088f);
+			return std::max(1.25f, size * 0.078f);
 		}
 
 		/* 第二档色：同色、低透明度（双色调图标用）。
@@ -23,6 +31,18 @@ namespace Helios::Icons
 			const ImU32 alpha = static_cast<ImU32>(static_cast<float>((color >> IM_COL32_A_SHIFT) & 0xFF) * alpha_scale);
 			return (color & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
 		}
+
+		/* 点缀色沿用调用方透明度，确保禁用态与整枚图标同步变淡。 */
+		inline ImU32 PaletteColor(ImU32 source, ImU32 palette, float alpha_scale = 1.0f)
+		{
+			const float source_alpha = static_cast<float>((source >> IM_COL32_A_SHIFT) & 0xFF);
+			const float palette_alpha = static_cast<float>((palette >> IM_COL32_A_SHIFT) & 0xFF);
+			const ImU32 alpha = static_cast<ImU32>(source_alpha * palette_alpha * alpha_scale / 255.0f);
+			return (palette & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
+		}
+
+		constexpr ImU32 kViolet = IM_COL32(108, 104, 217, 255);
+		constexpr ImU32 kMint = IM_COL32(39, 173, 145, 255);
 
 		/* 归一化坐标 -> 屏幕坐标。
 		 * 约定：图标在 [0,1]² 内作图，(0,0) 为左上、(1,1) 为右下；
@@ -72,12 +92,12 @@ namespace Helios::Icons
 
 			/* 翻起的一角：填色后一页纸才有立体感，不然只是条空心折线 */
 			dl->AddTriangleFilled(c.At(0.60f, 0.06f), c.At(0.82f, 0.28f), c.At(0.60f, 0.28f),
-				Soften(color, 0.40f));
+				PaletteColor(color, kViolet, 0.18f));
 
 			StrokePolyline(dl, c, kPage, thickness, color, true);
 
-			dl->AddLine(c.At(0.60f, 0.06f), c.At(0.60f, 0.28f), color, thickness);
-			dl->AddLine(c.At(0.60f, 0.28f), c.At(0.82f, 0.28f), color, thickness);
+			dl->AddLine(c.At(0.60f, 0.06f), c.At(0.60f, 0.28f), PaletteColor(color, kViolet), thickness);
+			dl->AddLine(c.At(0.60f, 0.28f), c.At(0.82f, 0.28f), PaletteColor(color, kViolet), thickness);
 		}
 
 		void DrawNewScene(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -89,13 +109,20 @@ namespace Helios::Icons
 		void DrawOpenScene(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
 
-			/* 文件夹 */
+			/* 打开的文件夹：后片与前片错层，前片以淡紫填充表达打开动作 */
 			static constexpr float kFolder[6][2] = {
-				{ 0.10f, 0.85f }, { 0.10f, 0.19f }, { 0.39f, 0.19f },
-				{ 0.49f, 0.34f }, { 0.90f, 0.34f }, { 0.90f, 0.85f }
+				{ 0.10f, 0.83f }, { 0.10f, 0.25f }, { 0.39f, 0.25f },
+				{ 0.50f, 0.39f }, { 0.90f, 0.39f }, { 0.90f, 0.83f }
 			};
-			StrokePolyline(dl, c, kFolder, StrokeWidth(size), color, true);
+			static constexpr float kFront[4][2] = {
+				{ 0.06f, 0.48f }, { 0.91f, 0.48f }, { 0.78f, 0.84f }, { 0.02f, 0.84f }
+			};
+			FillPoly(dl, c, kFront, PaletteColor(color, kViolet, 0.18f));
+			StrokePolyline(dl, c, kFolder, t, color, true);
+			StrokePolyline(dl, c, kFront, t, PaletteColor(color, kViolet), true);
+			dl->AddLine(c.At(0.16f, 0.66f), c.At(0.56f, 0.66f), PaletteColor(color, kMint), t);
 		}
 
 		void DrawSave(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -103,14 +130,56 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
-			/* 盘体（左上切角）+ 上方滑盖 + 下方标签 */
+			/* 软盘轮廓：淡紫标签窗配一条薄荷色保存指示 */
+			dl->AddRectFilled(c.At(0.30f, 0.54f), c.At(0.70f, 0.83f), PaletteColor(color, kViolet, 0.18f), c.Len(0.025f));
+			dl->AddRectFilled(c.At(0.35f, 0.16f), c.At(0.65f, 0.38f), PaletteColor(color, kViolet, 0.12f));
+
 			static constexpr float kShell[5][2] = {
 				{ 0.15f, 0.15f }, { 0.68f, 0.15f }, { 0.85f, 0.32f }, { 0.85f, 0.85f }, { 0.15f, 0.85f }
 			};
 			StrokePolyline(dl, c, kShell, t, color, true);
 
-			dl->AddRect(c.At(0.33f, 0.15f), c.At(0.67f, 0.40f), color, 0.0f, 0, t);
-			dl->AddRect(c.At(0.28f, 0.55f), c.At(0.72f, 0.85f), color, 0.0f, 0, t);
+			dl->AddRect(c.At(0.33f, 0.15f), c.At(0.67f, 0.40f), PaletteColor(color, kViolet), 0.0f, 0, t);
+			dl->AddRect(c.At(0.28f, 0.55f), c.At(0.72f, 0.85f), color, c.Len(0.025f), 0, t);
+			dl->AddLine(c.At(0.37f, 0.72f), c.At(0.63f, 0.72f), PaletteColor(color, kMint), t);
+		}
+
+		void DrawImport(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 文档 + 向下导入箭头 + 接收托盘，避免与打开场景的文件夹混淆 */
+			static constexpr float kPage[5][2] = {
+				{ 0.20f, 0.08f }, { 0.56f, 0.08f }, { 0.73f, 0.25f }, { 0.73f, 0.50f }, { 0.20f, 0.50f }
+			};
+			StrokePolyline(dl, c, kPage, t, color, true);
+			dl->AddLine(c.At(0.56f, 0.08f), c.At(0.56f, 0.25f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.56f, 0.25f), c.At(0.73f, 0.25f), PaletteColor(color, kViolet), t);
+
+			dl->AddLine(c.At(0.50f, 0.34f), c.At(0.50f, 0.76f), PaletteColor(color, kViolet), t);
+			dl->PathLineTo(c.At(0.36f, 0.62f));
+			dl->PathLineTo(c.At(0.50f, 0.76f));
+			dl->PathLineTo(c.At(0.64f, 0.62f));
+			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+
+			dl->AddLine(c.At(0.22f, 0.84f), c.At(0.78f, 0.84f), color, t);
+			dl->AddLine(c.At(0.22f, 0.84f), c.At(0.22f, 0.73f), color, t);
+			dl->AddCircleFilled(c.At(0.22f, 0.73f), c.Len(0.055f), PaletteColor(color, kMint));
+		}
+
+		/* 新建资源：一枚加号、不加外框，用"动作"强调色（跟 Add / Return / Filter 同源）。跟通用的
+		 * 「Add」（圆圈加号）刻意分开：这里是"往当前目录建资源"、组件那个是"带圈加号"。笔画略重
+		 * （2.6 / 32），因为它是整枚图标唯一的内容。 */
+		void DrawNewAsset(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			constexpr float kArm = 9.0f / 32.0f;                       /* 臂长 9 / 32（与 SVG 同一副几何） */
+			const float t = std::max(1.25f, size * (2.6f / 32.0f));    /* 线宽 2.6 / 32 */
+			const ImU32 violet = PaletteColor(color, kViolet);
+
+			dl->AddLine(c.At(0.50f, 0.50f - kArm), c.At(0.50f, 0.50f + kArm), violet, t);
+			dl->AddLine(c.At(0.50f - kArm, 0.50f), c.At(0.50f + kArm, 0.50f), violet, t);
 		}
 
 		/* ---- 编辑历史 ----
@@ -155,6 +224,34 @@ namespace Helios::Icons
 			DrawHistoryArrow(dl, Canvas{ center, size }, StrokeWidth(size), color, true);
 		}
 
+		/* ---- 路径导航 ----
+		 * 回到上次路径 / 重进路径：平直的方向箭头（尾线 + 折角箭头），跟撤销 / 重做的弧线刻意分开
+		 * （那个管编辑历史，这里管浏览位置）。镜像跟 DrawHistoryArrow 同一套做法（归一化坐标先镜像）。 */
+		void DrawNavArrow(ImDrawList* dl, const Canvas& c, float t, ImU32 color, bool mirror)
+		{
+			const float flip = mirror ? -1.0f : 1.0f;
+			const auto at = [&](float x, float y) { return c.At(0.5f + flip * (x - 0.5f), y); };
+
+			/* 尾线：从远端指到箭头折点 */
+			dl->AddLine(at(0.81f, 0.50f), at(0.20f, 0.50f), color, t);
+
+			/* 箭头的两条臂 */
+			dl->PathLineTo(at(0.44f, 0.27f));
+			dl->PathLineTo(at(0.20f, 0.50f));
+			dl->PathLineTo(at(0.44f, 0.73f));
+			dl->PathStroke(color, 0, t);
+		}
+
+		void DrawBack(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			DrawNavArrow(dl, Canvas{ center, size }, StrokeWidth(size), color, false);
+		}
+
+		void DrawForward(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			DrawNavArrow(dl, Canvas{ center, size }, StrokeWidth(size), color, true);
+		}
+
 		/* ---- 变换 ---- */
 
 		void DrawTranslate(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -174,27 +271,28 @@ namespace Helios::Icons
 		void DrawRotate(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
-			const ImVec2 origin = c.At(0.50f, 0.53f);
+			const float t = StrokeWidth(size);
+			const ImVec2 origin = c.At(0.50f, 0.50f);
 			const float radius = c.Len(0.30f);
-			/* 顶部留口，其余扫过一圈 */
-			const float a0 = -0.30f * kPi;
-			const float a1 = 1.28f * kPi;
+			const ImU32 violet = PaletteColor(color, kViolet);
 
-			dl->PathArcTo(origin, radius, a0, a1, 40);
-			dl->PathStroke(color, 0, StrokeWidth(size));
+			/* 两段半圆弧首尾相接：上弧终点向下、下弧终点向上，组成循环旋转 */
+			dl->PathArcTo(origin, radius, kPi, 2.0f * kPi, 24);
+			dl->PathStroke(violet, 0, t);
+			dl->PathArcTo(origin, radius, 0.0f, kPi, 24);
+			dl->PathStroke(color, 0, t);
 
-			/* 末端沿切向的箭头 */
-			const ImVec2 dir(std::cos(a1), std::sin(a1));   /* 半径方向 */
-			const ImVec2 end(origin.x + radius * dir.x, origin.y + radius * dir.y);
-			const ImVec2 tangent(-dir.y, dir.x);            /* 切向（角度增大方向） */
-			const float head = c.Len(0.17f);
-			const float half = c.Len(0.115f);
+			/* 右端箭头朝下，左端箭头朝上；两个折线尖端都落在半圆弧端点 */
+			dl->PathLineTo(c.At(0.70f, 0.40f));
+			dl->PathLineTo(c.At(0.80f, 0.50f));
+			dl->PathLineTo(c.At(0.90f, 0.40f));
+			dl->PathStroke(violet, 0, t);
 
-			dl->AddTriangleFilled(
-				ImVec2(end.x + tangent.x * head, end.y + tangent.y * head),
-				ImVec2(end.x + dir.x * half, end.y + dir.y * half),
-				ImVec2(end.x - dir.x * half, end.y - dir.y * half),
-				color);
+			dl->PathLineTo(c.At(0.30f, 0.60f));
+			dl->PathLineTo(c.At(0.20f, 0.50f));
+			dl->PathLineTo(c.At(0.10f, 0.60f));
+			dl->PathStroke(color, 0, t);
+			dl->AddCircleFilled(origin, c.Len(0.075f), PaletteColor(color, kMint));
 		}
 
 		void DrawScale(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -243,30 +341,39 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
-			dl->AddLine(c.At(0.50f, 0.16f), c.At(0.50f, 0.84f), color, t);
-			dl->AddLine(c.At(0.16f, 0.50f), c.At(0.84f, 0.50f), color, t);
+			/* 圆形操作符号让「新增」从静态十字装饰中脱离出来 */
+			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.36f), color, 0, t);
+			dl->AddLine(c.At(0.50f, 0.30f), c.At(0.50f, 0.70f), color, t);
+			dl->AddLine(c.At(0.30f, 0.50f), c.At(0.70f, 0.50f), color, t);
 		}
 
 		void DrawRemove(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
 
-			dl->AddLine(c.At(0.16f, 0.50f), c.At(0.84f, 0.50f), color, StrokeWidth(size));
+			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.36f), color, 0, t);
+			dl->AddLine(c.At(0.30f, 0.50f), c.At(0.70f, 0.50f), color, t);
 		}
 
 		void DrawReturn(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
+			const ImU32 violet = PaletteColor(color, kViolet);
 
-			/* 敞口箭头（chevron）+ 横线：现代"返回"造型 —— 比实心三角轻，
-			 * 行高附近也不会糊成一坨。 */
-			dl->PathLineTo(c.At(0.44f, 0.26f));
-			dl->PathLineTo(c.At(0.18f, 0.50f));
-			dl->PathLineTo(c.At(0.44f, 0.74f));
+			/* 折返路径先向左、再下行，末端箭头明确指向左侧 */
+			dl->PathLineTo(c.At(0.86f, 0.28f));
+			dl->PathLineTo(c.At(0.40f, 0.28f));
+			dl->PathBezierCubicCurveTo(c.At(0.31f, 0.28f), c.At(0.30f, 0.35f), c.At(0.30f, 0.44f), 8);
+			dl->PathLineTo(c.At(0.30f, 0.72f));
 			dl->PathStroke(color, 0, t);
 
-			dl->AddLine(c.At(0.18f, 0.50f), c.At(0.88f, 0.50f), color, t);
+			dl->PathLineTo(c.At(0.30f, 0.58f));
+			dl->PathLineTo(c.At(0.12f, 0.72f));
+			dl->PathLineTo(c.At(0.30f, 0.86f));
+			dl->PathStroke(violet, 0, t);
+			dl->AddLine(c.At(0.68f, 0.28f), c.At(0.86f, 0.28f), PaletteColor(color, kMint), t);
 		}
 
 		void DrawFilter(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -280,6 +387,15 @@ namespace Helios::Icons
 			StrokePolyline(dl, c, kFunnel, StrokeWidth(size), color, false);
 		}
 
+		void DrawSearch(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddCircle(c.At(0.42f, 0.42f), c.Len(0.26f), color, 0, t);
+			dl->AddLine(c.At(0.61f, 0.61f), c.At(0.88f, 0.88f), color, t);
+		}
+
 		void DrawVisible(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -290,7 +406,8 @@ namespace Helios::Icons
 			dl->PathBezierCubicCurveTo(c.At(0.70f, 0.84f), c.At(0.30f, 0.84f), c.At(0.08f, 0.50f), 24);
 			dl->PathStroke(color, 0, t);
 
-			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.145f), color, 0, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.19f), Soften(color, 0.26f));
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.105f), color);
 		}
 
 		/* ---- 场景树节点 ----
@@ -301,32 +418,42 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
+			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 mint = PaletteColor(color, kMint);
 
-			/* 透视地面 = 一片"世界"：面填一层淡色 + 网格线，比纯描边有实体感。
-			 * 造型上与模型（线框方块）、图片精灵（画框 + 山）都不撞。 */
-			static constexpr float kFloor[4][2] = {
-				{ 0.32f, 0.42f }, { 0.68f, 0.42f }, { 0.96f, 0.90f }, { 0.04f, 0.90f }
-			};
-			FillPoly(dl, c, kFloor, Soften(color, 0.30f));
-			StrokePolyline(dl, c, kFloor, t, color, true);
+			/* 根节点向下分出三个子对象：用圆节点和连线表达场景层级 */
+			dl->AddLine(c.At(0.50f, 0.30f), c.At(0.50f, 0.50f), violet, t);
+			dl->AddLine(c.At(0.22f, 0.50f), c.At(0.78f, 0.50f), violet, t);
+			dl->AddLine(c.At(0.22f, 0.50f), c.At(0.22f, 0.70f), violet, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.70f), violet, t);
+			dl->AddLine(c.At(0.78f, 0.50f), c.At(0.78f, 0.70f), violet, t);
 
-			dl->AddLine(c.At(0.40f, 0.42f), c.At(0.28f, 0.90f), color, t);
-			dl->AddLine(c.At(0.60f, 0.42f), c.At(0.72f, 0.90f), color, t);
-			dl->AddLine(c.At(0.19f, 0.66f), c.At(0.81f, 0.66f), color, t);
+			const float root_radius = c.Len(0.125f);
+			const float child_radius = c.Len(0.095f);
+			dl->AddCircleFilled(c.At(0.50f, 0.22f), root_radius, PaletteColor(color, kMint, 0.20f));
+			dl->AddCircle(c.At(0.50f, 0.22f), root_radius, mint, 0, t);
+			dl->AddCircleFilled(c.At(0.22f, 0.78f), child_radius, PaletteColor(color, kViolet, 0.16f));
+			dl->AddCircle(c.At(0.22f, 0.78f), child_radius, violet, 0, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.78f), child_radius, PaletteColor(color, kViolet, 0.16f));
+			dl->AddCircle(c.At(0.50f, 0.78f), child_radius, violet, 0, t);
+			dl->AddCircleFilled(c.At(0.78f, 0.78f), child_radius, PaletteColor(color, kViolet, 0.16f));
+			dl->AddCircle(c.At(0.78f, 0.78f), child_radius, violet, 0, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.22f), c.Len(0.035f), mint);
 		}
 
 		void DrawCamera(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
+			const float lens_radius = c.Len(0.22f);
 
-			/* 机身 + 右侧楔形镜头 */
-			dl->AddRect(c.At(0.06f, 0.30f), c.At(0.62f, 0.86f), color, c.Len(0.10f), 0, t);
-
-			static constexpr float kLens[4][2] = {
-				{ 0.62f, 0.44f }, { 0.94f, 0.24f }, { 0.94f, 0.92f }, { 0.62f, 0.72f }
-			};
-			StrokePolyline(dl, c, kLens, t, color, true);
+			/* 相机机身、取景器凸起与镜头；镜头中心用薄荷绿聚焦点强调 */
+			dl->AddRectFilled(c.At(0.08f, 0.28f), c.At(0.92f, 0.82f), PaletteColor(color, kViolet, 0.12f), c.Len(0.12f));
+			dl->AddRect(c.At(0.08f, 0.28f), c.At(0.92f, 0.82f), color, c.Len(0.12f), 0, t);
+			dl->AddRect(c.At(0.23f, 0.16f), c.At(0.50f, 0.29f), PaletteColor(color, kViolet), c.Len(0.045f), 0, t);
+			dl->AddCircleFilled(c.At(0.57f, 0.55f), lens_radius, PaletteColor(color, kViolet, 0.22f));
+			dl->AddCircle(c.At(0.57f, 0.55f), lens_radius, PaletteColor(color, kViolet), 0, t);
+			dl->AddCircleFilled(c.At(0.57f, 0.55f), c.Len(0.075f), PaletteColor(color, kMint));
 		}
 
 		void DrawDirectionalLight(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -337,7 +464,9 @@ namespace Helios::Icons
 			/* 太阳 + 三束等长等距的平行光：区分于点光（四向短射线）、聚光（锥形）。
 			 * 三束用同一个方向 + 垂直偏移量算出来，才不会像随手画的三条斜线。 */
 			const ImVec2 sun = c.At(0.30f, 0.28f);
+			dl->AddCircleFilled(sun, c.Len(0.16f), PaletteColor(color, kViolet, 0.18f));
 			dl->AddCircle(sun, c.Len(0.16f), color, 0, t);
+			dl->AddCircleFilled(sun, c.Len(0.045f), PaletteColor(color, kMint));
 
 			const float along_x = 0.707f;
 			const float along_y = 0.707f;
@@ -359,11 +488,13 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 
 			/* 发光球 + 四向短射线 */
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.22f), PaletteColor(color, kViolet, 0.18f));
 			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.22f), color, 0, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.075f), PaletteColor(color, kMint));
 
-			dl->AddLine(c.At(0.50f, 0.04f), c.At(0.50f, 0.18f), color, t);
+			dl->AddLine(c.At(0.50f, 0.04f), c.At(0.50f, 0.18f), PaletteColor(color, kViolet), t);
 			dl->AddLine(c.At(0.50f, 0.82f), c.At(0.50f, 0.96f), color, t);
-			dl->AddLine(c.At(0.04f, 0.50f), c.At(0.18f, 0.50f), color, t);
+			dl->AddLine(c.At(0.04f, 0.50f), c.At(0.18f, 0.50f), PaletteColor(color, kViolet), t);
 			dl->AddLine(c.At(0.82f, 0.50f), c.At(0.96f, 0.50f), color, t);
 		}
 
@@ -373,10 +504,89 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 
 			/* 灯源 + 向下张开的光锥（不封底，才读得出是"投出去的光"） */
-			dl->AddCircleFilled(c.At(0.50f, 0.16f), c.Len(0.11f), color);
+			dl->AddCircleFilled(c.At(0.50f, 0.16f), c.Len(0.11f), PaletteColor(color, kMint));
+			dl->AddLine(c.At(0.40f, 0.32f), c.At(0.14f, 0.92f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.60f, 0.32f), c.At(0.86f, 0.92f), PaletteColor(color, kViolet), t);
+		}
 
-			dl->AddLine(c.At(0.40f, 0.32f), c.At(0.14f, 0.92f), color, t);
-			dl->AddLine(c.At(0.60f, 0.32f), c.At(0.86f, 0.92f), color, t);
+		void DrawLight(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImVec2 bulb = c.At(0.50f, 0.42f);
+
+			/* 灯泡轮廓 + 灯座；淡紫灯罩与薄荷色发光核心 */
+			dl->AddCircleFilled(bulb, c.Len(0.25f), PaletteColor(color, kViolet, 0.18f));
+			dl->AddCircle(bulb, c.Len(0.25f), color, 0, t);
+			dl->AddLine(c.At(0.37f, 0.57f), c.At(0.42f, 0.69f), color, t);
+			dl->AddLine(c.At(0.63f, 0.57f), c.At(0.58f, 0.69f), color, t);
+			dl->AddLine(c.At(0.42f, 0.69f), c.At(0.58f, 0.69f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.43f, 0.77f), c.At(0.57f, 0.77f), color, t);
+			dl->AddLine(c.At(0.45f, 0.84f), c.At(0.55f, 0.84f), color, t);
+			dl->AddCircleFilled(bulb, c.Len(0.065f), PaletteColor(color, kMint));
+
+			dl->AddLine(c.At(0.50f, 0.04f), c.At(0.50f, 0.11f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.13f, 0.42f), c.At(0.20f, 0.42f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.80f, 0.42f), c.At(0.87f, 0.42f), PaletteColor(color, kViolet), t);
+		}
+
+		void DrawAudio(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 扬声器主体填淡紫，声波用主线色，中心用薄荷色作识别点 */
+			static constexpr float kSpeaker[6][2] = {
+				{ 0.08f, 0.40f }, { 0.30f, 0.40f }, { 0.60f, 0.18f },
+				{ 0.60f, 0.82f }, { 0.30f, 0.60f }, { 0.08f, 0.60f }
+			};
+			FillPoly(dl, c, kSpeaker, PaletteColor(color, kViolet, 0.18f));
+			StrokePolyline(dl, c, kSpeaker, t, PaletteColor(color, kViolet), true);
+			dl->PathArcTo(c.At(0.57f, 0.50f), c.Len(0.20f), -0.82f, 0.82f, 18);
+			dl->PathStroke(color, 0, t);
+			dl->PathArcTo(c.At(0.57f, 0.50f), c.Len(0.34f), -0.82f, 0.82f, 18);
+			dl->PathStroke(color, 0, t);
+			dl->AddCircleFilled(c.At(0.30f, 0.50f), c.Len(0.055f), PaletteColor(color, kMint));
+		}
+
+		void DrawParticle(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 大小不同的星形发射点与粒子点，保持轮廓清晰、不画成统计柱 */
+			static constexpr float kBurst[8][2] = {
+				{ 0.50f, 0.08f }, { 0.56f, 0.40f }, { 0.84f, 0.50f }, { 0.56f, 0.58f },
+				{ 0.50f, 0.90f }, { 0.43f, 0.58f }, { 0.16f, 0.50f }, { 0.43f, 0.40f }
+			};
+			StrokePolyline(dl, c, kBurst, t, PaletteColor(color, kViolet), true);
+			dl->AddCircleFilled(c.At(0.17f, 0.20f), c.Len(0.06f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.83f, 0.23f), c.Len(0.045f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.78f, 0.80f), c.Len(0.07f), color);
+			dl->AddCircleFilled(c.At(0.20f, 0.81f), c.Len(0.04f), PaletteColor(color, kViolet));
+		}
+
+		void DrawTerrain(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 山脊剪影 + 两道地层曲线：与场景地面网格、图片缩略图区分 */
+			static constexpr float kHill[7][2] = {
+				{ 0.08f, 0.76f }, { 0.27f, 0.43f }, { 0.41f, 0.60f },
+				{ 0.58f, 0.28f }, { 0.91f, 0.76f }, { 0.91f, 0.84f }, { 0.08f, 0.84f }
+			};
+			dl->AddTriangleFilled(c.At(0.27f, 0.76f), c.At(0.58f, 0.28f), c.At(0.91f, 0.76f),
+				PaletteColor(color, kViolet, 0.14f));
+			dl->AddTriangleFilled(c.At(0.08f, 0.76f), c.At(0.27f, 0.43f), c.At(0.41f, 0.60f),
+				PaletteColor(color, kMint, 0.10f));
+			StrokePolyline(dl, c, kHill, t, PaletteColor(color, kViolet), true);
+			dl->AddLine(c.At(0.29f, 0.48f), c.At(0.40f, 0.58f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.60f, 0.34f), c.At(0.73f, 0.49f), PaletteColor(color, kMint), t);
+
+			dl->PathLineTo(c.At(0.10f, 0.91f));
+			dl->PathBezierCubicCurveTo(c.At(0.34f, 0.82f), c.At(0.66f, 0.98f), c.At(0.90f, 0.89f), 12);
+			dl->PathStroke(color, 0, t);
 		}
 
 		void DrawReflectionProbe(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -385,12 +595,13 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 
 			/* 球体 + 左上高光弧 + 反射亮点 */
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.40f), PaletteColor(color, kViolet, 0.12f));
 			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.40f), color, 0, t);
 
 			dl->PathArcTo(c.At(0.50f, 0.50f), c.Len(0.22f), 3.34f, 4.56f, 16);
-			dl->PathStroke(color, 0, t);
+			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
 
-			dl->AddCircleFilled(c.At(0.66f, 0.66f), c.Len(0.08f), color);
+			dl->AddCircleFilled(c.At(0.66f, 0.66f), c.Len(0.08f), PaletteColor(color, kMint));
 		}
 
 		void DrawModel(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -406,12 +617,13 @@ namespace Helios::Icons
 			static constexpr float kTop[4][2] = {
 				{ 0.50f, 0.08f }, { 0.92f, 0.30f }, { 0.50f, 0.52f }, { 0.08f, 0.30f }
 			};
-			FillPoly(dl, c, kTop, Soften(color, 0.26f));
+			FillPoly(dl, c, kTop, PaletteColor(color, kViolet, 0.16f));
 			StrokePolyline(dl, c, kCube, t, color, true);
 
-			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.08f), color, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.08f), PaletteColor(color, kViolet), t);
 			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.92f, 0.70f), color, t);
 			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.08f, 0.70f), color, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.045f), PaletteColor(color, kMint));
 		}
 
 		void DrawSprite(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -422,35 +634,31 @@ namespace Helios::Icons
 			/* 画框 + 山 + 太阳：图片图标的通用语言 */
 			dl->AddRect(c.At(0.08f, 0.16f), c.At(0.92f, 0.84f), color, c.Len(0.08f), 0, t);
 
-			dl->AddTriangleFilled(c.At(0.18f, 0.74f), c.At(0.46f, 0.40f), c.At(0.72f, 0.74f), color);
-			dl->AddCircleFilled(c.At(0.70f, 0.34f), c.Len(0.08f), color);
+			dl->AddTriangleFilled(c.At(0.18f, 0.74f), c.At(0.46f, 0.40f), c.At(0.72f, 0.74f), PaletteColor(color, kViolet, 0.85f));
+			dl->AddCircleFilled(c.At(0.70f, 0.34f), c.Len(0.08f), PaletteColor(color, kMint));
 		}
 
 		void DrawEntity(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
+			const ImVec2 origin = c.At(0.48f, 0.56f);
+			const ImU32 violet = PaletteColor(color, kViolet);
 
-			/* 只有 Transform 的实体没有可视形态：用取景框四角表示"一个空对象"。
-			 * 同一个直角括号镜像四次，形状只有一份定义。 */
-			static constexpr float kBracket[3][2] = {
-				{ 0.12f, 0.36f }, { 0.12f, 0.12f }, { 0.36f, 0.12f }
-			};
+			/* 空物体：中心锚点伸出平面轴与一条斜向轴，表达可被变换的原点 */
+			dl->AddLine(origin, c.At(0.90f, 0.56f), color, t);
+			dl->AddLine(origin, c.At(0.48f, 0.13f), color, t);
+			dl->AddLine(origin, c.At(0.18f, 0.25f), violet, t);
+			dl->AddLine(origin, c.At(0.48f, 0.94f), color, t);
+			dl->AddLine(origin, c.At(0.08f, 0.56f), color, t);
 
-			for (int corner = 0; corner < 4; ++corner)
-			{
-				const float flip_x = (corner & 1) ? -1.0f : 1.0f;
-				const float flip_y = (corner & 2) ? -1.0f : 1.0f;
-
-				for (int i = 0; i < 3; ++i)
-				{
-					const float x = 0.5f + flip_x * (kBracket[i][0] - 0.5f);
-					const float y = 0.5f + flip_y * (kBracket[i][1] - 0.5f);
-					dl->PathLineTo(c.At(x, y));
-				}
-
-				dl->PathStroke(color, 0, t);
-			}
+			static constexpr float kAxisX[3][2] = { { 0.78f, 0.47f }, { 0.90f, 0.56f }, { 0.78f, 0.65f } };
+			static constexpr float kAxisY[3][2] = { { 0.40f, 0.28f }, { 0.48f, 0.13f }, { 0.56f, 0.28f } };
+			static constexpr float kAxisZ[3][2] = { { 0.16f, 0.38f }, { 0.18f, 0.25f }, { 0.31f, 0.28f } };
+			FillPoly(dl, c, kAxisX, color);
+			FillPoly(dl, c, kAxisY, color);
+			FillPoly(dl, c, kAxisZ, violet);
+			dl->AddCircleFilled(origin, c.Len(0.075f), PaletteColor(color, kMint));
 		}
 
 		/* ---- 组件卡头部 ----
@@ -501,10 +709,10 @@ namespace Helios::Icons
 			static constexpr float kTag[5][2] = {
 				{ 0.10f, 0.24f }, { 0.62f, 0.24f }, { 0.92f, 0.50f }, { 0.62f, 0.76f }, { 0.10f, 0.76f }
 			};
-			FillPoly(dl, c, kTag, Soften(color, 0.26f));
+			FillPoly(dl, c, kTag, PaletteColor(color, kViolet, 0.16f));
 			StrokePolyline(dl, c, kTag, StrokeWidth(size), color, true);
 
-			dl->AddCircleFilled(c.At(0.31f, 0.50f), c.Len(0.095f), color);
+			dl->AddCircleFilled(c.At(0.31f, 0.50f), c.Len(0.095f), PaletteColor(color, kMint));
 		}
 
 		void DrawStats(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -537,15 +745,16 @@ namespace Helios::Icons
 			static constexpr float kBody[4][2] = {
 				{ 0.08f, 0.35f }, { 0.92f, 0.35f }, { 0.92f, 0.83f }, { 0.08f, 0.83f }
 			};
-			FillPoly(dl, c, kTab, Soften(color, 0.26f));
-			FillPoly(dl, c, kBody, Soften(color, 0.42f));
+			FillPoly(dl, c, kTab, PaletteColor(color, kViolet, 0.16f));
+			FillPoly(dl, c, kBody, PaletteColor(color, kViolet, 0.12f));
 
-			/* 外形（正视图 + 标签页）：与工具栏里纯描边的"打开"区分开 */
+			/* 外形（正视图 + 标签页）：与工具栏里打开状态的斜前片区分开 */
 			static constexpr float kFolder[6][2] = {
 				{ 0.07f, 0.83f }, { 0.07f, 0.19f }, { 0.35f, 0.19f },
 				{ 0.46f, 0.34f }, { 0.93f, 0.34f }, { 0.93f, 0.83f }
 			};
 			StrokePolyline(dl, c, kFolder, t, color, true);
+			dl->AddLine(c.At(0.16f, 0.57f), c.At(0.82f, 0.57f), PaletteColor(color, kMint), t);
 		}
 
 		void DrawFile(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -569,9 +778,9 @@ namespace Helios::Icons
 			/* 图片文件：页里装着一张风景 —— 两座山 + 太阳（形够大，14px 下也认得出） */
 			StrokePage(dl, c, t, color);
 
-			dl->AddTriangleFilled(c.At(0.28f, 0.82f), c.At(0.50f, 0.53f), c.At(0.72f, 0.82f), color);
-			dl->AddTriangleFilled(c.At(0.50f, 0.82f), c.At(0.66f, 0.62f), c.At(0.82f, 0.82f), Soften(color, 0.55f));
-			dl->AddCircleFilled(c.At(0.68f, 0.44f), c.Len(0.085f), color);
+			dl->AddTriangleFilled(c.At(0.28f, 0.82f), c.At(0.50f, 0.53f), c.At(0.72f, 0.82f), PaletteColor(color, kViolet, 0.90f));
+			dl->AddTriangleFilled(c.At(0.50f, 0.82f), c.At(0.66f, 0.62f), c.At(0.82f, 0.82f), PaletteColor(color, kMint, 0.72f));
+			dl->AddCircleFilled(c.At(0.68f, 0.44f), c.Len(0.085f), PaletteColor(color, kMint));
 		}
 
 		void DrawFileMtlGraph(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -583,52 +792,815 @@ namespace Helios::Icons
 			/* 材质图 = 一个带输入 / 输出端口的节点（用过节点编辑器的都认得）：
 			 * 方框填淡色 + 左右两个实心端口 + 两小段连线。
 			 * 别用"三个点连两条线"——那个造型是"分享"，反而认不出是节点图。 */
-			dl->AddRectFilled(c.At(0.30f, 0.24f), c.At(0.70f, 0.76f), Soften(color, 0.30f), rounding);
+			dl->AddRectFilled(c.At(0.30f, 0.24f), c.At(0.70f, 0.76f), PaletteColor(color, kViolet, 0.18f), rounding);
 			dl->AddRect(c.At(0.30f, 0.24f), c.At(0.70f, 0.76f), color, rounding, 0, t);
 
-			dl->AddLine(c.At(0.14f, 0.50f), c.At(0.30f, 0.50f), color, t);
+			dl->AddLine(c.At(0.14f, 0.50f), c.At(0.30f, 0.50f), PaletteColor(color, kViolet), t);
 			dl->AddLine(c.At(0.70f, 0.50f), c.At(0.86f, 0.50f), color, t);
 
-			dl->AddCircleFilled(c.At(0.13f, 0.50f), c.Len(0.095f), color);
+			dl->AddCircleFilled(c.At(0.13f, 0.50f), c.Len(0.095f), PaletteColor(color, kMint));
 			dl->AddCircleFilled(c.At(0.87f, 0.50f), c.Len(0.095f), color);
+		}
+
+		/* 着色器文件：页里一颗"材质球"（右半浸紫 = 明暗交界，左上一点薄荷 = 高光）。
+		 * 球是 DCC 里最通行的着色器 / 材质预览造型，比"写个 fx 字母"或波形更一眼认得出。 */
+		void DrawFileShader(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			StrokePage(dl, c, t, color);
+
+			dl->AddCircleFilled(c.At(0.53f, 0.62f), c.Len(0.17f), PaletteColor(color, kViolet, 0.18f));
+			dl->AddCircle(c.At(0.53f, 0.62f), c.Len(0.17f), color, 0, t);
+			/* 右半个圆弧（-90° → +90° 经过 +x）：球被照亮的那一半，用强调色压出来 */
+			dl->PathArcTo(c.At(0.53f, 0.62f), c.Len(0.17f), -1.5708f, 1.5708f, 12);
+			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+			dl->AddCircleFilled(c.At(0.45f, 0.54f), c.Len(0.045f), PaletteColor(color, kMint));
+		}
+
+		/* 模型文件：页里一个立方体 —— 与场景树里的 Model 是同一副造型（同一件东西的两种用法：
+		 * 那边是"场景里的模型实体"，这里是"磁盘上的模型文件"）。 */
+		void DrawFileModel(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			StrokePage(dl, c, t, color);
+
+			/* 六边形轮廓（顶 / 右上 / 右下 / 底 / 左下 / 左上），折面填淡色、中间那个 Y 画深色 */
+			static constexpr float kCube[6][2] = {
+				{ 0.53f, 0.34f }, { 0.75f, 0.46f }, { 0.75f, 0.70f },
+				{ 0.53f, 0.82f }, { 0.31f, 0.70f }, { 0.31f, 0.46f }
+			};
+			FillPoly(dl, c, kCube, PaletteColor(color, kViolet, 0.16f));
+			StrokePolyline(dl, c, kCube, t, PaletteColor(color, kViolet), true);
+
+			dl->AddLine(c.At(0.31f, 0.46f), c.At(0.53f, 0.58f), color, t);
+			dl->AddLine(c.At(0.53f, 0.58f), c.At(0.75f, 0.46f), color, t);
+			dl->AddLine(c.At(0.53f, 0.58f), c.At(0.53f, 0.82f), color, t);
+		}
+
+		enum class SvgInk : uint8_t
+		{
+			None,
+			Navy,
+			Violet,
+			Mint,
+			PaleMint,
+			PaleViolet,
+			Red,
+			Gray,
+		};
+
+		struct SvgStyle
+		{
+			SvgInk Stroke = SvgInk::Navy;
+			SvgInk Fill = SvgInk::None;
+			float StrokeWidth = 1.8f;
+			float DashOn = 0.0f;
+			float DashOff = 0.0f;
+			bool RoundCap = false;
+			bool RoundJoin = false;
+		};
+
+		struct SvgContour
+		{
+			std::vector<ImVec2> Points;
+			bool Closed = false;
+		};
+
+		struct SvgShape
+		{
+			enum class Type : uint8_t { Path, Circle, Rect };
+			Type Kind = Type::Path;
+			SvgStyle Style;
+			std::vector<SvgContour> Contours;
+			float X = 0.0f;
+			float Y = 0.0f;
+			float Width = 0.0f;
+			float Height = 0.0f;
+			float Radius = 0.0f;
+		};
+
+		struct SvgIcon
+		{
+			std::vector<SvgShape> Shapes;
+		};
+
+		constexpr const char* kSvgSymbolIds[] = {
+			"", "new-scene", "open-scene", "save", "import", "new-asset", "undo", "redo", "back", "forward",
+			"translate", "rotate", "scale",
+			"play", "stop", "menu", "add", "remove", "return", "filter", "search", "visible", "scene",
+			"entity", "model", "camera", "light", "light-directional", "light-point", "light-spot",
+			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats",
+			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
+		};
+		static_assert(IM_ARRAYSIZE(kSvgSymbolIds) == static_cast<size_t>(Id::COUNT),
+			"SVG symbol map must remain aligned with Icons::Id");
+
+		constexpr ImU32 SvgInkColor(SvgInk ink, uint8_t alpha, bool dark_canvas)
+		{
+			if (dark_canvas)
+			{
+				switch (ink)
+				{
+				case SvgInk::Navy:        return IM_COL32(211, 222, 241, alpha);
+				case SvgInk::Violet:      return IM_COL32(166, 158, 255, alpha);
+				case SvgInk::Mint:        return IM_COL32(82, 222, 187, alpha);
+				case SvgInk::PaleMint:    return IM_COL32(27, 67, 60, alpha);
+				case SvgInk::PaleViolet:  return IM_COL32(43, 43, 78, alpha);
+				case SvgInk::Red:         return IM_COL32(255, 132, 126, alpha);
+				case SvgInk::Gray:        return IM_COL32(174, 187, 208, alpha);
+				default:                  return IM_COL32(0, 0, 0, 0);
+				}
+			}
+
+			switch (ink)
+			{
+			case SvgInk::Navy:        return IM_COL32(41, 53, 80, alpha);   /* #293550 */
+			case SvgInk::Violet:      return IM_COL32(101, 95, 208, alpha); /* #655FD0 */
+			case SvgInk::Mint:        return IM_COL32(39, 168, 138, alpha); /* #27A88A */
+			case SvgInk::PaleMint:    return IM_COL32(225, 245, 238, alpha);/* #E1F5EE */
+			case SvgInk::PaleViolet:  return IM_COL32(238, 240, 255, alpha);/* #EEF0FF */
+			case SvgInk::Red:         return IM_COL32(213, 92, 85, alpha);  /* #D55C55 */
+			case SvgInk::Gray:        return IM_COL32(170, 178, 193, alpha);/* #AAB2C1 */
+			default:                  return IM_COL32(0, 0, 0, 0);
+			}
+		}
+
+		inline SvgInk ParseSvgInk(const char* value, SvgInk fallback)
+		{
+			if (value == nullptr)
+				return fallback;
+			if (std::strcmp(value, "none") == 0)
+				return SvgInk::None;
+			if (std::strcmp(value, "#293550") == 0)
+				return SvgInk::Navy;
+			if (std::strcmp(value, "#655fd0") == 0)
+				return SvgInk::Violet;
+			if (std::strcmp(value, "#27a88a") == 0)
+				return SvgInk::Mint;
+			if (std::strcmp(value, "#e1f5ee") == 0)
+				return SvgInk::PaleMint;
+			if (std::strcmp(value, "#eef0ff") == 0)
+				return SvgInk::PaleViolet;
+			if (std::strcmp(value, "#d55c55") == 0)
+				return SvgInk::Red;
+			if (std::strcmp(value, "#aab2c1") == 0)
+				return SvgInk::Gray;
+			return fallback;
+		}
+
+		inline float ParseSvgNumber(const char* value, float fallback)
+		{
+			return value != nullptr ? std::strtof(value, nullptr) : fallback;
+		}
+
+		SvgStyle InheritSvgStyle(const tinyxml2::XMLElement* element, SvgStyle style)
+		{
+			style.Stroke = ParseSvgInk(element->Attribute("stroke"), style.Stroke);
+			style.Fill = ParseSvgInk(element->Attribute("fill"), style.Fill);
+			style.StrokeWidth = ParseSvgNumber(element->Attribute("stroke-width"), style.StrokeWidth);
+			style.RoundCap = element->Attribute("stroke-linecap") != nullptr
+				? std::strcmp(element->Attribute("stroke-linecap"), "round") == 0 : style.RoundCap;
+			style.RoundJoin = element->Attribute("stroke-linejoin") != nullptr
+				? std::strcmp(element->Attribute("stroke-linejoin"), "round") == 0 : style.RoundJoin;
+			if (const char* dash = element->Attribute("stroke-dasharray"))
+			{
+				style.DashOn = std::strtof(dash, nullptr);
+				const char* separator = dash;
+				while (*separator != '\0' && *separator != ',' && *separator != ' ' && *separator != '\t')
+					++separator;
+				while (*separator == ',' || *separator == ' ' || *separator == '\t')
+					++separator;
+				style.DashOff = std::strtof(separator, nullptr);
+			}
+			return style;
+		}
+
+		struct SvgPathToken
+		{
+			char Command = 0;
+			float Number = 0.0f;
+			bool IsCommand = false;
+		};
+
+		std::vector<SvgPathToken> TokenizeSvgPath(const char* data)
+		{
+			std::vector<SvgPathToken> tokens;
+			const char* cursor = data;
+			while (*cursor != '\0')
+			{
+				if ((*cursor >= 'A' && *cursor <= 'Z') || (*cursor >= 'a' && *cursor <= 'z'))
+				{
+					tokens.push_back({ *cursor++, 0.0f, true });
+					continue;
+				}
+				if (*cursor == ',' || *cursor == ' ' || *cursor == '\n' || *cursor == '\r' || *cursor == '\t')
+				{
+					++cursor;
+					continue;
+				}
+				char* end = nullptr;
+				const float number = std::strtof(cursor, &end);
+				if (end == cursor)
+				{
+					++cursor;
+					continue;
+				}
+				tokens.push_back({ 0, number, false });
+				cursor = end;
+			}
+			return tokens;
+		}
+
+		void AppendSvgArc(std::vector<ImVec2>& points, const ImVec2& from,
+		                  float rx, float ry, float rotation, bool large_arc, bool sweep,
+		                  const ImVec2& to)
+		{
+			rx = std::fabs(rx);
+			ry = std::fabs(ry);
+			if (rx <= 0.0f || ry <= 0.0f || (std::fabs(from.x - to.x) < 0.0001f && std::fabs(from.y - to.y) < 0.0001f))
+			{
+				points.push_back(to);
+				return;
+			}
+
+			const float phi = rotation * (kPi / 180.0f);
+			const float cos_phi = std::cos(phi);
+			const float sin_phi = std::sin(phi);
+			const float dx = (from.x - to.x) * 0.5f;
+			const float dy = (from.y - to.y) * 0.5f;
+			const float x1p = cos_phi * dx + sin_phi * dy;
+			const float y1p = -sin_phi * dx + cos_phi * dy;
+			const float lambda = x1p * x1p / (rx * rx) + y1p * y1p / (ry * ry);
+			if (lambda > 1.0f)
+			{
+				const float scale = std::sqrt(lambda);
+				rx *= scale;
+				ry *= scale;
+			}
+
+			const float rx2 = rx * rx;
+			const float ry2 = ry * ry;
+			const float numerator = std::max(0.0f, rx2 * ry2 - rx2 * y1p * y1p - ry2 * x1p * x1p);
+			const float denominator = rx2 * y1p * y1p + ry2 * x1p * x1p;
+			const float sign = large_arc == sweep ? -1.0f : 1.0f;
+			const float factor = denominator > 0.0f ? sign * std::sqrt(numerator / denominator) : 0.0f;
+			const float cxp = factor * rx * y1p / ry;
+			const float cyp = factor * -ry * x1p / rx;
+			const float cx = cos_phi * cxp - sin_phi * cyp + (from.x + to.x) * 0.5f;
+			const float cy = sin_phi * cxp + cos_phi * cyp + (from.y + to.y) * 0.5f;
+
+			const float ux = (x1p - cxp) / rx;
+			const float uy = (y1p - cyp) / ry;
+			const float vx = (-x1p - cxp) / rx;
+			const float vy = (-y1p - cyp) / ry;
+			float start = std::atan2(uy, ux);
+			float delta = std::atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+			if (!sweep && delta > 0.0f)
+				delta -= 2.0f * kPi;
+			else if (sweep && delta < 0.0f)
+				delta += 2.0f * kPi;
+
+			const int segments = std::max(4, static_cast<int>(std::ceil(std::fabs(delta) * 12.0f / kPi)));
+			for (int i = 1; i <= segments; ++i)
+			{
+				const float angle = start + delta * (static_cast<float>(i) / segments);
+				const float x = rx * std::cos(angle);
+				const float y = ry * std::sin(angle);
+				points.emplace_back(cx + cos_phi * x - sin_phi * y, cy + sin_phi * x + cos_phi * y);
+			}
+		}
+
+		std::vector<SvgContour> ParseSvgPath(const char* data, SvgInk fill)
+		{
+			const std::vector<SvgPathToken> tokens = TokenizeSvgPath(data);
+			std::vector<SvgContour> contours;
+			SvgContour contour;
+			ImVec2 current(0.0f, 0.0f);
+			ImVec2 start(0.0f, 0.0f);
+			ImVec2 previous_cubic(0.0f, 0.0f);
+			ImVec2 previous_quadratic(0.0f, 0.0f);
+			char command = 0;
+			size_t index = 0;
+			bool previous_was_cubic = false;
+			bool previous_was_quadratic = false;
+
+			const auto flush = [&]()
+			{
+				if (contour.Points.size() > 1)
+				{
+					if (fill != SvgInk::None)
+						contour.Closed = true;
+					contours.push_back(std::move(contour));
+				}
+				contour = SvgContour{};
+			};
+			const auto read_number = [&](float& value) -> bool
+			{
+				if (index >= tokens.size() || tokens[index].IsCommand)
+					return false;
+				value = tokens[index++].Number;
+				return true;
+			};
+			const auto read_point = [&](bool relative, ImVec2& point) -> bool
+			{
+				float x = 0.0f, y = 0.0f;
+				if (!read_number(x) || !read_number(y))
+					return false;
+				point = relative ? ImVec2(current.x + x, current.y + y) : ImVec2(x, y);
+				return true;
+			};
+
+			while (index < tokens.size())
+			{
+				if (tokens[index].IsCommand)
+					command = tokens[index++].Command;
+				if (command == 0)
+					break;
+
+				const bool relative = command >= 'a' && command <= 'z';
+				const char op = relative ? static_cast<char>(command - 'a' + 'A') : command;
+				if (op == 'Z')
+				{
+					current = start;
+					contour.Closed = true;
+					flush();
+					previous_was_cubic = false;
+					previous_was_quadratic = false;
+					command = 0;
+					continue;
+				}
+				if (index >= tokens.size() || tokens[index].IsCommand)
+					continue;
+
+				if (op == 'M' || op == 'L')
+				{
+					ImVec2 point;
+					if (!read_point(relative, point))
+						break;
+					if (op == 'M')
+					{
+						flush();
+						current = point;
+						start = point;
+						contour.Points.push_back(point);
+						command = relative ? 'l' : 'L';
+					}
+					else
+					{
+						current = point;
+						contour.Points.push_back(point);
+					}
+					previous_was_cubic = false;
+					previous_was_quadratic = false;
+					continue;
+				}
+				if (op == 'H' || op == 'V')
+				{
+					float value = 0.0f;
+					if (!read_number(value))
+						break;
+					current = op == 'H' ? ImVec2(relative ? current.x + value : value, current.y)
+					                    : ImVec2(current.x, relative ? current.y + value : value);
+					contour.Points.push_back(current);
+					previous_was_cubic = false;
+					previous_was_quadratic = false;
+					continue;
+				}
+				if (op == 'C')
+				{
+					ImVec2 c1, c2, end;
+					if (!read_point(relative, c1) || !read_point(relative, c2) || !read_point(relative, end))
+						break;
+					const ImVec2 from = current;
+					for (int step = 1; step <= 12; ++step)
+					{
+						const float t = static_cast<float>(step) / 12.0f;
+						const float u = 1.0f - t;
+						contour.Points.emplace_back(u*u*u*from.x + 3*u*u*t*c1.x + 3*u*t*t*c2.x + t*t*t*end.x,
+							u*u*u*from.y + 3*u*u*t*c1.y + 3*u*t*t*c2.y + t*t*t*end.y);
+					}
+					current = end;
+					previous_cubic = c2;
+					previous_was_cubic = true;
+					previous_was_quadratic = false;
+					continue;
+				}
+				if (op == 'S')
+				{
+					ImVec2 c1, c2, end;
+					c1 = previous_was_cubic
+						? ImVec2(2.0f * current.x - previous_cubic.x, 2.0f * current.y - previous_cubic.y)
+						: current;
+					if (!read_point(relative, c2) || !read_point(relative, end))
+						break;
+					const ImVec2 from = current;
+					for (int step = 1; step <= 12; ++step)
+					{
+						const float t = static_cast<float>(step) / 12.0f;
+						const float u = 1.0f - t;
+						contour.Points.emplace_back(u*u*u*from.x + 3*u*u*t*c1.x + 3*u*t*t*c2.x + t*t*t*end.x,
+							u*u*u*from.y + 3*u*u*t*c1.y + 3*u*t*t*c2.y + t*t*t*end.y);
+					}
+					current = end;
+					previous_cubic = c2;
+					previous_was_cubic = true;
+					previous_was_quadratic = false;
+					continue;
+				}
+				if (op == 'Q' || op == 'T')
+				{
+					ImVec2 control, end;
+					if (op == 'Q')
+					{
+						if (!read_point(relative, control) || !read_point(relative, end))
+						break;
+					}
+					else
+					{
+						control = previous_was_quadratic
+							? ImVec2(2.0f * current.x - previous_quadratic.x, 2.0f * current.y - previous_quadratic.y)
+							: current;
+						if (!read_point(relative, end))
+						break;
+					}
+					const ImVec2 from = current;
+					for (int step = 1; step <= 10; ++step)
+					{
+						const float t = static_cast<float>(step) / 10.0f;
+						const float u = 1.0f - t;
+						contour.Points.emplace_back(u*u*from.x + 2*u*t*control.x + t*t*end.x,
+							u*u*from.y + 2*u*t*control.y + t*t*end.y);
+					}
+					current = end;
+					previous_quadratic = control;
+					previous_was_quadratic = true;
+					previous_was_cubic = false;
+					continue;
+				}
+				if (op == 'A')
+				{
+					float rx = 0.0f, ry = 0.0f, rotation = 0.0f, large = 0.0f, sweep = 0.0f;
+					ImVec2 end;
+					if (!read_number(rx) || !read_number(ry) || !read_number(rotation)
+						|| !read_number(large) || !read_number(sweep) || !read_point(relative, end))
+						break;
+					AppendSvgArc(contour.Points, current, rx, ry, rotation, large != 0.0f, sweep != 0.0f, end);
+					current = end;
+					previous_was_cubic = false;
+					previous_was_quadratic = false;
+					continue;
+				}
+				break;
+			}
+			flush();
+			return contours;
+		}
+
+		void ParseSvgElement(const tinyxml2::XMLElement* element, const SvgStyle& inherited, SvgIcon& icon)
+		{
+			for (const tinyxml2::XMLElement* child = element->FirstChildElement(); child != nullptr; child = child->NextSiblingElement())
+			{
+				const char* tag = child->Name();
+				const SvgStyle style = InheritSvgStyle(child, inherited);
+				if (std::strcmp(tag, "g") == 0)
+				{
+					ParseSvgElement(child, style, icon);
+					continue;
+				}
+
+				SvgShape shape;
+				shape.Style = style;
+				if (std::strcmp(tag, "path") == 0)
+				{
+					shape.Kind = SvgShape::Type::Path;
+					const char* data = child->Attribute("d");
+					if (data != nullptr)
+						shape.Contours = ParseSvgPath(data, style.Fill);
+				}
+				else if (std::strcmp(tag, "circle") == 0)
+				{
+					shape.Kind = SvgShape::Type::Circle;
+					shape.X = child->FloatAttribute("cx");
+					shape.Y = child->FloatAttribute("cy");
+					shape.Radius = child->FloatAttribute("r");
+				}
+				else if (std::strcmp(tag, "rect") == 0)
+				{
+					shape.Kind = SvgShape::Type::Rect;
+					shape.X = child->FloatAttribute("x");
+					shape.Y = child->FloatAttribute("y");
+					shape.Width = child->FloatAttribute("width");
+					shape.Height = child->FloatAttribute("height");
+					shape.Radius = child->FloatAttribute("rx");
+				}
+				else
+					continue;
+				icon.Shapes.push_back(std::move(shape));
+			}
+		}
+
+		std::array<SvgIcon, static_cast<size_t>(Id::COUNT)> s_SvgIcons;
+		std::once_flag s_SvgIconsInit;
+
+		void InitializeSvgIcons()
+		{
+			tinyxml2::XMLDocument document;
+			if (document.Parse(Detail::kSvgSymbols) != tinyxml2::XML_SUCCESS || document.RootElement() == nullptr)
+				return;
+			const tinyxml2::XMLElement* defs = document.RootElement()->FirstChildElement("defs");
+			if (defs == nullptr)
+				return;
+
+			for (size_t i = 1; i < static_cast<size_t>(Id::COUNT); ++i)
+			{
+				const tinyxml2::XMLElement* symbol = nullptr;
+				for (const tinyxml2::XMLElement* candidate = defs->FirstChildElement("symbol"); candidate != nullptr;
+					candidate = candidate->NextSiblingElement("symbol"))
+				{
+					const char* symbol_id = candidate->Attribute("id");
+					if (symbol_id != nullptr && std::strcmp(symbol_id, kSvgSymbolIds[i]) == 0)
+					{
+						symbol = candidate;
+						break;
+					}
+				}
+				if (symbol != nullptr)
+					ParseSvgElement(symbol, SvgStyle{}, s_SvgIcons[i]);
+			}
+		}
+
+		bool IsSvgPointInsideTriangle(const ImVec2& p, const ImVec2& a, const ImVec2& b, const ImVec2& c)
+		{
+			const auto edge = [](const ImVec2& p0, const ImVec2& p1, const ImVec2& p2)
+			{
+				return (p2.x - p0.x) * (p1.y - p0.y) - (p1.x - p0.x) * (p2.y - p0.y);
+			};
+			const float d1 = edge(p, a, b);
+			const float d2 = edge(p, b, c);
+			const float d3 = edge(p, c, a);
+			const bool negative = d1 < 0.0f || d2 < 0.0f || d3 < 0.0f;
+			const bool positive = d1 > 0.0f || d2 > 0.0f || d3 > 0.0f;
+			return !(negative && positive);
+		}
+
+		void FillSvgPolygon(ImDrawList* draw_list, const std::vector<ImVec2>& points, ImU32 color)
+		{
+			if (points.size() < 3)
+				return;
+			std::vector<int> indices(points.size());
+			for (size_t i = 0; i < indices.size(); ++i)
+				indices[i] = static_cast<int>(i);
+			float area = 0.0f;
+			for (size_t i = 0; i < points.size(); ++i)
+			{
+				const ImVec2& a = points[i];
+				const ImVec2& b = points[(i + 1) % points.size()];
+				area += a.x * b.y - b.x * a.y;
+			}
+			const float orientation = area >= 0.0f ? 1.0f : -1.0f;
+			int guard = static_cast<int>(points.size() * points.size());
+			while (indices.size() > 3 && guard-- > 0)
+			{
+				bool clipped = false;
+				for (size_t i = 0; i < indices.size(); ++i)
+				{
+					const int ia = indices[(i + indices.size() - 1) % indices.size()];
+					const int ib = indices[i];
+					const int ic = indices[(i + 1) % indices.size()];
+					const ImVec2& a = points[ia];
+					const ImVec2& b = points[ib];
+					const ImVec2& c = points[ic];
+					const float cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+					if (cross * orientation <= 0.00001f)
+						continue;
+					bool contains = false;
+					for (int index : indices)
+					{
+						if (index == ia || index == ib || index == ic)
+							continue;
+						if (IsSvgPointInsideTriangle(points[index], a, b, c))
+						{
+							contains = true;
+						break;
+						}
+					}
+					if (contains)
+						continue;
+					draw_list->AddTriangleFilled(a, b, c, color);
+					indices.erase(indices.begin() + static_cast<ptrdiff_t>(i));
+					clipped = true;
+					break;
+				}
+				if (!clipped)
+					break;
+			}
+			if (indices.size() == 3)
+				draw_list->AddTriangleFilled(points[indices[0]], points[indices[1]], points[indices[2]], color);
+		}
+
+		float SvgStrokeWidth(const SvgStyle& style, float unit, bool dark_canvas)
+		{
+			const float scaled = style.StrokeWidth * unit * (dark_canvas ? 1.12f : 1.0f);
+			return dark_canvas ? std::max(1.35f, scaled) : scaled;
+		}
+
+		float SvgDarkOpticalBoost(float size)
+		{
+			if (size <= 16.0f)
+				return 1.30f;
+			if (size <= 24.0f)
+				return 1.30f - (size - 16.0f) * (0.16f / 8.0f);
+			if (size <= 32.0f)
+				return 1.14f - (size - 24.0f) * (0.14f / 8.0f);
+			return 1.0f;
+		}
+
+		void DrawSvgContour(ImDrawList* draw_list, const SvgContour& contour, const SvgStyle& style,
+		                    const ImVec2& center, float unit, uint8_t alpha, bool dark_canvas)
+		{
+			if (contour.Points.size() < 2)
+				return;
+			std::vector<ImVec2> points;
+			points.reserve(contour.Points.size());
+			for (const ImVec2& point : contour.Points)
+				points.emplace_back(center.x + (point.x - 16.0f) * unit, center.y + (point.y - 16.0f) * unit);
+
+			if (style.Fill != SvgInk::None && contour.Closed)
+				FillSvgPolygon(draw_list, points, SvgInkColor(style.Fill, alpha, dark_canvas));
+
+			if (style.Stroke != SvgInk::None && style.StrokeWidth > 0.0f)
+			{
+				const ImU32 stroke_color = SvgInkColor(style.Stroke, alpha, dark_canvas);
+				const float width = SvgStrokeWidth(style, unit, dark_canvas);
+				const bool dashed = style.DashOn > 0.0f && style.DashOff > 0.0f;
+				const size_t segment_count = points.size() - 1 + (contour.Closed ? 1 : 0);
+
+				if (!dashed)
+				{
+					draw_list->PathClear();
+					for (const ImVec2& point : points)
+						draw_list->PathLineTo(point);
+					draw_list->PathStroke(stroke_color, contour.Closed ? ImDrawFlags_Closed : 0, width);
+				}
+
+				for (size_t i = 0; i < segment_count; ++i)
+				{
+					const ImVec2& a = points[i];
+					const ImVec2& b = points[(i + 1) % points.size()];
+					if (!dashed)
+						continue;
+
+					const float dx = b.x - a.x;
+					const float dy = b.y - a.y;
+					const float length = std::sqrt(dx * dx + dy * dy);
+					const float cycle = (style.DashOn + style.DashOff) * unit;
+					if (length <= 0.001f || cycle <= 0.001f)
+						continue;
+					for (float offset = 0.0f; offset < length; offset += cycle)
+					{
+						const float end = std::min(offset + style.DashOn * unit, length);
+						const ImVec2 p0(a.x + dx * (offset / length), a.y + dy * (offset / length));
+						const ImVec2 p1(a.x + dx * (end / length), a.y + dy * (end / length));
+						draw_list->AddLine(p0, p1, stroke_color, width);
+						if (style.RoundCap)
+						{
+							const float radius = width * 0.5f;
+							draw_list->AddCircleFilled(p0, radius, stroke_color, 8);
+							draw_list->AddCircleFilled(p1, radius, stroke_color, 8);
+						}
+					}
+				}
+
+				if (!dashed && style.RoundCap && !contour.Closed)
+				{
+					const float radius = width * 0.5f;
+					draw_list->AddCircleFilled(points.front(), radius, stroke_color, 8);
+					draw_list->AddCircleFilled(points.back(), radius, stroke_color, 8);
+				}
+				if (style.RoundJoin)
+				{
+					const float radius = width * 0.5f;
+					const size_t point_count = contour.Closed ? points.size() : points.size() - 2;
+					for (size_t i = 0; i < point_count; ++i)
+					{
+						const size_t point_index = contour.Closed ? i : i + 1;
+						draw_list->AddCircleFilled(points[point_index], radius, stroke_color, 8);
+					}
+				}
+			}
+		}
+
+		void DrawSvgIcon(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 input_color)
+		{
+			std::call_once(s_SvgIconsInit, InitializeSvgIcons);
+			const size_t index = static_cast<size_t>(id);
+			if (index >= s_SvgIcons.size())
+				return;
+			const uint8_t alpha = static_cast<uint8_t>((input_color >> IM_COL32_A_SHIFT) & 0xFF);
+			const uint8_t red = static_cast<uint8_t>((input_color >> IM_COL32_R_SHIFT) & 0xFF);
+			const uint8_t green = static_cast<uint8_t>((input_color >> IM_COL32_G_SHIFT) & 0xFF);
+			const uint8_t blue = static_cast<uint8_t>((input_color >> IM_COL32_B_SHIFT) & 0xFF);
+			const bool dark_canvas = red * 0.2126f + green * 0.7152f + blue * 0.0722f > 128.0f;
+			const float rendered_size = size * (dark_canvas ? SvgDarkOpticalBoost(size) : 1.0f);
+			const float unit = rendered_size / 32.0f;
+			for (const SvgShape& shape : s_SvgIcons[index].Shapes)
+			{
+				if (shape.Kind == SvgShape::Type::Path)
+				{
+					for (const SvgContour& contour : shape.Contours)
+						DrawSvgContour(draw_list, contour, shape.Style, center, unit, alpha, dark_canvas);
+					continue;
+				}
+				const ImVec2 min(center.x + (shape.X - 16.0f) * unit, center.y + (shape.Y - 16.0f) * unit);
+				if (shape.Kind == SvgShape::Type::Circle)
+				{
+					const float radius = shape.Radius * unit;
+					if (shape.Style.Fill != SvgInk::None)
+						draw_list->AddCircleFilled(min, radius, SvgInkColor(shape.Style.Fill, alpha, dark_canvas));
+					if (shape.Style.Stroke != SvgInk::None)
+					{
+						const float stroke_width = SvgStrokeWidth(shape.Style, unit, dark_canvas);
+						if (shape.Style.DashOn > 0.0f)
+						{
+							const float circumference = 2.0f * kPi * radius;
+							const float dash = shape.Style.DashOn * unit;
+							const float cycle = (shape.Style.DashOn + shape.Style.DashOff) * unit;
+							for (float offset = 0.0f; offset < circumference; offset += cycle)
+							{
+								const float a0 = offset / radius;
+								const float a1 = std::min(offset + dash, circumference) / radius;
+								draw_list->PathArcTo(min, radius, a0, a1, 4);
+								draw_list->PathStroke(SvgInkColor(shape.Style.Stroke, alpha, dark_canvas), 0, stroke_width);
+							}
+						}
+						else
+							draw_list->AddCircle(min, radius, SvgInkColor(shape.Style.Stroke, alpha, dark_canvas), 0,
+								stroke_width);
+					}
+				}
+				else
+				{
+					const ImVec2 max(min.x + shape.Width * unit, min.y + shape.Height * unit);
+					if (shape.Style.Fill != SvgInk::None)
+						draw_list->AddRectFilled(min, max, SvgInkColor(shape.Style.Fill, alpha, dark_canvas), shape.Radius * unit);
+					if (shape.Style.Stroke != SvgInk::None)
+						draw_list->AddRect(min, max, SvgInkColor(shape.Style.Stroke, alpha, dark_canvas), shape.Radius * unit,
+							0, SvgStrokeWidth(shape.Style, unit, dark_canvas));
+				}
+			}
 		}
 
 		/* 元数据表：Id 与表项一一对应（顺序必须与 Id 枚举一致）*/
 		constexpr IconDesc s_Icons[] = {
-			{ "None",              nullptr },
-			{ "NewScene",          &DrawNewScene },
-			{ "OpenScene",         &DrawOpenScene },
-			{ "Save",              &DrawSave },
-			{ "Undo",              &DrawUndo },
-			{ "Redo",              &DrawRedo },
-			{ "Translate",         &DrawTranslate },
-			{ "Rotate",            &DrawRotate },
-			{ "Scale",             &DrawScale },
-			{ "Play",              &DrawPlay },
-			{ "Stop",              &DrawStop },
-			{ "Menu",              &DrawMenu },
-			{ "Add",               &DrawAdd },
-			{ "Remove",            &DrawRemove },
-			{ "Return",            &DrawReturn },
-			{ "Filter",            &DrawFilter },
-			{ "Visible",           &DrawVisible },
-			{ "Scene",             &DrawScene },
-			{ "Camera",            &DrawCamera },
-			{ "LightDirectional",  &DrawDirectionalLight },
-			{ "LightPoint",        &DrawPointLight },
-			{ "LightSpot",         &DrawSpotLight },
-			{ "ReflectionProbe",   &DrawReflectionProbe },
-			{ "Model",             &DrawModel },
-			{ "Sprite",            &DrawSprite },
-			{ "Entity",            &DrawEntity },
-			{ "Transform",         &DrawTransform },
-			{ "Tag",               &DrawTag },
-			{ "Stats",             &DrawStats },
-			{ "Directory",         &DrawDirectory },
-			{ "File",              &DrawFile },
-			{ "FileImage",         &DrawFileImage },
-			{ "FileScene",         &DrawScene },
-			{ "FileMtlGraph",      &DrawFileMtlGraph },
+			{ "None",              nullptr,                 1.0f },
+			{ "NewScene",          &DrawNewScene,           0.86f },
+			{ "OpenScene",         &DrawOpenScene,          0.86f },
+			{ "Save",              &DrawSave,               0.97f },
+			{ "Import",            &DrawImport,             0.93f },
+			{ "NewAsset",          &DrawNewAsset,           1.0f },
+			{ "Undo",              &DrawUndo,               0.96f },
+			{ "Redo",              &DrawRedo,               1.04f },
+			{ "Back",              &DrawBack,               0.97f },
+			{ "Forward",           &DrawForward,            0.97f },
+			{ "Translate",         &DrawTranslate,          0.92f },
+			{ "Rotate",            &DrawRotate,             1.09375f },
+			{ "Scale",             &DrawScale,              0.93f },
+			{ "Play",              &DrawPlay,               0.93f },
+			{ "Stop",              &DrawStop,               0.93f },
+			{ "Menu",              &DrawMenu,               1.09f },
+			{ "Add",               &DrawAdd,                0.93f },
+			{ "Remove",            &DrawRemove,             0.93f },
+			{ "Return",            &DrawReturn,             0.91f },
+			{ "Filter",            &DrawFilter,             0.93f },
+			{ "Search",            &DrawSearch,             1.109375f },
+			{ "Visible",           &DrawVisible,            0.86f },
+			{ "Scene",             &DrawScene,              0.90f },
+			{ "Entity",            &DrawEntity,             0.93f },
+			{ "Model",             &DrawModel,              0.93f },
+			{ "Camera",            &DrawCamera,             0.83f },
+			{ "Light",             &DrawLight,              0.86f },
+			{ "LightDirectional",  &DrawDirectionalLight,   0.83f },
+			{ "LightPoint",        &DrawPointLight,         0.76f },
+			{ "LightSpot",         &DrawSpotLight,          0.81f },
+			{ "ReflectionProbe",   &DrawReflectionProbe,    0.93f },
+			{ "Sprite",            &DrawSprite,             0.93f },
+			{ "Audio",             &DrawAudio,              0.90f },
+			{ "Particle",          &DrawParticle,           0.97f },
+			{ "Terrain",           &DrawTerrain,            0.86f },
+			{ "Transform",         &DrawTransform,          0.81f },
+			{ "Tag",               &DrawTag,                0.93f },
+			{ "Stats",             &DrawStats,              0.93f },
+			{ "Directory",         &DrawDirectory,          0.86f },
+			{ "File",              &DrawFile,               0.86f },
+			{ "FileImage",         &DrawFileImage,          0.86f },
+			{ "FileScene",         &DrawScene,              0.86f },
+			{ "FileMtlGraph",      &DrawFileMtlGraph,       0.86f },
+			{ "FileShader",        &DrawFileShader,         0.86f },
+			{ "FileModel",         &DrawFileModel,          0.86f },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),
@@ -650,9 +1622,28 @@ namespace Helios::Icons
 		if (index >= static_cast<size_t>(Id::COUNT))
 			return;
 
-		const IconDesc& desc = s_Icons[index];
-		if (desc.Draw != nullptr)
-			desc.Draw(draw_list, center, size, color);
+		std::call_once(s_SvgIconsInit, InitializeSvgIcons);
+		const float optical_size = size * s_Icons[index].OpticalScale;
+		if (s_SvgIcons[index].Shapes.empty())
+		{
+			if (s_Icons[index].Draw != nullptr)
+				s_Icons[index].Draw(draw_list, center, optical_size, color);
+			return;
+		}
+
+		DrawSvgIcon(draw_list, id, center, optical_size, color);
+	}
+
+	void BeginSearchInput()
+	{
+		BeginLeadingIcon();
+	}
+
+	void EndSearchInput()
+	{
+		/* 输入框的矩形当场可取（它的"当前窗口"就是输入框所在的窗口） */
+		DrawLeadingIcon(Id::Search, ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+		EndLeadingIcon();
 	}
 
 	/* 前置图标（输入框 / 下拉框左端那个小图标）的摆法：图标中心距控件左端多远，
