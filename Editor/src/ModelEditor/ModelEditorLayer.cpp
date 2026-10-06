@@ -168,8 +168,10 @@ namespace Helios
 			{
 				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
 				{
-					const wchar_t* path = (const wchar_t*)payload->Data;
-					OnDragItemToScene(g_AssetsPath / path);
+					std::filesystem::path relative_path;
+					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
+						payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
+						OnDragItemToScene(g_AssetsPath / relative_path);
 				}
 				ImGui::EndDragDropTarget();
 			}
@@ -400,16 +402,16 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const auto extension = path.extension().string();
+		const auto extension = PathToUtf8(path.extension());
 
 		/* 模型文件 */
 		if (extension == ".obj")
 		{
-			EDITOR_LOG_DEBUG("Import model file: {}.", path.generic_string());
+			EDITOR_LOG_DEBUG("Import model file: {}.", PathToUtf8(path));
 
 			/* 读取模型 */
 			m_pModelInfo->Reset();
-			m_pModelInfo->LoadFromObj(path.generic_string());
+			m_pModelInfo->LoadFromObj(PathToUtf8(path));
 
 			/* 初始化材质 */
 			m_pMaterialGroup->ClearAllMaterials();
@@ -498,8 +500,8 @@ namespace Helios
 			m_pMaterialGroup->Serializer(material_path);
 
 			/* 拷贝贴图文件 */
-			std::filesystem::path current_model_path(m_pModelInfo->m_Path);
-			std::filesystem::path target_path(file_path);
+			std::filesystem::path current_model_path = PathFromUtf8(m_pModelInfo->m_Path);
+			std::filesystem::path target_path = PathFromUtf8(file_path);
 			const std::regex pattern("^[\s\S]*\.(pdf|png|jpeg|jpg|tga|bmp|dds)$");
 			CopyFileFromTo(current_model_path.parent_path(), target_path.parent_path(), pattern);
 		}
@@ -510,7 +512,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 		
-		std::ofstream out_mesh_file(path, std::ios::out | std::ios::binary);
+		std::ofstream out_mesh_file(PathFromUtf8(path), std::ios::out | std::ios::binary);
 
 		/* 写入子模型数量: size_t * 1 */
 		size_t sub_model_count = m_pModelInfo->m_SubModelInfos.size();

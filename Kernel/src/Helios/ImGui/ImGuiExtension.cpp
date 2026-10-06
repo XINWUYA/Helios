@@ -488,14 +488,18 @@ namespace Helios::ImGuiExt
 		{
 			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
 			{
-				const wchar_t* path = (const wchar_t*)payload->Data;
-				const auto new_texture = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(path));
-				if (new_texture->IsLoaded())
-					texture = new_texture;
-				else
+				/* 资源浏览器以 char 字节串（含末尾 NUL）传路径；按 wchar_t 读取会破坏路径。 */
+				std::filesystem::path relative_path;
+				if (payload->DataSize > 1 && TryPathFromUtf8Payload(
+					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
 				{
-					const std::filesystem::path texture_path = g_AssetsPath / path;
-					EDITOR_LOG_WARN("Failed to load texture {0}.", texture_path.filename().string());
+					const std::filesystem::path texture_path = g_AssetsPath / relative_path;
+					const auto new_texture = TextureAssetManager::Instance().GetOrCreateTexture(
+						PathToUtf8(texture_path));
+					if (new_texture->IsLoaded())
+						texture = new_texture;
+					else
+						EDITOR_LOG_WARN("Failed to load texture {0}.", PathToUtf8(texture_path.filename()));
 				}
 			}
 			ImGui::EndDragDropTarget();

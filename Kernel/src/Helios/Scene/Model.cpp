@@ -280,7 +280,8 @@ namespace Helios
 			const auto& material_group = model->GetMaterialGroup();
 
 			/* 直接从mesh文件加载 */
-			std::ifstream in_mesh_file(ABSOLUTE_PATH(path), std::ios::in | std::ios::binary);
+			const std::filesystem::path mesh_path = PathFromUtf8(ABSOLUTE_PATH(path));
+			std::ifstream in_mesh_file(mesh_path, std::ios::in | std::ios::binary);
 			if (!in_mesh_file)
 			{
 				CORE_LOG_ERROR("Failed to load file: {}.", ABSOLUTE_PATH(path));

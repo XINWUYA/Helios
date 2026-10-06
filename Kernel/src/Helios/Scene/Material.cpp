@@ -199,6 +199,19 @@ namespace Helios
 		m_Path = path;
 
 		ASSERT(!m_Path.empty());
+		std::filesystem::path material_path;
+		if (!TryPathFromUtf8(path, material_path))
+		{
+			CORE_LOG_ERROR("Invalid UTF-8 material path.");
+			return;
+		}
+		auto material_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+			OpenUtf8File(material_path, "wb"), &std::fclose);
+		if (!material_file)
+		{
+			CORE_LOG_ERROR("Failed to open material file for writing: {}.", path);
+			return;
+		}
 		
 		/* 写入材质信息 */
 		auto* out_mtl_file = new tinyxml2::XMLDocument();
@@ -281,7 +294,8 @@ namespace Helios
 		}
 
 		/* 保存到文本 */
-		out_mtl_file->SaveFile(path.c_str());
+		if (out_mtl_file->SaveFile(material_file.get()) != tinyxml2::XML_SUCCESS)
+			CORE_LOG_ERROR("Failed to write material file: {}.", path);
 		delete out_mtl_file;
 	}
 
@@ -293,9 +307,23 @@ namespace Helios
 		m_Path = ABSOLUTE_PATH(path);
 		ASSERT(!m_Path.empty());
 
+		std::filesystem::path material_path;
+		if (!TryPathFromUtf8(m_Path, material_path))
+		{
+			CORE_LOG_ERROR("Invalid UTF-8 material path.");
+			return false;
+		}
+		auto material_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+			OpenUtf8File(material_path, "rb"), &std::fclose);
+		if (!material_file)
+		{
+			CORE_LOG_ERROR("Failed to open material file: {}.", m_Path);
+			return false;
+		}
+
 		/* 读取材质信息 */
-		auto* in_mtl_file = new tinyxml2::XMLDocument();
-		tinyxml2::XMLError error = in_mtl_file->LoadFile(m_Path.c_str());
+		auto in_mtl_file = std::make_unique<tinyxml2::XMLDocument>();
+		tinyxml2::XMLError error = in_mtl_file->LoadFile(material_file.get());
 		if (error != tinyxml2::XML_SUCCESS)
 		{
 			CORE_LOG_ERROR("Failed to deserializer mtl file: {}.", m_Path);
@@ -377,7 +405,6 @@ namespace Helios
 			m_Materials[id] = material;
 		}
 
-		delete in_mtl_file;
 		return true;
 	}
 }

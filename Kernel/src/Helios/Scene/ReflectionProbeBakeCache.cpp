@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "ReflectionProbeBakeCache.h"
+#include "Helios/Common/PathUtils.h"
 #include <filesystem>
 #include <fstream>
 
@@ -42,12 +43,18 @@ namespace Helios::ReflectionProbeBakeCache
 			return false;
 		}
 
+		std::filesystem::path file_path;
+		if (!TryPathFromUtf8(path, file_path))
+		{
+			CORE_LOG_ERROR("ReflectionProbeBakeCache::Write: path is not valid UTF-8");
+			return false;
+		}
+
 		std::error_code error;
-		const std::filesystem::path file_path(path);
 		if (file_path.has_parent_path())
 			std::filesystem::create_directories(file_path.parent_path(), error);
 
-		std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+		std::ofstream stream(file_path, std::ios::binary | std::ios::trunc);
 		if (!stream.is_open())
 		{
 			CORE_LOG_ERROR("ReflectionProbeBakeCache::Write: cannot open '{}'", path);
@@ -111,7 +118,14 @@ namespace Helios::ReflectionProbeBakeCache
 		if (path.empty())
 			return false;
 
-		std::ifstream stream(path, std::ios::binary);
+		std::filesystem::path file_path;
+		if (!TryPathFromUtf8(path, file_path))
+		{
+			CORE_LOG_ERROR("ReflectionProbeBakeCache::Read: path is not valid UTF-8");
+			return false;
+		}
+
+		std::ifstream stream(file_path, std::ios::binary);
 		if (!stream.is_open())
 		{
 			CORE_LOG_ERROR("ReflectionProbeBakeCache::Read: cannot open '{}'", path);

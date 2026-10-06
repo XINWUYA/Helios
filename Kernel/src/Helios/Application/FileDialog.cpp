@@ -6,6 +6,7 @@
 #ifdef PLATFORM_WINDOWS
 #include "commdlg.h"
 #include "shellapi.h"
+#include "Helios/Common/PathUtils.h"
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
 #elif defined(PLATFORM_MACOS)
@@ -16,27 +17,58 @@
 
 namespace Helios
 {
+#ifdef PLATFORM_WINDOWS
+	namespace
+	{
+		std::wstring MakeWideFilter(const char* filter)
+		{
+			static constexpr char default_filter[] = "*.*\0*.*\0";
+			const char* source = filter != nullptr ? filter : default_filter;
+			std::wstring result;
+			for (size_t index = 0;; ++index)
+			{
+				const auto byte = static_cast<unsigned char>(source[index]);
+				if (byte > 0x7f)
+					return {};
+				result.push_back(static_cast<wchar_t>(byte));
+				if (byte == 0 && source[index + 1] == '\0')
+				{
+					result.push_back(L'\0');
+					break;
+				}
+			}
+			return result;
+		}
+	}
+#endif
+
 	/* 通过文件对话框选取指定的文件路径 */
 	std::string FileDialog::OpenFile(const char* filter)	{
 #ifdef PLATFORM_WINDOWS
-		OPENFILENAMEA ofn;
-		CHAR szFile[260] = { 0 };
-		CHAR currentDir[256] = { 0 };
-		ZeroMemory(&ofn, sizeof(OPENFILENAME));
-		ofn.lStructSize = sizeof(OPENFILENAME);
-		ofn.hwndOwner = glfwGetWin32Window((GLFWwindow*)Application::Instance()->GetWindow().GetNativeWindow());
-		ofn.lpstrFile = szFile;
-		ofn.nMaxFile = sizeof(szFile);
-		if (GetCurrentDirectoryA(256, currentDir))
-			ofn.lpstrInitialDir = currentDir;
-		ofn.lpstrFilter = filter;
+		std::wstring wide_filter = MakeWideFilter(filter);
+		if (wide_filter.empty())
+			return {};
+
+		std::vector<wchar_t> file_path(32768, L'\0');
+		std::vector<wchar_t> current_dir(32768, L'\0');
+		if (GetCurrentDirectoryW(static_cast<DWORD>(current_dir.size()), current_dir.data()) == 0)
+			current_dir.clear();
+
+		OPENFILENAMEW ofn{};
+		ofn.lStructSize = sizeof(ofn);
+		ofn.hwndOwner = glfwGetWin32Window(
+			static_cast<GLFWwindow*>(Application::Instance()->GetWindow().GetNativeWindow()));
+		ofn.lpstrFile = file_path.data();
+		ofn.nMaxFile = static_cast<DWORD>(file_path.size());
+		ofn.lpstrInitialDir = current_dir.empty() ? nullptr : current_dir.data();
+		ofn.lpstrFilter = wide_filter.data();
 		ofn.nFilterIndex = 1;
 		ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
 
-		if (GetOpenFileNameA(&ofn) == TRUE)
-			return ofn.lpstrFile;
+		if (GetOpenFileNameW(&ofn) == TRUE)
+			return PathToUtf8(std::filesystem::path(file_path.data()));
 
-		return std::string();
+		return {};
 #elif defined(PLATFORM_MACOS)
 		@autoreleasepool {
 			NSOpenPanel* openPanel = [NSOpenPanel openPanel];
@@ -63,27 +95,46 @@ namespace Helios
 	/* 保存文件到指定路径 */
 	std::string FileDialog::SaveFile(const char* filter)	{
 #ifdef PLATFORM_WINDOWS
-		OPENFILENAMEA ofn;
-		CHAR szFile[260] = { 0 };
-		CHAR currentDir[256] = { 0 };
-		ZeroMemory(&ofn, sizeof(OPENFILENAME));
-		ofn.lStructSize = sizeof(OPENFILENAME);
-		ofn.hwndOwner = glfwGetWin32Window((GLFWwindow*)Application::Instance()->GetWindow().GetNativeWindow());
-		ofn.lpstrFile = szFile;
-		ofn.nMaxFile = sizeof(szFile);
-		if (GetCurrentDirectoryA(256, currentDir))
-			ofn.lpstrInitialDir = currentDir;
-		ofn.lpstrFilter = filter;
+		std::wstring wide_filter = MakeWideFilter(filter);
+		if (wide_filter.empty())
+			return {};
+
+		std::vector<wchar_t> file_path(32768, L'\0');
+		std::vector<wchar_t> current_dir(32768, L'\0');
+		if (GetCurrentDirectoryW(static_cast<DWORD>(current_dir.size()), current_dir.data()) == 0)
+			current_dir.clear();
+
+		OPENFILENAMEW ofn{};
+		ofn.lStructSize = sizeof(ofn);
+		ofn.hwndOwner = glfwGetWin32Window(
+			static_cast<GLFWwindow*>(Application::Instance()->GetWindow().GetNativeWindow()));
+		ofn.lpstrFile = file_path.data();
+		ofn.nMaxFile = static_cast<DWORD>(file_path.size());
+		ofn.lpstrInitialDir = current_dir.empty() ? nullptr : current_dir.data();
+		ofn.lpstrFilter = wide_filter.data();
 		ofn.nFilterIndex = 1;
 		ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
 
-		// Sets the default extension by extracting it from the filter
-		ofn.lpstrDefExt = strchr(filter, '\0') + 1;
+		std::wstring default_extension;
+		if (filter != nullptr)
+		{
+			const char* pattern = std::strchr(filter, '\0');
+			if (pattern != nullptr)
+			{
+				++pattern;
+				if (pattern[0] == '*' && pattern[1] == '.')
+				{
+					for (pattern += 2; *pattern != '\0' && *pattern != ';'; ++pattern)
+						default_extension.push_back(static_cast<wchar_t>(static_cast<unsigned char>(*pattern)));
+				}
+			}
+		}
+		ofn.lpstrDefExt = default_extension.empty() ? nullptr : default_extension.c_str();
 
-		if (GetSaveFileNameA(&ofn) == TRUE)
-			return ofn.lpstrFile;
+		if (GetSaveFileNameW(&ofn) == TRUE)
+			return PathToUtf8(std::filesystem::path(file_path.data()));
 
-		return std::string();
+		return {};
 #elif defined(PLATFORM_MACOS)
 		@autoreleasepool {
 			NSSavePanel* savePanel = [NSSavePanel savePanel];
@@ -108,23 +159,23 @@ namespace Helios
 	/* 打开到指定的文件目录 */
 	bool OpenFileExplorer(const char* path)
 	{
-		if (!path || path == "")
+		if (path == nullptr || *path == '\0')
 			return false;
 
 #ifdef PLATFORM_WINDOWS
-		auto select_params = " /select, " + std::string(path);
-		std::wstring select_params_ws;
-		select_params_ws.assign(select_params.begin(), select_params.end());
+		std::filesystem::path file_path;
+		if (!TryPathFromUtf8(path, file_path))
+			return false;
 
-		SHELLEXECUTEINFO shex = { 0 };
-		shex.cbSize = sizeof(SHELLEXECUTEINFO);
-		shex.lpFile = static_cast<LPCSTR>("explorer");
-		shex.lpParameters = reinterpret_cast<LPCSTR>(select_params_ws.c_str());
-		shex.lpVerb = static_cast<LPCSTR>("open");
+		const std::wstring select_params = L"/select, \"" + file_path.wstring() + L"\"";
+		SHELLEXECUTEINFOW shex{};
+		shex.cbSize = sizeof(shex);
+		shex.fMask = SEE_MASK_FLAG_NO_UI;
+		shex.lpFile = L"explorer.exe";
+		shex.lpParameters = select_params.c_str();
+		shex.lpVerb = L"open";
 		shex.nShow = SW_SHOWDEFAULT;
-		shex.lpDirectory = NULL;
-
-		return ShellExecuteEx(&shex);
+		return ShellExecuteExW(&shex) == TRUE;
 #elif defined(PLATFORM_MACOS)
 		@autoreleasepool {
 			NSString* nsPath = [NSString stringWithUTF8String:path];

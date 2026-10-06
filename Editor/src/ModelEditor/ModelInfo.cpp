@@ -1,28 +1,91 @@
 ﻿#include "Pch.h"
 #include "ModelInfo.h"
+#include "Helios/Common/PathUtils.h"
+#include "Helios/Scene/SceneCommon.h"
 
 namespace Helios
 {
+	namespace
+	{
+		class Utf8MaterialReader final : public tinyobj::MaterialReader
+		{
+		public:
+			explicit Utf8MaterialReader(std::filesystem::path base_directory)
+				: m_BaseDirectory(std::move(base_directory))
+			{
+			}
+
+			bool operator()(const std::string& material_name,
+				std::vector<tinyobj::material_t>* materials,
+				std::map<std::string, int>* material_map,
+				std::string* warning,
+				std::string* error) override
+			{
+				std::filesystem::path relative_path;
+				if (!TryPathFromUtf8(material_name, relative_path))
+				{
+					if (warning != nullptr)
+						*warning += "Material path is not valid UTF-8: " + material_name + "\\n";
+					return false;
+				}
+
+				const std::filesystem::path material_path = relative_path.is_absolute()
+					? relative_path : m_BaseDirectory / relative_path;
+				std::ifstream material_stream(material_path, std::ios::in | std::ios::binary);
+				if (!material_stream)
+				{
+					if (warning != nullptr)
+						*warning += "Material file not found: " + PathToUtf8(material_path) + "\\n";
+					return false;
+				}
+
+				tinyobj::LoadMtl(material_map, materials, &material_stream, warning, error);
+				return true;
+			}
+
+		private:
+			std::filesystem::path m_BaseDirectory;
+		};
+	}
+
 	/* 加载Obj模型信息 */
 	void ModelInfo::LoadFromObj(const std::string& filepath)
 	{
 		if (filepath.empty())
 		{
 			EDITOR_LOG_ERROR("Model filepath is empty.");
+			return;
 		}
 
-		m_Path = filepath;
-		const std::string basedir = ExtractFileBaseDir(filepath); /* 模型所在路径 */
+		std::filesystem::path model_path;
+		if (!TryPathFromUtf8(filepath, model_path))
+		{
+			EDITOR_LOG_ERROR("Model path is not valid UTF-8.");
+			return;
+		}
+
+		m_Path = PathToUtf8(model_path);
+		std::ifstream model_stream(model_path, std::ios::in | std::ios::binary);
+		if (!model_stream)
+		{
+			EDITOR_LOG_ERROR("Failed to open model file: {}.", m_Path);
+			return;
+		}
+
+		Utf8MaterialReader material_reader(model_path.parent_path());
 
 		/* 加载模型数据 */
 		std::string warn, err;
-		bool ret = tinyobj::LoadObj(&m_Attributes, &m_Shapes, &m_Materials, &warn, &err, filepath.c_str(), basedir.c_str());
+		bool ret = tinyobj::LoadObj(&m_Attributes, &m_Shapes, &m_Materials, &warn, &err,
+			&model_stream, &material_reader);
 
 		if (!warn.empty())
 			EDITOR_LOG_WARN("Load Obj Warning: {}.", warn);
 
 		if (!err.empty())
 			EDITOR_LOG_ERROR("Load Obj Error: {}.", err);
+		if (!ret)
+			return;
 
 #if HELIOS_DEBUG
 		/* 打印模型信息 */
@@ -188,8 +251,14 @@ namespace Helios
 			sub_model_info->VertexArray->AddVertexBuffer(vertex_buffer);
 
 			/* MaterialParams */
-			std::filesystem::path relative_dir = std::filesystem::relative(basedir, g_AssetsPath);
+			const std::filesystem::path relative_dir = std::filesystem::relative(model_path.parent_path(), g_AssetsPath);
 			auto& params = sub_model_info->MaterialParams;
+			const auto relative_texture_path = [&relative_dir](const std::string& texture_name)
+			{
+				return texture_name.empty()
+					? std::string()
+					: PathToUtf8(relative_dir / PathFromUtf8(texture_name));
+			};
 			int shape_material_id = shape_data.mesh.material_ids[0];
 			if (shape_material_id >= 0 && shape_material_id < m_Materials.size())
 			{
@@ -197,25 +266,25 @@ namespace Helios
 				/* Name */
 				params.Name = material_data.name;
 				/* Ambient */
-				params.AmbientTexPath = material_data.ambient_texname.empty() ? "" : (relative_dir / material_data.ambient_texname).generic_string();
+				params.AmbientTexPath = relative_texture_path(material_data.ambient_texname);
 				params.Ambient = glm::vec3(material_data.ambient[0], material_data.ambient[1], material_data.ambient[2]);
 				/* Diffuse/Albedo */
-				params.DiffuseTexPath = material_data.diffuse_texname.empty() ? "" : (relative_dir / material_data.diffuse_texname).generic_string();
+				params.DiffuseTexPath = relative_texture_path(material_data.diffuse_texname);
 				params.Diffuse = glm::vec3(material_data.diffuse[0], material_data.diffuse[1], material_data.diffuse[2]);
 				/* Specular */
-				params.SpecularTexPath = material_data.specular_texname.empty() ? "" : (relative_dir / material_data.specular_texname).generic_string();
+				params.SpecularTexPath = relative_texture_path(material_data.specular_texname);
 				params.Specular = glm::vec3(material_data.specular[0], material_data.specular[1], material_data.specular[2]);
 				/* NormalTex */
-				params.BumpTexPath = material_data.bump_texname.empty() ? "" : (relative_dir / material_data.bump_texname).generic_string();
-				params.DisplacementTexPath = material_data.displacement_texname.empty() ? "" : (relative_dir / material_data.displacement_texname).generic_string();
+				params.BumpTexPath = relative_texture_path(material_data.bump_texname);
+				params.DisplacementTexPath = relative_texture_path(material_data.displacement_texname);
 				/* Roughness */
-				params.RoughnessTexPath = material_data.roughness_texname.empty() ? "" : (relative_dir / material_data.roughness_texname).generic_string();
+				params.RoughnessTexPath = relative_texture_path(material_data.roughness_texname);
 				params.Roughness = material_data.roughness;
 				/* Metallic */
-				params.MetallicTexPath = material_data.metallic_texname.empty() ? "" : (relative_dir / material_data.metallic_texname).generic_string();
+				params.MetallicTexPath = relative_texture_path(material_data.metallic_texname);
 				params.Metallic = material_data.metallic;
 				/* Emission */
-				params.EmissionTexPath = material_data.emissive_texname.empty() ? "" : (relative_dir / material_data.emissive_texname).generic_string();
+				params.EmissionTexPath = relative_texture_path(material_data.emissive_texname);
 				params.Emission = glm::vec3(material_data.emission[0], material_data.emission[1], material_data.emission[2]);
 				/* ClearCoat */
 				params.ClearCoatRoughness = material_data.clearcoat_roughness;

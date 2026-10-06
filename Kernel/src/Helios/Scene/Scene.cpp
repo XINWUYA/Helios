@@ -265,6 +265,20 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		std::filesystem::path scene_path;
+		if (!TryPathFromUtf8(path, scene_path))
+		{
+			CORE_LOG_ERROR("Invalid UTF-8 scene path.");
+			return;
+		}
+		auto scene_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+			OpenUtf8File(scene_path, "wb"), &std::fclose);
+		if (!scene_file)
+		{
+			CORE_LOG_ERROR("Failed to open scene file for writing: {}.", path);
+			return;
+		}
+
 		auto* doc = new tinyxml2::XMLDocument();
 		doc->InsertEndChild(doc->NewDeclaration());
 		tinyxml2::XMLElement* scene_root = doc->NewElement("Scene");
@@ -298,7 +312,8 @@ namespace Helios
 		}
 
 		/* 保存到文本 */
-		doc->SaveFile(path.c_str());
+		if (doc->SaveFile(scene_file.get()) != tinyxml2::XML_SUCCESS)
+			CORE_LOG_ERROR("Failed to write scene file: {}.", path);
 
 		delete doc;
 	}
@@ -307,8 +322,22 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		std::filesystem::path scene_path;
+		if (!TryPathFromUtf8(path, scene_path))
+		{
+			CORE_LOG_ERROR("Invalid UTF-8 scene path.");
+			return false;
+		}
+		auto scene_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+			OpenUtf8File(scene_path, "rb"), &std::fclose);
+		if (!scene_file)
+		{
+			CORE_LOG_ERROR("Failed to open scene file: {}.", path);
+			return false;
+		}
+
 		tinyxml2::XMLDocument doc;
-		if (doc.LoadFile(path.c_str()) != tinyxml2::XML_SUCCESS)
+		if (doc.LoadFile(scene_file.get()) != tinyxml2::XML_SUCCESS)
 		{
 			CORE_LOG_ERROR("Failed to deserializer scene file: {}.", path);
 			return false;

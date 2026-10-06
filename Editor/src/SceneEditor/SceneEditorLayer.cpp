@@ -168,16 +168,17 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const auto extension = path.extension().string();
+		const auto extension = PathToUtf8(path.extension());
 
 		/* 场景文件 */
 		if (extension == ".scn")
 		{
-			EDITOR_LOG_DEBUG("Import scene file: {}.", path.generic_string());
+			const std::string scene_path = PathToUtf8(path);
+			EDITOR_LOG_DEBUG("Import scene file: {}.", scene_path);
 
 			SharedPtr<Scene> new_scene = CreateSharedPtr<Scene>();
-			if (new_scene->Deserializer(path.generic_string()))
-				SetActiveScene(new_scene, path.generic_string());
+			if (new_scene->Deserializer(scene_path))
+				SetActiveScene(new_scene, scene_path);
 
 			return;
 		}
@@ -185,11 +186,12 @@ namespace Helios
 		/* 模型文件 */
 		if (extension == ".mesh")
 		{
-			EDITOR_LOG_DEBUG("Import model file: {}.", path.generic_string());
+			const std::string model_path = PathToUtf8(path);
+			EDITOR_LOG_DEBUG("Import model file: {}.", model_path);
 
-			Entity entity = m_pMainScene->CreateEntity(path.stem().string());
+			Entity entity = m_pMainScene->CreateEntity(PathToUtf8(path.stem()));
 			auto& model_component = entity.AddComponent<ModelComponent>();
-			model_component.m_Model = Model::Create(path.generic_string());
+			model_component.m_Model = Model::Create(model_path);
 
 			/* 这条改动不走命令栈（没有对应的撤销），脏标记只能在这里显式补上 */
 			m_HasUnrecordedChange = true;
