@@ -1,9 +1,27 @@
 #pragma once
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
 namespace Helios
 {
+	/* 资源文件的大类：决定资源浏览器里画哪枚图标、"按类型筛选"能筛出什么。
+	 * 枚举值顺序 = 筛选下拉里的顺序（面板那边的 TypeFilter 除 All 外与它一一对应）。 */
+	enum class AssetFileKind : uint8_t
+	{
+		Other = 0,   /* 认不出的后缀：通用文件图标，只在「All types」下出现 */
+		Image,       /* .png / .jpg / .dds / .tga / .bmp */
+		Scene,       /* .scn */
+		MtlGraph,    /* .mtlgraph */
+		Shader,      /* .glsl（源） / .metal（Metal 目标，编译产物） */
+		Model,       /* .obj（引擎自己导的） / .mesh（网格缓存） / .fbx / .dae / .stl */
+	};
+
+	/* 后缀 -> 大类。extension 形如 ".glsl"，大小写不敏感（内部转大写再比）。
+	 * 后缀与大类的对应关系只在这一处（表在 .cpp 里）：加一种资源类型 = 枚举加一项 + 表里加几行，
+	 * 图标与类型筛选都跟着走，不必各自再列一遍后缀。 */
+	AssetFileKind AssetFileKindOf(const std::string& extension);
+
 	/* 资源改动（新建 / 重命名 / 删除，含撤销重做）的观察者：文件命令只管改磁盘，界面靠回调同步
 	 * "选中项 / 当前目录"（不然撤销一次重命名，选中项会先凭空消失）。传的是相对 Assets 的路径：
 	 * from 空 = 新建，to 空 = 删除，都有 = 改名 / 移动。 */

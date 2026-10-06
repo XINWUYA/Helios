@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "Command/AssetFileOps.h"
+#include <cctype>
 
 namespace Helios
 {
@@ -28,6 +29,38 @@ namespace Helios
 	{
 		/* 与 Assets 平级：不进资源树（浏览器只列 Assets 下面的东西），也不会被打进包 */
 		return g_AssetsPath.parent_path() / ".helios-trash";
+	}
+
+	AssetFileKind AssetFileKindOf(const std::string& extension)
+	{
+		/* 后缀一律转大写再比，大小写不敏感（调用方给 ".GLSL" 也能对上）。 */
+		std::string upper;
+		upper.reserve(extension.size());
+		for (const char character : extension)
+			upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(character))));
+
+		static constexpr struct { const char* Extension; AssetFileKind Kind; } kByExtension[] = {
+			{ ".PNG", AssetFileKind::Image }, { ".JPG", AssetFileKind::Image }, { ".DDS", AssetFileKind::Image },
+			{ ".TGA", AssetFileKind::Image }, { ".BMP", AssetFileKind::Image },
+			{ ".SCN", AssetFileKind::Scene },
+			{ ".MTLGRAPH", AssetFileKind::MtlGraph },
+			/* 着色器：.glsl 是源，.metal 是同一次编译的产物（落在 Assets/Cache/Shaders 下）——
+			 * 两样都是"一个着色器"，筛 Shaders 时一起出来。 */
+			{ ".GLSL", AssetFileKind::Shader }, { ".METAL", AssetFileKind::Shader },
+			/* 模型：引擎自己只导 .obj（tinyobjloader），.mesh 是它旁边那份二进制网格缓存；
+			 * .fbx / .dae / .stl 是随模型一起带进来的交换格式 —— 都算"这个模型的文件"。
+			 * .mtl 是材质库（跟着 .obj 走的那份），不是模型，归 Other。 */
+			{ ".OBJ", AssetFileKind::Model }, { ".MESH", AssetFileKind::Model }, { ".FBX", AssetFileKind::Model },
+			{ ".DAE", AssetFileKind::Model }, { ".STL", AssetFileKind::Model },
+		};
+
+		for (const auto& entry : kByExtension)
+		{
+			if (upper == entry.Extension)
+				return entry.Kind;
+		}
+
+		return AssetFileKind::Other;
 	}
 
 	std::string AssetRelativePath(const std::filesystem::path& path)

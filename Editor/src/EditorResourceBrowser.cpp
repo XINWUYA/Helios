@@ -22,6 +22,10 @@ namespace Helios
 		/* 目录状态检查间隔：兼顾刷新及时性与遍历开销 */
 		constexpr float kDirectoryCheckInterval = 0.5f;
 
+		/* 浏览位置的历史最多记几步（超出丢最旧的一条）：它不是工作记忆，
+		 * 这里只是防"长时间浏览把它撑成无界"。 */
+		constexpr size_t kMaxNavigationHistory = 64;
+
 		/* 目录树 / 内容区的宽度分配：比例的可拖范围，以及两栏各自的最小宽度
 		 * （目录树至少要放得下一个目录名，内容区至少要放得下一列缩略图） */
 		constexpr float kMinTreePaneRatio = 0.12f;
@@ -104,24 +108,6 @@ namespace Helios
 			}
 
 			return true;
-		}
-
-		/* 编辑历史按钮的 tooltip："Undo Rename hero.png  (Ctrl+Z)"。
-		 * 操作名拿不到（历史是空的）就只写动作与快捷键。 */
-		std::string HistoryTooltip(const char* action, const char* label, const char* shortcut)
-		{
-			std::string text(action);
-
-			if (label != nullptr && label[0] != '\0')
-			{
-				text += ' ';
-				text += label;
-			}
-
-			text += "  (";
-			text += shortcut;
-			text += ')';
-			return text;
 		}
 
 		/* 面包屑的分隔符是矢量三角（见 ShowBrowserFooter），这是它占位的方框边长 ——
@@ -280,18 +266,43 @@ namespace Helios
 	/* 文件类型 -> 图标：与层级面板共用同一套矢量图标语言（单色、可着色、任意尺寸不糊） */
 	Icons::Id EditorResourceBrowser::ResolveFileIcon(FileType type)
 	{
+		/* 不留 default：FileType 加了新档却忘了给图标时，-Wswitch 会直接报出来
+		 * （留下 default 的话新类型会静默落到通用文件图标上，很难发现）。 */
 		switch (type)
 		{
+		case FileType::Default:  return Icons::Id::File;
 		case FileType::Folder:   return Icons::Id::Directory;
 		case FileType::Image:    return Icons::Id::FileImage;
 		case FileType::Scene:    return Icons::Id::FileScene;
 		case FileType::MtlGraph: return Icons::Id::FileMtlGraph;
-		default:                 return Icons::Id::File;
+		case FileType::Shader:   return Icons::Id::FileShader;
+		case FileType::Model:    return Icons::Id::FileModel;
 		}
+
+		return Icons::Id::File;
+	}
+
+	/* 后缀分出来的大类 -> 面板的 FileType：面板比大类多两档（Folder 来自"是不是目录"、
+	 * Default = 认不出的后缀），剩下的一一对上。同上：不留 default，漏了会由 -Wswitch 报出来。 */
+	EditorResourceBrowser::FileType EditorResourceBrowser::FileTypeOfKind(AssetFileKind kind)
+	{
+		switch (kind)
+		{
+		case AssetFileKind::Other:    return FileType::Default;
+		case AssetFileKind::Image:    return FileType::Image;
+		case AssetFileKind::Scene:    return FileType::Scene;
+		case AssetFileKind::MtlGraph: return FileType::MtlGraph;
+		case AssetFileKind::Shader:   return FileType::Shader;
+		case AssetFileKind::Model:    return FileType::Model;
+		}
+
+		return FileType::Default;
 	}
 
 	const char* EditorResourceBrowser::TypeFilterName(TypeFilter filter)
 	{
+		/* 不留 default：TypeFilter 加了一项却没给显示名时 -Wswitch 会报出来
+		 * （否则那一项会顶着 "All types" 出现在下拉里）。 */
 		switch (filter)
 		{
 		case TypeFilter::All:      return "All types";
@@ -299,8 +310,11 @@ namespace Helios
 		case TypeFilter::Image:    return "Images";
 		case TypeFilter::Scene:    return "Scenes";
 		case TypeFilter::MtlGraph: return "Mtl Graphs";
-		default:                   return "All types";
+		case TypeFilter::Shader:   return "Shaders";
+		case TypeFilter::Model:    return "Models";
 		}
+
+		return "All types";
 	}
 
 	bool EditorResourceBrowser::MatchesTypeFilter(TypeFilter filter, FileType type)
@@ -312,6 +326,8 @@ namespace Helios
 		case TypeFilter::Image:    return type == FileType::Image;
 		case TypeFilter::Scene:    return type == FileType::Scene;
 		case TypeFilter::MtlGraph: return type == FileType::MtlGraph;
+		case TypeFilter::Shader:   return type == FileType::Shader;
+		case TypeFilter::Model:    return type == FileType::Model;
 		}
 
 		return true;
@@ -469,6 +485,44 @@ namespace Helios
 					m_SelectionAnchor = created;
 				}
 				m_PendingSelectPath.clear();
+			}
+
+			/* 浏览历史（回到上次路径 / 重进路径）要跟目录重建对齐：重命名过的项按前缀 remap；
+			 * 进不去的项（目录已删）直接摘掉；游标那一项写回当前实际位置（当前目录被改名 / 被删也跟得上）。 */
+			{
+				const std::string current_now = m_CurrentFileNode->FilePath;
+				std::vector<std::string> history;
+				history.reserve(m_NavHistory.size());
+
+				size_t cursor = 0;
+				bool cursor_kept = false;
+
+				for (size_t i = 0; i < m_NavHistory.size(); ++i)
+				{
+					const bool is_cursor = (i == m_NavCursor);
+					const std::string path = is_cursor ? current_now : remap(m_NavHistory[i]);
+
+					if (!is_cursor && FindNode(m_RootFileNodeTree, path) == nullptr)
+						continue;
+
+					if (is_cursor)
+					{
+						cursor = history.size();
+						cursor_kept = true;
+					}
+
+					history.push_back(path);
+				}
+
+				/* 首次重建时历史还是空的（游标也没有落点）：以当前目录为起点 */
+				if (!cursor_kept)
+				{
+					history.assign(1, current_now);
+					cursor = 0;
+				}
+
+				m_NavHistory = std::move(history);
+				m_NavCursor = cursor;
 			}
 
 			m_RemapFrom.clear();
@@ -662,16 +716,69 @@ namespace Helios
 		}
 	}
 
-	/* 切换当前目录：置上「下次画目录树时把它露出来」。
-	 * 选中项属于上一个目录，一并清掉。 */
+	/* ---- 浏览位置与它的历史 ----
+	 * 历史里存的是相对 Assets 的路径：文件树会重建，节点指针不保险
+	 * （与文件操作的待办同一套理由）。游标左边是「回到上次路径」能去的，右边是「重进路径」能去的。 */
+
+	/* 用户导航（点目录树 / 点面包屑 / 双击文件夹）：落位 + 记一条历史。
+	 * 目录没变（又点了当前目录）不算一次导航 —— 不落位也不记，历史里不出现连续重复项。 */
 	void EditorResourceBrowser::SetCurrentNode(const SharedPtr<FileNode>& node)
 	{
 		if (node == nullptr || node == m_CurrentFileNode)
 			return;
 
+		RecordNavigation(node->FilePath);
+		ApplyCurrentNode(node);
+	}
+
+	/* 落位：切目录 + 清选中项（它们属于上一个目录）+ 置上「下次画目录树时把它露出来
+	 * （展开祖先 + 滚到可见）」。浏览历史跳转与用户导航共用这里，差别只在记不记历史。 */
+	void EditorResourceBrowser::ApplyCurrentNode(const SharedPtr<FileNode>& node)
+	{
 		m_CurrentFileNode = node;
 		ClearSelection();
 		m_RevealCurrentNode = true;
+	}
+
+	void EditorResourceBrowser::RecordNavigation(const std::string& path)
+	{
+		/* 从历史中间走新路 = 丢弃「前进」的那一段（与浏览器一致）：历史里只留真的走过的那一条 */
+		if (m_NavCursor + 1 < m_NavHistory.size())
+			m_NavHistory.resize(m_NavCursor + 1);
+
+		/* 超出上限就丢最旧的一条：接着 push 新的一条、游标落在末尾，两头的关系都不受影响 */
+		if (m_NavHistory.size() >= kMaxNavigationHistory)
+			m_NavHistory.erase(m_NavHistory.begin());
+
+		m_NavHistory.push_back(path);
+		m_NavCursor = m_NavHistory.size() - 1;
+	}
+
+	int EditorResourceBrowser::FindHistoryStep(int direction, SharedPtr<FileNode>& node) const
+	{
+		for (int index = static_cast<int>(m_NavCursor) + direction;
+			index >= 0 && index < static_cast<int>(m_NavHistory.size());
+			index += direction)
+		{
+			if (SharedPtr<FileNode> found = FindNode(m_RootFileNodeTree, m_NavHistory[static_cast<size_t>(index)]))
+			{
+				node = found;
+				return index;
+			}
+		}
+
+		return -1;
+	}
+
+	void EditorResourceBrowser::NavigateHistory(int direction)
+	{
+		SharedPtr<FileNode> target;
+		const int step = FindHistoryStep(direction, target);
+		if (step < 0)
+			return;
+
+		m_NavCursor = static_cast<size_t>(step);
+		ApplyCurrentNode(target);
 	}
 
 	/* ---- 选择（内容区，可多选）：全部入口都在这一节，绘制代码只读不写 ---- */
@@ -821,7 +928,7 @@ namespace Helios
 
 		if (m_History.Execute)
 		{
-			/* 交给编辑历史：撤销 / 重做（含工具栏按钮、Ctrl+Z 与顶栏那两个按钮）都归它管 */
+			/* 交给编辑历史：撤销 / 重做（菜单、主工具栏按钮与 Ctrl+Z）都归它管 */
 			m_History.Execute(std::move(command));
 			return;
 		}
@@ -1189,7 +1296,7 @@ namespace Helios
 
 		/* 顶栏就画在面板的客户端顶边上（面板本身不带上下内边距，见 OnImGuiRenderer），
 		 * 横向按内容区左端对齐。左上角不再画面板图标（目录名在底栏、面板名在窗口标题里，
-		 * 那枚文件夹图标只是重复），改成「新建 + 撤销 / 重做」三个按钮。 */
+		 * 那枚文件夹图标只是重复），改成「新建 + 回到上次路径 / 重进路径」三个按钮。 */
 		PanelChrome::HeaderRow row = PanelChrome::BeginHeaderRow(Icons::Id::None);
 
 		/* 控件上下各留 1px：栏高因此比控件高 2px。留白的用处是"贴边画"的两个毛病 ——
@@ -1208,36 +1315,44 @@ namespace Helios
 		const float action_step = action_size + gap;          /* 按钮的步长（含它们之间的间隙） */
 		const float left_cluster = action_size * 3.0f + gap * 2.0f;
 
+		/* 新建图标是「新建 / 添加」入口统一的那枚加号（与层级面板、属性面板同一枚）：
+		 * 同一个"新建"动作到哪儿都是同一张脸。 */
 		ImGui::SetCursorScreenPos(ImVec2(row.Min.x, control_y));
-		if (Icons::IconButton(Icons::Id::Add, ImVec2(action_size, action_size), false,
+		if (Icons::IconButton(Icons::Id::NewAsset, ImVec2(action_size, action_size), false,
 			"New asset  (folder / scene / material graph / file)"))
 		{
 			ImGui::OpenPopup(m_PopupNewMenu);
 		}
 
-		const bool can_undo = m_History.CanUndo && m_History.CanUndo();
-		const bool can_redo = m_History.CanRedo && m_History.CanRedo();
-		const std::string undo_tip = HistoryTooltip("Undo",
-			m_History.UndoLabel ? m_History.UndoLabel() : nullptr, "Ctrl+Z");
-		const std::string redo_tip = HistoryTooltip("Redo",
-			m_History.RedoLabel ? m_History.RedoLabel() : nullptr, "Ctrl+Y");
+		/* 两枚导航按钮各自的目标 = 历史里沿那个方向还进得去的一项（见 FindHistoryStep）：
+		 * 按钮的可用态与 tooltip 都看它。tooltip 说清"这一步会去哪儿"：“Back to Scenes/Props”；
+		 * 根目录的相对路径为空，用它的目录名 —— 与路径栏里对它的称呼一致。 */
+		SharedPtr<FileNode> back_target;
+		SharedPtr<FileNode> forward_target;
+		const bool can_back = (FindHistoryStep(-1, back_target) >= 0);
+		const bool can_forward = (FindHistoryStep(1, forward_target) >= 0);
+
+		const auto navigation_tooltip = [](const char* action, const SharedPtr<FileNode>& target)
+		{
+			const std::string name = target->FilePath.empty() ? DisplayNodeName(*target) : target->FilePath;
+			return std::string(action) + " to " + name;
+		};
+
+		const std::string back_tip = can_back
+			? navigation_tooltip("Back", back_target) : std::string("Back");
+		const std::string forward_tip = can_forward
+			? navigation_tooltip("Forward", forward_target) : std::string("Forward");
 
 		ImGui::SetCursorScreenPos(ImVec2(row.Min.x + action_step, control_y));
-		ImGui::BeginDisabled(!can_undo);
-		if (Icons::IconButton(Icons::Id::Undo, ImVec2(action_size, action_size), false, undo_tip.c_str())
-			&& m_History.Undo)
-		{
-			m_History.Undo();
-		}
+		ImGui::BeginDisabled(!can_back);
+		if (Icons::IconButton(Icons::Id::Back, ImVec2(action_size, action_size), false, back_tip.c_str()))
+			NavigateHistory(-1);
 		ImGui::EndDisabled();
 
 		ImGui::SetCursorScreenPos(ImVec2(row.Min.x + action_step * 2.0f, control_y));
-		ImGui::BeginDisabled(!can_redo);
-		if (Icons::IconButton(Icons::Id::Redo, ImVec2(action_size, action_size), false, redo_tip.c_str())
-			&& m_History.Redo)
-		{
-			m_History.Redo();
-		}
+		ImGui::BeginDisabled(!can_forward);
+		if (Icons::IconButton(Icons::Id::Forward, ImVec2(action_size, action_size), false, forward_tip.c_str()))
+			NavigateHistory(1);
 		ImGui::EndDisabled();
 
 		/* ---- 尺寸 ----
@@ -1842,10 +1957,13 @@ namespace Helios
 		}
 		else
 		{
-			/* 列表模式：三列（名字 / 类型 / 大小），名字列带文件类型图标 */
-			ImGui::BeginTable("Assets List", 3);
+			/* 列表模式三列（名字 / 类型 / 大小）；横向的账跟网格一套：表宽 = 内容栏宽 - 两侧内沿，
+			 * 名字列 WidthStretch 吃掉剩余，类型 / 大小推到右端；NoPadOuterX 拿掉表格外边距。 */
+			const float list_width = ImMax(panel_width - kGridSideInset * 2.0f, 160.0f);
+			ImGui::SetCursorScreenPos(ImVec2(content_left_x + kGridSideInset, ImGui::GetCursorScreenPos().y));
+			ImGui::BeginTable("Assets List", 3, ImGuiTableFlags_NoPadOuterX, ImVec2(list_width, 0.0f));
 			{
-				ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_NoHide);
+				ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_NoHide | ImGuiTableColumnFlags_WidthStretch);
 				ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed);
 				ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed);
 				ImGui::TableHeadersRow();
@@ -1900,24 +2018,10 @@ namespace Helios
 			}
 			else
 			{
-				auto ext = PathToUtf8(filename.extension());
-				transform(ext.begin(), ext.end(), ext.begin(), ::toupper);
-				if (ext == ".JPG" || ext == ".PNG" || ext == ".DDS" || ext == ".TGA" || ext == ".BMP")
-				{
-                    file_node->Type = FileType::Image;
-				}
-				else if (ext == ".SCN")
-				{
-                    file_node->Type = FileType::Scene;
-				}
-				else if (ext == ".MTLGRAPH")
-				{
-                    file_node->Type = FileType::MtlGraph;
-				}
-				else
-				{
-                    file_node->Type = FileType::Default;
-				}
+				/* 分类只此一处：后缀 -> 大类在 AssetFileOps 那张表里（图标与类型筛选都跟着它走），
+				 * 这里只把大类翻成面板的 FileType。加一种资源类型 = 那边的表加几行 + 这里的 switch
+				 * 加一个 case + FileType / TypeFilter / 图标各加一项。 */
+				file_node->Type = FileTypeOfKind(AssetFileKindOf(PathToUtf8(filename.extension())));
 
 				/* 图标不在这里取：非图片是矢量图标，图片缩略图按需加载（见 ThumbnailOf） */
 				file_node->FileSize = static_cast<float>(std::filesystem::file_size(path)) / 1024.0f;
@@ -1933,6 +2037,22 @@ namespace Helios
 	{
 		bool clicked_an_item = false;
 
+		/* 单元格里的"类型 / 大小"用绘制列表画、不建条目：整行的命中与悬停都归整行的
+		 * Selectable（再建条目会跟它抢悬停）。
+		 * align_right：数字右对齐贴本列右端，位数不齐也成一条线。 */
+		const auto draw_cell_text = [](const std::string& text, bool align_right)
+		{
+			if (text.empty())
+				return;
+
+			const ImVec2 origin = ImGui::GetCursorScreenPos();
+			const float text_width = ImGui::CalcTextSize(text.c_str()).x;
+			const float x = align_right
+				? origin.x + ImMax(ImGui::GetContentRegionAvail().x - text_width, 0.0f) : origin.x;
+			ImGui::GetWindowDrawList()->AddText(ImVec2(x, origin.y),
+				ImGui::GetColorU32(EditorTheme::Token::Text), text.c_str());
+		};
+
 		for (const SharedPtr<FileNode>& child_node : visible)
 		{
 			const bool is_folder = (child_node->Type == FileType::Folder);
@@ -1943,11 +2063,21 @@ namespace Helios
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 
-			/* Leaf：列表里不给展开箭头（要看层级去目录树）；选中态用 ImGui 自己的行高亮 */
-			ImGui::TreeNodeEx("##node",
-				ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen
-					| (is_selected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None),
-				"%s", "");
+			/* 名字列内容的落点要在进 Selectable 之前取：这是本列内容的起点（与表头的
+			 * Name 同一条竖线）；进 Selectable 之后光标已被推到下一行。 */
+			const ImVec2 name_origin = ImGui::GetCursorScreenPos();
+
+			/* 整行一个 Selectable（`SpanAllColumns`）：高亮与命中区都是整行（含"类型 / 大小"两列）。
+			 * `AllowItemOverlap`：右侧两列的自绘文字不抢整行的悬停。 */
+			/* 选中行被悬停时 ImGui 画的也是 HeaderHovered —— 推"更亮的选中色"顶住 */
+			if (is_selected)
+				ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorTheme::RowHoverSelected);
+
+			ImGui::Selectable("##row", is_selected,
+				ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap);
+
+			if (is_selected)
+				ImGui::PopStyleColor();
 
 			/* 单击 = 选中（Shift 连选 / Ctrl 加选），双击文件夹 = 进去 */
 			if (ImGui::IsItemClicked())
@@ -1972,16 +2102,26 @@ namespace Helios
 				ImGui::EndPopup();
 			}
 
-			/* 选中态由 ImGui 的行高亮表达（与网格的"强调色描边"是同一套语义的另一半） */
-			PanelChrome::DrawTreeRowLabel(ResolveFileIcon(child_node->Type), child_node->FileName);
+			/* 名字列的内容（图标 + 文件名）：自己画在 Selectable 之上 —— `DrawTreeRowLabel` 的
+			 * 树形让位（箭头 + 缩进）会让图标落不到列首、与表头的 Name 对不齐。 */
+			{
+				const float icon_size = ImGui::GetFontSize();
+				const ImU32 text_color = ImGui::GetColorU32(EditorTheme::Token::Text);
+				ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+
+				Icons::Draw(draw_list, ResolveFileIcon(child_node->Type),
+					ImVec2(name_origin.x + icon_size * 0.5f, name_origin.y + icon_size * 0.5f), icon_size, text_color);
+				draw_list->AddText(ImVec2(name_origin.x + icon_size + ImGui::GetStyle().ItemInnerSpacing.x,
+					name_origin.y), text_color, child_node->FileName.c_str());
+			}
 
 			/* 文件类型 */
 			ImGui::TableNextColumn();
-			ImGui::TextUnformatted(ExtractFileSuffix(child_node->FileName).c_str());
+			draw_cell_text(ExtractFileSuffix(child_node->FileName), false);
 
 			/* 文件大小（文件夹不计） */
 			ImGui::TableNextColumn();
-			ImGui::TextUnformatted(is_folder ? "" : (ToString(child_node->FileSize, 2) + "KB").c_str());
+			draw_cell_text(is_folder ? std::string() : (ToString(child_node->FileSize, 2) + "KB"), true);
 
 			ImGui::PopID();
 		}

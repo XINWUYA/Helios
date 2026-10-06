@@ -30,13 +30,6 @@ namespace Helios
 		{
 			/* 把命令交给编辑历史（撤销 / 重做从此也管着它） */
 			std::function<void(UniquePtr<ICommand>)> Execute;
-			std::function<bool()> Undo;
-			std::function<bool()> Redo;
-			std::function<bool()> CanUndo;
-			std::function<bool()> CanRedo;
-			/* 历史里下一步要撤销 / 重做的操作名（拿不到就返回 null），只用在 tooltip 上 */
-			std::function<const char*()> UndoLabel;
-			std::function<const char*()> RedoLabel;
 		};
 
 		void SetHistorySink(HistorySink sink) { m_History = std::move(sink); }
@@ -46,7 +39,8 @@ namespace Helios
 		void OnAssetPathChanged(const std::string& from, const std::string& to) override;
 
 	private:
-		/* 文件类型，确定文件后缀是否正确 */
+		/* 文件类型。除 Folder（是不是目录）与 Default（认不出的后缀）外，
+		 * 其余几档与 AssetFileKind 一一对应 —— 后缀归属哪一类在 AssetFileOps 的那张表里。 */
 		enum class FileType : uint8_t
 		{
 			Default,
@@ -54,9 +48,13 @@ namespace Helios
 			Image,
 			Scene,
 			MtlGraph,
+			Shader,
+			Model,
 		};
 
-		/* 内容筛选里的「按类型」（工具行下拉）：All = 不按类型筛 */
+		/* 内容筛选里的「按类型」（工具行下拉）：All = 不按类型筛。
+		 * 除 All 外与 FileType 一一对应（名字、判据、顺序都跟着走）——
+		 * 加一种资源类型时，这两处要一起加（还有分类那一处，见 BuildFileNodeTree）。 */
 		enum class TypeFilter : uint8_t
 		{
 			All = 0,
@@ -64,6 +62,8 @@ namespace Helios
 			Image,
 			Scene,
 			MtlGraph,
+			Shader,
+			Model,
 			COUNT
 		};
 
@@ -158,11 +158,30 @@ namespace Helios
 		/* 图片缩略图按需加载：只有真的要画的时候才建贴图（建树时全加载会拖慢启动、白占显存） */
 		static SharedPtr<DeviceTexture> ThumbnailOf(FileNode& node);
 
-		/* 切换当前目录：置上「下次画目录树时把它露出来」（展开祖先 + 滚到可见） */
+		/* ---- 浏览位置（右栏当前目录）与它的历史 ----
+		 * 顶栏的「回到上次路径 / 重进路径」走这里：历史按相对 Assets 的路径记
+		 * （文件树会重建、节点指针不保险 —— 与文件操作的待办同一套理由）。 */
+
+		/* 切换当前目录（用户导航：目录树点击 / 面包屑 / 双击文件夹）：记一条历史 */
 		void SetCurrentNode(const SharedPtr<FileNode>& node);
+		/* 落位到某个节点：切目录 + 清选择 + 置上「下次画目录树时把它露出来」（见 SetCurrentNode）。
+		 * 从历史里跳转时不重复记历史，所以"记历史"与"落位"拆开。 */
+		void ApplyCurrentNode(const SharedPtr<FileNode>& node);
+		/* 记一条浏览历史：从历史中间走新路时丢掉"前进"的那一段（与浏览器一致） */
+		void RecordNavigation(const std::string& path);
+		/* 沿 direction（-1 = 回到上次路径、+1 = 重进路径）找历史里最近的一条还进得去的项：
+		 * 找到时返回下标、并把节点写进 node；没有这样的项就返回 -1（按钮据此置灰）。 */
+		int FindHistoryStep(int direction, SharedPtr<FileNode>& node) const;
+		/* 走一步历史（点按钮时用）：游标落到目标项，不产生新的历史 */
+		void NavigateHistory(int direction);
 
 		/* 文件类型 -> 图标：与层级面板共用同一套矢量图标语言 */
 		static Icons::Id ResolveFileIcon(FileType type);
+
+		/* 后缀分出来的大类（AssetFileOps）-> 面板自己的 FileType。
+		 * 面板比大类多两档：Folder（来自"这是不是目录"，与后缀无关）、
+		 * Default（= 大类里的 Other，认不出的后缀）。 */
+		static FileType FileTypeOfKind(AssetFileKind kind);
 
 		/* 节点的显示名：根节点的 FileName 存的是整条绝对路径，用最后一级目录名代替 */
 		static std::string DisplayNodeName(const FileNode& node);
@@ -229,7 +248,7 @@ namespace Helios
 		std::string m_RemapTo;
 		std::string m_PendingSelectPath;
 
-		/* 跨面板通道：编辑历史（文件操作要进同一条历史、顶栏的撤销 / 重做按钮要问状态）。
+		/* 跨面板通道：编辑历史（文件操作要进同一条历史 —— 撤销 / 重做由菜单与主工具栏触发）。
 		 * 只为这一个用途，由主壳层注入。 */
 		HistorySink m_History;
 
@@ -245,6 +264,11 @@ namespace Helios
 		SharedPtr<FileNode> m_RootFileNodeTree{};
 		/* 当前选中的文件节点 */
 		SharedPtr<FileNode> m_CurrentFileNode{};
+
+		/* 浏览位置的历史与游标：游标左边是「回到上次路径」能去的，右边是「重进路径」能去的。
+		 * 首次重建时补上根目录一项 —— 第一次导航之后就有"上次"可回。 */
+		std::vector<std::string> m_NavHistory;
+		size_t m_NavCursor{ 0 };
 		/* 右栏里选中的项（可多选）：网格 / 列表据此高亮，底栏显示它们。
 		 * 顺序 = 点选顺序（Shift 范围按显示顺序）；切目录时清掉 —— 它们属于上一个目录。
 		 * `m_SelectionAnchor` 是 Shift 范围选择的锚点（最近一次"不带 Shift 的点选"）。 */
