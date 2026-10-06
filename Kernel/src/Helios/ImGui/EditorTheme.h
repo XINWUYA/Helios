@@ -32,10 +32,12 @@ namespace Helios::EditorTheme
         /* 属性行标签：比正文弱、比禁用强 —— 标签是"说明"，值才是内容 */
         inline const ImVec4 TextLabel = ImVec4(0.765f, 0.808f, 0.863f, 1.00f); /* #C3CEDC */
 
-        /* 薄荷青强调色：只用于选中 / 激活 / 焦点 / 拖拽，不作为装饰色铺满界面 */
-        inline const ImVec4 Accent      = ImVec4(0.333f, 0.839f, 0.761f, 1.00f); /* #55D6C2 */
-        inline const ImVec4 AccentHover = ImVec4(0.514f, 0.906f, 0.839f, 1.00f); /* #83E7D6 */
-        inline const ImVec4 AccentDown  = ImVec4(0.208f, 0.718f, 0.624f, 1.00f); /* #35B79F */
+        /* 淡紫强调色：与图标系统同源 —— 取 SvgInk::Violet 的深色画布落地色（EditorIcons.cpp，
+         * #A69EFF），图标里的紫与 UI 状态色是同一个颜色。
+         * 只用于选中 / 激活 / 焦点 / 拖拽，不作为装饰色铺满界面 */
+        inline const ImVec4 Accent      = ImVec4(0.651f, 0.620f, 1.000f, 1.00f); /* #A69EFF */
+        inline const ImVec4 AccentHover = ImVec4(0.776f, 0.757f, 1.000f, 1.00f); /* #C6C1FF */
+        inline const ImVec4 AccentDown  = ImVec4(0.533f, 0.502f, 0.910f, 1.00f); /* #8880E8 */
 
         /* 分量色：X/Y/Z 的身份标识（业界约定 红/绿/蓝），与"状态"无关，
          * 因此只出现在「分量重置按钮」这一处；深色界面下取降饱和版本，避免抢眼。
@@ -56,8 +58,8 @@ namespace Helios::EditorTheme
          * 细轨用中性灰；点亮段与圆点一起表示"当前值"——当前值在强调色白名单里，
          * 故用 Accent；悬停 / 拖动时整条再亮一档，状态的差异只在这三个颜色里。 */
         inline const ImVec4 SliderTrack = Neutral6;      /* #465363 细轨（值右侧那一段） */
-        inline const ImVec4 SliderValue = Accent;        /* #55D6C2 点亮段 + 圆点（常态） */
-        inline const ImVec4 SliderHover = AccentHover;   /* #83E7D6 点亮段 + 圆点（悬停 / 拖动） */
+        inline const ImVec4 SliderValue = Accent;        /* #A69EFF 点亮段 + 圆点（常态） */
+        inline const ImVec4 SliderHover = AccentHover;   /* #C6C1FF 点亮段 + 圆点（悬停 / 拖动） */
 
         inline const ImVec4 Clear   = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
         inline const ImVec4 White06 = ImVec4(1.0f, 1.0f, 1.0f, 0.06f);
