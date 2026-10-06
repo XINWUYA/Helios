@@ -448,11 +448,19 @@ namespace Helios
 				glm::vec4 color{ 1.0f };
 				float intensity = 1.0f;
 				bool cast_shadow = false;
+				/* 点光 / 聚光的共有范围：旧光有则沿用；旧光没有（方向光）则用新光的默认值 */
+				float range = 0.0f;
+				bool has_range = false;
 				if (light_component.m_Light != nullptr)
 				{
 					color = light_component.m_Light->GetColor();
 					intensity = light_component.m_Light->GetIntensity();
 					cast_shadow = light_component.m_Light->IsCastShadow();
+					if (const auto* punctual = AsPunctualLight(light_component.m_Light.get()))
+					{
+						range = punctual->GetRange();
+						has_range = true;
+					}
 				}
 
 				light_component.m_Type = type;
@@ -462,7 +470,80 @@ namespace Helios
 					light_component.m_Light->SetColor(color);
 					light_component.m_Light->SetIntensity(intensity);
 					light_component.m_Light->SetIsCastShadow(cast_shadow);
+					if (auto* punctual = AsPunctualLight(light_component.m_Light.get()); punctual != nullptr && has_range)
+						punctual->SetRange(range);
 				}
+			};
+
+			return accessor;
+		}
+
+		/* ============ 点光 / 聚光的共有与专有参数 ============
+		 * Range 长在 PunctualLight、Angle 长在 SpotLight，Light 基类不认识，所以手写访问器按类型取值：
+		 * 类型不符时读保持缓冲、写不做任何事（配合字段的条件，两者都不会被触发）。 */
+
+		/* 点光 / 聚光才有的参数 */
+		bool IsPunctualLightComponent(const void* component)
+		{
+			const auto& light = static_cast<const LightComponent*>(component)->m_Light;
+			return light != nullptr && AsPunctualLight(light.get()) != nullptr;
+		}
+
+		/* 聚光才有的参数（锥角） */
+		bool IsSpotLightComponent(const void* component)
+		{
+			const auto& light = static_cast<const LightComponent*>(component)->m_Light;
+			return light != nullptr && light->GetLightType() == LightType::Spot;
+		}
+
+		/* 光照范围（点光 / 聚光） */
+		FieldAccessor MakeLightRangeAccessor()
+		{
+			FieldAccessor accessor;
+			accessor.ValueSize = sizeof(float);
+
+			accessor.Get = [](const void* component, void* out_value)
+			{
+				const auto& light = static_cast<const LightComponent*>(component)->m_Light;
+				if (light == nullptr)
+					return;
+				if (const auto* punctual = AsPunctualLight(light.get()))
+					*static_cast<float*>(out_value) = punctual->GetRange();
+			};
+
+			accessor.Set = [](void* component, const void* in_value)
+			{
+				const auto& light = static_cast<LightComponent*>(component)->m_Light;
+				if (light == nullptr)
+					return;
+				if (auto* punctual = AsPunctualLight(light.get()))
+					punctual->SetRange(*static_cast<const float*>(in_value));
+			};
+
+			return accessor;
+		}
+
+		/* 外锥全角（度；聚光），编辑时夹取到与渲染端一致的安全范围 */
+		FieldAccessor MakeSpotAngleAccessor()
+		{
+			FieldAccessor accessor;
+			accessor.ValueSize = sizeof(float);
+
+			accessor.Get = [](const void* component, void* out_value)
+			{
+				const auto& light = static_cast<const LightComponent*>(component)->m_Light;
+				if (light == nullptr || light->GetLightType() != LightType::Spot)
+					return;
+				*static_cast<float*>(out_value) = static_cast<const SpotLight*>(light.get())->GetAngle();
+			};
+
+			accessor.Set = [](void* component, const void* in_value)
+			{
+				const auto& light = static_cast<LightComponent*>(component)->m_Light;
+				if (light == nullptr || light->GetLightType() != LightType::Spot)
+					return;
+				auto* spot_light = static_cast<SpotLight*>(light.get());
+				spot_light->SetAngle(glm::clamp(*static_cast<const float*>(in_value), 1.0f, 170.0f));
 			};
 
 			return accessor;
@@ -675,6 +756,13 @@ namespace Helios
 					.Field(MakeAccessor<&LightComponent::m_Light, &Light::IsCastShadow, &Light::SetIsCastShadow>(),
 						"CastShadow", FieldType::Bool)
 					.SerializeName("IsCastShadow")
+					/* 范围与锥角：条件同时驱动 UI（不适用类型不显示）与序列化（不适用不写出） */
+					.Field(MakeLightRangeAccessor(), "Range", FieldType::Float)
+					.When(FieldCondition{ 0, FieldType::Bool, ConditionOp::Always, 0.0, &IsPunctualLightComponent })
+					.SerializeName("LightRange")
+					.Field(MakeSpotAngleAccessor(), "Angle", FieldType::Float)
+					.When(FieldCondition{ 0, FieldType::Bool, ConditionOp::Always, 0.0, &IsSpotLightComponent })
+					.SerializeName("LightAngle")
 					.Visible(&HasLightObject)
 					.Variant("Directional Light", [](Entity& entity)
 						{

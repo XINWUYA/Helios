@@ -85,6 +85,9 @@ namespace Helios
 		/* 获取光源 */
 		[[nodiscard]] const std::vector<SharedPtr<Light>>& GetValidLights() const { return m_ValidLights; }
 
+		/* 本视图是否存在需要投影的光源（级联或点光/聚光任一） */
+		[[nodiscard]] bool HasShadowCast() const { return m_IsHasShadowCast; }
+
 	private:
 		/* 视锥体剔除，仅保留对当前RenderView可见的对象 */
 		void PrepareVisibleObjects();

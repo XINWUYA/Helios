@@ -26,10 +26,13 @@ namespace Helios
 
 		[[nodiscard]] uint16_t GetShadowIndex() const { return m_ShadowIndex; }
 
+		/* 所属光源（光照阶段按光源匹配阴影数据用） */
+		[[nodiscard]] const SharedPtr<Light>& GetLight() const { return m_pLight; }
+
 		void SetLayer(uint8_t layer) { m_Layer = layer; }
 		[[nodiscard]] uint8_t GetLayer() const { return m_Layer; }
 
-		/* 级联阴影的光照视图投影矩阵 */
+		/* 级联阴影 / 点光聚光单面的光照视图投影矩阵 */
 		void SetLightViewProjectionMat(const glm::mat4& vp_mat) { m_LightViewProjectionMat = vp_mat; }
 		[[nodiscard]] const glm::mat4& GetLightViewProjectionMat() const { return m_LightViewProjectionMat; }
 
@@ -50,6 +53,20 @@ namespace Helios
 		friend class ShadowMapManager;
 	};
 
+	/* 光照阶段采样点光/聚光阴影所需的数据（一个光源一份） */
+	struct PunctualShadowData
+	{
+		bool     Valid{ false };
+		/* 该光源阴影面在纹理数组中的起始层（点光 6 面连续，聚光 1 面） */
+		uint32_t BaseLayer{ 0 };
+		/* 面数：点光 = 6（立方体），聚光 = 1 */
+		uint32_t FaceCount{ 0 };
+		/* 阴影投影的远平面（= 光源范围），采样端按它裁剪超出范围的遮挡 */
+		float    Far{ 0.0f };
+		/* 各面的光照视图投影矩阵（下标与 GetPunctualLightViewMatrix 的面顺序一致） */
+		glm::mat4 FaceMat[6]{ glm::mat4(1.0f) };
+	};
+
 	/* 所有光源的RT将被收集到同一个TextureArray中 */
 	class ShadowMapManager
 	{
@@ -65,6 +82,10 @@ namespace Helios
 		 * 纳入光源视锥拟合，防落 near/far 板外被裁；传 nullptr 就退化成只按相机子视锥拟合。 */
 		void UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects);
 
+		/* 重算全部点光/聚光阴影面的视图投影矩阵（位置 / 旋转 / 范围变化即时反映）。
+		 * 光源数量少、单光源只有 1 / 6 个矩阵，不做脏检测，每帧直接重算。 */
+		void UpdatePunctualMatrices();
+
 		/* 清空已收集的阴影贴图与纹理，保留Manager对象本身 */
 		void Reset();
 
@@ -78,6 +99,12 @@ namespace Helios
 		[[nodiscard]] SharedPtr<DeviceTexture> GetShadowMapTexture() const { return m_ShadowMapTexture; }
 		/* 获取级联阴影贴图 */
 		[[nodiscard]] const std::vector<SharedPtr<ShadowMap>>& GetCascadeShadowMaps() const { return m_CascadeShadowMaps; }
+		/* 获取点光/聚光阴影贴图（按注册顺序连续占层） */
+		[[nodiscard]] const std::vector<SharedPtr<ShadowMap>>& GetPunctualShadowMaps() const { return m_PunctualShadowMaps; }
+		/* 级联分割距离（视图空间远边界），供光照阶段填充 UBO */
+		[[nodiscard]] const glm::vec4& GetCascadeSplits() const { return m_CascadeSplits; }
+		/* 取某光源的点光/聚光阴影数据；该光源无阴影时返回 Valid = false */
+		[[nodiscard]] PunctualShadowData GetPunctualShadowData(const Light* light) const;
 
 	private:
 		void PrepareRequiredTexture();

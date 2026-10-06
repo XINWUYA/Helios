@@ -88,8 +88,25 @@ namespace Helios
 	};
 
 
+	/* 点光与聚光的共享部分：两者都是有位置、有衰减范围（Range）的点状光源，
+	 * 光照衰减与阴影远平面都从这一份范围数据出发（单一来源）。 */
+	class PunctualLight : public Light
+	{
+	public:
+		PunctualLight() = default;
+		~PunctualLight() override = default;
+
+		/* 光照范围：衰减到 0 的距离（世界单位），同时作为阴影投影的远平面 */
+		void SetRange(float range) { m_Range = range; }
+		[[nodiscard]] float GetRange() const { return m_Range; }
+
+	protected:
+		float m_Range{ 10.0f };
+	};
+
+
 	/* 点光 */
-	class PointLight final : public Light
+	class PointLight final : public PunctualLight
 	{
 	public:
 		PointLight() = default;
@@ -97,15 +114,11 @@ namespace Helios
 
 		/* 获取光源类型 */
 		[[nodiscard]] LightType GetLightType() const override { return LightType::Point; }
-
-	private:
-		/* 光源位置 */
-		glm::vec3 m_LightPos{ 0.0f };
 	};
 
 
 	/* 聚光 */
-	class SpotLight final : public Light
+	class SpotLight final : public PunctualLight
 	{
 	public:
 		SpotLight() = default;
@@ -113,7 +126,40 @@ namespace Helios
 
 		/* 获取光源类型 */
 		[[nodiscard]] LightType GetLightType() const override { return LightType::Spot; }
+
+		/* 外锥全角（度，与 Camera Fov 同单位习惯） */
+		void SetAngle(float angle) { m_Angle = angle; }
+		[[nodiscard]] float GetAngle() const { return m_Angle; }
+
+		/* 内锥全角：硬编码为外锥的固定比例，锥缘有一段半影过渡 */
+		[[nodiscard]] float GetInnerAngle() const { return m_Angle * kInnerAngleRatio; }
+
+		/* 光传播方向：实体旋转下的 -Z 前向（与场景 gizmo 的锥体轴向同源） */
+		[[nodiscard]] glm::vec3 GetDirection() const;
+
+		static constexpr float kInnerAngleRatio = 0.8f;
+
+	private:
+		float m_Angle{ 30.0f };
 	};
+
+	/* 从 Light 取点光/聚光公共接口：非点状光源（方向光等）返回 nullptr */
+	[[nodiscard]] inline PunctualLight* AsPunctualLight(Light* light) noexcept
+	{
+		if (light == nullptr)
+			return nullptr;
+		switch (light->GetLightType())
+		{
+		case LightType::Point: return static_cast<PointLight*>(light);
+		case LightType::Spot:  return static_cast<SpotLight*>(light);
+		default:               return nullptr;
+		}
+	}
+
+	[[nodiscard]] inline const PunctualLight* AsPunctualLight(const Light* light) noexcept
+	{
+		return AsPunctualLight(const_cast<Light*>(light));
+	}
 
 
 	/* 面光 */

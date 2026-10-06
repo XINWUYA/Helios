@@ -22,6 +22,13 @@ namespace Helios
 	namespace
 	{
 		constexpr uint32_t kFallbackCascadeCount = 4;
+
+		/* 点光/聚光阴影投影的近平面：取足够小的值以容纳贴着光源的几何；
+		 * 深度用 Depth32F + Reversed-Z（近处精度高），小近平面不产生可见失真。 */
+		constexpr float kPunctualShadowNear = 0.05f;
+
+		/* 点光立方体各面视锥的半角（90° 全角） */
+		constexpr float kPointLightFaceFov = 90.0f;
 	}
 
 	ShadowMap::ShadowMap(const SharedPtr<Light>& light, uint16_t shadow_idx, uint8_t face_idx)
@@ -69,6 +76,11 @@ namespace Helios
 		if (!light || !light->IsCastShadow())
 			return;
 
+		/* 场景里的光源不携带阴影配置（只有 Sample 程序显式 SetShadowMapInfo），
+		 * 首次注册阴影时补一份默认配置，使"勾选投影"即可用时序完整。 */
+		if (!light->GetShadowMapInfo())
+			light->SetShadowMapInfo(CreateSharedPtr<ShadowMapInfo>());
+
 		if (auto& shadow_map_info = light->GetShadowMapInfo())
 		{
 			switch (light->GetLightType())
@@ -82,11 +94,24 @@ namespace Helios
 				}
 				break;
 			case LightType::Point:
-
-				/* todo */
+			{
+				/* 点光 = 立方体 6 面，每面一个固定朝向的 90° 投影
+				 * （面顺序与 GetPunctualLightViewMatrix 一致：+X,-X,+Y,-Y,+Z,-Z）；
+				 * 超出层预算时整个光源放弃注册，保证同一光源的面在数组里连续。 */
+				if (m_PunctualShadowMaps.size() + 6 > SHADOW_PUNCTUAL_MAX_NUM)
+					break;
+				for (uint8_t face = 0; face < 6; ++face)
+				{
+					auto shadow_map = CreateSharedPtr<ShadowMap>(light, 0, face);
+					m_PunctualShadowMaps.push_back(shadow_map);
+				}
 				break;
+			}
 			case LightType::Spot:
-				/* todo: */
+				/* 聚光 = 单面，投影视锥即为光锥（轴心 = 光源位置，朝向 = 光向） */
+				if (m_PunctualShadowMaps.size() + 1 > SHADOW_PUNCTUAL_MAX_NUM)
+					break;
+				m_PunctualShadowMaps.push_back(CreateSharedPtr<ShadowMap>(light, 0, 0));
 				break;
 			default:
 				break;
@@ -350,6 +375,74 @@ namespace Helios
 		m_CascadeSplits = cascade_splits;
 	}
 
+	/* 重算全部点光/聚光阴影面的视图投影矩阵。
+	 * 光源位置 / 旋转 / 范围每帧可能变化，且单光源只有 1 / 6 个矩阵，直接重算不做脏检测。 */
+	void ShadowMapManager::UpdatePunctualMatrices()
+	{
+		if (m_PunctualShadowMaps.empty())
+			return;
+
+		for (const auto& shadow_map : m_PunctualShadowMaps)
+		{
+			const auto light = std::dynamic_pointer_cast<PunctualLight>(shadow_map->m_pLight);
+			if (!light)
+				continue;
+
+			/* 远平面 = 光源范围（与光照衰减同一份数据），超出范围的遮挡物不产生阴影 */
+			const float far_plane = std::max(light->GetRange(), kPunctualShadowNear + 0.01f);
+
+			glm::mat4 light_view_mat;
+			float fov_degrees = kPointLightFaceFov;
+			if (light->GetLightType() == LightType::Point)
+			{
+				/* 点光：按面取固定朝向的 90° 视图矩阵（面顺序与采样端约定一致） */
+				light_view_mat = ShadowMap::GetPunctualLightViewMatrix(shadow_map->m_FaceIndex, light->GetPosition());
+			}
+			else
+			{
+				/* 聚光：视图朝向 = 光传播方向，投影视锥全角 = 外锥角。
+				 * 锥角接近 180° 时透视矩阵退化，夹取到安全范围。 */
+				const auto spot = std::static_pointer_cast<SpotLight>(light);
+				light_view_mat = ShadowMap::GetDirectionalLightViewMatrix(spot->GetDirection(), spot->GetPosition());
+				fov_degrees = glm::clamp(spot->GetAngle(), 1.0f, 170.0f);
+			}
+
+			const glm::mat4 light_proj_mat = MakeReversedZProjection(
+				glm::perspective(glm::radians(fov_degrees), 1.0f, kPunctualShadowNear, far_plane));
+			shadow_map->SetLightViewProjectionMat(light_proj_mat * light_view_mat);
+		}
+	}
+
+	/* 取某光源的点光/聚光阴影数据（供光照阶段采样） */
+	PunctualShadowData ShadowMapManager::GetPunctualShadowData(const Light* light) const
+	{
+		PunctualShadowData data;
+		if (light == nullptr)
+			return data;
+
+		const auto* punctual = AsPunctualLight(light);
+		if (punctual == nullptr)
+			return data;
+
+		for (const auto& shadow_map : m_PunctualShadowMaps)
+		{
+			if (shadow_map->m_pLight.get() != light)
+				continue;
+
+			/* 首次命中：定下基址与远平面（同一光源的所有面连续排列） */
+			if (!data.Valid)
+			{
+				data.Valid = true;
+				data.BaseLayer = shadow_map->GetLayer();
+				data.Far = punctual->GetRange();
+			}
+
+			data.FaceMat[shadow_map->m_FaceIndex] = shadow_map->GetLightViewProjectionMat();
+			data.FaceCount = std::max<uint32_t>(data.FaceCount, shadow_map->m_FaceIndex + 1u);
+		}
+		return data;
+	}
+
 	/* 清空已收集的阴影贴图与纹理，保留Manager对象本身 */
 	void ShadowMapManager::Reset()
 	{
@@ -379,10 +472,11 @@ namespace Helios
 			max_dimension = std::max(max_dimension, shadow_map->m_pLight->GetShadowMapInfo()->Size);
 		}
 
-		/* 点光/聚光 */
+		/* 点光/聚光（与级联共用同一张纹理数组，尺寸统一取最大值） */
 		for (auto& shadow_map : m_PunctualShadowMaps)
 		{
 			shadow_map->SetLayer(layer++);
+			max_dimension = std::max(max_dimension, shadow_map->m_pLight->GetShadowMapInfo()->Size);
 		}
 
 		const uint8_t total_layer_num = layer;
@@ -445,13 +539,15 @@ namespace Helios
 	/* 将ShadowPass注入到FrameGraph */
 	void ShadowMapManager::AddShadowPass(FrameGraph& frame_graph, const SharedPtr<Scene>& scene, RenderView* render_view)
 	{
+		const bool has_any_shadow_map = !m_CascadeShadowMaps.empty() || !m_PunctualShadowMaps.empty();
+
 		/* 若尚未准备（如FrameGraph setup阶段早于RenderView每帧的PrepareLights），
 		 * 则先基于当前Scene准备阴影纹理描述，确保setup阶段能创建正确尺寸的纹理资源
 		 */
-		if (m_CascadeShadowMaps.empty())
+		if (!has_any_shadow_map)
 			PrepareForShadowMaps(scene, render_view ? render_view->GetCullingCamera() : nullptr);
 
-		if (m_CascadeShadowMaps.empty())
+		if (m_CascadeShadowMaps.empty() && m_PunctualShadowMaps.empty())
 			return;
 
 		/* ========== Pass: Shadow Pass ========== */
@@ -484,38 +580,18 @@ namespace Helios
 				const auto render_pass_info = resources.GetPassRenderTarget();
 				render_view->EmplacePassFrameBuffer("ShadowPass", render_pass_info);
 
-				/* 一次性将全部级联的VP矩阵写入光照UBO（u_LightViewProjectionMat 数组），
-				 * 供阴影Pass（按级联索引取对应矩阵）与后续LightingPass（按视距选级联）共同使用。 */
-				std::vector<glm::mat4> light_vp_mats;
-				light_vp_mats.reserve(m_CascadeShadowMaps.size());
-				for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
-					light_vp_mats.push_back(cascade_shadow_map->GetLightViewProjectionMat());
-				Renderer::FillLightUniformBuffer(m_CascadeShadowMaps[0]->m_pLight, light_vp_mats, m_CascadeSplits);
-
 				auto render_api = Renderer::GetRenderAPI();
+				const uint32_t shadow_size = m_RequiredTextureDesc.Size;
 
-				/* 渲染每级联阴影，复用PrepareAllShadowMaps已计算好的VP矩阵与Layer */
-				for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
+				/* 每层的公共渲染体：清深度 + 全量投射物提交（级联与点光/聚光共用） */
+				const auto render_shadow_layer = [&](uint8_t layer, const SharedPtr<Material>& shadow_material)
 				{
-					const uint8_t cascade_id = cascade_shadow_map->GetLayer();
-					std::string label = "Cascade " + std::to_string(cascade_id);
-					render_api->PushDebugGroup(label.c_str());
-
-					/* 绑定FrameBuffer为指定cascade_id层（统一 Bind 接口，自动设置 viewport 并按层附着 Depth 附件） */
-					render_pass_info->Bind(FrameBufferBindInfo::ToDepthLayer(cascade_id));
-
-					render_api->SetViewport(0, 0, m_RequiredTextureDesc.Size, m_RequiredTextureDesc.Size);
-					render_api->SetScissor(0, 0, m_RequiredTextureDesc.Size, m_RequiredTextureDesc.Size);
+					/* 绑定FrameBuffer为指定层（统一 Bind 接口，自动设置 viewport 并按层附着 Depth 附件） */
+					render_pass_info->Bind(FrameBufferBindInfo::ToDepthLayer(layer));
+					render_api->SetViewport(0, 0, shadow_size, shadow_size);
+					render_api->SetScissor(0, 0, shadow_size, shadow_size);
 					render_api->Clear();
 
-					/* 设置阴影Shader的级联索引 */
-					auto shadow_material = Material::Create(m_ShadowCasterShader);
-				/* 阴影投射材质：关掉背面剔除 —— 单面几何（地面 / 薄墙 / 植被）必须能写进深度，免得绕序
-				 * 约定有差异时这些 caster 直接消失；闭合几何体双面渲染的最终深度跟单面一致，只多花一点光栅化。 */
-					shadow_material->GetRasterState().CullMode = CullMode::Cull_None;
-					shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
-
-					/* 渲染场景到阴影贴图 */
 					for (const auto& mesh_object : render_view->GetVisibleMeshObjects())
 					{
 						Renderer::FillObjectUniformBuffer(mesh_object);
@@ -523,6 +599,57 @@ namespace Helios
 					}
 
 					render_pass_info->Unbind();
+				};
+
+				/* 阴影投射材质：关掉背面剔除 —— 单面几何（地面 / 薄墙 / 植被）必须能写进深度，免得绕序
+				 * 约定有差异时这些 caster 直接消失；闭合几何体双面渲染的最终深度跟单面一致，只多花一点光栅化。 */
+				const auto make_caster_material = [this]()
+				{
+					auto shadow_material = Material::Create(m_ShadowCasterShader);
+					shadow_material->GetRasterState().CullMode = CullMode::Cull_None;
+					return shadow_material;
+				};
+
+				/* 渲染每级联阴影，复用UpdateCascadeMatrices已计算好的VP矩阵与Layer */
+				if (!m_CascadeShadowMaps.empty())
+				{
+					/* 一次性将全部级联的VP矩阵写入光照UBO（u_LightViewProjectionMat 数组），
+					 * 供阴影Pass（按级联索引取对应矩阵）与后续LightingPass（按视距选级联）共同使用。 */
+					std::vector<glm::mat4> light_vp_mats;
+					light_vp_mats.reserve(m_CascadeShadowMaps.size());
+					for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
+						light_vp_mats.push_back(cascade_shadow_map->GetLightViewProjectionMat());
+					Renderer::FillLightUniformBuffer(m_CascadeShadowMaps[0]->m_pLight, light_vp_mats, m_CascadeSplits);
+
+					for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
+					{
+						const uint8_t cascade_id = cascade_shadow_map->GetLayer();
+						std::string label = "Cascade " + std::to_string(cascade_id);
+						render_api->PushDebugGroup(label.c_str());
+
+						auto shadow_material = make_caster_material();
+						shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
+
+						render_shadow_layer(cascade_id, shadow_material);
+						render_api->PopDebugGroup();
+					}
+				}
+
+				/* 渲染点光/聚光阴影层：
+				 * 单面矩阵作为材质参数下发（不占级联矩阵数组）；
+				 * u_CascadeIndex = -1 让 Shadow.glsl 走单矩阵分支。 */
+				for (const auto& punctual_shadow_map : m_PunctualShadowMaps)
+				{
+					const uint8_t layer = punctual_shadow_map->GetLayer();
+					std::string label = "Punctual " + std::to_string(layer);
+					render_api->PushDebugGroup(label.c_str());
+
+					auto shadow_material = make_caster_material();
+					shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", -1);
+					shadow_material->SetParameters(ParamType::Mat4, "u_PunctualShadowMat",
+						punctual_shadow_map->GetLightViewProjectionMat());
+
+					render_shadow_layer(layer, shadow_material);
 					render_api->PopDebugGroup();
 				}
 			});

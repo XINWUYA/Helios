@@ -7,6 +7,7 @@
 #include "Helios/Common/Math.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 #include "Helios/Scene/Material.h"
+#include "Helios/Scene/ShadowMap.h"
 
 namespace Helios
 {
@@ -82,7 +83,9 @@ namespace Helios
 
 		/* 聚光：锥体（轴心点 + 中段圆 + 底圆 + 四条母线） */
 		constexpr float kSpotGizmoLength = 1.25f;
-		constexpr float kSpotGizmoAngle = 0.5236f;			/* 锥角 30°（引擎暂无聚光角度数据，先固定） */
+		/* 规范锥角 30°（弧度）：几何一次构建，实际锥角由绘制时的"形状缩放"张开
+		 * 到光源的真实外锥角（与相机视锥的 FOV 处理同范式） */
+		constexpr float kSpotGizmoAngle = 0.5236f;
 
 		/* 相机：视锥（近 / 远矩形 + 棱 + 上向标记）+ 成像背盒。视锥按规范形状（45° / 16:9）建，
 		 * 绘制时乘"真实量 / 规范量"因子张开到真实的 near / far 与 FOV / 宽高比。
@@ -292,8 +295,8 @@ namespace Helios
 			return vertices;
 		}
 
-		/* 聚光：锥体线框（轴心点 + 中段圆 + 底圆 + 四条母线；轴向本地 -Z，
-		 * 锥角先固定 30° —— 引擎接通聚光角度数据后从同一来源读取） */
+		/* 聚光：锥体线框（轴心点 + 中段圆 + 底圆 + 四条母线；轴向本地 -Z =
+		 * 与光传播方向同源；规范锥角 30°，真实锥角经绘制时的形状缩放张开） */
 		std::vector<float> BuildSpotLightGizmoVertices()
 		{
 			std::vector<float> vertices;
@@ -672,8 +675,13 @@ namespace Helios
 				case LightType::Spot:
 				{
 					vertex_array = GetSpotLightGizmoVertexArray();
-					/* 旋转对称锥：Z 调射程、横向调口径；横向合并到最大轴并保持正圆 */
-					const float radial_scale = std::max(parts.Scale.x, parts.Scale.y);
+					/* 旋转对称锥：Z 调射程、横向调口径；横向合并到最大轴并保持正圆。
+					 * 锥角吃"形状缩放"：按规范角 30° 建的几何张开到光源的真实外锥角
+					 * （角度读自光照用的同一份数据），锥轴 = 实体旋转（与光向同源）。 */
+					const auto spot_light = std::static_pointer_cast<SpotLight>(light_component.m_Light);
+					const float angle = glm::clamp(spot_light->GetAngle(), 1.0f, 170.0f);
+					const float angle_shape = std::tan(glm::radians(angle) * 0.5f) / std::tan(kSpotGizmoAngle * 0.5f);
+					const float radial_scale = std::max(parts.Scale.x, parts.Scale.y) * angle_shape;
 					response = glm::vec3(radial_scale, radial_scale, parts.Scale.z);
 					break;
 				}
@@ -957,6 +965,24 @@ namespace Helios
 		const auto gbuffer_shader = ShaderAssetManager::Instance().GetOrLoad(
 			ABSOLUTE_PATH("Shaders/default.glsl"));
 
+		/* 阴影：先生成中性深度数组（保证光照着色器总能采样到合法纹理），
+		 * 本视图有投影光源（级联 / 点光 / 聚光）时再生成真实阴影图；
+		 * 句柄都落进 Blackboard 的 "ShadowMapHandle"，由光照 Pass 绑定。 */
+		{
+			auto shadow_map_manager = render_view.GetShadowMapManager();
+			shadow_map_manager->AddNoShadowMapPass(*frame_graph);
+			if (render_view.HasShadowCast())
+			{
+				shadow_map_manager->AddShadowPass(*frame_graph, render_view.GetOwnerScene(), &render_view);
+			}
+			else
+			{
+				const auto fallback_handle = frame_graph->GetBlackboard()
+					.GetResourceHandle<FrameGraphTexture>("NoShadowMapHandle");
+				frame_graph->GetBlackboard()["ShadowMapHandle"] = fallback_handle;
+			}
+		}
+
 		/* GBuffer Pass */
 		struct GBufferPassData
 		{
@@ -1057,6 +1083,7 @@ namespace Helios
 			FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture3;
 			FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture4;
 			FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture5;
+			FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle;
 			FrameGraphResourceHandleTyped<FrameGraphTexture> LightingResult;
 		};
 
@@ -1069,6 +1096,7 @@ namespace Helios
 				data.GBufferTexture3 = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferTexture3");
 				data.GBufferTexture4 = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferTexture4");
 				data.GBufferTexture5 = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferTexture5");
+				data.ShadowMapHandle = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ShadowMapHandle");
 
 				data.LightingResult = builder.CreateTexture("LightingResult", color_target_desc);
 
@@ -1078,6 +1106,7 @@ namespace Helios
 				builder.BindInputResource(data.GBufferTexture3, FrameGraphTexture::Usage::Sampleable);
 				builder.BindInputResource(data.GBufferTexture4, FrameGraphTexture::Usage::Sampleable);
 				builder.BindInputResource(data.GBufferTexture5, FrameGraphTexture::Usage::Sampleable);
+				builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
 				builder.BindOutputResource(data.LightingResult, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
 
 				FrameGraphPassInfo::Descriptor pass_desc;
@@ -1095,10 +1124,17 @@ namespace Helios
 				render_pass_info->Bind();
 				{
 					Renderer::GetRenderAPI()->Clear();
-					for (const auto& light : render_view.GetValidLights())
+
+					/* 阴影纹理随 Submit 直绑（按 Shader 反射出的 "u_ShadowMap" 绑定点） */
+					ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
+
+					const auto& lights = render_view.GetValidLights();
+					for (size_t light_index = 0; light_index < lights.size(); ++light_index)
 					{
-						/* Fill light uniform buffer */
-						Renderer::FillLightUniformBuffer(light);
+						const auto& light = lights[light_index];
+
+						/* 完整光照数据：光源参数 + 该光源的阴影（级联 / 点光 / 聚光，来自本视图阴影管理器） */
+						Renderer::FillLightUniformBuffer(light, render_view.GetShadowMapManager().get());
 
 						SharedPtr<Material> material = CreateSharedPtr<Material>();
 						auto& raster_state = material->GetRasterState();
@@ -1118,6 +1154,9 @@ namespace Helios
 						material->SetTexture("u_GBufferTexture3", resources.Get(data.GBufferTexture3).Texture);
 						material->SetTexture("u_GBufferTexture4", resources.Get(data.GBufferTexture4).Texture);
 						material->SetTexture("u_GBufferTexture5", resources.Get(data.GBufferTexture5).Texture);
+						/* 环境光 / 自发光与光源无关，只由第一笔光照合成（多光源逐笔加法叠加） */
+						material->SetParameters(ParamType::Int, "u_ComposeAmbientEmission",
+							light_index == 0 ? 1 : 0);
 						Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
 					}
 				}

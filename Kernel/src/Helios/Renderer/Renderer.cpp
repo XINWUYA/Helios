@@ -9,6 +9,8 @@
 #include <Helios/Scene/Material.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/Light.h>
+#include <Helios/Scene/ShadowMap.h>
+#include <cmath>
 
 namespace Helios
 {
@@ -44,6 +46,8 @@ namespace Helios
 
 	/* Per light uniform data */
 	constexpr uint32_t MAX_LIGHT_VIEW_PROJ = 4; /* 与 Uniforms.glsl 中的数组长度保持一致 */
+	/* 点光立方体阴影的面数上限（与 Uniforms.glsl 中的数组长度保持一致） */
+	constexpr uint32_t MAX_PUNCTUAL_SHADOW_FACE = 6;
 	struct alignas(16) LightUniformData
 	{
 		/* 级联阴影的光照视图投影矩阵数组（最多 MAX_LIGHT_VIEW_PROJ 个） */
@@ -57,6 +61,17 @@ namespace Helios
 		/* 阴影深度偏移（来自 ShadowMapInfo::ConstantBias），缓解阴影失真（peter-panning / acne）。
 		 * 置于 Light UBO 中，避免作为独立 uniform 被遗漏赋值。 */
 		float ShadowBias{ 0.0f };
+		/* std140 对齐补齐：下面的 mat4 数组须落在 16 字节边界（GLSL 侧自动对齐，
+		 * C++ 侧 glm::mat4 无对齐要求，不补会错位 12 字节）。 */
+		float Reserved0[3]{ 0.0f, 0.0f, 0.0f };
+
+		/* ---- 点光/聚光阴影（光照阶段逐光源填充） ---- */
+		/* 各阴影面的视图投影矩阵（点光 6 面 / 聚光只用 [0]），与采样端的面索引约定一致 */
+		glm::mat4 PunctualShadowMat[MAX_PUNCTUAL_SHADOW_FACE]{ glm::mat4(1) };
+		/* x: 阴影面在数组中的起始层；y: 是否投影（0/1）；z: 阴影远平面（= 光源范围）；w: 保留 */
+		glm::vec4 PunctualShadowParams{ 0.0f };
+		/* x: 光照范围；y: cos(内锥半角)；z: cos(外锥半角)；w: 保留 */
+		glm::vec4 PunctualLightParams{ 0.0f };
 	};
 
 	struct RenderData
@@ -233,50 +248,113 @@ namespace Helios
 		s_RenderData.pObjectUniformBuffer->SetData(&data, sizeof(ObjectUniformData));
 	}
 
+	namespace
+	{
+		/* 光照 UBO 的公共填充体：光源参数 + 级联矩阵数组 + 点光/聚光阴影块。
+		 * punctual_shadow 为 nullptr 或 invalid 时按"无点状阴影"填充。 */
+		void FillLightUniformData(LightUniformData& data, const SharedPtr<Light>& light,
+			const std::vector<glm::mat4>& light_vp_mats, const glm::vec4& cascade_splits,
+			const PunctualShadowData* punctual_shadow)
+		{
+			/* 拷贝级联阴影的光照视图投影矩阵数组 */
+			const uint32_t cascade_count = std::min<uint32_t>(static_cast<uint32_t>(light_vp_mats.size()), MAX_LIGHT_VIEW_PROJ);
+			for (uint32_t i = 0; i < MAX_LIGHT_VIEW_PROJ; ++i)
+				data.LightViewProjectionMat[i] = (i < cascade_count) ? light_vp_mats[i] : glm::mat4(1.0f);
+			data.CascadeCount = cascade_count;
+			data.CascadeSplits = cascade_splits;
+
+			/* 阴影深度偏移：来自光源的 ShadowMapInfo::ConstantBias。 */
+			if (const auto& shadow_map_info = light->GetShadowMapInfo())
+				data.ShadowBias = shadow_map_info->ConstantBias;
+			else
+				data.ShadowBias = 0.0f;
+
+			/* 光源公共参数 */
+			const auto& light_color = light->GetColor();
+			data.ColorIntensity = glm::vec4(light_color.r, light_color.g, light_color.b, light->GetIntensity());
+			data.LightType = static_cast<uint32_t>(light->GetLightType());
+			data.LightPos = light->GetPosition();
+			data.LightDir = glm::vec3(0.0f);
+
+			/* 点光/聚光块先归零，再按类型填充 */
+			data.PunctualShadowParams = glm::vec4(0.0f);
+			data.PunctualLightParams = glm::vec4(0.0f);
+			for (glm::mat4& punctual_mat : data.PunctualShadowMat)
+				punctual_mat = glm::mat4(1.0f);
+
+			switch (light->GetLightType())
+			{
+			case LightType::Directional:
+			{
+				const auto directional_light = StaticPtrCast<DirectionalLight>(light);
+				data.LightDir = directional_light->GetDirection();
+				break;
+			}
+			case LightType::Point:
+			case LightType::Spot:
+			{
+				const auto* punctual_light = AsPunctualLight(light.get());
+				data.PunctualLightParams.x = punctual_light->GetRange();
+
+				if (light->GetLightType() == LightType::Spot)
+				{
+					/* 聚光：方向 = 光传播方向（u_LightDir 与方向光同语义）；锥角以 cos(半角) 下发 */
+					const auto* spot_light = static_cast<const SpotLight*>(light.get());
+					data.LightDir = spot_light->GetDirection();
+					data.PunctualLightParams.y = std::cos(glm::radians(spot_light->GetInnerAngle() * 0.5f));
+					data.PunctualLightParams.z = std::cos(glm::radians(spot_light->GetAngle() * 0.5f));
+				}
+				break;
+			}
+			default:
+				break;
+			}
+
+			/* 点光/聚光阴影块：面矩阵 + 层基址 + 远平面 */
+			if (punctual_shadow != nullptr && punctual_shadow->Valid)
+			{
+				const uint32_t face_count = std::min<uint32_t>(punctual_shadow->FaceCount, MAX_PUNCTUAL_SHADOW_FACE);
+				for (uint32_t i = 0; i < face_count; ++i)
+					data.PunctualShadowMat[i] = punctual_shadow->FaceMat[i];
+				data.PunctualShadowParams = glm::vec4(
+					static_cast<float>(punctual_shadow->BaseLayer), 1.0f, punctual_shadow->Far, 0.0f);
+			}
+		}
+	}
+
 	void Renderer::FillLightUniformBuffer(const SharedPtr<Light>& light, const std::vector<glm::mat4>& light_vp_mats, const glm::vec4& cascade_splits)
 	{
 		static LightUniformData data;
-		/* 拷贝级联阴影的光照视图投影矩阵数组 */
-		const uint32_t cascade_count = std::min<uint32_t>(static_cast<uint32_t>(light_vp_mats.size()), MAX_LIGHT_VIEW_PROJ);
-		for (uint32_t i = 0; i < MAX_LIGHT_VIEW_PROJ; ++i)
-		{
-			if (i < cascade_count)
-				data.LightViewProjectionMat[i] = light_vp_mats[i];
-			else
-				data.LightViewProjectionMat[i] = glm::mat4(1.0f);
-		}
-		data.CascadeCount = cascade_count;
-		data.CascadeSplits = cascade_splits;
-
-		/* 阴影深度偏移：来自光源的 ShadowMapInfo::ConstantBias。 */
-		if (const auto& shadow_map_info = light->GetShadowMapInfo())
-			data.ShadowBias = shadow_map_info->ConstantBias;
-		else
-			data.ShadowBias = 0.0f;
-
-		const auto& light_color = light->GetColor();
-		data.ColorIntensity = glm::vec4(light_color.r, light_color.g, light_color.b, light->GetIntensity());
-		data.LightType = static_cast<uint32_t>(light->GetLightType());
-		data.LightPos = light->GetPosition();
-
-		switch (light->GetLightType())
-		{
-		case LightType::Directional:
-		{
-			auto directional_light = StaticPtrCast<DirectionalLight>(light);
-			data.LightDir = directional_light->GetDirection();
-
-			break;
-		}
-		default:
-			break;
-		}
-		
+		FillLightUniformData(data, light, light_vp_mats, cascade_splits, nullptr);
 		s_RenderData.pLightUniformBuffer->SetData(&data, sizeof(LightUniformData));
 	}
 
-	void Renderer::FillLightUniformBuffer(const SharedPtr<Light>& light)
+	void Renderer::FillLightUniformBuffer(const SharedPtr<Light>& light, const ShadowMapManager* shadow_maps)
 	{
-		FillLightUniformBuffer(light, {}, glm::vec4(0.0f));
+		static LightUniformData data;
+
+		/* 方向光：级联数据来自本视图的阴影管理器 —— 容器里存的就是"负责投影的方向光"，
+		 * 其它方向光没有级联，按无阴影填充（CascadeCount = 0，着色阶段跳过采样）。 */
+		std::vector<glm::mat4> light_vp_mats;
+		glm::vec4 cascade_splits(0.0f);
+		if (shadow_maps != nullptr && light->GetLightType() == LightType::Directional)
+		{
+			const auto& cascade_maps = shadow_maps->GetCascadeShadowMaps();
+			if (!cascade_maps.empty() && cascade_maps[0]->GetLight().get() == light.get())
+			{
+				light_vp_mats.reserve(cascade_maps.size());
+				for (const auto& cascade_map : cascade_maps)
+					light_vp_mats.push_back(cascade_map->GetLightViewProjectionMat());
+				cascade_splits = shadow_maps->GetCascadeSplits();
+			}
+		}
+
+		/* 点光/聚光：该光源的面矩阵与层信息（无阴影时 Valid = false） */
+		PunctualShadowData punctual_shadow;
+		if (shadow_maps != nullptr)
+			punctual_shadow = shadow_maps->GetPunctualShadowData(light.get());
+
+		FillLightUniformData(data, light, light_vp_mats, cascade_splits, &punctual_shadow);
+		s_RenderData.pLightUniformBuffer->SetData(&data, sizeof(LightUniformData));
 	}
 }
