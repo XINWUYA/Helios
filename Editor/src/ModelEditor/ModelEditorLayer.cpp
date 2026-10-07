@@ -498,7 +498,12 @@ namespace Helios
 			/* 导出模型 */
 			ExportMesh(file_path);
 
-			/* 导出材质 */
+			/* 导出材质：把导入时的材质名写进槽表（加载后覆盖表按槽名匹配） */
+			for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
+			{
+				m_pMaterialGroup->SetEntrySlotName(static_cast<int>(i),
+					m_pModelInfo->m_SubModelInfos[i]->MaterialParams.Name);
+			}
 			const auto& material_path = ReplaceFileSuffix(file_path, ".mtl");
 			m_pMaterialGroup->Serializer(material_path);
 
@@ -563,15 +568,15 @@ namespace Helios
 				out_mesh_file.write((char*)&element.Normalized, sizeof(bool));
 			}
 
-			/* 写入材质索引：int * 1 */
+			/* 写入材质索引：int * 1（= 加载侧的槽索引，与 .mtl 条目对位） */
 			auto material = m_pMaterialGroup->GetMaterialByIndex(i);
 			int material_id = -1;
-			for (int i = 0; i < m_pMaterialGroup->GetAllMaterials().size(); ++i)
+			for (int j = 0; j < static_cast<int>(m_pMaterialGroup->GetEntries().size()); ++j)
 			{
-				const auto& mtl = m_pMaterialGroup->GetMaterialByIndex(i);
+				const auto& mtl = m_pMaterialGroup->GetMaterialByIndex(j);
 				if (mtl == material)
 				{
-					material_id = i;
+					material_id = j;
 					break;
 				}
 			}
@@ -603,8 +608,16 @@ namespace Helios
 
 			/* 更新材质 */
 			UpdateMaterial(material, sub_model_info->MaterialParams);
-			
-			SharedPtr<MeshSegment> mesh_segment = CreateSharedPtr<MeshSegment>(sub_model_info->Name, sub_model_info->VertexArray, material);
+
+			/* 槽：每个子模型一个（槽名 = 导入时的材质名，与导出 / 加载链对位） */
+			m_pModel->AddMaterialSlot(
+				sub_model_info->MaterialParams.Name.empty()
+					? ("slot_" + std::to_string(i))
+					: sub_model_info->MaterialParams.Name,
+				material);
+
+			SharedPtr<MeshSegment> mesh_segment = CreateSharedPtr<MeshSegment>(
+				sub_model_info->Name, sub_model_info->VertexArray, static_cast<int>(i));
 			mesh_segment->SetAABB(sub_model_info->AABB.first, sub_model_info->AABB.second);
 
 			m_pModel->AddMeshSegment(mesh_segment);

@@ -1,19 +1,15 @@
 ﻿#include "Pch.h"
 #include "Mesh.h"
-#include "Material.h"
 
 namespace Helios
 {
-	MeshSegment::MeshSegment(const std::string& name, const MeshPrimitive& mesh_primitive, const SharedPtr<Material>& material)
-		: m_DebugName(name), m_MeshPrimitive(mesh_primitive), m_pMaterial(material)
+	MeshSegment::MeshSegment(const std::string& name, const MeshPrimitive& mesh_primitive, int slot_index)
+		: m_DebugName(name), m_MeshPrimitive(mesh_primitive), m_SlotIndex(slot_index)
 	{
 	}
 
-	SharedPtr<MeshSegment> MeshSegment::Create(const std::string& name, const MeshPrimitive& mesh_primitive, const SharedPtr<Material>& material)
+	SharedPtr<MeshSegment> MeshSegment::Create(const std::string& name, const MeshPrimitive& mesh_primitive, int slot_index)
 	{
-		if (!material)
-			return nullptr;
-
-		return CreateSharedPtr<MeshSegment>(name, mesh_primitive, material);
+		return CreateSharedPtr<MeshSegment>(name, mesh_primitive, slot_index);
 	}
 }

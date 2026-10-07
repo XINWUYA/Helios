@@ -1,8 +1,11 @@
 ﻿#pragma once
+#include <filesystem>
+#include <functional>
 #include <imgui.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 #include "Helios/Command/CommandStack.h"
 #include "Helios/Reflection/ComponentRegistry.h"
@@ -11,6 +14,7 @@
 namespace Helios
 {
 	class Scene;
+	class Material;
 	struct EntityTemplateDesc;
 
 	/* 场景实体层级树 + 属性面板。层级树按父子关系展开；层级面板 = 顶栏（搜索 + 筛选 + 新建）+
@@ -33,6 +37,10 @@ namespace Helios
 		void SetSceneDirty(bool dirty) { m_SceneDirty = dirty; }
 		/* 编辑历史：字段改动经命令栈落地（未设置时直接改数据） */
 		void SetCommandStack(CommandStack* command_stack) { m_pCommandStack = command_stack; }
+		/* 资源定位通道（跨面板能力）：材质卡里的贴图点击 → 资源浏览器切目录并选中。
+		 * 由上层接线注入（装配层 → SceneEditorLayer → 这里），面板不查 Layer。 */
+		using AssetRevealFunc = std::function<void(const std::string&)>;
+		void SetAssetRevealFunc(AssetRevealFunc func) { m_AssetRevealFunc = std::move(func); }
 		/* 绘制相关UI */
 		void OnImGuiRender();
 		/* 选中实体 */
@@ -77,6 +85,18 @@ namespace Helios
 
 		/* 显示场景实体列表UI */
 		void ShowSceneHierarchyUI();
+		/* 层级里拖入 .mesh = 给实体挂 / 换模型：
+		 * 无组件先补组件（AddComponentCommand）、再设模型（组件快照命令）——两步都可撤销。
+		 * entity 按值（轻量句柄）：树遍历里拿到的是 const Entity&，拷贝一份再改。 */
+		void ApplyDroppedMeshToEntity(Entity entity, const std::string& absolute_path);
+
+		/* Model 的材质卡：每槽一张，排在 Model 组件卡之后（卡片背景走绘制通道、通道不可嵌套，
+		 * "卡中卡"画不出来 —— 所以材质详情不能画在组件卡里，只能同级平铺）。 */
+		void DrawModelMaterialCards(Entity entity, ModelComponent& component);
+		/* 材质卡主体：当前材质的属性行（Shader + 参数，可就地编辑 → 自动实例化） */
+		bool DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index);
+		/* 组件自定义编辑的合并窗口封口（每帧调用；与 DrawEditableField 同一套事务规则） */
+		void ServiceComponentEditTransaction();
 		/* 顶栏：左端「新建实体」，右端搜索框（贴右端）。
 		 * 版式与资源浏览器的顶栏同一套：控件贴上边、上下各留 1px、放不下时把搜索框压窄。
 		 * （类型筛选不在这一栏：它搬到了底栏左端，见 ShowHierarchyFooter。） */
@@ -151,8 +171,12 @@ namespace Helios
 		PendingReparent m_PendingReparent;
 		/* 编辑历史（由所属 Layer 注入） */
 		CommandStack* m_pCommandStack{ nullptr };
+		/* 资源定位（材质卡的贴图点击）；由上层注入，未注入时点击无动作 */
+		AssetRevealFunc m_AssetRevealFunc;
 		/* 字段编辑的合并窗口是否已打开（连续拖动合并为一条历史） */
 		bool m_FieldEditTransactionOpen{ false };
+		/* 组件自定义绘制的合并窗口是否已打开（同上，走 CustomDraw 通道：材质参数拖动等） */
+		bool m_ComponentEditTransactionOpen{ false };
 		/* 「添加组件」菜单的过滤词：组件一多，菜单需要能搜 */
 		char m_AddComponentFilter[64]{};
 		/* 顶栏「新建实体」菜单的过滤词（与添加组件菜单同款：打开即清空并聚焦） */

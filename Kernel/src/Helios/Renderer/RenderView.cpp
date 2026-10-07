@@ -3,6 +3,7 @@
 #include "FrameGraph/FrameGraph.h"
 #include <Helios/Scene/Scene.h>
 #include <Helios/Scene/Components.h>
+#include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/ShadowMap.h>
 #include <Helios/Scene/Light.h>
 #include <Helios/Scene/ReflectionProbe.h>
@@ -131,7 +132,10 @@ namespace Helios
 			{
 				// todo: 执行剔除
 				//if ()
-				m_VisibleMeshObjects.emplace_back((int)entity, local_2_world, mesh_segment);
+				/* 收集时按解析链定下最终材质：实体绑定 ?: 模型槽表默认 ?: 内置白模 */
+				const auto material = ResolveSlotMaterial(
+					*model_component.m_Model, mesh_segment->GetSlotIndex(), &model_component.m_SlotOverrides);
+				m_VisibleMeshObjects.emplace_back((int)entity, local_2_world, mesh_segment, material);
 			}
 		}
 

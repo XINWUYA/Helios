@@ -390,7 +390,7 @@ namespace Helios
             for (const auto& mesh_object : visible_objects)
             {
                 Renderer::FillObjectUniformBuffer(mesh_object);
-                auto& material = mesh_object.MeshSegment->GetMaterial();
+                const auto& material = mesh_object.Material;
                 if (material == nullptr || material->GetShader() == nullptr)
                     continue;
 

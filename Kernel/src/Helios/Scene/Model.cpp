@@ -2,6 +2,7 @@
 #include "Model.h"
 #include "Mesh.h"
 #include "SceneCommon.h"
+#include "Helios/Application/AssetManager.h"
 #include "Helios/Common/Math.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
@@ -120,9 +121,10 @@ namespace Helios
 		/* 内建模型的顶点范围是固定的（±0.5 的立方体），显式写入局部 AABB。
 		 * 阴影视锥拟合、视锥体剔除等逻辑都依赖 MeshSegment 的 AABB，
 		 * 缺省值 (0,0,0) 是退化包围盒，会让这些逻辑把物体当成一个点。 */
-		auto mesh_segment = CreateSharedPtr<MeshSegment>(model_name, vertex_array, material);
+		auto mesh_segment = CreateSharedPtr<MeshSegment>(model_name, vertex_array, 0);
 		mesh_segment->SetAABB(glm::vec3(-0.5f), glm::vec3(0.5f));
 		model->AddMeshSegment(mesh_segment);
+		model->AddMaterialSlot("Default", material);
 		return model;
 	}
 
@@ -228,9 +230,10 @@ namespace Helios
 		}
 
 		/* 内建球为半径 1 的单位球（球心在局部原点） */
-		auto mesh_segment = MeshSegment::Create(model_name, { vertex_array, PrimitiveType::Triangles }, material);
+		auto mesh_segment = MeshSegment::Create(model_name, { vertex_array, PrimitiveType::Triangles }, 0);
 		mesh_segment->SetAABB(glm::vec3(-1.0f), glm::vec3(1.0f));
 		model->AddMeshSegment(mesh_segment);
+		model->AddMaterialSlot("Default", material);
 		return model;
 	}
 
@@ -266,9 +269,10 @@ namespace Helios
 		}
 
 		/* 内建平面位于局部空间的 XZ 平面，范围 ±0.5（零厚度） */
-		auto mesh_segment = CreateSharedPtr<MeshSegment>(model_name, vertex_array, material);
+		auto mesh_segment = CreateSharedPtr<MeshSegment>(model_name, vertex_array, 0);
 		mesh_segment->SetAABB(glm::vec3(-0.5f, 0.0f, -0.5f), glm::vec3(0.5f, 0.0f, 0.5f));
 		model->AddMeshSegment(mesh_segment);
+		model->AddMaterialSlot("Default", material);
 		return model;
 	}
 
@@ -329,10 +333,9 @@ namespace Helios
 		{
 			SharedPtr<Model> model = CreateSharedPtr<Model>(model_path);
 
-			/* 加载mtl文件 */
+			/* 读取伴生 .mtl 槽表（缺失 = 空槽表 → 解析时全部兜底白模） */
 			const std::string mtl_filepath = ReplaceFileSuffix(model_path, ".mtl");
-			model->LoadMaterial(mtl_filepath);
-			const auto& material_group = model->GetMaterialGroup();
+			model->LoadMaterialSlots(mtl_filepath);
 
 			/* 直接从mesh文件加载 */
 			const std::filesystem::path mesh_path = PathFromUtf8(model_path);
@@ -422,12 +425,9 @@ namespace Helios
 					delete[] buffer_data;
 				}
 
-				/* Material */
+				/* 材质槽索引：段只记索引、不解析材质（解析链收口在 ResolveSlotMaterial） */
 				int material_idx;
 				in_mesh_file.read((char*)&material_idx, sizeof(int));
-				auto material = material_group->GetMaterialByIndex(material_idx);
-				if (!material)
-					material = Material::Error();
 
 				/* AABB */
 				glm::vec3 aabb_min, aabb_max;
@@ -435,7 +435,7 @@ namespace Helios
 				in_mesh_file.read((char*)&aabb_max, sizeof(glm::vec3));
 
 				/* 创建MeshSegment */
-				auto mesh_segment = CreateSharedPtr<MeshSegment>(name, vertex_array, material);
+				auto mesh_segment = CreateSharedPtr<MeshSegment>(name, vertex_array, material_idx);
 				mesh_segment->SetAABB(aabb_min, aabb_max);
 
 				model->AddMeshSegment(mesh_segment);
@@ -458,13 +458,34 @@ namespace Helios
 	/* 创建内建模型 */
 	SharedPtr<Model> Model::Create(BuiltinModelType type, const SharedPtr<Material>& material)
 	{
+		/* 材质为空 = 内置白模（新建 / 拖入的初始外观） */
+		auto slot_material = (material != nullptr) ? material : Material::BuiltinWhite();
+
 		switch (type)
 		{
-		case BuiltinModelType::Cube:   return CreateCube(material);
-		case BuiltinModelType::Sphere: return CreateSphere(material);
-		case BuiltinModelType::Plane:  return CreatePlane(material);
+		case BuiltinModelType::Cube:   return CreateCube(slot_material);
+		case BuiltinModelType::Sphere: return CreateSphere(slot_material);
+		case BuiltinModelType::Plane:  return CreatePlane(slot_material);
 		}
 		return nullptr;
+	}
+
+	/* 添加一个材质槽 */
+	void Model::AddMaterialSlot(const std::string& name, const SharedPtr<Material>& material)
+	{
+		MaterialSlot slot;
+		slot.Name = name;
+		slot.pDefault = material;
+		m_MaterialSlots.emplace_back(std::move(slot));
+	}
+
+	/* 按索引取槽 */
+	const MaterialSlot* Model::GetSlotByIndex(int idx) const
+	{
+		if (idx < 0 || idx >= static_cast<int>(m_MaterialSlots.size()))
+			return nullptr;
+
+		return &m_MaterialSlots[idx];
 	}
 
 	/* 内建模型类型：路径即身份名（见 TryParseBuiltinModelName） */
@@ -473,11 +494,46 @@ namespace Helios
 		return TryParseBuiltinModelName(m_Path, out_type);
 	}
 
-	/* 加载模型时，加载材质 */
-	void Model::LoadMaterial(const std::string& path)
+	/* 加载模型时，读取伴生 .mtl 槽表 */
+	void Model::LoadMaterialSlots(const std::string& path)
 	{
-		m_pMaterialGroup = CreateSharedPtr<MaterialGroup>();
-		m_pMaterialGroup->Deserializer(path);
+		/* 伴生 .mtl 不存在 = 未配置材质（正常状态：几何先进场、材质后挂），静默跳过 */
+		const std::filesystem::path absolute_mtl_path = PathFromUtf8(ABSOLUTE_PATH(path));
+		std::error_code error;
+		if (!std::filesystem::exists(absolute_mtl_path, error))
+			return;
+
+		auto material_group = CreateSharedPtr<MaterialGroup>();
+		if (!material_group->Deserializer(path))
+			return;
+
+		const auto& entries = material_group->GetEntries();
+		m_MaterialSlots.reserve(entries.size());
+		for (int i = 0; i < static_cast<int>(entries.size()); ++i)
+		{
+			const auto& entry = entries[i];
+
+			MaterialSlot slot;
+			/* 槽名：显式指定优先；老资产没有名字 → 生成 slot_N（与索引对位稳定） */
+			slot.Name = entry.SlotName.empty() ? ("slot_" + std::to_string(i)) : entry.SlotName;
+
+			/* 默认绑定：资产引用优先解析；内嵌定义直接用；两者皆无 → 空（解析时兜底白模） */
+			if (!entry.AssetPath.empty())
+			{
+				slot.pDefault = MaterialAssetManager::Instance().GetOrLoad(entry.AssetPath);
+				if (slot.pDefault == nullptr)
+				{
+					CORE_LOG_WARN("Failed to load material asset '{}' for model '{}' slot '{}'.",
+						entry.AssetPath, m_Path, slot.Name);
+				}
+			}
+			else
+			{
+				slot.pDefault = entry.pMaterial;
+			}
+
+			m_MaterialSlots.emplace_back(std::move(slot));
+		}
 	}
 
 	SkeletonModel::SkeletonModel(const std::string& path)

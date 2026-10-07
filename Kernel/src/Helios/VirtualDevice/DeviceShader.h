@@ -1,10 +1,23 @@
 ﻿#pragma once
 #include <string>
+#include <any>
+#include <vector>
+#include <unordered_map>
 #include <glm/glm.hpp>
 #include "DeviceVertexArray.h"
+#include "Helios/Renderer/RenderCommon.h"
 
 namespace Helios
 {
+	/* 反射出的一条材质参数：名字 + 类型 + 源码默认值（可空，空就按类型零值兜底）。材质属性面板
+	 * 按它列行 —— 参数集合 / 类型 / 默认值的唯一来源。 */
+	struct ReflectedMaterialParam
+	{
+		ParamType	Type{};
+		std::string	Name;
+		std::any	Default{};
+	};
+
 	/* Shader反射数据：从Shader中`layout(binding = X) uniform sampler2D u_xxx; ` 反射出真实的绑定点  */
 	struct ShaderReflectionData
 	{
@@ -12,11 +25,15 @@ namespace Helios
 		std::unordered_map<std::string, uint32_t> SamplerBindings{};
 		/* Sampler变量名->MetalSamplerState索引（[[sampler(N)]]），仅Metal后端使用 */
 		std::unordered_map<std::string, uint32_t> SamplerStateBindings{};
+		/* 材质参数表（声明顺序）：采样器（Texture）+ 裸 uniform（int/float/vec2-4/mat4）。
+		 * 空 = 拿不到声明的场合（如 SPIR-V 反射路径），调用方自行回退。 */
+		std::vector<ReflectedMaterialParam> MaterialParams{};
 
 		void Clear()
 		{
 			SamplerBindings.clear();
 			SamplerStateBindings.clear();
+			MaterialParams.clear();
 		}
 
 		[[nodiscard]] int FindSamplerBinding(const std::string& name) const
@@ -29,6 +46,16 @@ namespace Helios
 		{
 			const auto it = SamplerStateBindings.find(name);
 			return it == SamplerStateBindings.end() ? -1 : static_cast<int>(it->second);
+		}
+
+		[[nodiscard]] const ReflectedMaterialParam* FindMaterialParam(const std::string& name) const
+		{
+			for (const ReflectedMaterialParam& param : MaterialParams)
+			{
+				if (param.Name == name)
+					return &param;
+			}
+			return nullptr;
 		}
 	};
 

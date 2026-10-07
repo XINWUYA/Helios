@@ -1079,7 +1079,7 @@ namespace Helios
 						/* Fill object uniform buffer */
 						Renderer::FillObjectUniformBuffer(mesh_object);
 
-						const auto& material = mesh_object.MeshSegment->GetMaterial();
+						const auto& material = mesh_object.Material;
 						if (material == nullptr)
 							continue;
 

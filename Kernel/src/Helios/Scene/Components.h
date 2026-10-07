@@ -3,6 +3,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <string>
+#include <unordered_map>
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Camera.h"
 #include "Model.h"
@@ -112,14 +114,70 @@ namespace Helios
 		}
 	};
 
+	/* 材质槽的实体级绑定（三态）：条目不存在 = 用模型槽表的默认；IsInstance=false = 覆盖
+	 * （挂另一份材质资产，共享）；IsInstance=true = 实例（克隆出来的实体级独立材质）。
+	 * 解析链见 ResolveSlotMaterial。 */
+	struct MaterialSlotOverride
+	{
+		SharedPtr<Material> pMaterial; /* 覆盖（共享资产）或实例（独立） */
+		std::string SourceAssetPath;   /* 实例的来源资产路径（"重置回来源"用；空 = 无来源） */
+		bool IsInstance{ false };      /* 实例：参数独立、序列化全量内嵌 */
+	};
+
 	/* 模型组件 */
 	struct ModelComponent : ComponentBase
 	{
 		SharedPtr<Model> m_Model{ nullptr };
+		/* 槽名 → 实体级绑定（"覆盖"与"实例"，见 MaterialSlotOverride） */
+		std::unordered_map<std::string, MaterialSlotOverride> m_SlotOverrides;
 
 		ModelComponent() = default;
-		ModelComponent(const ModelComponent&) = default;
+
+		/* 值语义：拷贝组件时，实例材质必须深拷贝 ——
+		 * 组件的撤销快照（Capture/Restore）靠这条把实例参数一起保存 / 还原；
+		 * "覆盖 / 默认"是共享资产，SharedPtr 浅拷贝保持共享。 */
+		ModelComponent(const ModelComponent& other)
+			: ComponentBase(other), m_Model(other.m_Model), m_SlotOverrides(other.m_SlotOverrides)
+		{
+			for (auto& entry : m_SlotOverrides)
+			{
+				auto& slot_override = entry.second;
+				if (slot_override.IsInstance && slot_override.pMaterial != nullptr)
+					slot_override.pMaterial = slot_override.pMaterial->Clone();
+			}
+		}
+
+		ModelComponent& operator=(const ModelComponent& other)
+		{
+			if (this != &other)
+			{
+				ModelComponent copy(other); /* 走深拷贝构造 */
+				std::swap(m_Model, copy.m_Model);
+				std::swap(m_SlotOverrides, copy.m_SlotOverrides);
+			}
+			return *this;
+		}
 	};
+
+	/* 解析一个 MeshSegment 的最终材质（全引擎唯一入口）：
+	 * 实体绑定（覆盖 / 实例） ?: 模型槽表默认 ?: 内置白模 */
+	inline SharedPtr<Material> ResolveSlotMaterial(
+		const Model& model, int slot_index,
+		const std::unordered_map<std::string, MaterialSlotOverride>* slot_overrides)
+	{
+		const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
+		if (slot == nullptr)
+			return Material::BuiltinWhite();
+
+		if (slot_overrides != nullptr)
+		{
+			const auto iter = slot_overrides->find(slot->Name);
+			if (iter != slot_overrides->end() && iter->second.pMaterial != nullptr)
+				return iter->second.pMaterial;
+		}
+
+		return (slot->pDefault != nullptr) ? slot->pDefault : Material::BuiltinWhite();
+	}
 
 	/* 光源组件 */
 	struct LightComponent : ComponentBase

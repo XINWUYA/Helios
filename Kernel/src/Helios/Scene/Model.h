@@ -23,6 +23,15 @@ namespace Helios
 	/* 反查：身份名 -> 类型（非内建名返回 false） */
 	[[nodiscard]] bool TryParseBuiltinModelName(const std::string& name, BuiltinModelType& out_type);
 
+	/* 材质槽：几何侧声明的"材质需求"。
+	 * 稳定标识是名字（导入时取 OBJ 材质名，重名加后缀唯一化）；
+	 * pDefault 为模型级默认绑定（来自伴生 .mtl 槽表，可空 = 解析时兜底白模）。 */
+	struct MaterialSlot
+	{
+		std::string Name;
+		SharedPtr<Material> pDefault;
+	};
+
 	/* 模型类：默认静态模型，仅支持 .mesh（由 ModelEditor 导出）。几何和材质解耦 —— 模型只描述
 	 * 几何与"材质槽表"；具体绑哪份材质由实体槽覆盖与模型默认绑定的解析链决定（见 ResolveSlotMaterial）。 */
 	class Model : public SceneObject
@@ -55,23 +64,28 @@ namespace Helios
 		/* 获取所有MeshSegments */
 		[[nodiscard]] const std::vector<SharedPtr<MeshSegment>>& GetMeshSegments() const { return m_MeshSegments; }
 
-		[[nodiscard]] const SharedPtr<MaterialGroup>& GetMaterialGroup() const { return m_pMaterialGroup; }
+		/* 添加一个材质槽 */
+		void AddMaterialSlot(const std::string& name, const SharedPtr<Material>& material);
+		/* 获取槽表 */
+		[[nodiscard]] const std::vector<MaterialSlot>& GetMaterialSlots() const { return m_MaterialSlots; }
+		/* 按索引取槽（越界返回 nullptr） */
+		[[nodiscard]] const MaterialSlot* GetSlotByIndex(int idx) const;
 
 		/* 从路径加载一个模型， 仅支持.mesh文件 */
 		static SharedPtr<Model> Create(const std::string& path);
-		/* 创建内建模型 */
-		static SharedPtr<Model> Create(BuiltinModelType type, const SharedPtr<Material>& material = Material::Default());
+		/* 创建内建模型（材质为空时用内置白模） */
+		static SharedPtr<Model> Create(BuiltinModelType type, const SharedPtr<Material>& material = nullptr);
 
 	private:
-		/* 加载模型时，加载材质 */
-		void LoadMaterial(const std::string& path);
+		/* 加载模型时，读取伴生 .mtl 槽表 */
+		void LoadMaterialSlots(const std::string& path);
 
 		/* 文件路径 */
 		std::string m_Path{};
 		/* 一个模型中包含的子模型 */
 		std::vector<SharedPtr<MeshSegment>> m_MeshSegments{};
-		/* 模型对应的材质 */
-		SharedPtr<MaterialGroup> m_pMaterialGroup{ nullptr };
+		/* 材质槽表（与 MeshSegment 的槽索引对位） */
+		std::vector<MaterialSlot> m_MaterialSlots{};
 		/* AABB */
 		glm::vec3 m_AABBMin;
 		glm::vec3 m_AABBMax;

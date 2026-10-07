@@ -226,6 +226,18 @@ namespace Helios
 		Linear
 	};
 
+	/* 材质参数类型（Shader 反射与材质参数表共用；见 DeviceShader / Material） */
+	enum class ParamType : uint8_t
+	{
+		Texture = 0,
+		Int,
+		Float,
+		Vec2,
+		Vec3,
+		Vec4,
+		Mat4,
+	};
+
 	/* BlendEquation */
 	enum class BlendEquation : uint8_t
 	{

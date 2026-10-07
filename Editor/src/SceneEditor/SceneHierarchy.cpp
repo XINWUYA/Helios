@@ -4,6 +4,10 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "Helios/Application/AssetManager.h"
+#include "Helios/Common/PathUtils.h"
+#include "Helios/Scene/SceneCommon.h"
+#include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "EntityTemplateRegistry.h"
 #include "Command/ComponentFieldCommand.h"
@@ -14,6 +18,7 @@
 #include "Command/ReparentEntityCommand.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/Components.h"
+#include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -42,6 +47,20 @@ namespace Helios
 			void Do() override { Apply(m_After); }
 			void Undo() override { Apply(m_Before); }
 			[[nodiscard]] const char* GetLabel() const override { return m_Label.c_str(); }
+
+			/* 同一实体同一组件的连续改动可合并：拖动材质参数时每帧产生一条快照命令，
+			 * 由 CommandStack 的事务窗口（Begin/EndTransaction）圈进来，只保留最初 before 与最新 after。 */
+			bool TryMerge(const ICommand& next) override
+			{
+				const auto* next_command = dynamic_cast<const ComponentCustomDrawCommand*>(&next);
+				if (next_command == nullptr)
+					return false;
+				if (next_command->m_Entity != m_Entity || next_command->m_Restore != m_Restore)
+					return false;
+
+				m_After = next_command->m_After;
+				return true;
+			}
 
 		private:
 			void Apply(const ComponentSnapshot& snapshot)
@@ -1411,6 +1430,675 @@ namespace Helios
 		}
 	}
 
+	/* ==================== 材质卡（Model 组件的附属，每槽一张）====================
+	 * 卡片背景走绘制通道、不能嵌套 —— 材质详情就平铺在 Model 卡后面。编辑语义跟组件卡一致：
+	 * 改参数自动实例化（改动那一刻才克隆写回），撤销走"组件快照 + 事务合并"。 */
+
+	namespace
+	{
+		/* 材质没有 Shader 时按钮上的占位文案（菜单照常能开，选一个即可补上） */
+		constexpr const char* kNoShaderOption = "(no shader)";
+
+		/* 反射参数 → 显示行：材质还没有这条时用它撑起一行 ——
+		 * 默认值取 Shader 源码声明的（如 u_AlbedoTilingOffset = vec4(1,1,0,0)），
+		 * 没有就按类型给零值；贴图没有"默认"，显示成空槽（拖入才落材质）。 */
+		MaterialParamInfo MakeDefaultMaterialParamRow(const ReflectedMaterialParam& reflected)
+		{
+			const std::any& declared = reflected.Default;
+			switch (reflected.Type)
+			{
+			case ParamType::Texture:
+				return Material::MakeTextureParam(reflected.Name, nullptr);
+			case ParamType::Int:
+				return { ParamType::Int, reflected.Name, declared.has_value() ? declared : std::any(0) };
+			case ParamType::Float:
+				return { ParamType::Float, reflected.Name, declared.has_value() ? declared : std::any(0.0f) };
+			case ParamType::Vec2:
+				return { ParamType::Vec2, reflected.Name, declared.has_value() ? declared : std::any(glm::vec2(0.0f)) };
+			case ParamType::Vec3:
+				return { ParamType::Vec3, reflected.Name, declared.has_value() ? declared : std::any(glm::vec3(0.0f)) };
+			case ParamType::Vec4:
+				return { ParamType::Vec4, reflected.Name, declared.has_value() ? declared : std::any(glm::vec4(0.0f)) };
+			case ParamType::Mat4:
+				return { ParamType::Mat4, reflected.Name, std::any(glm::mat4(1.0f)) };
+			}
+
+			return { reflected.Type, reflected.Name, std::any{} };
+		}
+
+		/* 材质参数行的显示清单：Shader 反射是参数集合的唯一来源（反射声明什么就列什么，跟材质
+		 * 里残留的旧参数无关）；值优先取材质里已有的，没有的就显示反射默认值。反射不到就返回空、
+		 * 不回退旧参数表（让调用方画报错），免得旧参数被显示成"默认材质"误导人。 */
+		std::vector<MaterialParamInfo> BuildMaterialParamRows(const Material& material)
+		{
+			std::vector<MaterialParamInfo> rows;
+
+			const SharedPtr<DeviceShader> shader = material.GetShader();
+			if (shader == nullptr)
+				return rows;
+
+			const ShaderReflectionData& reflection = shader->GetReflectionData();
+			const auto& parameters = material.GetAllParameters();
+			rows.reserve(reflection.MaterialParams.size());
+			for (const ReflectedMaterialParam& reflected : reflection.MaterialParams)
+			{
+				const auto iter = parameters.find(ToID(reflected.Name));
+				rows.push_back(iter != parameters.end() ? iter->second : MakeDefaultMaterialParamRow(reflected));
+			}
+
+			std::sort(rows.begin(), rows.end(),
+				[](const MaterialParamInfo& lhs, const MaterialParamInfo& rhs) { return lhs.Name < rhs.Name; });
+			return rows;
+		}
+
+		/* 参数无法按 Shader 反射时的报错提示行（Danger 色）：两种状态分开说清 ——
+		 * 没 Shader / 有 Shader 但反射为空（后端不支持或声明识别不出）。 */
+		void DrawMaterialReflectionNotice(const Material& material)
+		{
+			const char* message = (material.GetShader() == nullptr)
+				? "No shader loaded — cannot reflect parameters"
+				: "Shader reflection unavailable — parameters not listed";
+
+			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::Danger);
+			ImGui::TextWrapped("%s", message);
+			ImGui::PopStyleColor();
+		}
+
+		/* Shader 菜单树：按目录分层的节点（文件夹 = Children 非空；文件 = Path 为完整相对路径） */
+		struct ShaderMenuNode
+		{
+			std::string Name;                      /* 显示名（文件 / 文件夹名） */
+			std::string Path;                      /* 文件 = 完整相对路径；文件夹 = 空 */
+			std::vector<ShaderMenuNode> Children;  /* 文件夹的子项 */
+
+			[[nodiscard]] bool IsFolder() const { return Path.empty(); }
+		};
+
+		/* 把"可选 Shader 的相对路径清单"装成一棵按目录分层的菜单树（同名文件夹归并）。
+		 * 清单本身是字典序：同一层级里文件夹与文件各自保持排好的顺序 ——
+		 * 画的时候文件夹先、文件后（见 DrawShaderMenuLevel）。 */
+		std::vector<ShaderMenuNode> BuildShaderMenuTree(const std::vector<std::string>& options)
+		{
+			std::vector<ShaderMenuNode> roots;
+
+			for (const std::string& option : options)
+			{
+				std::vector<ShaderMenuNode>* level = &roots;
+				size_t begin = 0;
+
+				while (true)
+				{
+					const size_t slash = option.find('/', begin);
+					if (slash == std::string::npos)
+						break;
+
+					const std::string folder = option.substr(begin, slash - begin);
+					auto found = std::find_if(level->begin(), level->end(),
+						[&folder](const ShaderMenuNode& node)
+						{
+							return node.IsFolder() && node.Name == folder;
+						});
+
+					if (found == level->end())
+					{
+						level->push_back(ShaderMenuNode{ folder, {}, {} });
+						found = level->end() - 1;
+					}
+
+					level = &found->Children;
+					begin = slash + 1;
+				}
+
+				level->push_back(ShaderMenuNode{ option.substr(begin), option, {} });
+			}
+
+			return roots;
+		}
+
+		/* 画一层 Shader 菜单：文件夹先（悬停展开子菜单）、文件后（点一条 = 选中）。
+		 * 当前 Shader 打一枚对勾（Accent，行右缘）；选中后把整条菜单链收起。 */
+		void DrawShaderMenuLevel(const std::vector<ShaderMenuNode>& nodes, const std::string& current,
+			std::string& out_picked)
+		{
+			for (const ShaderMenuNode& node : nodes)
+			{
+				if (!node.IsFolder())
+					continue;
+
+				if (PanelChrome::BeginMenuWithIcon(Icons::Id::Directory, node.Name.c_str()))
+				{
+					DrawShaderMenuLevel(node.Children, current, out_picked);
+					PanelChrome::EndMenuWithIcon();
+				}
+			}
+
+			for (const ShaderMenuNode& node : nodes)
+			{
+				if (node.IsFolder())
+					continue;
+
+				/* 对勾行的默认行为是"点了不收起"（连点开关用）；单选的场合点完自己收起 ——
+				 * CloseCurrentPopup 会顺着 ChildMenu 链把整个菜单一起带走。 */
+				bool checked = (node.Path == current);
+				if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::FileShader, node.Name.c_str(), &checked))
+				{
+					out_picked = node.Path;
+					ImGui::CloseCurrentPopup();
+				}
+			}
+		}
+
+		/* 把槽的绑定换成"实例"（若已是实例则原样返回）。
+		 * 返回值：可编辑的实例材质；component_changed 标记组件数据被修改（撤销靠它）。 */
+		SharedPtr<Material> EnsureSlotInstance(ModelComponent& component, const Model& model,
+			int slot_index, bool& component_changed)
+		{
+			const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
+			if (slot == nullptr)
+				return nullptr;
+
+			auto iter = component.m_SlotOverrides.find(slot->Name);
+			if (iter != component.m_SlotOverrides.end() && iter->second.IsInstance && iter->second.pMaterial != nullptr)
+				return iter->second.pMaterial;
+
+			/* 从"当前生效材质"（覆盖 ?: 默认 ?: 白模）克隆 */
+			SharedPtr<Material> source;
+			std::string source_path;
+			if (iter != component.m_SlotOverrides.end() && iter->second.pMaterial != nullptr)
+			{
+				source = iter->second.pMaterial;
+				source_path = iter->second.pMaterial->GetPath();
+			}
+			else
+			{
+				source = (slot->pDefault != nullptr) ? slot->pDefault : Material::BuiltinWhite();
+				source_path = source->GetPath();
+			}
+
+			MaterialSlotOverride slot_override;
+			slot_override.pMaterial = source->Clone();
+			slot_override.IsInstance = true;
+			slot_override.SourceAssetPath = std::move(source_path);
+			component.m_SlotOverrides[slot->Name] = std::move(slot_override);
+			component_changed = true;
+
+			return component.m_SlotOverrides[slot->Name].pMaterial;
+		}
+
+		/* 参数改动写回：确保实例 → SetParameters 到实例（Texture 走 SetTexture 的绑定解析） */
+		void WriteBackMaterialParam(ModelComponent& component, const Model& model, int slot_index,
+			ParamType type, const std::string& name, const std::any& value, bool& component_changed)
+		{
+			SharedPtr<Material> instance = EnsureSlotInstance(component, model, slot_index, component_changed);
+			if (instance == nullptr)
+				return;
+
+			if (type == ParamType::Texture)
+				instance->SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
+			else
+				instance->SetParameters(type, name, value);
+		}
+
+		/* 光栅化状态改动写回：确保实例 → SetRasterState 到实例（与参数同一套撤销路径） */
+		void WriteBackMaterialRasterState(ModelComponent& component, const Model& model, int slot_index,
+			const RenderRasterState& state, bool& component_changed)
+		{
+			SharedPtr<Material> instance = EnsureSlotInstance(component, model, slot_index, component_changed);
+			if (instance == nullptr)
+				return;
+
+			instance->SetRasterState(state);
+		}
+
+		/* 一条材质参数行：值画在临时缓冲上，改动经 write_back 落进目标材质（槽位 → 自动实例化
+		 * 写回；资产编辑缓冲 → 直接写）。行对齐：标签跟 frame 高控件垂直居中。贴图行只画缩略图
+		 * （点击定位、拖入替换、悬停看大图）。 */
+		void DrawMaterialParamRow(const MaterialParamInfo& param_info,
+			const SceneHierarchy::AssetRevealFunc& reveal_asset,
+			const std::function<void(ParamType, const std::string&, const std::any&)>& write_back)
+		{
+			bool edited = false;
+			const std::string& param_name = param_info.Name;
+			const float kLabelWidth = EditorTheme::Token::PropertyLabelWidth;
+
+			switch (param_info.Type)
+			{
+			case ParamType::Texture:
+				{
+					auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(param_info.Value);
+					auto texture = texture_info.first; /* 临时副本 */
+
+					ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+
+					const auto& show_texture = texture ? texture
+						: TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/default.png"));
+
+					/* 缩略图与行高同高（frame 高含 1px 外框）：逐行对齐、不撑行 */
+					const float thumbnail = ImGui::GetFrameHeight() - 2.0f;
+					const bool clicked = ImGui::ImageButton((ImTextureID)show_texture.get(), ImVec2(thumbnail, thumbnail),
+						ImVec2(0, 1), ImVec2(1, 0), 1, ImVec4(0, 0, 0, 0), ImVec4(1, 1, 1, 1));
+
+					if (ImGui::BeginDragDropTarget())
+					{
+						if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
+						{
+							std::filesystem::path relative_path;
+							if (payload->DataSize > 1 && TryPathFromUtf8Payload(
+								payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
+							{
+								const auto new_texture = TextureAssetManager::Instance().GetOrCreateTexture(
+									PathToUtf8(g_AssetsPath / relative_path));
+								if (new_texture->IsLoaded())
+								{
+									texture = new_texture;
+									edited = true;
+								}
+							}
+						}
+						ImGui::EndDragDropTarget();
+					}
+
+					if (ImGui::IsItemHovered())
+					{
+						ImGui::BeginTooltip();
+						ImGui::Image((ImTextureID)show_texture.get(), ImVec2(200, 200), ImVec2(0, 1), ImVec2(1, 0));
+						ImGui::TextDisabled("Click to reveal in Assets");
+						ImGui::EndTooltip();
+					}
+
+					/* 点击缩略图 = 在资源浏览器里定位这张贴图 */
+					if (clicked && reveal_asset && show_texture != nullptr)
+					{
+						const std::string relative = RELATIVE_PATH(show_texture->GetPath());
+						if (!relative.empty() && relative.rfind("..", 0) != 0)
+							reveal_asset(relative);
+					}
+
+					ImGuiExt::EndPropertyRow();
+
+					if (edited)
+						write_back(ParamType::Texture, param_name, texture);
+				}
+				break;
+			case ParamType::Int:
+				{
+					int value = std::any_cast<int>(param_info.Value);
+					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+					ImGui::SetNextItemWidth(value_width);
+					edited = ImGui::DragInt("##Value", &value, 0.1f);
+					ImGuiExt::EndPropertyRow();
+					if (edited)
+						write_back(ParamType::Int, param_name, value);
+				}
+				break;
+			case ParamType::Float:
+				{
+					float value = std::any_cast<float>(param_info.Value);
+					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+					ImGui::SetNextItemWidth(value_width);
+					edited = ImGui::DragFloat("##Value", &value, 0.01f);
+					ImGuiExt::EndPropertyRow();
+					if (edited)
+						write_back(ParamType::Float, param_name, value);
+				}
+				break;
+			case ParamType::Vec2:
+				{
+					glm::vec2 value = std::any_cast<glm::vec2>(param_info.Value);
+					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+					ImGui::SetNextItemWidth(value_width);
+					edited = ImGui::DragFloat2("##Value", glm::value_ptr(value), 0.01f);
+					ImGuiExt::EndPropertyRow();
+					if (edited)
+						write_back(ParamType::Vec2, param_name, value);
+				}
+				break;
+			case ParamType::Vec3:
+				{
+					glm::vec3 value = std::any_cast<glm::vec3>(param_info.Value);
+					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+					ImGui::SetNextItemWidth(value_width);
+					edited = ImGui::DragFloat3("##Value", glm::value_ptr(value), 0.01f);
+					ImGuiExt::EndPropertyRow();
+					if (edited)
+						write_back(ParamType::Vec3, param_name, value);
+				}
+				break;
+			case ParamType::Vec4:
+				{
+					glm::vec4 value = std::any_cast<glm::vec4>(param_info.Value);
+					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+					ImGui::SetNextItemWidth(value_width);
+					edited = ImGui::DragFloat4("##Value", glm::value_ptr(value), 0.01f);
+					ImGuiExt::EndPropertyRow();
+					if (edited)
+						write_back(ParamType::Vec4, param_name, value);
+				}
+				break;
+			default:
+				/* Mat4 等没做编辑器，跳过（只读展示也省） */
+				break;
+			}
+		}
+
+		/* ---- 光栅化状态（RenderRasterState）的行 ---- */
+
+		/* 各枚举的显示名（顺序与 RenderCommon.h 里的枚举定义一一对应） */
+		const std::vector<std::string>& CullModeOptions()
+		{
+			static const std::vector<std::string> options = { "None", "Front", "Back", "Front And Back" };
+			return options;
+		}
+
+		const std::vector<std::string>& FrontFaceOptions()
+		{
+			static const std::vector<std::string> options = { "CW", "CCW" };
+			return options;
+		}
+
+		const std::vector<std::string>& BlendEquationOptions()
+		{
+			static const std::vector<std::string> options = { "Add", "Subtract", "Reverse Subtract", "Min", "Max" };
+			return options;
+		}
+
+		const std::vector<std::string>& BlendFuncOptions()
+		{
+			static const std::vector<std::string> options = {
+				"Zero", "One", "Src Color", "One Minus Src Color", "Dst Color", "One Minus Dst Color",
+				"Src Alpha", "One Minus Src Alpha", "Dst Alpha", "One Minus Dst Alpha", "Src Alpha Saturate" };
+			return options;
+		}
+
+		const std::vector<std::string>& CompareFuncOptions()
+		{
+			static const std::vector<std::string> options = {
+				"Less Equal", "Greater Equal", "Less", "Greater", "Equal", "Not Equal", "Always", "Never" };
+			return options;
+		}
+
+		/* 光栅化状态的行：直接画在传入的 state 上；返回值 = 是否有改动
+		 * （调用方决定记脏 / 实例化写回 / 热更新 —— 两种材质卡共用同一套行）。 */
+		bool DrawMaterialRasterStateRows(RenderRasterState& state)
+		{
+			bool changed = false;
+
+			int cull_mode = static_cast<int>(state.CullMode);
+			ImGuiExt::DrawComboUI("Cull Mode", CullModeOptions(), cull_mode,
+				[&](int picked) { state.CullMode = static_cast<CullMode>(picked); changed = true; });
+
+			int front_face = static_cast<int>(state.FrontFaceType);
+			ImGuiExt::DrawComboUI("Front Face", FrontFaceOptions(), front_face,
+				[&](int picked) { state.FrontFaceType = static_cast<FrontFaceType>(picked); changed = true; });
+
+			/* 位域字段不能绑 bool&：勾选框画在临时量上、改动时写回 */
+			bool enable_blend = state.EnableBlend;
+			if (ImGuiExt::DrawCheckboxUI("Blend", enable_blend))
+			{
+				state.EnableBlend = enable_blend;
+				changed = true;
+			}
+
+			int blend_equation_rgb = static_cast<int>(state.BlendEquationRGB);
+			ImGuiExt::DrawComboUI("Blend Op RGB", BlendEquationOptions(), blend_equation_rgb,
+				[&](int picked) { state.BlendEquationRGB = static_cast<BlendEquation>(picked); changed = true; });
+
+			int blend_equation_a = static_cast<int>(state.BlendEquationA);
+			ImGuiExt::DrawComboUI("Blend Op A", BlendEquationOptions(), blend_equation_a,
+				[&](int picked) { state.BlendEquationA = static_cast<BlendEquation>(picked); changed = true; });
+
+			int blend_src_rgb = static_cast<int>(state.BlendFuncSrcRGB);
+			ImGuiExt::DrawComboUI("Blend Src RGB", BlendFuncOptions(), blend_src_rgb,
+				[&](int picked) { state.BlendFuncSrcRGB = static_cast<BlendFunc>(picked); changed = true; });
+
+			int blend_src_a = static_cast<int>(state.BlendFuncSrcA);
+			ImGuiExt::DrawComboUI("Blend Src A", BlendFuncOptions(), blend_src_a,
+				[&](int picked) { state.BlendFuncSrcA = static_cast<BlendFunc>(picked); changed = true; });
+
+			int blend_dst_rgb = static_cast<int>(state.BlendFuncDstRGB);
+			ImGuiExt::DrawComboUI("Blend Dst RGB", BlendFuncOptions(), blend_dst_rgb,
+				[&](int picked) { state.BlendFuncDstRGB = static_cast<BlendFunc>(picked); changed = true; });
+
+			int blend_dst_a = static_cast<int>(state.BlendFuncDstA);
+			ImGuiExt::DrawComboUI("Blend Dst A", BlendFuncOptions(), blend_dst_a,
+				[&](int picked) { state.BlendFuncDstA = static_cast<BlendFunc>(picked); changed = true; });
+
+			bool enable_depth_write = state.EnableDepthWrite;
+			if (ImGuiExt::DrawCheckboxUI("Depth Write", enable_depth_write))
+			{
+				state.EnableDepthWrite = enable_depth_write;
+				changed = true;
+			}
+
+			int depth_compare = static_cast<int>(state.DepthCompareFunc);
+			ImGuiExt::DrawComboUI("Depth Test", CompareFuncOptions(), depth_compare,
+				[&](int picked) { state.DepthCompareFunc = static_cast<CompareFunc>(picked); changed = true; });
+
+			bool enable_color_write = state.EnableColorWrite;
+			if (ImGuiExt::DrawCheckboxUI("Color Write", enable_color_write))
+			{
+				state.EnableColorWrite = enable_color_write;
+				changed = true;
+			}
+
+			return changed;
+		}
+
+		/* 分区标题行：三角和标题从标签列左沿起排（跟卡片头同一套画法）。不用 stock 树箭头
+		 * （它从 FramePadding 起画、会右移一档）；TreeNodeEx 只用来做整行命中和折叠状态，箭头推成
+		 * 透明藏掉，这里自绘精确对位 —— 要在 TreeNodeEx 之后立刻调用。 */
+		void DrawMaterialSectionHeader(bool open, const char* title)
+		{
+			const ImVec2 row_min = ImGui::GetItemRectMin();
+			const float row_height = ImGui::GetItemRectSize().y;
+			const float text_height = ImGui::GetFontSize();
+			const float arrow_size = text_height * 0.55f; /* 与卡片头箭头同口径 */
+			const float center_y = row_min.y + row_height * 0.5f;
+
+			ImDrawList* draw_list = ImGui::GetWindowDrawList();
+			PanelChrome::DrawDisclosureArrow(draw_list,
+				ImVec2(row_min.x + arrow_size * 0.5f, center_y),
+				arrow_size, open, ImGui::GetColorU32(EditorTheme::Token::TextDim));
+			draw_list->AddText(
+				ImVec2(row_min.x + arrow_size + ImGui::GetStyle().ItemInnerSpacing.x,
+					center_y - text_height * 0.5f),
+				ImGui::GetColorU32(EditorTheme::Token::Text), title);
+		}
+
+		/* 分区隔离线：把 RasterState 分区与上面的参数行隔开（收起时也在）。
+		 * 自绘细线（项目惯例：自绘不占行距、间距说得清；ImGui::Separator 吃「1px + 整行距」、
+		 * 且 Separator 色在卡底上偏淡）——块高 = 上留 5 + 线 1 + 下留 5。 */
+		void DrawMaterialSectionDivider()
+		{
+			const float top_gap = 5.0f;
+			const float bottom_gap = 5.0f;
+			const ImVec2 line_start = ImGui::GetCursorScreenPos();
+			const float line_y = line_start.y + top_gap + 0.5f;
+			ImGui::GetWindowDrawList()->AddLine(
+				ImVec2(line_start.x, line_y),
+				ImVec2(line_start.x + ImGui::GetContentRegionAvail().x, line_y),
+				ImGui::GetColorU32(EditorTheme::Token::Border));
+			ImGui::Dummy(ImVec2(0.0f, top_gap + 1.0f + bottom_gap));
+		}
+	}
+
+	/* 组件自定义编辑的合并窗口封口（每帧调用；与 DrawEditableField 同一套事务规则）：
+	 * 上一帧有控件活跃、这一帧没有 → 一次连续编辑结束，给命令栈封口。 */
+	void SceneHierarchy::ServiceComponentEditTransaction()
+	{
+		const bool item_active = ImGui::IsAnyItemActive();
+		if (m_ComponentEditTransactionOpen && !item_active)
+		{
+			m_ComponentEditTransactionOpen = false;
+			if (m_pCommandStack != nullptr)
+				m_pCommandStack->EndTransaction();
+		}
+	}
+
+	/* 材质卡主体：Shader 行 + 参数行（可就地编辑 → 自动实例化） */
+	bool SceneHierarchy::DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index)
+	{
+		bool changed = false;
+
+		const SharedPtr<Material> current = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
+
+		/* Shader 行（只读）：长路径只裁不换行（换行会撑成两行、错位）。裁剪必须走
+		 * DrawClippedTextLine（定宽占位 + 省略号）—— PushClipRect 只压绘制不压布局，超宽路径
+		 * 会把面板撑出横滑。 */
+		if (current->GetShader() != nullptr)
+		{
+			const float value_width = ImGuiExt::BeginPropertyRow("Shader", EditorTheme::Token::PropertyLabelWidth, true);
+			const std::string shader_path = RELATIVE_PATH(current->GetShader()->GetPath());
+			PanelChrome::DrawClippedTextLine(shader_path.c_str(), value_width);
+			ImGuiExt::EndPropertyRow();
+		}
+
+		/* 参数行：集合与类型来自 Shader 反射（见 BuildMaterialParamRows）——换 Shader 行集跟着换；
+		 * 值取当前生效材质，反射声明而材质还没有的先显示默认值。每轮重新解析材质（上一轮改动可能已换成实例） */
+		const std::vector<MaterialParamInfo> rows = BuildMaterialParamRows(*current);
+		if (rows.empty())
+			DrawMaterialReflectionNotice(*current);
+
+		for (const MaterialParamInfo& row : rows)
+		{
+			const SharedPtr<Material> live = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
+			const auto& parameters = live->GetAllParameters();
+			const auto iter = parameters.find(ToID(row.Name));
+			const MaterialParamInfo& param_info = (iter != parameters.end()) ? iter->second : row;
+
+			DrawMaterialParamRow(param_info, m_AssetRevealFunc,
+				[&component, &model, slot_index, &changed](ParamType type, const std::string& name, const std::any& value)
+				{
+					WriteBackMaterialParam(component, model, slot_index, type, name, value, changed);
+				});
+		}
+
+		/* 光栅化状态：可折叠分区（默认收起；值画在临时副本上，改动时才实例化写回）。上方压一条
+		 * 隔离线。注意：TreeNodeEx 只承担命中 / 折叠状态（标签传空串、三角自绘）；
+		 * NoTreePushOnOpen：内容不缩进（默认 TreePush 会 Indent 18px、整段右移错位）。 */
+		DrawMaterialSectionDivider();
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 0.0f)); /* 藏掉 stock 箭头（自绘对位） */
+			const bool raster_open = ImGui::TreeNodeEx("##MaterialRasterState",
+				ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen, "%s", "");
+			ImGui::PopStyleColor();
+			DrawMaterialSectionHeader(raster_open, "Raster State");
+
+			if (raster_open)
+			{
+				const SharedPtr<Material> live = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
+				RenderRasterState state = live->GetRasterState();
+				if (DrawMaterialRasterStateRows(state))
+					WriteBackMaterialRasterState(component, model, slot_index, state, changed);
+			}
+		}
+
+		return changed;
+	}
+
+	/* Model 的材质卡：每槽一张，排在 Model 组件卡之后同级平铺。 */
+	void SceneHierarchy::DrawModelMaterialCards(Entity entity, ModelComponent& component)
+	{
+		PROFILE_FUNCTION();
+
+		if (component.m_Model == nullptr)
+			return;
+
+		const auto& slots = component.m_Model->GetMaterialSlots();
+		if (slots.empty())
+			return;
+
+		const ComponentDesc* desc = ComponentRegistry::Instance().Find(std::type_index(typeid(ModelComponent)));
+		if (desc == nullptr)
+			return;
+
+		for (int slot_index = 0; slot_index < static_cast<int>(slots.size()); ++slot_index)
+		{
+			const MaterialSlot& slot = slots[slot_index];
+
+			/* 卡片键按槽索引：多槽各一张、折叠状态互不影响（槽名可能重名，不能当 ID） */
+			ImGui::PushID(slot_index);
+
+			const std::string title = "Material · " + slot.Name;
+			const PanelChrome::Card card = PanelChrome::BeginCard(title.c_str(), Icons::Id::FileMaterial);
+
+			if (card.Open)
+			{
+				/* 与 DrawComponentBlock 同一套撤销语义：快照 + 事务合并 */
+				const bool can_record = m_pCommandStack != nullptr
+					&& desc->Capture != nullptr && desc->Restore != nullptr;
+
+				ComponentSnapshot before;
+				if (can_record)
+					desc->Capture(entity, before);
+
+				const bool changed = DrawMaterialCardBody(component, *component.m_Model, slot_index);
+
+				if (changed && can_record && before.IsValid())
+				{
+					if (ImGui::IsAnyItemActive() && !m_ComponentEditTransactionOpen)
+					{
+						m_ComponentEditTransactionOpen = true;
+						m_pCommandStack->BeginTransaction();
+					}
+
+					ComponentSnapshot after;
+					desc->Capture(entity, after);
+					if (after.IsValid())
+					{
+						m_pCommandStack->Execute(CreateUniquePtr<ComponentCustomDrawCommand>(
+							entity, desc->Has, desc->Restore, std::move(before), std::move(after), desc->Name));
+					}
+				}
+			}
+
+			PanelChrome::EndCard(card);
+			ImGui::PopID();
+		}
+	}
+
+	/* 层级里拖入 .mesh：给实体挂 / 换模型。
+	 * 无组件先补组件（AddComponentCommand）、再设模型（组件快照命令）——两步都可撤销。 */
+	void SceneHierarchy::ApplyDroppedMeshToEntity(Entity entity, const std::string& absolute_path)
+	{
+		PROFILE_FUNCTION();
+
+		SharedPtr<Model> loaded_model = Model::Create(absolute_path);
+		if (loaded_model == nullptr)
+			return;
+
+		const ComponentDesc* desc = ComponentRegistry::Instance().Find(std::type_index(typeid(ModelComponent)));
+		if (desc == nullptr)
+			return;
+
+		if (!entity.HasComponent<ModelComponent>())
+		{
+			if (m_pCommandStack != nullptr && desc->Add != nullptr)
+				m_pCommandStack->Execute(CreateUniquePtr<AddComponentCommand>(entity, desc->Name, desc->Add, desc->Remove));
+			else
+				entity.AddComponent<ModelComponent>();
+		}
+
+		/* 设模型：经组件快照命令入栈（与属性面板的 Replace .mesh 同一条撤销机制） */
+		const bool can_record = m_pCommandStack != nullptr && desc->Capture != nullptr && desc->Restore != nullptr;
+		ComponentSnapshot before;
+		if (can_record)
+			desc->Capture(entity, before);
+
+		entity.GetComponent<ModelComponent>().m_Model = std::move(loaded_model);
+
+		if (can_record && before.IsValid())
+		{
+			ComponentSnapshot after;
+			desc->Capture(entity, after);
+			if (after.IsValid())
+			{
+				m_pCommandStack->Execute(CreateUniquePtr<ComponentCustomDrawCommand>(
+					entity, desc->Has, desc->Restore, std::move(before), std::move(after), desc->Name));
+			}
+		}
+	}
+
 	/* 绘制单个组件块：卡头（折叠箭头 + 图标 + 组件名 + 右侧菜单）+ 卡身（schema 字段 +
 	 * 组件自定义绘制）。卡片版式来自 PanelChrome，各面板共用。 */
 	void SceneHierarchy::DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component)
@@ -1426,6 +2114,9 @@ namespace Helios
 
 		if (card.Open)
 		{
+			/* 组件自定义编辑的合并窗口封口（拖动材质参数等 → 每帧快照命令由事务窗口合并为一条） */
+			ServiceComponentEditTransaction();
+
 			DrawComponentFieldsBySchema(desc, entity, component);
 			if (desc.CustomDraw != nullptr)
 			{
@@ -1438,6 +2129,13 @@ namespace Helios
 				const bool changed = desc.CustomDraw(component);
 				if (changed && can_record_custom_edit && before.IsValid())
 				{
+					/* 用户正在操作控件时开合并窗口：连续拖动只留一条历史 */
+					if (ImGui::IsAnyItemActive() && !m_ComponentEditTransactionOpen)
+					{
+						m_ComponentEditTransactionOpen = true;
+						m_pCommandStack->BeginTransaction();
+					}
+
 					ComponentSnapshot after;
 					desc.Capture(entity, after);
 					if (after.IsValid())
@@ -1495,6 +2193,11 @@ namespace Helios
 
 			ImGui::PushID(static_cast<int>(desc.Type.hash_code()));
 			DrawComponentBlock(desc, m_SelectedEntity, component);
+
+			/* Model 的材质卡：每槽一张，排在组件卡之后同级平铺
+			 * （卡片背景走绘制通道、通道不可嵌套 —— 详情卡画不进组件卡里）。 */
+			if (desc.Type == std::type_index(typeid(ModelComponent)))
+				DrawModelMaterialCards(m_SelectedEntity, *static_cast<ModelComponent*>(component));
 			ImGui::PopID();
 		}
 	}

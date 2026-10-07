@@ -9,6 +9,7 @@ namespace Helios
 	class Camera;
 	class Scene;
 	class MeshSegment;
+	class Material;
 	class DeviceTexture;
 	class DeviceFrameBuffer;
 	class FrameGraph;
@@ -21,10 +22,13 @@ namespace Helios
 		int ObjectId{ -1 };
 		glm::mat4 Local2WorldMat;
 		SharedPtr<MeshSegment> MeshSegment;
+		/* 收集时按解析链定下的最终材质（实体绑定 ?: 模型默认 ?: 内置白模） */
+		SharedPtr<Material> Material;
 
 		VisibleMeshObject() = default;
-		VisibleMeshObject(int object_id, const glm::mat4& local_2_world, const SharedPtr<class MeshSegment>& mesh_segment)
-			: ObjectId(object_id), Local2WorldMat(local_2_world), MeshSegment(mesh_segment)
+		VisibleMeshObject(int object_id, const glm::mat4& local_2_world,
+			const SharedPtr<class MeshSegment>& mesh_segment, const SharedPtr<class Material>& material)
+			: ObjectId(object_id), Local2WorldMat(local_2_world), MeshSegment(mesh_segment), Material(material)
 		{}
 	};
 

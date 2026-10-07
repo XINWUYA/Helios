@@ -64,7 +64,6 @@ void SampleCSM::OnAttached()
 		auto& model_component = entity.AddComponent<ModelComponent>();
 		model_component.m_Model = Model::Create(ABSOLUTE_PATH("Models/big_cottage/Cottage.mesh"));
 		model_component.m_Model->SetDebugName("Cottage");
-		auto& material_group = model_component.m_Model->GetMaterialGroup();
 		auto& transform_component = entity.GetComponent<TransformComponent>();
 		transform_component.m_Scale = glm::vec3(0.6f);
 		transform_component.m_Position = glm::vec3(0.0f, 0.0f, 0.0f);

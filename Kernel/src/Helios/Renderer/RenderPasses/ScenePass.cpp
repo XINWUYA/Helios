@@ -48,7 +48,7 @@ namespace Helios
 						for (const auto& mesh_object : render_view->GetVisibleMeshObjects())
 						{
 							Renderer::FillObjectUniformBuffer(mesh_object);
-							auto& material = mesh_object.MeshSegment->GetMaterial();
+							const auto& material = mesh_object.Material;
 							if (material == nullptr)
 								continue;
 							if (probe_manager && probe_manager->HasProbe())
