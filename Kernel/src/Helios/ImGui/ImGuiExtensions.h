@@ -19,10 +19,11 @@ class DeviceTexture;
  * 左边界都是对齐的。 */
 namespace ImGuiExt
 {
-	/* 属性行的通用前置/收尾：画标签（弱化色，定宽裁剪）并把光标移到值列，
-	 * 返回值列可用宽度。自定义绘制可以复用它来保持同一套行布局。
-	 * 成对使用，收尾负责把行内的 ID 作用域弹回去。 */
-	float BeginPropertyRow(const char* label, float label_width = EditorTheme::Token::PropertyLabelWidth);
+	/* 属性行的通用前置 / 收尾：画标签（弱化色、定宽裁剪）并把光标移到值列，返回值列的可用宽度；
+	 * 成对使用、收尾时弹回 ID 作用域。行高统一为「字体高 + 2×PropertyRowPadY」，行内内容竖直居中。
+	 * frame_aligned 是历史参数（垂直对齐恒开），留着是为了稳住调用点。 */
+	float BeginPropertyRow(const char* label, float label_width = EditorTheme::Token::PropertyLabelWidth,
+		bool frame_aligned = false);
 	void EndPropertyRow();
 
 	/* 绘制一个普通的文本UI */
@@ -41,8 +42,10 @@ namespace ImGuiExt
 	void DrawDragFloat3UI(const char* label, glm::vec3& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个可拖动的Float4 UI */
 	void DrawDragFloat4UI(const char* label, glm::vec4& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
-	/* 绘制一个vec3 UI， 带XYZ */
-	void DrawVec3ControlUI(const std::string& label, glm::vec3& values, float reset_value = 0.0f, float label_width = EditorTheme::Token::PropertyLabelWidth);
+	/* 绘制一个vec3 UI， 带XYZ。
+	 * uniform_scale：Scale 类字段用 —— 拖任一分量时按住 Shift = 三轴等比缩放。 */
+	void DrawVec3ControlUI(const std::string& label, glm::vec3& values, float reset_value = 0.0f,
+		float label_width = EditorTheme::Token::PropertyLabelWidth, bool uniform_scale = false);
 	/* 绘制带选中的图像按钮UI */
 	void DrawCheckedImageButtonUI(const std::string& label, const SharedPtr<DeviceTexture>& texture, const ImVec2& size, bool checked = false, const std::function<void()>& button_func = []() {});
 	/* 绘制一个Checkbox；返回是否被改动（调用方要"改动即生效"时用它，别每帧无条件写回） */

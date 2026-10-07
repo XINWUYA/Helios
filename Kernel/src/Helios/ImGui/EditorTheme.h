@@ -31,6 +31,9 @@ namespace Helios::EditorTheme
         inline const ImVec4 TextDim = ImVec4(0.545f, 0.600f, 0.671f, 1.00f); /* #8B99AB 次要 / 禁用 */
         /* 属性行标签：比正文弱、比禁用强 —— 标签是"说明"，值才是内容 */
         inline const ImVec4 TextLabel = ImVec4(0.765f, 0.808f, 0.863f, 1.00f); /* #C3CEDC */
+        /* 错误提示：只用于"当下就不对"的输入（如就地改名的非法名字），
+         * 不参与状态色带（选中 / 悬停是 Accent 家族），也别拿它当装饰色 */
+        inline const ImVec4 Danger    = ImVec4(0.851f, 0.482f, 0.459f, 1.00f); /* #D97B75 */
 
         /* 淡紫强调色：与图标系统同源 —— 取 SvgInk::Violet 的深色画布落地色（EditorIcons.cpp，
          * #A69EFF），图标里的紫与 UI 状态色是同一个颜色。
@@ -39,9 +42,8 @@ namespace Helios::EditorTheme
         inline const ImVec4 AccentHover = ImVec4(0.776f, 0.757f, 1.000f, 1.00f); /* #C6C1FF */
         inline const ImVec4 AccentDown  = ImVec4(0.533f, 0.502f, 0.910f, 1.00f); /* #8880E8 */
 
-        /* 分量色：X/Y/Z 的身份标识（业界约定 红/绿/蓝），与"状态"无关，
-         * 因此只出现在「分量重置按钮」这一处；深色界面下取降饱和版本，避免抢眼。
-         * 四分量（W）没有约定俗成的颜色，用中性灰，不让它冒充分量语义。 */
+        /* 分量色：X/Y/Z 的身份标识（红 / 绿 / 蓝），只出现在「分量重置按钮」和「视图指示器」两处
+         * （共用 AxisGlyph.h 的字母笔画）；深色界面用降饱和版本。W 没有约定色，用中性灰。 */
         inline const ImVec4 AxisX      = ImVec4(0.784f, 0.396f, 0.373f, 1.00f); /* #C8655F */
         inline const ImVec4 AxisXHover = ImVec4(0.851f, 0.482f, 0.459f, 1.00f); /* #D97B75 */
         inline const ImVec4 AxisY      = ImVec4(0.435f, 0.667f, 0.353f, 1.00f); /* #6FAA5A */
@@ -67,10 +69,14 @@ namespace Helios::EditorTheme
 
         /* ---- 尺寸 ---- */
 
-        /* 属性面板标签列宽：全面板共用一档，所有组件卡的字段左边界因此对齐。
-         * 取值覆盖当前注册表里最长的字段名（PrefilterMipLevels）；行内仍会按实际
-         * 文本做一次下限保护，将来出现更长的名字只会撑宽自己那一行而不会重叠。 */
-        inline constexpr float PropertyLabelWidth = 108.0f;
+        /* 属性面板标签列宽：全面板共用一档（各卡字段左边界对齐）。覆盖最长的字段名（PrefilterMipLevels）
+         * 和最长的材质参数名（u_DisplacementTexture）；行内按实际文本做下限保护，更长名字只撑宽自己那一行。 */
+        inline constexpr float PropertyLabelWidth = 124.0f;
+
+        /* 属性行的垂直内边距（FramePadding.y）：行高 = 字体高 + 2×这一档。
+         * 行内文字（标签与值）统一取同一档基线，竖直居中、全面板同一节奏。
+         * 取值手感：0 = 紧贴文字（过于发挤）；5（全局档）= 回到 24px 的老行高。 */
+        inline constexpr float PropertyRowPadY = 3.0f;
 
         /* 分组卡片背景的外扩留白（PanelChrome::CardPad）：容器内边距取这个值就贴住容器两边。
          * 注意：必须是常量（早先按"当前窗口内边距 × 0.6"现算，容器设过内边距后就永远差一截）。 */

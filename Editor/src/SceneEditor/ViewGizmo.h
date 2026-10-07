@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "Helios/ImGui/EditorTheme.h"
+#include "Helios/ImGui/AxisGlyph.h"
 
 namespace Helios::ViewGizmo
 {
@@ -18,14 +19,6 @@ namespace Helios::ViewGizmo
 	inline constexpr float kDiscRadius = 10.5f;
 	/* 悬停 / 按下：轴色亮一档 + 外扩一圈（与主题控件"提亮一档"的状态语言一致） */
 	inline constexpr float kHighlightGrow = 2.0f;
-/* 轴字母（X / Y / Z / W）的矢量笔画 —— 视图指示器和分量重置按钮共用（两处"轴盘语言"逐笔
- * 同源）。用矢量笔画而不是字体：ImFont::RenderText 会把落点对齐到整数逻辑像素，拖动时字母
- * 逐像素跳；矢量笔画是亚像素落点、跟盘一起平滑移动。 */
-	inline constexpr float kLetterWidth = 8.0f;
-	inline constexpr float kLetterHeight = 9.0f;
-	inline constexpr float kLetterStroke = 1.8f;
-	/* 圆环 / 收边线宽 */
-	inline constexpr float kStroke = 1.5f;
 
 	/* 六个轴盘方向：+X / -X / +Y / -Y / +Z / -Z */
 	inline const glm::vec3 kDiscDirections[kDiscCount] = {
@@ -87,42 +80,6 @@ namespace Helios::ViewGizmo
 		return -1;
 	}
 
-	/* 单个字母（X / Y / Z）：三笔以内的直笔画。坐标全部从盘心派生、不经过任何
-	 * 取整 —— "拖动时字和盘一起平滑走"靠的就是这一点（见 kLetterWidth 的注释）。 */
-	inline void DrawLetter(ImDrawList* draw_list, char letter, const ImVec2& center, ImU32 ink)
-	{
-		const float half_w = kLetterWidth * 0.5f;
-		const float half_h = kLetterHeight * 0.5f;
-
-		const ImVec2 top_left(center.x - half_w, center.y - half_h);
-		const ImVec2 top_right(center.x + half_w, center.y - half_h);
-		const ImVec2 bottom_left(center.x - half_w, center.y + half_h);
-		const ImVec2 bottom_right(center.x + half_w, center.y + half_h);
-
-		switch (letter)
-		{
-		case 'X':
-			draw_list->AddLine(top_left, bottom_right, ink, kLetterStroke);
-			draw_list->AddLine(top_right, bottom_left, ink, kLetterStroke);
-			break;
-		case 'Y':
-		{
-			/* 分叉点略高于中线（与字体的 Y 一致），三笔共点 */
-			const ImVec2 junction(center.x, center.y - 1.0f);
-			draw_list->AddLine(top_left, junction, ink, kLetterStroke);
-			draw_list->AddLine(top_right, junction, ink, kLetterStroke);
-			draw_list->AddLine(junction, ImVec2(center.x, center.y + half_h), ink, kLetterStroke);
-			break;
-		}
-		case 'Z':
-		default:
-			draw_list->AddLine(top_left, top_right, ink, kLetterStroke);
-			draw_list->AddLine(top_right, bottom_left, ink, kLetterStroke);
-			draw_list->AddLine(bottom_left, bottom_right, ink, kLetterStroke);
-			break;
-		}
-	}
-
 	/* 逐盘绘制（远→近）。正轴实心、负轴空心 —— 正负不再靠明暗区分；悬停 / 按下 = 轴色悬停档 +
 	 * 外扩一圈。 */
 	inline void Draw(ImDrawList* draw_list, const Disc discs[kDiscCount], int32_t hovered_index, int32_t pressed_index)
@@ -144,19 +101,19 @@ namespace Helios::ViewGizmo
 			if (positive)
 			{
 				draw_list->AddCircleFilled(disc.Position, radius, ImGui::GetColorU32(color));
-				draw_list->AddCircle(disc.Position, radius, separator, 0, kStroke);
+				draw_list->AddCircle(disc.Position, radius, separator, 0, AxisGlyph::kRimStroke);
 			}
 			else
 			{
 				/* 空心环：先垫一圈底色描边再画本色环 —— 环压在同色实心盘上也分得开 */
-				draw_list->AddCircle(disc.Position, radius, separator, 0, kStroke + 2.0f);
-				draw_list->AddCircle(disc.Position, radius, ImGui::GetColorU32(color), 0, kStroke);
+				draw_list->AddCircle(disc.Position, radius, separator, 0, AxisGlyph::kRimStroke + 2.0f);
+				draw_list->AddCircle(disc.Position, radius, ImGui::GetColorU32(color), 0, AxisGlyph::kRimStroke);
 			}
 
 			/* 字母：实心盘用石墨墨色（对三个轴色的对比度都高于浅色字），空心盘用轴色 */
 			const ImU32 ink = positive ? ImGui::GetColorU32(EditorTheme::Token::Neutral0)
 				: ImGui::GetColorU32(color);
-			DrawLetter(draw_list, axis.Letter[0], disc.Position, ink);
+			AxisGlyph::DrawLetter(draw_list, axis.Letter[0], disc.Position, ink);
 		}
 	}
 }

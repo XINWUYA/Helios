@@ -1255,16 +1255,21 @@ namespace Helios
 		case FieldType::Vec3:
 		{
 			auto& vec = *reinterpret_cast<glm::vec3*>(field_ptr);
+			/* UniformScale：Scale 类字段 —— 拖任一分量时按住 Shift = 三轴等比 */
+			const bool uniform_scale = field.Semantics != nullptr
+				&& std::strcmp(field.Semantics, "UniformScale") == 0;
 			if (field.Semantics != nullptr && std::strcmp(field.Semantics, "AngleDeg") == 0)
 			{
 				/* 内部以弧度存储、Inspector 按角度编辑 */
 				glm::vec3 degree = glm::degrees(vec);
-				ImGuiExt::DrawVec3ControlUI(field.Name, degree, field.ResetValue);
+				ImGuiExt::DrawVec3ControlUI(field.Name, degree, field.ResetValue,
+					EditorTheme::Token::PropertyLabelWidth, uniform_scale);
 				vec = glm::radians(degree);
 			}
 			else
 			{
-				ImGuiExt::DrawVec3ControlUI(field.Name, vec, field.ResetValue);
+				ImGuiExt::DrawVec3ControlUI(field.Name, vec, field.ResetValue,
+					EditorTheme::Token::PropertyLabelWidth, uniform_scale);
 			}
 			break;
 		}

@@ -4,6 +4,7 @@
 #include <imgui_internal.h>
 #include "Helios/Application/AssetManager.h"
 #include "Helios/Common/Math.h"
+#include "Helios/ImGui/AxisGlyph.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/Scene/SceneCommon.h"
 
@@ -327,13 +328,24 @@ namespace Helios::ImGuiExt
 	 * 卡片背景靠 draw list 通道延后绘制，而 Columns 会把通道占死（俩没法共存）。
 	 * 改用 SameLine(绝对偏移) 手工分列，效果一样、还不占通道。 */
 
-	float BeginPropertyRow(const char* label, float label_width)
+	float BeginPropertyRow(const char* label, float label_width, bool frame_aligned)
 	{
 		PROFILE_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 
 		ImGui::PushID(label);
+
+		/* 行高 = 字体高 + 2×PropertyRowPadY：整行推 FramePadding.y，行内控件（按钮 /
+		 * 拖拽框 / 输入框 / 复选框）一律按 GetFrameHeight() 定高；收尾弹回。
+		 * 行内自算尺寸必须在 Begin 之后调 GetFrameHeight()，才跟这一档一致。 */
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+			ImVec2(style.FramePadding.x, EditorTheme::Token::PropertyRowPadY));
+
+		/* 文本和控件文字同线：AlignTextToFramePadding 把文本基线下移一档、行高也撑起来 —— 纯文本行
+		 * 和带控件行等高、行内内容竖直居中。frame_aligned 参数留着是为了稳住调用点（就是默认行为）。 */
+		(void)frame_aligned;
+		ImGui::AlignTextToFramePadding();
 
 		const float start_x = ImGui::GetCursorPosX();
 		const float available = ImGui::GetContentRegionAvail().x;
@@ -359,6 +371,7 @@ namespace Helios::ImGuiExt
 
 	void EndPropertyRow()
 	{
+		ImGui::PopStyleVar(); /* 行高那一档（与 BeginPropertyRow 的 Push 配对） */
 		ImGui::PopID();
 	}
 
@@ -385,53 +398,136 @@ namespace Helios::ImGuiExt
 			return kAxes[ImClamp(index, 0, 3)];
 		}
 
-		/* 分量重置按钮：点一下把该分量恢复成默认值（拖拽框上直接改造也可以） */
+		/* 分量重置按钮：轴色实心圆角色块（悬停亮 / 按下暗，跟 Button 三档一致），字母用视图指示器
+		 * 同款矢量笔画、白色墨。每枚按钮带起一个「按钮 + 值」小组（左端圆角、右端直角）；点一下把
+		 * 该分量恢复成默认值。命中格 (高+3)×高，行内布局不变。 */
 		bool DrawAxisButton(const AxisStyle& axis, float height)
 		{
-			ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
-			ImGui::PushStyleColor(ImGuiCol_Button, axis.Base);
-			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, axis.Hover);
-			ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::Token::Neutral6);
+			/* 命中 id 用 axis.Letter（"X"），绝不能复用 axis.Id（"##X"）—— 那是同行拖拽框的 id。
+			 * 两个控件共 id 时：拖拽框一激活就把 ActiveIdMouseButton 重置成 -1，下一帧本按钮的 ButtonBehavior
+			 * 在 Mouse 分支读到 -1、直接触发 IM_ASSERT 崩（回归见 vec_row_input_check）。 */
+			const bool clicked = ImGui::InvisibleButton(axis.Letter, ImVec2(height + 3.0f, height));
 
-			const bool clicked = ImGui::Button(axis.Letter, ImVec2(height + 3.0f, height));
-
-			ImGui::PopStyleColor(3);
-			ImGui::PopStyleVar();
-
-			if (ImGui::IsItemHovered())
+			const bool hovered = ImGui::IsItemHovered();
+			const bool active = ImGui::IsItemActive();
+			if (hovered)
 				ImGui::SetTooltip("Reset %s", axis.Letter);
+
+			const ImVec4& background = active ? EditorTheme::Token::Neutral6
+				: (hovered ? axis.Hover : axis.Base);
+			const ImVec2 min = ImGui::GetItemRectMin();
+			const ImVec2 max = ImGui::GetItemRectMax();
+
+			ImDrawList* draw_list = ImGui::GetWindowDrawList();
+			draw_list->AddRectFilled(min, max, ImGui::GetColorU32(background),
+				ImGui::GetStyle().FrameRounding, ImDrawFlags_RoundCornersLeft);
+			AxisGlyph::DrawLetter(draw_list, axis.Letter[0],
+				ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f),
+				ImGui::GetColorU32(ImGuiCol_Text));
 
 			return clicked;
 		}
 
-		/* 多分量数值行：每个分量 = 一个彩色的重置按钮 + 一个拖拽框，两者贴合。
-		 * 2/3/4 分量共用这一处实现，分量色与语义只在 Axis() 里定义一次。 */
+		/* 把刚画完的 frame 控件左缘的两个圆角补成直角（跟左边的轴按钮拼成一体）：按当前状态补填充
+		 * 方块 + 直角描边，值框本体走 stock 绘制。注意：坐标必须跟 stock 边框同一笔账（item 矩形内缩
+		 * 0.5px；直接用 item 矩形或用 AddLine 会错开 0.5~1px，接缝冒台阶）。 */
+		void SquareOffLeftCorners()
+		{
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const float radius = style.FrameRounding;
+			if (radius <= 0.0f)
+				return;
+
+			const ImU32 fill = ImGui::GetColorU32(ImGui::IsItemActive() ? ImGuiCol_FrameBgActive
+				: ImGui::IsItemHovered() ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
+			const ImU32 border = ImGui::GetColorU32(ImGuiCol_Border);
+			const float border_size = style.FrameBorderSize;
+
+			const ImVec2 min = ImGui::GetItemRectMin();
+			const ImVec2 max = ImGui::GetItemRectMax();
+			/* stock 边框 / 填充的实际路径矩形 = item 矩形内缩 0.5 */
+			const ImVec2 frame_min(min.x + 0.5f, min.y + 0.5f);
+			const ImVec2 frame_max(max.x - 0.5f, max.y - 0.5f);
+
+			ImDrawList* draw_list = ImGui::GetWindowDrawList();
+			draw_list->AddRectFilled(frame_min, ImVec2(frame_min.x + radius, frame_min.y + radius), fill);
+			draw_list->AddRectFilled(ImVec2(frame_min.x, frame_max.y - radius),
+				ImVec2(frame_min.x + radius, frame_max.y), fill);
+
+			if (border_size > 0.0f)
+			{
+				/* 左上角：左边线补到顶端 + 上边线补到左端 */
+				draw_list->PathLineTo(ImVec2(frame_min.x, frame_min.y + radius));
+				draw_list->PathLineTo(frame_min);
+				draw_list->PathLineTo(ImVec2(frame_min.x + radius, frame_min.y));
+				draw_list->PathStroke(border, 0, border_size);
+
+				/* 左下角：左边线补到底端 + 下边线补到左端 */
+				draw_list->PathLineTo(ImVec2(frame_min.x, frame_max.y - radius));
+				draw_list->PathLineTo(ImVec2(frame_min.x, frame_max.y));
+				draw_list->PathLineTo(ImVec2(frame_min.x + radius, frame_max.y));
+				draw_list->PathStroke(border, 0, border_size);
+			}
+		}
+
+		/* 多分量数值行：每个分量 = 彩色重置按钮 + 拖拽框（「按钮 + 值」小组，组内左圆角 / 相接处直角；
+		 * 组间留一档横向间距）。2/3/4 分量共用；uniform_scale：Scale 字段用，拖任一分量时按住 Shift =
+		 * 三轴等比。 */
 		void DrawVectorRow(const char* label, float* values, int component_count,
-		                   float reset_value, float label_width, const char* format)
+		                   float reset_value, float label_width, const char* format,
+		                   bool uniform_scale)
 		{
 			const float value_width = BeginPropertyRow(label, label_width);
 			const float frame_height = ImGui::GetFrameHeight();
+			const ImGuiStyle& style = ImGui::GetStyle();
 
+			/* 组间距：按钮与值贴合靠行内 ItemSpacing 归零，组与组之间显式给一档 */
+			constexpr float kGroupGap = 4.0f;
 			const float button_width = frame_height + 3.0f;
 			const float box_width = ImMax(12.0f,
-				value_width / static_cast<float>(component_count) - button_width);
+				(value_width - static_cast<float>(component_count - 1) * kGroupGap)
+					/ static_cast<float>(component_count) - button_width);
 
-			/* 按钮与拖拽框贴合：靠 ItemSpacing = 0，不靠负偏移 */
-			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+			/* 按钮和拖拽框贴合：只把横向间距归零，纵向保留行距 —— ItemSize 会把「行高 + ItemSpacing.y」
+			 * 记进光标、EndCard 又按「光标 − ItemSpacing.y」反推卡底；纵向也归零的话，行距和卡底留白就
+			 * 按 0 记账（三行贴死、Z 行压上底边框）。 */
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, style.ItemSpacing.y));
 
 			for (int i = 0; i < component_count; ++i)
 			{
 				const AxisStyle& axis = Axis(i);
 
 				if (i > 0)
-					ImGui::SameLine();
+					ImGui::SameLine(0.0f, kGroupGap);
 
 				if (DrawAxisButton(axis, frame_height))
 					values[i] = reset_value;
 
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(box_width);
-				ImGui::DragFloat(axis.Id, &values[i], 0.1f, 0.0f, 0.0f, format);
+
+				/* Shift 等比：只认"本帧拖动增量"的比值，乘到其余分量上 —— 逐帧比值
+				 * 的连乘正好抵消（= 总比值），与帧率无关；本帧起手值为 0 时跳过
+				 * （0 没法按比例缩）。 */
+				const float before = values[i];
+				if (ImGui::DragFloat(axis.Id, &values[i], 0.1f, 0.0f, 0.0f, format))
+				{
+					if (uniform_scale && ImGui::GetIO().KeyShift && before != 0.0f)
+					{
+						const float ratio = values[i] / before;
+						for (int j = 0; j < component_count; ++j)
+						{
+							if (j != i)
+								values[j] *= ratio;
+						}
+					}
+				}
+
+				if (uniform_scale && ImGui::IsItemHovered() && !ImGui::IsItemActive())
+					ImGui::SetTooltip("Drag with Shift to scale all three axes proportionally");
+
+				/* 组内拼接：值框左缘直角（左邻是按钮）；右缘起就是组边界，保留圆角。 */
+				SquareOffLeftCorners();
 			}
 
 			ImGui::PopStyleVar();
@@ -554,7 +650,7 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		DrawVectorRow(label, glm::value_ptr(value), 2, 0.0f, label_width, "%.3f");
+		DrawVectorRow(label, glm::value_ptr(value), 2, 0.0f, label_width, "%.3f", false);
 	}
 
 	/* 绘制一个可拖动的Float3 UI */
@@ -562,7 +658,7 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		DrawVectorRow(label, glm::value_ptr(value), 3, 0.0f, label_width, "%.3f");
+		DrawVectorRow(label, glm::value_ptr(value), 3, 0.0f, label_width, "%.3f", false);
 	}
 
 	/* 绘制一个可拖动的Float4 UI */
@@ -570,16 +666,18 @@ namespace Helios::ImGuiExt
 	{
 		PROFILE_FUNCTION();
 
-		DrawVectorRow(label, glm::value_ptr(value), 4, 0.0f, label_width, "%.3f");
+		DrawVectorRow(label, glm::value_ptr(value), 4, 0.0f, label_width, "%.3f", false);
 	}
 
 	/* 绘制一个vec3 UI， 带XYZ */
-	void DrawVec3ControlUI(const std::string& label, glm::vec3& values, float reset_value, float label_width)
+	void DrawVec3ControlUI(const std::string& label, glm::vec3& values, float reset_value, float label_width,
+	                       bool uniform_scale)
 	{
 		PROFILE_FUNCTION();
 
-		/* 重置值由组件声明（如 Scale 复位成 1），点分量按钮即恢复 */
-		DrawVectorRow(label.c_str(), glm::value_ptr(values), 3, reset_value, label_width, "%.2f");
+		/* 重置值由组件声明（如 Scale 复位成 1），点分量按钮即恢复；
+		 * uniform_scale 行额外给 Shift 等比（见 DrawVectorRow） */
+		DrawVectorRow(label.c_str(), glm::value_ptr(values), 3, reset_value, label_width, "%.2f", uniform_scale);
 	}
 
 	/* 绘制带选中的图像按钮UI */

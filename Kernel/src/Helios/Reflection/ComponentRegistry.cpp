@@ -797,7 +797,7 @@ namespace Helios
 					.Field(&TransformComponent::m_Position, "Position", FieldType::Vec3, 0.1f, 0.0f)
 					/* 内部以弧度存储、Inspector 按角度编辑 */
 					.Field(&TransformComponent::m_Rotation, "Rotation", FieldType::Vec3, 0.1f, 0.0f, "AngleDeg")
-					.Field(&TransformComponent::m_Scale,    "Scale",    FieldType::Vec3, 0.1f, 1.0f)
+					.Field(&TransformComponent::m_Scale,    "Scale",    FieldType::Vec3, 0.1f, 1.0f, "UniformScale")
 					.NotAddable()
 					.Register();
 

@@ -22,9 +22,9 @@ namespace Helios::PanelChrome
 		float  TitleX{ 0.0f };      /* 标题起点 x（图标之后） */
 	};
 
-	/* 开一行头部：画面板图标（None 则不画），并把光标留在标题起点。
-	 * 标题由调用方画：静态用 DrawHeaderTitle，需要就地编辑就自己放输入框。 */
-	inline HeaderRow BeginHeaderRow(Icons::Id icon)
+	/* 开一行头部：画图标（None 不画），光标停在标题起点，标题由调用方自己画（静态标题用 DrawHeaderTitle）。
+	 * leading > 0 时在图标前留出一格（行首的前置控件），图标和标题起点一起右移。 */
+	inline HeaderRow BeginHeaderRow(Icons::Id icon, float leading = 0.0f)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 
@@ -33,9 +33,12 @@ namespace Helios::PanelChrome
 		header.Right = header.Min.x + ImGui::GetContentRegionAvail().x;
 		header.Height = ImGui::GetFrameHeight();
 
+		const float icon_x = header.Min.x + leading;
+
 		if (icon == Icons::Id::None)
 		{
-			header.TitleX = header.Min.x;
+			header.TitleX = icon_x;
+			ImGui::SetCursorScreenPos(ImVec2(header.TitleX, header.Min.y));
 			return header;
 		}
 
@@ -45,10 +48,10 @@ namespace Helios::PanelChrome
 		ImGui::PopFont();
 
 		Icons::Draw(ImGui::GetWindowDrawList(), icon,
-			ImVec2(header.Min.x + icon_size * 0.5f, header.Min.y + header.Height * 0.5f),
+			ImVec2(icon_x + icon_size * 0.5f, header.Min.y + header.Height * 0.5f),
 			icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
 
-		header.TitleX = header.Min.x + icon_size + style.ItemInnerSpacing.x;
+		header.TitleX = icon_x + icon_size + style.ItemInnerSpacing.x;
 		ImGui::SetCursorScreenPos(ImVec2(header.TitleX, header.Min.y));
 		return header;
 	}
@@ -104,11 +107,34 @@ namespace Helios::PanelChrome
 
 	/* ==================== 树行内容 ==================== */
 
+	/* 只读单行文本，宽度由调用方限定（width）：超宽就用省略号收尾，排版宽度被占位框夹在 width 内。
+	 * 别用 PushClipRect + TextUnformatted：它只裁绘制不裁布局，超宽文本会把面板撑出横向可滑区。 */
+	inline void DrawClippedTextLine(const char* text, float width)
+	{
+		const ImVec2 cursor = ImGui::GetCursorScreenPos();
+		const ImVec2 text_pos(cursor.x, cursor.y + ImGui::GetCurrentWindow()->DC.CurrLineTextBaseOffset);
+		const ImVec2 text_size = ImGui::CalcTextSize(text);
+
+		if (text_size.x <= width)
+		{
+			ImGui::TextUnformatted(text);
+			return;
+		}
+
+		/* 放不下：省略号收尾。占位与文本行同高、只占裁剪后的那一截宽，
+		 * 行内容与行右端的尾随控件不会重叠。 */
+		const float avail = ImMax(width, 1.0f);
+		ImGui::Dummy(ImVec2(avail, ImGui::GetTextLineHeight()));
+		ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), text_pos,
+			ImVec2(text_pos.x + avail, text_pos.y + ImGui::GetTextLineHeight()),
+			text_pos.x + avail, text_pos.x + avail, text, nullptr, &text_size);
+	}
+
 	/* 树节点行内容：图标 + 文本（marked 时带脏标记）。要在 TreeNodeEx 之后紧接着调用，
 	 * TreeNode 的标签传空字符串 ""（不能传 "##"）；点击 / 拖拽 / 右键也都得在它后面立刻处理。
 	 * clip_right > 0 时把文本裁到该 x 之前，给行右端留出尾随控件的位置（走 DrawClippedTextLine）。 */
 	inline void DrawTreeRowLabel(Icons::Id icon, const std::string& text, bool marked = false,
-	                             ImVec4 icon_color = EditorTheme::Token::Text)
+	                             ImVec4 icon_color = EditorTheme::Token::Text, float clip_right = 0.0f)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 
@@ -126,7 +152,12 @@ namespace Helios::PanelChrome
 			icon_size, ImGui::GetColorU32(icon_color));
 
 		ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
-		ImGui::TextUnformatted(text.c_str());
+
+		/* 有尾随控件（clip_right > 0）时按"到 clip_right 为止"的宽度裁；没有就不限宽 */
+		if (clip_right > 0.0f)
+			DrawClippedTextLine(text.c_str(), clip_right - ImGui::GetCursorScreenPos().x);
+		else
+			ImGui::TextUnformatted(text.c_str());
 
 		if (!marked)
 			return;
@@ -192,6 +223,11 @@ namespace Helios::PanelChrome
 		const float icon_size = ImGui::GetFontSize();
 		const float icon_gap = style.ItemInnerSpacing.x;
 
+		/* 与 MenuItemWithIcon 同一笔账，尾部再加一个图标宽的勾选格 */
+		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
+		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x
+			+ icon_gap + icon_size;
+
 		if (!enabled)
 			ImGui::BeginDisabled();
 
@@ -199,7 +235,7 @@ namespace Helios::PanelChrome
 		const bool clicked = ImGui::Selectable("##row", false,
 			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover
 				| ImGuiSelectableFlags_SpanAvailWidth | ImGuiSelectableFlags_DontClosePopups,
-			ImVec2(0.0f, 0.0f));
+			ImVec2(width, 0.0f));
 		ImGui::PopID();
 
 		const ImVec2 min = ImGui::GetItemRectMin();
