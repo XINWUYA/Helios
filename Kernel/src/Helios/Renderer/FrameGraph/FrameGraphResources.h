@@ -9,6 +9,7 @@ namespace Helios
 	class RenderPassNode;
 	class IResource;
 	class DeviceFrameBuffer;
+	class FrameGraphResourceCache;
 
 	/* FrameGraph中一个RenderPassNode中使用的资源 */
 	class FrameGraphResources
@@ -88,9 +89,9 @@ namespace Helios
 		static constexpr Usage DefaultReadUsage = TextureUsage::Sampleable;
 		static constexpr Usage DefaultWriteUsage = TextureUsage::ColorAttachment;
 
-		/* 创建 */
-		void Create(const std::string& name, const Descriptor& desc, Usage usage);
-		/* 销毁 */
-		void Destroy();
+		/* 创建（cache 非空时先查跨帧缓存：(名称, 描述) 不变的纹理直接复用） */
+		void Create(const std::string& name, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache);
+		/* 销毁（归还跨帧缓存；未缓存的对象直接释放） */
+		void Destroy(const std::string& name, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache);
 	};
 }

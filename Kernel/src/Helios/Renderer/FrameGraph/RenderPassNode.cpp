@@ -147,8 +147,8 @@ namespace Helios
 			continue;
 		}
 
-		/* 创建FrameBuffer */
-		render_pass_data->FrameBuffer = DeviceFrameBuffer::Create(render_pass_data->DebugName + "_FrameBuffer", desc);
+		/* 创建FrameBuffer（名称 + 描述不变时由 FrameGraph 跨帧缓存复用，不再每帧重建） */
+		render_pass_data->FrameBuffer = m_OwnerFrameGraph.AcquirePassFrameBuffer(render_pass_data->DebugName, desc);
 	}
 
 	/* 对于没有附件的Pass，需要由后端绑定默认RenderTarget（如Metal的drawable），

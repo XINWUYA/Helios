@@ -4,6 +4,7 @@
 #include "DependencyGraph.h"
 #include "FrameGraphResourceHandle.h"
 #include "FrameGraphResources.h"
+#include "FrameGraphResourceCache.h"
 #include "Resource.h"
 #include "RenderPassNode.h"
 #include "RenderResourceNode.h"
@@ -12,6 +13,7 @@ namespace Helios
 {
 	class FrameGraphBuilder;
 	class RenderResourceNode;
+	struct FrameBufferDesc;
 
 	/* FrameGraph类 */
 	class FrameGraph final
@@ -34,6 +36,8 @@ namespace Helios
 		FrameGraphResourceHandleTyped<ResourceType> CreateResource(const std::string& name, const typename ResourceType::Descriptor& desc = {})
 		{
 			auto resource = CreateSharedPtr<Resource<ResourceType>>(name, desc);
+			/* 注入跨帧资源缓存：Create / Destroy 时按 (名称, 描述) 复用 transient 资源 */
+			resource->SetResourceCache(&m_ResourceCache);
 			return FrameGraphResourceHandleTyped<ResourceType>(AddResourceInternal(resource));
 		}
 
@@ -88,6 +92,13 @@ namespace Helios
 		/* 重置 */
 		void Reset() noexcept;
 
+		/* 获取（或跨帧复用）一个 Pass 的 FrameBuffer：名称 + 描述不变时不再重新分配
+		 * RenderPassDescriptor 与附件（见 FrameGraphResourceCache）。 */
+		[[nodiscard]] SharedPtr<DeviceFrameBuffer> AcquirePassFrameBuffer(const std::string& pass_name, const FrameBufferDesc& desc);
+
+		/* 诊断：跨帧资源缓存的创建 / 复用统计 */
+		[[nodiscard]] const FrameGraphResourceCache::Stats& GetResourceCacheStats() const { return m_ResourceCache.GetStats(); }
+
 		/* 导出依赖图 http://dreampuf.github.io/GraphvizOnline/ */
 		void ExportGraphviz(const std::string& path);
 
@@ -123,6 +134,9 @@ namespace Helios
 		DependencyGraph m_DependencyGraph;
 		/* 最后一个有效的RenderPassNode */
 		std::vector<SharedPtr<RenderPassNode>>::iterator m_LastValidRenderPassNodeIter;
+		/* 跨帧资源缓存：Reset 只清渲染图结构，缓存里的 GPU 资源按 (名称, 描述) 跨帧复用
+		 * （双缓存轮转：相邻帧各用一份副本，见 FrameGraphResourceCache） */
+		FrameGraphResourceCache m_ResourceCache;
 	};
 
 	/* FrameGraph Builder类

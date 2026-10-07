@@ -5,6 +5,7 @@
 namespace Helios
 {
 	class RenderPassNode;
+	class FrameGraphResourceCache;
 
 	/* 资源类基类 */
 	class IResource
@@ -139,16 +140,20 @@ namespace Helios
 			return true;
 		}
 
+		/* 设置所属 FrameGraph 的跨帧资源缓存（由 FrameGraph::CreateResource 注入；
+		 * 资源创建 / 销毁时带着它走，见 FrameGraphResourceCache） */
+		void SetResourceCache(FrameGraphResourceCache* cache) { m_ResourceCache = cache; }
+
 		/* 创建资源 */
 		void Create() override
 		{
-			m_Resource.Create(m_Name, m_Descriptor, m_Usage);
+			m_Resource.Create(m_Name, m_Descriptor, m_Usage, m_ResourceCache);
 		}
 
 		/* 销毁资源 */
 		void Destroy() override
 		{
-			m_Resource.Destroy();
+			m_Resource.Destroy(m_Name, m_Descriptor, m_Usage, m_ResourceCache);
 		}
 
 		/* 释放一条连线 */
@@ -175,5 +180,6 @@ namespace Helios
 		ResourceDescriptor m_Descriptor{}; /* 资源描述 */
 		ResourceSubDescriptor m_SubDescriptor{}; /* 子资源描述 */
 		ResourceUsage m_Usage{}; /* 资源用途 */
+		FrameGraphResourceCache* m_ResourceCache{ nullptr }; /* 跨帧资源缓存（可为空） */
 	};
 }

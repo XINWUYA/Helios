@@ -1,7 +1,9 @@
 ﻿#include "Pch.h"
 #include "FrameGraph.h"
+#include "FrameGraphResourceCache.h"
 #include "RenderPassNode.h"
 #include "RenderResourceNode.h"
+#include "Helios/VirtualDevice/DeviceFrameBuffer.h"
 
 namespace Helios
 {
@@ -161,6 +163,10 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 帧入口：推进跨帧缓存的帧号并做淘汰 —— 即使本帧没有 Pass 也要发生，
+		 * 否则空图期间缓存永不收缩 */
+		m_ResourceCache.BeginFrame();
+
 		if (m_RenderPassNodes.empty())
 			return;
 
@@ -187,6 +193,12 @@ namespace Helios
 			/* 下一个 */
 			++iter_current;
 		}
+	}
+
+	/* 获取（或跨帧复用）一个 Pass 的 FrameBuffer */
+	SharedPtr<DeviceFrameBuffer> FrameGraph::AcquirePassFrameBuffer(const std::string& pass_name, const FrameBufferDesc& desc)
+	{
+		return m_ResourceCache.AcquireFrameBuffer(pass_name + "_FrameBuffer", desc);
 	}
 
 	/* 重置 */

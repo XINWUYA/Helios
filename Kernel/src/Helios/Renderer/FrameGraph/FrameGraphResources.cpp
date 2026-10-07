@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "FrameGraphResources.h"
+#include "FrameGraphResourceCache.h"
 #include "Resource.h"
 #include "RenderPassNode.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
@@ -48,16 +49,37 @@ namespace Helios
 	}
 
 	/* 创建 */
-	void FrameGraphTexture::Create(const std::string& name, const Descriptor& desc, Usage usage)
+	void FrameGraphTexture::Create(const std::string& name, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache)
 	{
 		PROFILE_FUNCTION();
 
-		Texture = DeviceTexture::Create(name, { desc.Width, desc.Height, desc.Depth, desc.MipLevels, desc.Samples, desc.TextureFormat, desc.SamplerType, usage });
+		const TextureDesc texture_desc{ desc.Width, desc.Height, desc.Depth, desc.MipLevels, desc.Samples,
+			desc.TextureFormat, desc.SamplerType, usage };
+
+		/* 跨帧复用：同 (名称, 描述) 的纹理命中缓存时不再分配。
+		 * 缓存返回空（同帧重名占用 / 分配失败）时退回直接分配，不进缓存。 */
+		if (cache)
+		{
+			Texture = cache->AcquireTexture(name, texture_desc);
+			if (Texture)
+				return;
+		}
+
+		Texture = DeviceTexture::Create(name, texture_desc);
 	}
 
 	/* 销毁 */
-	void FrameGraphTexture::Destroy()
+	void FrameGraphTexture::Destroy(const std::string& name, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache)
 	{
+		PROFILE_FUNCTION();
+
+		if (cache && Texture)
+		{
+			const TextureDesc texture_desc{ desc.Width, desc.Height, desc.Depth, desc.MipLevels, desc.Samples,
+				desc.TextureFormat, desc.SamplerType, usage };
+			cache->ReleaseTexture(name, texture_desc, Texture);
+		}
+
 		Texture = nullptr;
 	}
 }
