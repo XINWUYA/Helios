@@ -111,6 +111,12 @@ namespace Helios
 		constexpr float kCameraGizmoPixelSize = 96.0f;
 		constexpr float kSpriteGizmoPixelSize = 68.0f;
 
+		/* 实体 gizmo 随距离收缩的三档：参考距离（默认视距，此处与标称同大小）与
+		 * 屏上比例的下限 / 上限（拉远收缩保底、拉近放大封顶） */
+		constexpr float kGizmoRefDistance = 10.0f;
+		constexpr float kGizmoMinPixelScale = 0.2f;
+		constexpr float kGizmoMaxPixelScale = 1.6f;
+
 		/* direction / side 只对轴带有意义（网格用缺省 0：不展开、不羽化） */
 		void PushVertex(std::vector<float>& vertices, const glm::vec3& position, const glm::vec3& color,
 			const glm::vec3& direction = glm::vec3(0.0f), float side = 0.0f)
@@ -251,7 +257,7 @@ namespace Helios
 			return vertices;
 		}
 
-		/* === 实体类型 gizmo 的几何（本地空间，约 1 单位大小；绘制时乘“屏幕恒定尺寸”的模型矩阵）=== */
+		/* === 实体类型 gizmo 的几何（本地空间，约 1 单位大小；绘制时乘随距离收缩的尺寸矩阵）=== */
 
 		/* 平行光：太阳式图标（圆环 + 8 条长短交替射线 + 方向杆 + 轴心点）。
 		 * 几何按“光向 = -Y”的规范朝向建，绘制时旋到实际光向（见 DrawEntityGizmos） */
@@ -610,7 +616,7 @@ namespace Helios
 			return std::max(std::max(scale.x, scale.y), scale.z);
 		}
 
-		/* 组装 gizmo 的模型矩阵：平移 × 纯旋转 × [额外旋转] × 屏幕恒定基准 × 各轴缩放响应 */
+		/* 组装 gizmo 的模型矩阵：平移 × 纯旋转 × [额外旋转] × 尺寸基准（随距离收缩）× 各轴缩放响应 */
 		glm::mat4 BuildGizmoModel(const GizmoTransformParts& parts, float world_scale,
 			const glm::quat& extra_rotation, const glm::vec3& response)
 		{
@@ -639,10 +645,15 @@ namespace Helios
 			if (!gizmo_options.MasterEnabled)
 				return;	/* 总开关关：实体图标全部不提交 */
 
-			/* 屏幕恒定尺寸：世界尺寸 = 像素尺度 × 标称像素 × 到相机的距离 */
+			/* 世界尺寸 = 像素尺度 × 标称像素 × 距离比例 × 到相机的距离；距离比例 =
+			 * clamp(参考距离/距离, 下限, 上限)：中段世界恒定（屏上按 1/距离 递减），
+			 * 近 / 远到钳制值后转为屏幕恒定（放大封顶 / 收缩保底） */
 			const auto world_scale_at = [&](const glm::vec3& position, float nominal_pixel_size)
 				{
-					return gizmo_screen_scale * nominal_pixel_size * glm::distance(camera_position, position);
+					const float distance = glm::distance(camera_position, position);
+					const float pixel_scale = glm::clamp(kGizmoRefDistance / distance,
+						kGizmoMinPixelScale, kGizmoMaxPixelScale);
+					return gizmo_screen_scale * nominal_pixel_size * pixel_scale * distance;
 				};
 
 			/* 光源：按 LightComponent 的类型选几何 */
@@ -746,7 +757,7 @@ namespace Helios
 						glm::vec3(shape_x * entity_scale, shape_y * entity_scale, entity_scale)), nullptr, nullptr });
 				Renderer::Submit(material, MeshPrimitive{ GetCameraFrustumVertexArray(near_depth_unit), PrimitiveType::Triangles });
 
-				/* 机身盒 + 轴心点：只随屏幕恒定基准与实体缩放 */
+				/* 机身盒 + 轴心点：只随尺寸基准与实体缩放 */
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
 					BuildGizmoModel(parts, world_scale, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
 						glm::vec3(entity_scale)), nullptr, nullptr });
@@ -1236,8 +1247,8 @@ namespace Helios
 					gizmo_material->SetParameters(ParamType::Vec2, "u_ViewportSize", viewport_size);
 				}
 
-				/* 实体 gizmo 的屏幕恒定尺寸系数：每“逻辑像素”在单位距离上对应的世界尺寸
-				 * （= 2·tan(fov/2)·内容缩放 / 视口高；世界尺寸 = 系数 × 标称像素 × 距离） */
+				/* 实体 gizmo 的像素→世界系数：每"逻辑像素"在单位距离上对应的世界尺寸
+				 * （= 2·tan(fov/2)·内容缩放 / 视口高；配 world_scale_at 的距离比例与距离使用） */
 				const float gizmo_screen_scale =
 					2.0f * std::tan(glm::radians(m_Fov) * 0.5f) * content_scale
 					/ static_cast<float>(m_ViewportRegion.Height);
