@@ -125,6 +125,11 @@ namespace Helios
 			if (!model_component.m_Model)
 				 continue;
 
+			/* 隐藏的实体（自身或祖先）不进可见列表：场景视口 / 阴影 / 探针烘焙
+			 * 都从这里取对象，一处过滤三处同步（判定收口在 Scene::IsEntityVisible）。 */
+			if (!owner_scene->IsEntityVisible(entity))
+				continue;
+
 			/* 组件里存的是相对父节点的局部变换，画到世界里的必须是沿父链累积的结果 */
 			const glm::mat4 local_2_world = owner_scene->GetWorldTransform(entity);
 
@@ -158,6 +163,10 @@ namespace Helios
 		const auto light_entity_view = owner_scene->GetRegistry().view<TransformComponent, LightComponent>();
 		for (auto& entity : light_entity_view)
 		{
+			/* 隐藏的光源不参与光照（与模型的过滤同源：隐藏 = 不画 + 不照） */
+			if (!owner_scene->IsEntityVisible(entity))
+				continue;
+
 			auto [transform_component, light_component] = light_entity_view.get<TransformComponent, LightComponent>(entity);
 			if (light_component.m_Light)
 			{

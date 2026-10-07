@@ -45,6 +45,11 @@ namespace Helios
 		/* ancestor 是否为 entity 的祖先（含 entity 自身），用于拒绝成环的挂接 */
 		[[nodiscard]] bool IsAncestor(entt::entity ancestor, entt::entity entity) const;
 
+		/* 实体是否参与渲染：自己和全部祖先都可见才算。「隐藏」= 挂 VisibilityComponent 且
+		 * m_Visible=false（缺席 = 可见）；隐藏沿父链传染（父隐藏整棵子树不画，子节点自身状态不受
+		 * 影响）；句柄无效返回 false。 */
+		[[nodiscard]] bool IsEntityVisible(entt::entity entity) const;
+
 		/* 世界变换 = 沿父链累积的局部变换；没有父节点时就是局部变换。
 		 * 句柄无效时返回单位阵。 */
 		[[nodiscard]] glm::mat4 GetWorldTransform(entt::entity entity) const;

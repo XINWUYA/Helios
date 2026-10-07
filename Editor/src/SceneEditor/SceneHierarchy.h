@@ -176,6 +176,9 @@ namespace Helios
 		Entity CreateEntityFromTemplate(const EntityTemplateDesc& template_desc);
 		/* 删除实体；有命令栈时可撤销 */
 		void DeleteEntity(Entity entity);
+		/* 设置实体自身的可见性（层级行右端的眼睛开关）；有命令栈时可撤销。
+		 * visible 为目标状态：隐藏 = 补 Visibility 组件并置 false，显示 = 去组件（缺席 = 可见）。 */
+		void SetEntityVisibility(Entity entity, bool visible);
 
 		/* 按字段元数据生成控件；编辑前后各取一次值，有变化则生成字段改动命令 */
 		void DrawComponentFieldsBySchema(const ComponentDesc& desc, Entity& entity, void* component);

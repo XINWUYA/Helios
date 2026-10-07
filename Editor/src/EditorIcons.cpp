@@ -411,6 +411,21 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.105f), color);
 		}
 
+		/* 隐藏（眼睛被划掉）：与 Visible 同一只眼睛、去掉瞳点，再压一道斜杠 ——
+		 * 造型差异（有无斜杠）比颜色差异在 14px 行高下更稳，也更容易一眼读出。 */
+		void DrawHidden(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->PathLineTo(c.At(0.08f, 0.50f));
+			dl->PathBezierCubicCurveTo(c.At(0.30f, 0.16f), c.At(0.70f, 0.16f), c.At(0.92f, 0.50f), 24);
+			dl->PathBezierCubicCurveTo(c.At(0.70f, 0.84f), c.At(0.30f, 0.84f), c.At(0.08f, 0.50f), 24);
+			dl->PathStroke(color, 0, t);
+
+			dl->AddLine(c.At(0.22f, 0.82f), c.At(0.78f, 0.18f), PaletteColor(color, kViolet), t);
+		}
+
 		/* ---- 场景树节点 ----
 		 * "场景 / 实体类型"图标，用在层级树节点前面；只描必要的外形、细部靠实心小图元点缀，
 		 * 正文行高（约 14px）下也能一眼区分。 */
@@ -1108,11 +1123,11 @@ namespace Helios::Icons
 		constexpr const char* kSvgSymbolIds[] = {
 			"", "new-scene", "open-scene", "save", "import", "new-asset", "undo", "redo", "back", "forward",
 			"translate", "rotate", "scale",
-			"play", "stop", "menu", "add", "remove", "return", "filter", "search", "visible", "scene",
+			"play", "stop", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
 			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
 			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats",
 			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
-			"gizmos", "grid", "world-axis",
+			"file-material", "file-probe", "gizmos", "grid", "world-axis",
 		};
 		static_assert(IM_ARRAYSIZE(kSvgSymbolIds) == static_cast<size_t>(Id::COUNT),
 			"SVG symbol map must remain aligned with Icons::Id");
@@ -1796,6 +1811,7 @@ namespace Helios::Icons
 			{ "Filter",            &DrawFilter,             0.93f },
 			{ "Search",            &DrawSearch,             1.109375f },
 			{ "Visible",           &DrawVisible,            0.86f },
+			{ "Hidden",            &DrawHidden,             0.86f },
 			{ "Scene",             &DrawScene,              0.90f },
 			{ "Entity",            &DrawEntity,             0.93f },
 			{ "Model",             &DrawModel,              0.93f },

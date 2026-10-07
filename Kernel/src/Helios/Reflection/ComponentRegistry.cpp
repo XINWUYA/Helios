@@ -1236,6 +1236,13 @@ namespace Helios
 					.NotAddable()
 					.Register();
 
+				/* 可见性：层级面板行右端的眼睛开关（没有组件 = 可见）。不进「Add 菜单」（开关长在层级里）；
+				 * 属性面板的 "Visible" 勾选只在实体已经隐藏时才出现。序列化元素落在 Transform 之后。 */
+				MakeRegistrar<VisibilityComponent>("Visibility")
+					.Field(&VisibilityComponent::m_Visible, "Visible", FieldType::Bool)
+					.NotAddable()
+					.Register();
+
 				MakeRegistrar<SpriteComponent>("Sprite")
 					.SaveExtra(&SaveSpriteTexture)
 					.LoadExtra(&LoadSpriteTexture)

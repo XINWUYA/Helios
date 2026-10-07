@@ -76,6 +76,21 @@ namespace Helios
 		}
 	};
 
+	/* 可见性组件：实体自身的显隐开关（层级行右端的眼睛）。「隐藏」= 挂组件且 m_Visible == false
+	 * （缺席 = 可见）；沿父链传染，判定收口在 Scene::IsEntityVisible。隐藏的模型不进可见列表、
+	 * 光源不参与光照、探针不烘焙；相机不受影响。 */
+	struct VisibilityComponent : ComponentBase
+	{
+		bool m_Visible{ true };
+
+		VisibilityComponent() = default;
+		VisibilityComponent(const VisibilityComponent&) = default;
+		VisibilityComponent(bool visible)
+			: m_Visible(visible)
+		{
+		}
+	};
+
 	/* 场景相机组件 */
 	struct CameraComponent : ComponentBase
 	{

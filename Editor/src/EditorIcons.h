@@ -22,7 +22,7 @@ namespace Helios
 			/* 运行 */
 			Play, Stop,
 			/* 通用 */
-			Menu, Add, Remove, Return, Filter, Search, Visible,
+			Menu, Add, Remove, Return, Filter, Search, Visible, Hidden,
 			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
 			Scene, Entity, Model, Cube, Sphere, Plane, Shape3D, Camera, Light, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Sprite,
 			Audio, Particle, Terrain,

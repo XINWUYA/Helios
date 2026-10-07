@@ -19,6 +19,7 @@
 #include "Command/CreateEntityCommand.h"
 #include "Command/DeleteEntityCommand.h"
 #include "Command/ReparentEntityCommand.h"
+#include "Command/SetEntityVisibilityCommand.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/Components.h"
 #include <glm/gtc/type_ptr.hpp>
@@ -289,7 +290,7 @@ namespace Helios
 		 * 判定收口在这里：组件列表和头部两边共用。 */
 		bool IsEditedInPanelHeader(const ComponentDesc& desc)
 		{
-			return desc.Type == typeid(NameComponent);
+			return desc.Type == typeid(NameComponent) || desc.Type == typeid(VisibilityComponent);
 		}
 
 		/* 把 std::string 喂给 InputText：缓冲区在栈上，改完写回；
@@ -344,10 +345,56 @@ namespace Helios
 			return std::filesystem::path(path).stem().string();
 		}
 
-		/* 实体行内容：按实体持有的组件解析图标，再交给共用的树行版式 */
-		void DrawEntityRowLabel(const Entity& entity, const std::string& name)
+		/* 实体行内容：按实体持有的组件解析图标，再交给共用的树行版式。
+		 * icon_color / clip_right 由调用方算好透传：隐藏行的整体压暗（含图标），
+		 * 以及"给行右端的眼睛让出一列"的文本裁剪。 */
+		void DrawEntityRowLabel(const Entity& entity, const std::string& name,
+		                        ImVec4 icon_color, float clip_right)
 		{
-			PanelChrome::DrawTreeRowLabel(ResolveEntityIcon(entity), name);
+			PanelChrome::DrawTreeRowLabel(ResolveEntityIcon(entity), name, false, icon_color, clip_right);
+		}
+
+		/* 可见性开关（眼睛）按钮本体：命中区 + 悬停底色 + 图标 + tooltip。层级树行右端与属性
+		 * 面板标题栏左端共用（reveal_icon = true 时常驻）。注意：主题给 framed 控件设了 1px 边框，
+		 * 透明填充的按钮要把边框推掉，不然常态下会留一圈空心方框。 */
+		bool DrawVisibilityToggle(const char* str_id, const ImVec2& rect_min, const ImVec2& rect_max,
+		                          bool hidden, bool reveal_icon)
+		{
+			ImGui::SetCursorScreenPos(rect_min);
+			ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+			ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Token::Clear);
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, EditorTheme::Token::Clear);
+			ImGui::PushStyleColor(ImGuiCol_ButtonActive, EditorTheme::Token::Clear);
+			const bool pressed = ImGui::Button(str_id,
+				ImVec2(rect_max.x - rect_min.x, rect_max.y - rect_min.y));
+			const bool hovered = ImGui::IsItemHovered();
+			const bool held = ImGui::IsItemActive();
+			ImGui::PopStyleColor(3);
+			ImGui::PopStyleVar();
+
+			ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+
+			if (hovered || held)
+			{
+				draw_list->AddRectFilled(rect_min, rect_max,
+					ImGui::GetColorU32(held
+						? EditorTheme::WithAlpha(EditorTheme::Token::Neutral7, 0.70f)
+						: EditorTheme::WithAlpha(EditorTheme::Token::Neutral6, 0.85f)),
+					ImGui::GetStyle().FrameRounding);
+			}
+
+			if (hidden || reveal_icon || hovered)
+			{
+				const ImVec2 center((rect_min.x + rect_max.x) * 0.5f, (rect_min.y + rect_max.y) * 0.5f);
+				Icons::Draw(draw_list, hidden ? Icons::Id::Hidden : Icons::Id::Visible,
+					center, (rect_max.y - rect_min.y) * 0.66f,
+					ImGui::GetColorU32(hovered ? EditorTheme::Token::Text : EditorTheme::Token::TextDim));
+			}
+
+			if (hovered)
+				ImGui::SetTooltip(hidden ? "Show entity" : "Hide entity");
+
+			return pressed;
 		}
 
 		/* 栏与主体之间那条分隔线（1px，自绘） */
@@ -1001,6 +1048,12 @@ namespace Helios
 
 		const auto& name = entity.GetComponent<NameComponent>().m_Name;
 
+		/* 可见性两种口径：眼睛画的是自身状态（点它只写自己那一行），
+		 * 行的压暗看的是有效状态（自身或祖先被隐藏，含父链传染）。 */
+		const bool self_hidden = entity.HasComponent<VisibilityComponent>()
+			&& !entity.GetComponent<VisibilityComponent>().m_Visible;
+		const bool effectively_hidden = (m_pOwnerScene == nullptr) ? false : !m_pOwnerScene->IsEntityVisible(entity);
+
 		const auto child_entry = children.find(entity);
 		const std::vector<Entity>* sub_entities = (child_entry != children.end()) ? &child_entry->second : nullptr;
 		const bool has_children = (sub_entities != nullptr && !sub_entities->empty());
@@ -1009,9 +1062,10 @@ namespace Helios
 		if (filter != nullptr && has_children)
 			ImGui::SetNextItemOpen(true, ImGuiCond_Always);
 
-		/* SpanFullWidth：选中 / 悬停高亮撑满整行（连缩进区一起，到行的左右沿）——
-		 * SpanAvailWidth 只铺到文字右侧、左边留着缩进的缺口；与资源浏览器目录树同一档。 */
-		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_DefaultOpen;
+		/* SpanFullWidth：高亮撑满整行（连缩进区）。AllowItemOverlap：行右端的可见性开关叠在行
+		 * 命中区上面，后提交的先拿到悬停和点击；行自身的选中要显式让开开关那一块。 */
+		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth
+			| ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowItemOverlap;
 		if (m_SelectedEntity == entity)
 			flags |= ImGuiTreeNodeFlags_Selected;
 		/* 没有子节点就是叶子：不能画成可展开的节点，否则会多出一层空节点 */
@@ -1031,9 +1085,21 @@ namespace Helios
 		if (m_SelectedEntity == entity)
 			ImGui::PopStyleColor();
 
-		if (ImGui::IsItemClicked())
+		/* 行右端给可见性开关留一列：开关的命中区 = 行右端的方框（与行同高）。
+		 * 此刻"上一项"还是树节点，几何从它身上取。 */
+		const ImVec2 row_min = ImGui::GetItemRectMin();
+		const ImVec2 row_max = ImGui::GetItemRectMax();
+		const float eye_side = ImMax(row_max.y - row_min.y, 1.0f);
+		const ImVec2 eye_min(row_max.x - eye_side, row_min.y);
+		const ImVec2 eye_max(row_max.x, row_max.y);
+
+		/* 行的悬停（开关还没提交，HoveredId 不会被它抢走）：开关"悬停现形"要看它 */
+		const bool row_hovered = ImGui::IsItemHovered();
+
+		/* 点眼睛那一下不算选中这行（开关与选中是两件事）：开关方框里的按下留给开关自己 */
+		if (ImGui::IsItemClicked() && !ImGui::IsMouseHoveringRect(eye_min, eye_max))
 		{
-			m_SelectedEntity = entity;
+			SetSelectedEntity(entity);
 		}
 
 		/* 拖拽源：把这个实体挂到别的节点下 */
@@ -1056,6 +1122,22 @@ namespace Helios
 					m_PendingReparent = { dragged, static_cast<entt::entity>(entity) };
 			}
 
+			/* 资源浏览器拖入 .mesh = 给这个实体挂 / 换模型 */
+			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
+			{
+				std::filesystem::path relative_path;
+				if (payload->DataSize > 1 && TryPathFromUtf8Payload(
+					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
+				{
+					std::string extension = PathToUtf8(relative_path.extension());
+					std::transform(extension.begin(), extension.end(), extension.begin(),
+						[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+					if (extension == ".mesh")
+						ApplyDroppedMeshToEntity(entity, PathToUtf8(g_AssetsPath / relative_path));
+				}
+			}
+
 			ImGui::EndDragDropTarget();
 		}
 
@@ -1068,8 +1150,25 @@ namespace Helios
 			ImGui::EndPopup();
 		}
 
-		/* 交互都在上面处理完了（那时"上一项"才是树节点），这里补画行内容 */
-		DrawEntityRowLabel(entity, name);
+		/* 交互都在上面处理完了（那时"上一项"才是树节点），这里补画行内容：
+		 * 有效隐藏的行整体压暗（名字与图标），名字裁到开关列之前（放不下用省略号收尾）。 */
+		const ImVec4 row_color = effectively_hidden ? EditorTheme::Token::TextDim : EditorTheme::Token::Text;
+		ImGui::PushStyleColor(ImGuiCol_Text, row_color);
+		DrawEntityRowLabel(entity, name, row_color,
+			eye_min.x - ImGui::GetStyle().ItemInnerSpacing.x);
+		ImGui::PopStyleColor();
+
+		/* ---- 行右端：可见性开关（眼睛）----
+		 * 可见的实体悬停才现形（留白优先给名字）；隐藏的实体常驻 —— 划掉的眼睛就是"没画进视口"
+		 * 的记号。按钮本体跟属性面板标题栏共用（见 DrawVisibilityToggle）。 */
+		ImGui::PushID(static_cast<int>(static_cast<uint32_t>(entity)));
+		const bool eye_pressed = DrawVisibilityToggle("##EntityVisibility",
+			eye_min, eye_max, self_hidden, /*reveal_icon=*/row_hovered);
+		ImGui::PopID();
+
+		/* 点一下 = 翻转到当前的反面（目标值就是"现在的自身状态"） */
+		if (eye_pressed)
+			SetEntityVisibility(entity, self_hidden);
 
 		/* 展开子节点（叶子节点没有 TreePush，无需 TreePop） */
 		if (has_children && is_opened)
@@ -1226,18 +1325,22 @@ namespace Helios
 		ImGui::End();
 	}
 
-	/* 面板头部：实体图标 + 实体名（就地可编辑）+ 右侧「添加组件」。
+	/* 面板头部：可见性开关（眼睛）+ 实体图标 + 实体名（就地可编辑）+ 右侧「添加组件」。
 	 * 头部自带上下文 —— 不必回头看层级树才知道正在编辑哪个实体；
-	 * 实体名同时也就不再单独占一张 Name 组件卡（同一条信息只说一次）。 */
+	 * 实体名与可见性也不再单独占卡（同一条信息只说一次，见 IsEditedInPanelHeader）。 */
 	void SceneHierarchy::ShowPropertiesHeader()
 	{
 		PROFILE_FUNCTION();
 
-		const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(ResolveEntityIcon(m_SelectedEntity));
+		/* 行首给可见性开关留一格（控件高见方）：可见性是这个实体最直接的状态，
+		 * 直接画在标题栏左边 —— 与层级行右端是同一枚眼睛、同一套交互。 */
+		const float eye_size = ImGui::GetFrameHeight();
+		const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(
+			ResolveEntityIcon(m_SelectedEntity), eye_size + ImGui::GetStyle().ItemInnerSpacing.x);
 
 		/* 实体名：就地编辑，与组件字段走同一条命令路径（可撤销）。
-		 * 头部只放得下一行，所以取该组件的第一个文本字段 —— 头部就地编辑的组件
-		 * 必须只有一个文本字段（见 IsEditedInPanelHeader）。 */
+		 * 头部行里"由字段驱动"的只有 Name 一个 —— 取它的第一个文本字段就地绘制；
+		 * Visibility 虽同在头部呈现，但画的是开关不是字段（见 IsEditedInPanelHeader）。 */
 		for (const ComponentDesc& desc : ComponentRegistry::Instance().All())
 		{
 			if (!IsEditedInPanelHeader(desc) || desc.GetPtr == nullptr)
@@ -1267,6 +1370,17 @@ namespace Helios
 		const float button_size = ImGui::GetFrameHeight();
 		PanelChrome::PlaceHeaderAction(header, button_size);
 		ShowAddComponentButton();
+
+		/* 可见性开关放行首的空档里（名字与「添加组件」都提交完了，这里补那把空档填上；
+		 * 图标/名字的起点在 BeginHeaderRow 里已按这一格让过位）。眼睛画自身状态：
+		 * 点它只写自己那一行 —— 与层级行右端共用同一份按钮实现。 */
+		const bool self_hidden = m_SelectedEntity.HasComponent<VisibilityComponent>()
+			&& !m_SelectedEntity.GetComponent<VisibilityComponent>().m_Visible;
+		if (DrawVisibilityToggle("##HeaderVisibility", header.Min,
+			ImVec2(header.Min.x + eye_size, header.Min.y + eye_size), self_hidden, /*reveal_icon=*/true))
+		{
+			SetEntityVisibility(m_SelectedEntity, self_hidden);
+		}
 
 		PanelChrome::EndHeaderRow(header);
 	}

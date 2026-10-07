@@ -105,6 +105,27 @@ namespace Helios
 		return false;
 	}
 
+	/* 实体是否参与渲染：自身与全部祖先都可见（隐藏沿父链传染）。
+	 * 与 IsAncestor / GetWorldTransform 同一套上溯写法：深度上限兜住畸形层级。 */
+	bool Scene::IsEntityVisible(entt::entity entity) const
+	{
+		entt::entity current = entity;
+		for (size_t depth = 0; current != entt::null && depth < kMaxHierarchyDepth; ++depth)
+		{
+			if (!m_Registry.valid(current))
+				return false;
+
+			if (const auto* visibility = m_Registry.try_get<VisibilityComponent>(current);
+				visibility != nullptr && !visibility->m_Visible)
+				return false;
+
+			current = GetParent(current);
+		}
+
+		/* 句柄无效（或父链异常长）时不参与渲染 */
+		return current == entt::null;
+	}
+
 	glm::mat4 Scene::GetWorldTransform(entt::entity entity) const
 	{
 		/* 先自下而上收集父链，再自顶向下累积：一趟 O(深度)，不需要递归 */
@@ -203,7 +224,12 @@ namespace Helios
 				camera_component->m_Camera->SetTransform(world_transform);
 
 			if (auto* probe_component = m_Registry.try_get<ReflectionProbeComponent>(entity); probe_component && probe_component->m_ReflectionProbe)
+			{
 				probe_component->m_ReflectionProbe->SetTransform(world_transform);
+				/* 可见性同源传播（与光源"隐藏 = 不照"一致）：隐藏的探针不烘焙、
+				 * 不参与 IBL 选择（注册保留，恢复可见即恢复参与） */
+				probe_component->m_ReflectionProbe->SetEnable(IsEntityVisible(entity));
+			}
 		}
 
 		/* 收集RenderView，并在收集前更新 Camera 的视图/投影矩阵 */
