@@ -11,7 +11,6 @@
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderAPI.h"
 #include "Helios/Scene/SceneCommon.h"
-#include "Helios/ImGui/EditorTheme.h"
 
 namespace Helios
 {
@@ -80,14 +79,13 @@ namespace Helios
 
 		float dpi_scale = 1.0f;
 		glfwGetWindowContentScale(window, &dpi_scale, nullptr);	/* Retina = 2.0 */
-		const auto editor_fonts = EditorTheme::SetupFonts(io, ABSOLUTE_PATH("EditorRes/fonts"), dpi_scale);
-		if (editor_fonts.Regular == nullptr)
-		{
-			CORE_LOG_ERROR("Failed to load editor fonts: EditorRes/fonts");
-		}
 
-		/* 编辑器主题：统一颜色体系 + 形状语言（见 Helios/ImGui/EditorTheme.h） */
-		EditorTheme::ApplyDark();
+		/* 界面外观由应用注入（见 StyleInstaller）；未注入 = ImGui 内置默认字体与风格。
+		 * 字体必须在字体图集上传（ImGuiRenderer::Init）前装好。 */
+		if (m_StyleInstaller)
+			m_StyleInstaller(io, dpi_scale);
+		else
+			io.Fonts->AddFontDefault();
 
 		// Setup Platform bindings (GLFW only, no renderer backend)
 		ImGui_ImplGlfw_InitForOpenGL(window, true);

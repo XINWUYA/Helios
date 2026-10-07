@@ -1,16 +1,17 @@
 ﻿#pragma once
 #include "Helios/VirtualDevice/DeviceWindow.h"
 #include "Helios/Core/LayerStack.h"
+#include "Helios/ImGui/ImGuiLayer.h"
 
 namespace Helios
 {
-	class ImGuiLayer;
-
 	class Application 
 	{
 	public:
+		/* ui_style_installer：应用自带的界面字体 / 风格安装器（缺省 = ImGui 默认外观）。
+		 * 在 ImGui 上下文建立后、字体图集上传前调用一次（见 ImGuiLayer::StyleInstaller）。 */
 		Application(const std::string& window_title = "Unnamed App", uint32_t width = 1920, uint32_t height = 1080,
-			bool start_maximized = false);
+			bool start_maximized = false, ImGuiLayer::StyleInstaller ui_style_installer = {});
 		virtual ~Application();
 
 		static Application* Instance();

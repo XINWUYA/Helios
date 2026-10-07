@@ -10,7 +10,8 @@ namespace Helios
 {
 	Application* Application::s_pInstance = nullptr;
 
-	Application::Application(const std::string& window_title, uint32_t width, uint32_t height, bool start_maximized)
+	Application::Application(const std::string& window_title, uint32_t width, uint32_t height, bool start_maximized,
+		ImGuiLayer::StyleInstaller ui_style_installer)
 	{
 		PROFILE_FUNCTION();
 
@@ -27,6 +28,7 @@ namespace Helios
 		Renderer::SetViewport(0, 0, m_pWindow->GetWidth(), m_pWindow->GetHeight());
 
 		m_pImGuiLayer = CreateSharedPtr<ImGuiLayer>();
+		m_pImGuiLayer->SetStyleInstaller(std::move(ui_style_installer));
 		PushOverlay(m_pImGuiLayer);
 	}
 

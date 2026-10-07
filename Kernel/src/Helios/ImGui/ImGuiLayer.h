@@ -1,7 +1,11 @@
 ﻿#pragma once
 #include "Helios/Core/Layer.h"
+#include <functional>
 #include <memory>
 #include <string>
+
+/* imgui 全局命名空间的类型（仅用于安装器签名，不引入 imgui 头） */
+struct ImGuiIO;
 
 namespace Helios
 {
@@ -11,8 +15,15 @@ namespace Helios
 	class ImGuiLayer : public ILayer
 	{
 	public:
+		/* 界面字体 / 风格的安装器：应用注入自己的 UI 外观（字体、配色、间距等）。
+		 * 在 ImGui 上下文建立后、字体图集上传前调用一次。
+		 * 未注入 = ImGui 内置默认字体与默认风格 —— 引擎不预设编辑器外观。 */
+		using StyleInstaller = std::function<void(ImGuiIO&, float content_scale)>;
+
 		ImGuiLayer();
 		~ImGuiLayer() override;
+
+		void SetStyleInstaller(StyleInstaller installer) { m_StyleInstaller = std::move(installer); }
 
 		virtual void OnAttached() override;
 		virtual void OnDetached() override;
@@ -40,6 +51,8 @@ namespace Helios
 		bool m_IsBlockEvents = false;
 		/* imgui.ini 的绝对路径（SetLayoutSavingEnabled 切换时复用） */
 		std::string m_IniPath;
+		/* 界面外观安装器（见 StyleInstaller；空 = ImGui 内置默认） */
+		StyleInstaller m_StyleInstaller;
 		std::unique_ptr<ImGuiRenderer> m_Renderer;
 	};
 }
