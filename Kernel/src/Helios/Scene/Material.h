@@ -54,6 +54,9 @@ namespace Helios
 		 * 顶点着色器把网格铺满全屏、深度取远平面）。这类材质不进延迟管线 G-Buffer、
 		 * 不参与阴影投射，由天空背景通道专绘。 */
 		[[nodiscard]] bool IsSkyBox() const;
+		/* 是否支持反射探针的 IBL 着色（着色器声明了 IBL 契约的采样器，
+		 * 见 builtin/IBL.glsl）。渲染通道据此决定是否发 per-draw 的探针绑定。 */
+		[[nodiscard]] bool SupportsIBL() const;
 		/* 设置参数 */
 		void SetParameters(ParamType type, const std::string& name, const std::any& param);
 		[[nodiscard]] const ParameterMap& GetAllParameters() const { return m_Parameters; }
@@ -76,6 +79,14 @@ namespace Helios
 
 		/* 构造一个 per-draw 用的纹理参数：绑定点留待应用时按 Shader 反射解析 */
 		static MaterialParamInfo MakeTextureParam(const std::string& name, const SharedPtr<DeviceTexture>& texture);
+
+		/* 组装 IBL 契约（u_UseIBL + 辐照度 / 预滤波 / BRDF LUT）的 per-draw 覆盖：三张图齐了就置一 +
+		 * 真实纹理；缺任何一张就置零 + 中性兜底。采样器每次绘制都必须有绑定（Metal 会校验断言），
+		 * 门控 uniform 只关取值、不省绑定，四个槽位始终有绑定。 */
+		static void MakeIBLParamOverrides(std::vector<MaterialParamInfo>& overrides,
+			const SharedPtr<DeviceTexture>& irradiance_map,
+			const SharedPtr<DeviceTexture>& prefilter_map,
+			const SharedPtr<DeviceTexture>& brdf_lut);
 
 		/* 克隆一个材质实例：共享 Shader 与纹理，复制参数表与光栅化状态；不带资产路径。
 		 * 用于"实例化材质"（实体级独立参数，见 ModelComponent::m_SlotOverrides）。 */

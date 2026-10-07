@@ -9,6 +9,8 @@
 #include "Helios/Common/Utils.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 #include "Helios/Scene/Material.h"
+#include "Helios/Scene/ReflectionProbe.h"
+#include "Helios/Scene/Scene.h"
 #include "Helios/Scene/ShadowMap.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 
@@ -16,6 +18,11 @@ namespace Helios
 {
 	namespace
 	{
+		/* 延迟光照一次参与"逐像素最近探针"选择的探针上限：受纹理 / 采样器槽位
+		 * 预算约束（lighting.glsl 里每个探针占一组固定绑定点）。
+		 * 场景内探针多于上限时取离相机最近的若干个（见 CollectClosestBakedProbes）。 */
+		constexpr size_t kMaxDeferredIBLProbes = 3;
+
 		/* G-Buffer 采样点缺省时补的默认贴图：法线图按名字认，亮度类（Albedo / Roughness）用白，其余用黑。 */
 		SharedPtr<DeviceTexture> DefaultTextureForSampler(const std::string& sampler_name)
 		{
@@ -1216,6 +1223,21 @@ namespace Helios
 					/* 阴影纹理随 Submit 直绑（按 Shader 反射出的 "u_ShadowMap" 绑定点） */
 					ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
 
+					/* 反射探针 IBL：收集本帧参与"逐像素最近探针"选择的探针子集
+					 * （≤ kMaxDeferredIBLProbes 个，按到相机的距离排序）。
+					 * BRDF LUT 未就绪（没有探针烘焙过）时不做 IBL。 */
+					std::vector<SharedPtr<ReflectionProbe>> ibl_probes;
+					SharedPtr<DeviceTexture> ibl_brdf_lut;
+					if (const auto scene = render_view.GetOwnerScene())
+					{
+						if (const auto probe_manager = scene->GetReflectionProbeManager())
+						{
+							ibl_brdf_lut = probe_manager->GetBRDFLutMap();
+							if (ibl_brdf_lut != nullptr)
+								ibl_probes = probe_manager->CollectClosestBakedProbes(GetPosition(), kMaxDeferredIBLProbes);
+						}
+					}
+
 					const auto& lights = render_view.GetValidLights();
 					for (size_t light_index = 0; light_index < lights.size(); ++light_index)
 					{
@@ -1245,6 +1267,26 @@ namespace Helios
 						/* 环境光 / 自发光与光源无关，只由第一笔光照合成（多光源逐笔加法叠加） */
 						material->SetParameters(ParamType::Int, "u_ComposeAmbientEmission",
 							light_index == 0 ? 1 : 0);
+
+								/* 探针 IBL 的参数和贴图每笔光照都完整设一遍（裸 uniform 是 per-program 状态，漏设就残留
+								 * 上一笔）；采样槽位不管有没有效都必须有绑定（缺绑定会被 Metal 校验断言），无效槽位用中性兜底。 */
+						material->SetParameters(ParamType::Int, "u_ProbeCount",
+							static_cast<int>(ibl_probes.size()));
+						for (size_t probe_index = 0; probe_index < kMaxDeferredIBLProbes; ++probe_index)
+						{
+							const std::string suffix = std::to_string(probe_index);
+							const bool valid = probe_index < ibl_probes.size();
+							material->SetParameters(ParamType::Vec3, "u_ProbePosition" + suffix,
+								valid ? ibl_probes[probe_index]->GetPosition() : glm::vec3(0.0f));
+
+							material->SetTexture("u_IrradianceMap" + suffix,
+								valid ? ibl_probes[probe_index]->GetIrradianceMap() : DeviceTexture::BlackCube());
+							material->SetTexture("u_PrefilterMap" + suffix,
+								valid ? ibl_probes[probe_index]->GetPrefilterMap() : DeviceTexture::BlackCube());
+						}
+						material->SetTexture("u_BRDFLut",
+							ibl_brdf_lut != nullptr ? ibl_brdf_lut : DeviceTexture::Black());
+
 						Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
 					}
 				}

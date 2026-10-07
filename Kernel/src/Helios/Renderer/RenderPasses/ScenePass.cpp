@@ -7,6 +7,7 @@
 #include <Helios/Scene/Material.h>
 #include <Helios/Scene/ReflectionProbe.h>
 #include <Helios/Scene/Scene.h>
+#include <Helios/VirtualDevice/DeviceShader.h>
 
 namespace Helios
 {
@@ -51,21 +52,27 @@ namespace Helios
 							const auto& material = mesh_object.Material;
 							if (material == nullptr)
 								continue;
-							if (probe_manager && probe_manager->HasProbe())
+
+					/* IBL 是"每次绘制都不一样"的绑定（按对象选最近探针）—— 走 per-draw 覆盖、不写进材质对象；
+					 * 只对支持 IBL 的 Shader 发；没有探针时靠覆盖里的中性兜底，保证四个采样槽始终有绑定。
+					 * 覆盖随每个光照笔重发（声明过的采样器每次绘制都要有绑定）。 */
+							DrawParams per_draw;
+							if (material->SupportsIBL())
 							{
-								/* 选择最近且已烘焙的探针 */
 								const glm::vec3 world_pos = glm::vec3(mesh_object.Local2WorldMat[3]);
-								const auto chosen = probe_manager->GetClostedReflectionProbe(world_pos);
-								if (chosen)
-								{
-									/* 指定IBL资源 */
-									material->SetParameters(ParamType::Int, "u_UseIBL", 1);
-									material->SetTexture("u_BRDFLut", probe_manager->GetBRDFLutMap());
-									material->SetTexture("u_IrradianceMap", chosen->GetIrradianceMap());
-									material->SetTexture("u_PrefilterMap", chosen->GetPrefilterMap());
-								}
+								const auto chosen = (probe_manager && probe_manager->HasProbe())
+									? probe_manager->GetClostedReflectionProbe(world_pos)
+									: nullptr;
+								const SharedPtr<DeviceTexture> brdf_lut = (probe_manager != nullptr)
+									? probe_manager->GetBRDFLutMap() : nullptr;
+
+								Material::MakeIBLParamOverrides(per_draw.Overrides,
+									chosen != nullptr ? chosen->GetIrradianceMap() : nullptr,
+									chosen != nullptr ? chosen->GetPrefilterMap() : nullptr,
+									brdf_lut);
 							}
-							Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive());
+							Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive(),
+								per_draw.Overrides.empty() ? nullptr : &per_draw);
 						}
 					}
 				}

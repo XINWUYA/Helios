@@ -111,6 +111,10 @@ namespace Helios
 		static SharedPtr<DeviceTexture> White();
 		static SharedPtr<DeviceTexture> Black();
 		static SharedPtr<DeviceTexture> Normal();
+		/* 默认立方图（1x1、六面全黑）：给"暂不使用"的立方采样槽位做中性绑定。
+		 * Metal 要求片元函数声明的采样器在每次绘制都全部有绑定 —— u_UseIBL=0
+		 * 之类的门控只关取值、不能省绑定（缺一即被校验层断言，见 IBL.glsl）。 */
+		static SharedPtr<DeviceTexture> BlackCube();
 
 	protected:
 		DeviceTexture() = default;

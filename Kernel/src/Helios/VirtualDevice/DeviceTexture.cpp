@@ -75,7 +75,7 @@ namespace Helios
 	/* 默认纹理 */
 	SharedPtr<DeviceTexture> DeviceTexture::White()
 	{
-		SharedPtr<DeviceTexture> texture;
+		static SharedPtr<DeviceTexture> texture;
 
 		if (!texture)
 		{
@@ -96,7 +96,7 @@ namespace Helios
 
 	SharedPtr<DeviceTexture> DeviceTexture::Black()
 	{
-		SharedPtr<DeviceTexture> texture;
+		static SharedPtr<DeviceTexture> texture;
 
 		if (!texture)
 		{
@@ -117,7 +117,7 @@ namespace Helios
 
 	SharedPtr<DeviceTexture> DeviceTexture::Normal()
 	{
-		SharedPtr<DeviceTexture> texture;
+		static SharedPtr<DeviceTexture> texture;
 
 		if (!texture)
 		{
@@ -131,6 +131,29 @@ namespace Helios
 				0xffff0000,
 			}; // Normal
 			texture->SetData(default_texture_data, {});
+		}
+
+		return texture;
+	}
+
+	SharedPtr<DeviceTexture> DeviceTexture::BlackCube()
+	{
+		/* 单实例：每帧可能被多处绑定（无 IBL 时的中性兜底），不能每次调用都新建上传 */
+		static SharedPtr<DeviceTexture> texture;
+
+		if (!texture)
+		{
+			TextureDesc desc;
+			desc.SamplerType = SamplerType::SamplerCubeMap;
+			desc.Width = 1;
+			desc.Height = 1;
+			desc.MipLevels = 1;
+			texture = DeviceTexture::Create("DefaultBlackCube", desc);
+
+			/* 立方图逐面上传（offset_z = 面索引） */
+			uint32_t black = 0x00000000;
+			for (uint32_t face = 0; face < 6; ++face)
+				texture->SetData(&black, {}, 0, 0, 0, face);
 		}
 
 		return texture;

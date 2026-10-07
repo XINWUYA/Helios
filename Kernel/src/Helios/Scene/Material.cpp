@@ -48,6 +48,15 @@ namespace Helios
 		return m_pShader != nullptr && m_pShader == s_skybox_shader;
 	}
 
+	bool Material::SupportsIBL() const
+	{
+		PROFILE_FUNCTION();
+
+		/* 判据 = 声明了 IBL 契约的辐照度采样器（只能按 sampler 反射来查）；不能查 u_UseIBL ——
+		 * 裸 uniform 在 Metal 反射里查不到，拿它做门控会恒为假、per-draw 的探针绑定永远发不出去。 */
+		return m_pShader != nullptr && m_pShader->GetUniformBinding("u_IrradianceMap") >= 0;
+	}
+
 	void Material::SetParameters(ParamType type, const std::string& name, const std::any& param)
 	{
 		PROFILE_FUNCTION();
@@ -208,6 +217,23 @@ namespace Helios
 		/* slot 填无效值：应用时（ApplyParam）按 Shader 反射解析出真正的绑定点 */
 		return { ParamType::Texture, name,
 			std::make_pair(texture, static_cast<uint32_t>(InvalidTextureSlot)) };
+	}
+
+	void Material::MakeIBLParamOverrides(std::vector<MaterialParamInfo>& overrides,
+		const SharedPtr<DeviceTexture>& irradiance_map,
+		const SharedPtr<DeviceTexture>& prefilter_map,
+		const SharedPtr<DeviceTexture>& brdf_lut)
+	{
+		/* 三张图齐备才启用（与探针"可用"的判据同源：不齐视为无 IBL） */
+		const bool ibl_ready = irradiance_map != nullptr && prefilter_map != nullptr && brdf_lut != nullptr;
+
+		overrides.emplace_back(ParamType::Int, "u_UseIBL", ibl_ready ? 1 : 0);
+		overrides.emplace_back(MakeTextureParam("u_IrradianceMap",
+			ibl_ready ? irradiance_map : DeviceTexture::BlackCube()));
+		overrides.emplace_back(MakeTextureParam("u_PrefilterMap",
+			ibl_ready ? prefilter_map : DeviceTexture::BlackCube()));
+		overrides.emplace_back(MakeTextureParam("u_BRDFLut",
+			ibl_ready ? brdf_lut : DeviceTexture::Black()));
 	}
 
 	/* 克隆一个材质实例 */

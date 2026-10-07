@@ -214,6 +214,12 @@ namespace Helios
         /* 获取距离最近的反射探针 */
         SharedPtr<ReflectionProbe> GetClostedReflectionProbe(const glm::vec3& target_pos) const;
 
+        /* 按到目标点的距离升序收集可用的已烘焙探针（最多 max_count 个；
+         * "可用"= 启用 + 已烘焙 + 双图齐备）。延迟光照据此决定本帧参与
+         * 逐像素选择的探针子集。 */
+        std::vector<SharedPtr<ReflectionProbe>> CollectClosestBakedProbes(const glm::vec3& target_pos,
+            size_t max_count) const;
+
         /* 获取BRDF查找表贴图 */
         const SharedPtr<DeviceTexture>& GetBRDFLutMap() const { return m_BRDFLutMap; }
 

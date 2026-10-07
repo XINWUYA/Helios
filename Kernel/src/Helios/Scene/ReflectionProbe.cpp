@@ -742,8 +742,13 @@ namespace Helios
                 if (material == nullptr || material->GetShader() == nullptr)
                     continue;
 
-                material->SetParameters(ParamType::Int, "u_UseIBL", 0);
-                Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive());
+                /* 捕获阶段关闭 IBL：走 per-draw 覆盖、不写共享材质；只对支持 IBL 的 Shader 发，覆盖里同时
+                 * 带中性兜底 —— 只把 u_UseIBL 置零会留下没绑定的采样器，而绘制时声明过的采样器必须全部有绑定。 */
+                DrawParams per_draw;
+                if (material->SupportsIBL())
+                    Material::MakeIBLParamOverrides(per_draw.Overrides, nullptr, nullptr, nullptr);
+                Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive(),
+                    per_draw.Overrides.empty() ? nullptr : &per_draw);
             }
         }
         capture_fb->Unbind();
@@ -898,6 +903,18 @@ namespace Helios
         m_NeedBakeProbes.clear();
     }
 
+    namespace
+    {
+        /* 探针当前可否用于 IBL 着色：启用、已烘焙、双图（辐照度 + 预滤波）齐备。
+         * 缺图（烘焙配置关掉了漫反射 / 镜面）时按"不可用"处理 ——
+         * 采样未绑定的立方图在 Metal 校验层直接断言，不做猜测性兜底。 */
+        bool IsProbeUsableForIBL(const SharedPtr<ReflectionProbe>& probe)
+        {
+            return probe != nullptr && probe->GetEnable() && probe->IsBaked()
+                && probe->GetIrradianceMap() != nullptr && probe->GetPrefilterMap() != nullptr;
+        }
+    }
+
     /* 获取距离最近的反射探针 */
     SharedPtr<ReflectionProbe> ReflectionProbeManager::GetClostedReflectionProbe(const glm::vec3& target_pos) const
     {
@@ -908,7 +925,7 @@ namespace Helios
 
         for (const auto& probe : m_RegisteredProbes)
         {
-            if (!probe || !probe->IsBaked())
+            if (!IsProbeUsableForIBL(probe))
                 continue;
             const float dist_sq = glm::distance2(target_pos, probe->GetPosition());
             if (dist_sq < best_dist_sq)
@@ -919,6 +936,34 @@ namespace Helios
         }
 
         return chosen;
+    }
+
+    /* 按到目标点的距离升序收集可用的已烘焙探针（最多 max_count 个）。
+     * 延迟光照在着色器里逐像素做"最近探针"选择，这里给出本帧参与选择的子集
+     * （调用方传入相机位置：离视点更近的探针优先获得采样器槽位）。 */
+    std::vector<SharedPtr<ReflectionProbe>> ReflectionProbeManager::CollectClosestBakedProbes(
+        const glm::vec3& target_pos, size_t max_count) const
+    {
+        PROFILE_FUNCTION();
+
+        std::vector<SharedPtr<ReflectionProbe>> usable;
+        usable.reserve(m_RegisteredProbes.size());
+        for (const auto& probe : m_RegisteredProbes)
+        {
+            if (IsProbeUsableForIBL(probe))
+                usable.push_back(probe);
+        }
+
+        std::sort(usable.begin(), usable.end(),
+            [&target_pos](const SharedPtr<ReflectionProbe>& lhs, const SharedPtr<ReflectionProbe>& rhs)
+            {
+                return glm::distance2(target_pos, lhs->GetPosition())
+                    < glm::distance2(target_pos, rhs->GetPosition());
+            });
+
+        if (usable.size() > max_count)
+            usable.resize(max_count);
+        return usable;
     }
 
     void ReflectionProbeManager::Prepare()
@@ -986,11 +1031,20 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
-        if (!render_view || m_NeedBakeProbes.empty())
+        if (!render_view)
             return;
 
         auto& frame_graph = render_view->GetFrameGraph();
         if (!frame_graph)
+            return;
+
+        /* BRDFLut 是 IBL 的通用查找表：只要有已注册的探针就要保证它在 ——
+         * 探针可能全部来自磁盘缓存（这一帧不需要任何烘焙 Pass），但 IBL 着色仍要
+         * 用它。只需烘焙一次。 */
+        if (m_BRDFLutMap == nullptr && !m_RegisteredProbes.empty())
+            BakeBRDFLutMap();
+
+        if (m_NeedBakeProbes.empty())
             return;
 
         /* Probe 捕获使用中性阴影图，不复用主相机的级联阴影。 */
@@ -1019,10 +1073,6 @@ namespace Helios
                     probe->Bake(render_view);
                 });
         }
-
-        /* BRDFLut 是通用查找表: 只需烘焙一次 */
-        if (m_BRDFLutMap) return;
-        BakeBRDFLutMap();
     }
 
     /* 烘焙BRDF查找表 */

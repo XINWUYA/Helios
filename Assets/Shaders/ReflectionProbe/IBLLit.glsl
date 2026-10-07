@@ -33,6 +33,7 @@ void main()
 #include "../builtin/Uniforms.glsl"
 #include "../builtin/Math.glsl"
 #include "../builtin/BRDF.glsl"
+#include "../builtin/IBL.glsl"
 
 struct SVertex2Frag
 {
@@ -50,9 +51,8 @@ layout(binding = 1) uniform sampler2D u_RoughnessTexture;
 layout(binding = 2) uniform sampler2D u_MetalnessTexture;
 layout(binding = 3) uniform sampler2D u_NormalTexture;
 
-layout(binding = 4) uniform samplerCube u_IrradianceMap;
-layout(binding = 5) uniform samplerCube u_PrefilterMap;
-layout(binding = 6) uniform sampler2D u_BRDFLut;
+/* IBL 环境贴图（u_IrradianceMap / u_PrefilterMap / u_BRDFLut / u_UseIBL）来自
+ * builtin/IBL.glsl —— 由渲染通道按最近探针 per-draw 绑定 */
 layout(location = 0) uniform float u_EnvironmentStrength;
 
 vec3 GetNormal()
@@ -77,20 +77,10 @@ void main()
 	vec3 L = normalize(-u_LightDir);
 	vec3 direct = BRDF(L, V, N, metallic, roughness, albedo);
 
-	// 间接漫反射（IBL）
-	vec3 irradiance = texture(u_IrradianceMap, N).rgb;
-	vec3 F = F_Schlick(max(dot(N, V), 0.0f), metallic, albedo);
-	vec3 kd = (vec3(1.0f) - F) * (1.0f - metallic);
-	vec3 diffuse = irradiance * albedo;
-
-	// 间接高光（IBL）
-	vec3 R = reflect(-V, N);
-	const float k_MaxReflectionLod = 4.0f;
-	vec3 prefiltered_color = textureLod(u_PrefilterMap, R, roughness * k_MaxReflectionLod).rgb;
-	vec2 brdf = texture(u_BRDFLut, vec2(max(dot(N, V), 0.0f), roughness)).rg;
-	vec3 specular = prefiltered_color * (F * brdf.x + brdf.y);
-
-	vec3 ambient = (kd * diffuse + specular) * u_EnvironmentStrength;
+	// 间接光（IBL）：u_UseIBL = 0（无探针 / 探针未烘焙 / 探针捕获自身）时不参与
+	vec3 ambient = (u_UseIBL != 0)
+		? EvaluateIBL(N, V, roughness, metallic, albedo) * u_EnvironmentStrength
+		: vec3(0.0f);
 
 	// 方向光环境项：direct 已经包含 (diff+spec)*NdotL
 	vec3 color = ambient + u_ColorIntensity.rgb * u_ColorIntensity.a * direct;
