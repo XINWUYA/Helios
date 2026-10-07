@@ -316,26 +316,30 @@ namespace Helios
 		if (TryParseBuiltinModelName(path, builtin_type))
 			return Create(builtin_type);
 
+		/* 文件模型统一归一为绝对路径（相对形态 = 场景文件里的存储形态）：
+		 * 对象内部路径恒为绝对，保存 / 预览换算才不依赖进程工作目录。 */
+		const std::string model_path = ABSOLUTE_PATH(path);
+
 		/* 获取文件后缀名 */
-		std::string suffix = ExtractFileSuffix(path);
+		std::string suffix = ExtractFileSuffix(model_path);
 		std::transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower);
 
 		/* 加载Mesh模型数据 */
 		if (suffix == "mesh")
 		{
-			SharedPtr<Model> model = CreateSharedPtr<Model>(path);
+			SharedPtr<Model> model = CreateSharedPtr<Model>(model_path);
 
 			/* 加载mtl文件 */
-			const std::string mtl_filepath = ReplaceFileSuffix(path, ".mtl");
+			const std::string mtl_filepath = ReplaceFileSuffix(model_path, ".mtl");
 			model->LoadMaterial(mtl_filepath);
 			const auto& material_group = model->GetMaterialGroup();
 
 			/* 直接从mesh文件加载 */
-			const std::filesystem::path mesh_path = PathFromUtf8(ABSOLUTE_PATH(path));
+			const std::filesystem::path mesh_path = PathFromUtf8(model_path);
 			std::ifstream in_mesh_file(mesh_path, std::ios::in | std::ios::binary);
 			if (!in_mesh_file)
 			{
-				CORE_LOG_ERROR("Failed to load file: {}.", ABSOLUTE_PATH(path));
+				CORE_LOG_ERROR("Failed to load file: {}.", model_path);
 				return nullptr;
 			}
 

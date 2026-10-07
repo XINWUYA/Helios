@@ -320,7 +320,8 @@ namespace Helios
 		{
 			const char* path = element->Attribute("TexturePath");
 			if (path != nullptr && *path != '\0')
-				static_cast<SpriteComponent*>(component)->m_Texture = DeviceTexture::Create(path);
+				/* 属性里存的是相对资产根的形态，入口即转绝对（对象内部路径恒为绝对） */
+				static_cast<SpriteComponent*>(component)->m_Texture = DeviceTexture::Create(ABSOLUTE_PATH(path));
 		}
 
 		void SaveModelPath(tinyxml2::XMLElement* element, const void* component)
@@ -673,8 +674,9 @@ namespace Helios
 			if (probe == nullptr)
 				return;
 
+			/* 同上：天空盒路径按相对资产根存储，入口即转绝对 */
 			if (const char* path = element->Attribute("SkyBoxPath"); path != nullptr && *path != '\0')
-				probe->SetSkyBoxTexture(DeviceTexture::Create(path));
+				probe->SetSkyBoxTexture(DeviceTexture::Create(ABSOLUTE_PATH(path)));
 
 			/* 命中缓存就直接恢复烘焙结果：加载后无需再烘焙 */
 			if (const char* cache_path = element->Attribute("BakeCachePath"); cache_path != nullptr && *cache_path != '\0')
