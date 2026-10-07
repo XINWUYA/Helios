@@ -65,6 +65,7 @@ namespace Helios
 			MtlGraph,
 			Shader,
 			Model,
+			Probe,
 		};
 
 		/* 内容筛选里的「按类型」（工具行下拉）：All = 不按类型筛。
@@ -79,6 +80,7 @@ namespace Helios
 			MtlGraph,
 			Shader,
 			Model,
+			Probe,
 			COUNT
 		};
 

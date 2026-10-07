@@ -282,6 +282,7 @@ namespace Helios
 		case FileType::MtlGraph: return Icons::Id::FileMtlGraph;
 		case FileType::Shader:   return Icons::Id::FileShader;
 		case FileType::Model:    return Icons::Id::FileModel;
+		case FileType::Probe:    return Icons::Id::FileProbe;
 		}
 
 		return Icons::Id::File;
@@ -299,6 +300,7 @@ namespace Helios
 		case AssetFileKind::MtlGraph: return FileType::MtlGraph;
 		case AssetFileKind::Shader:   return FileType::Shader;
 		case AssetFileKind::Model:    return FileType::Model;
+		case AssetFileKind::Probe:    return FileType::Probe;
 		}
 
 		return FileType::Default;
@@ -315,6 +317,7 @@ namespace Helios
 		case FileType::MtlGraph: return AssetFileKind::MtlGraph;
 		case FileType::Shader:   return AssetFileKind::Shader;
 		case FileType::Model:    return AssetFileKind::Model;
+		case FileType::Probe:    return AssetFileKind::Probe;
 		case FileType::Folder:   return AssetFileKind::Other;   /* 文件夹不看大类（看 IsFolder） */
 		}
 
@@ -334,6 +337,7 @@ namespace Helios
 		case TypeFilter::MtlGraph: return "Mtl Graphs";
 		case TypeFilter::Shader:   return "Shaders";
 		case TypeFilter::Model:    return "Models";
+		case TypeFilter::Probe:    return "Reflection Probes";
 		}
 
 		return "All types";
@@ -350,6 +354,7 @@ namespace Helios
 		case TypeFilter::MtlGraph: return type == FileType::MtlGraph;
 		case TypeFilter::Shader:   return type == FileType::Shader;
 		case TypeFilter::Model:    return type == FileType::Model;
+		case TypeFilter::Probe:    return type == FileType::Probe;
 		}
 
 		return true;

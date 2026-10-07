@@ -82,6 +82,8 @@ namespace Helios
 			 * .mtl 是材质库（跟着 .obj 走的那份），不是模型，归 Other。 */
 			{ ".OBJ", AssetFileKind::Model }, { ".MESH", AssetFileKind::Model }, { ".FBX", AssetFileKind::Model },
 			{ ".DAE", AssetFileKind::Model }, { ".STL", AssetFileKind::Model },
+			/* 反射探针的烘焙缓存（保存场景时落盘，加载时直接恢复） */
+			{ ".PROBE", AssetFileKind::Probe },
 		};
 
 		for (const auto& entry : kByExtension)

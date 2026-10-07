@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace Helios
 {
@@ -206,6 +207,12 @@ namespace Helios
             return false;
         }
 
+        if (m_Texture->sampleCount() > 1)
+        {
+            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: '{}' is multisampled, resolve it first", m_DebugName);
+            return false;
+        }
+
         const uint32_t bytes_per_pixel = GetTextureFormatTexelSize(m_TextureDesc.Format);
         if (bytes_per_pixel == 0)
         {
@@ -220,20 +227,95 @@ namespace Helios
             return false;
         }
 
+        const MTL::TextureType texture_type = m_Texture->textureType();
+        /* 立方图 / 数组纹理的面、层索引不能塞进 region.origin.z：getBytes 的校验以 depth 为界，而这
+         * 类型纹理 depth 恒为 1（切片数在 arrayLength × face 上），传 origin.z = 1 会直接断言中断。
+         * 这类纹理必须走 blit 拷贝（sourceSlice 才是面 / 层索引）；只有 3D 纹理用 origin.z。 */
+        const bool slice_addressed = texture_type == MTL::TextureType2DArray
+            || texture_type == MTL::TextureTypeCube
+            || texture_type == MTL::TextureTypeCubeArray;
+
+        uint32_t read_slice = layer;
+        if (slice_addressed || texture_type == MTL::TextureType3D)
+        {
+            /* 切片数：立方图的面 = 6 * 立方体个数；数组取 arrayLength；3D 取深度。
+             * 越界同样是致命断言，这里先行拦截。 */
+            const NS::UInteger slice_count = slice_addressed
+                ? ((texture_type == MTL::TextureTypeCube || texture_type == MTL::TextureTypeCubeArray)
+                    ? 6 * std::max<NS::UInteger>(1, m_Texture->arrayLength())
+                    : std::max<NS::UInteger>(1, m_Texture->arrayLength()))
+                : m_Texture->depth();
+
+            if (read_slice >= slice_count)
+            {
+                CORE_LOG_ERROR("MetalTexture::ReadbackPixels: slice {} out of range ({}) on '{}'",
+                    read_slice, slice_count, m_DebugName);
+                return false;
+            }
+        }
+        else
+        {
+            /* 其余类型（2D 等）没有切片概念，layer 按契约忽略 */
+            read_slice = 0;
+        }
+
         const uint32_t level_width = MipDimension(m_TextureDesc.Width, mip_level);
         const uint32_t level_height = MipDimension(m_TextureDesc.Height, mip_level);
         const NS::UInteger bytes_per_row = level_width * bytes_per_pixel;
+        const NS::UInteger bytes_per_image = bytes_per_row * level_height;
 
-        MTL::Region region;
-        region.origin.x = 0;
-        region.origin.y = 0;
-        region.origin.z = layer;            /* 立方体贴图的面索引 / 数组的切片索引 */
-        region.size.width = level_width;
-        region.size.height = level_height;
-        region.size.depth = 1;
+        out_data.resize(static_cast<size_t>(bytes_per_image));
 
-        out_data.resize(static_cast<size_t>(bytes_per_row) * level_height);
-        m_Texture->getBytes(out_data.data(), bytes_per_row, region, mip_level);
+        if (!slice_addressed)
+        {
+            MTL::Region region;
+            region.origin.x = 0;
+            region.origin.y = 0;
+            region.origin.z = read_slice;
+            region.size.width = level_width;
+            region.size.height = level_height;
+            region.size.depth = 1;
+
+            m_Texture->getBytes(out_data.data(), bytes_per_row, region, mip_level);
+            return true;
+        }
+
+        /* 切片回读经共享缓冲中转：blit 提交并等待执行结束后内容才可用 */
+        MTL::Device* device = MetalRuntime::Device();
+        MTL::CommandQueue* queue = MetalRuntime::Queue();
+        if (device == nullptr || queue == nullptr)
+        {
+            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: Metal device / command queue unavailable");
+            return false;
+        }
+
+        MTL::Buffer* staging_buffer = device->newBuffer(bytes_per_image, MTL::ResourceStorageModeShared);
+        if (staging_buffer == nullptr)
+        {
+            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: failed to allocate {} byte staging buffer",
+                bytes_per_image);
+            return false;
+        }
+
+        MTL::CommandBuffer* command_buffer = queue->commandBuffer();
+        MTL::BlitCommandEncoder* blit_encoder = command_buffer ? command_buffer->blitCommandEncoder() : nullptr;
+        if (blit_encoder == nullptr)
+        {
+            staging_buffer->release();
+            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: failed to create blit encoder");
+            return false;
+        }
+
+        blit_encoder->copyFromTexture(m_Texture, read_slice, mip_level,
+            MTL::Origin(0, 0, 0), MTL::Size(level_width, level_height, 1),
+            staging_buffer, 0, bytes_per_row, bytes_per_image);
+        blit_encoder->endEncoding();
+        /* 编码器与命令缓冲区由 Metal 自动释放池管理，此处不手动 release */
+        command_buffer->commit();
+        command_buffer->waitUntilCompleted();
+
+        std::memcpy(out_data.data(), staging_buffer->contents(), bytes_per_image);
+        staging_buffer->release();
         return true;
     }
 

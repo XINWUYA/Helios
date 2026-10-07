@@ -8,6 +8,7 @@
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Scene/SceneCommon.h"
+#include "Helios/Scene/ReflectionProbe.h"	/* .probe 详情的烘焙结果预览（BuildPreviewTexture） */
 #include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "EntityTemplateRegistry.h"
@@ -1342,6 +1343,18 @@ namespace Helios
 			return "File";
 		}
 
+		/* 烘焙缓存里的一张图 -> 显示名（与探针卡的详情行同口径） */
+		const char* BakeImageKindName(ReflectionProbeBakeCache::ImageKind kind)
+		{
+			switch (kind)
+			{
+			case ReflectionProbeBakeCache::ImageKind::Environment: return "Environment";
+			case ReflectionProbeBakeCache::ImageKind::Irradiance:  return "Irradiance";
+			case ReflectionProbeBakeCache::ImageKind::Prefilter:   return "Prefilter";
+			}
+
+			return "Image";
+		}
 
 	}
 
@@ -1410,6 +1423,76 @@ namespace Helios
 
 		PanelChrome::EndCard(card);
 
+		/* .probe：三张烘焙图各一张卡片 —— 同级平铺在详情卡之后（卡片通道不可嵌套，
+		 * "卡中卡"画不出来，与材质卡排在组件卡之后是同一条路数）。
+		 * 图是十字展开预览；无图形上下文（headless）时只有规格行，图跳过。 */
+		for (size_t index = 0; index < m_AssetProbeCards.size(); ++index)
+		{
+			ProbeImageCard& probe_image = m_AssetProbeCards[index];
+
+			/* 卡片键按索引：三张各一卡、折叠状态互不影响 */
+			ImGui::PushID(static_cast<int>(index));
+
+			const PanelChrome::Card image_card = PanelChrome::BeginCard(
+				probe_image.Label.c_str(), Icons::Id::FileProbe);
+
+			if (image_card.Open)
+			{
+				ImGuiExt::DrawCommonTextUI("Texture", probe_image.Spec);
+
+				/* 多层 mip 才有的切换行：切哪层就看哪层的十字展开 —— 高层看整体结构、
+				 * 低层（模糊）看细节（预滤波的高层就是更粗糙的那档）。
+				 * 选项 = 层号 + 该层面边长；初始选中 = 自动挑的那层。 */
+				if (probe_image.MipCount > 1)
+				{
+					std::vector<std::string> mip_options;
+					mip_options.reserve(static_cast<size_t>(probe_image.MipCount));
+					for (int level = 0; level < probe_image.MipCount; ++level)
+					{
+						mip_options.push_back(std::to_string(level) + " ("
+							+ std::to_string(ReflectionProbe::PreviewMipFaceSize(
+								probe_image.Mip0Size, static_cast<uint32_t>(level))) + ")");
+					}
+
+					int mip = probe_image.Mip;
+					bool mip_changed = false;
+					ImGuiExt::DrawComboUI("Mip", mip_options, mip,
+						[&mip_changed](int) { mip_changed = true; });
+					if (mip_changed)
+						ApplyProbeCardMip(index, mip);
+				}
+
+				if (probe_image.Texture != nullptr)
+				{
+					ImGui::Spacing();
+
+					/* 4:3 的十字图；宽度跟"图片预览"同一档上限，居中 */
+					const float available = ImGui::GetContentRegionAvail().x;
+					const float image_width = ImMin(available, kAssetPreviewMaxWidth);
+					const float image_height = image_width * 0.75f;
+
+					ImGui::SetCursorPosX(ImGui::GetCursorPosX()
+						+ ImMax((available - image_width) * 0.5f, 0.0f));
+
+					/* UV 不翻转：预览图第 0 行（+Y 面）就在顶部 —— 与图片贴图的
+					 * (0,1)-(1,0) 相反，那些贴图在上传前被垂直翻转（IsFlipV） */
+					ImGui::Image((ImTextureID)probe_image.Texture.get(),
+						ImVec2(image_width, image_height), ImVec2(0, 0), ImVec2(1, 1));
+
+					if (ImGui::IsItemHovered())
+					{
+						ImGui::BeginTooltip();
+						ImGui::Image((ImTextureID)probe_image.Texture.get(),
+							ImVec2(320.0f, 240.0f), ImVec2(0, 0), ImVec2(1, 1));
+						ImGui::TextUnformatted(probe_image.Label.c_str());
+						ImGui::EndTooltip();
+					}
+				}
+			}
+
+			PanelChrome::EndCard(image_card);
+			ImGui::PopID();
+		}
 
 	}
 
@@ -1470,6 +1553,7 @@ namespace Helios
 		{
 			m_AssetDetailPath.clear();
 			m_AssetDetailRows.clear();
+			m_AssetProbeCards.clear();
 			return;
 		}
 
@@ -1479,6 +1563,7 @@ namespace Helios
 		m_AssetDetailPath = entry.Path;
 		m_AssetDetailWriteTime = write_time;
 		m_AssetDetailRows.clear();
+		m_AssetProbeCards.clear();
 
 		if (entry.Kind == AssetFileKind::Image)
 		{
@@ -1534,8 +1619,60 @@ namespace Helios
 			if (probe_count > 0)
 				m_AssetDetailRows.emplace_back("Probes", std::to_string(probe_count));
 		}
+		else if (entry.Kind == AssetFileKind::Probe)
+		{
+			/* 反射探针的烘焙缓存：每张立方图（环境 / 辐照度 / 预滤波）攒一张图卡
+			 * （名字 + 规格 + 十字展开预览）—— 由调用方在详情卡之后同级平铺画出。
+			 * 预览要上传纹理（无图形上下文时为空），规格行是纯 CPU 的，照常显示。 */
+			ReflectionProbeBakeCache::Data data;
+			if (!ReflectionProbeBakeCache::Read(PathToUtf8(absolute_path), data))
+				return;	/* 损坏 / 版本不符：图卡留空（通用行仍显示大小与时间） */
+
+			for (const ReflectionProbeBakeCache::Image& image : data.Images)
+			{
+				ProbeImageCard image_card;
+				image_card.Label = BakeImageKindName(image.Kind);
+
+				const char* format_name = GetEnumName(image.Format);
+				image_card.Spec = std::to_string(image.Size) + " x " + std::to_string(image.Size)
+					+ ", " + (format_name != nullptr ? format_name : "?")
+					+ ", " + std::to_string(image.Mips.size())
+					+ (image.Mips.size() > 1 ? " mips" : " mip");
+
+				image_card.SourcePath = PathToUtf8(absolute_path);
+				image_card.TextureName = PathToUtf8(absolute_path.filename()) + "_" + image_card.Label;
+				image_card.ImageIndex = static_cast<int>(m_AssetProbeCards.size());
+				image_card.MipCount = static_cast<int>(std::max<size_t>(image.Mips.size(), 1));
+				image_card.Mip0Size = image.Size;
+				/* 初始显示"自动挑的那层"（封面到 ~64px）—— 与探针卡里的预览同口径 */
+				image_card.Mip = static_cast<int>(ReflectionProbe::AutoPreviewMip(image));
+				image_card.Texture = ReflectionProbe::BuildPreviewTexture(
+					image_card.TextureName, image, image_card.Mip);
+
+				m_AssetProbeCards.push_back(std::move(image_card));
+			}
+		}
 	}
 
+	/* 切换某张烘焙图卡的预览 mip：重开缓存文件（数据不常驻 —— 切层是低频动作，
+	 * 重读一遍文件最省内存）、按新层级重生成十字展开图。
+	 * 读不到（损坏 / 丢失 / 序号越界）：图留空，卡照常显示。 */
+	void SceneHierarchy::ApplyProbeCardMip(size_t card_index, int mip)
+	{
+		ProbeImageCard& card = m_AssetProbeCards[card_index];
+		card.Mip = mip;
+
+		ReflectionProbeBakeCache::Data data;
+		if (card.SourcePath.empty() || !ReflectionProbeBakeCache::Read(card.SourcePath, data)
+			|| card.ImageIndex < 0 || static_cast<size_t>(card.ImageIndex) >= data.Images.size())
+		{
+			card.Texture = nullptr;
+			return;
+		}
+
+		card.Texture = ReflectionProbe::BuildPreviewTexture(
+			card.TextureName, data.Images[card.ImageIndex], card.Mip);
+	}
 
 	/* 按字段类型绘制单个控件，field_ptr 指向可写的字段存储 */
 	static void DrawFieldControl(const FieldDesc& field, void* field_ptr)

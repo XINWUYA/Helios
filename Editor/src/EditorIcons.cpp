@@ -934,6 +934,35 @@ namespace Helios::Icons
 			dl->AddLine(c.At(0.53f, 0.58f), c.At(0.53f, 0.82f), color, t);
 		}
 
+		/* 探针缓存文件：页里一个八面体 + 中心星芒（与场景树里的 ReflectionProbe 同一处标记——
+		 * 那边是"场景里的探针实体"，这里是"磁盘上的烘焙结果"）。 */
+		void DrawFileProbe(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			StrokePage(dl, c, t, color);
+
+			/* 八面体轮廓（顶 / 右上 / 右下 / 底 / 左下 / 左上），折面填淡色 */
+			static constexpr float kBody[6][2] = {
+				{ 0.500f, 0.316f }, { 0.713f, 0.431f }, { 0.713f, 0.663f },
+				{ 0.500f, 0.778f }, { 0.287f, 0.663f }, { 0.287f, 0.431f }
+			};
+			FillPoly(dl, c, kBody, PaletteColor(color, kViolet, 0.16f));
+			StrokePolyline(dl, c, kBody, t, PaletteColor(color, kViolet), true);
+
+			/* 腰线 + 竖棱 */
+			dl->AddLine(c.At(0.287f, 0.431f), c.At(0.500f, 0.547f), color, t);
+			dl->AddLine(c.At(0.500f, 0.547f), c.At(0.713f, 0.431f), color, t);
+			dl->AddLine(c.At(0.500f, 0.547f), c.At(0.500f, 0.778f), color, t);
+
+			/* 中心星芒（探针特征） */
+			static constexpr float kStar[8][2] = {
+				{ 0.500f, 0.453f }, { 0.534f, 0.522f }, { 0.603f, 0.547f }, { 0.534f, 0.572f },
+				{ 0.500f, 0.641f }, { 0.466f, 0.572f }, { 0.397f, 0.547f }, { 0.466f, 0.522f }
+			};
+			FillPoly(dl, c, kStar, PaletteColor(color, kMint));
+		}
 
 		/* ---- 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 ----
 		 * 造型与 SVG symbol 对齐：四角取景框 + 中心轴点（Gizmos）、
@@ -1770,6 +1799,7 @@ namespace Helios::Icons
 			{ "FileMtlGraph",      &DrawFileMtlGraph,       0.86f },
 			{ "FileShader",        &DrawFileShader,         0.86f },
 			{ "FileModel",         &DrawFileModel,          0.86f },
+			{ "FileProbe",         &DrawFileProbe,          0.86f },
 			{ "Gizmos",            &DrawGizmos,             0.90f },
 			{ "Grid",              &DrawGrid,               0.90f },
 			{ "WorldAxis",         &DrawWorldAxis,          0.90f },

@@ -286,11 +286,11 @@ namespace Helios
 
 		tinyxml2::XMLElement* entities_root = scene_root->InsertNewChildElement("Entities");
 
-		/* 保存场景时才持久化烘焙结果：烘焙结果是显存中的中间状态，只有场景落盘时才有必要写文件。
-		 * 这里只登记请求（写入要等 GPU 执行完，由探针的写入状态机在后续帧完成），
-		 * 但缓存路径必须在序列化组件之前定下来，才能一并写进 .scn。 */
+		/* 保存场景时才持久化烘焙结果：这里只登记请求（真正的写入等 GPU 执行完、由探针状态机在后续
+		 * 帧完成），但缓存路径要在序列化组件之前定下来（一并写进 .scn）；缓存按正在保存的场景文件
+		 * 位置分目录。 */
 		if (m_pReflectionProbeManager != nullptr)
-			m_pReflectionProbeManager->RequestBakeCacheWrites();
+			m_pReflectionProbeManager->RequestBakeCacheWrites(path);
 
 		/* 按实体句柄升序输出：registry 的遍历顺序与创建顺序无关，
 		 * 直接遍历会让每次「加载 → 保存」把实体顺序整体翻转。 */

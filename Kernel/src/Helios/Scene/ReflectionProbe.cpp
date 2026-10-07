@@ -13,7 +13,12 @@
 #include <Helios/VirtualDevice/DeviceTexture.h>
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
+#include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
+#include <unordered_set>
+#include <vector>
 
 
 namespace Helios
@@ -54,6 +59,17 @@ namespace Helios
     {
         m_BakeResult = BakeResult{};
         m_BakeCompleted = false;
+
+        /* 烘焙结果作废，预览随之作废：清空后由 UI 的按需请求在重新烘焙完成后重建 */
+        for (auto& preview : m_BakePreviews)
+            preview = nullptr;
+        m_PreviewState = BakePreviewState::Idle;
+        m_PreviewFailed = false;
+    }
+
+    void ReflectionProbe::RequestRebake()
+    {
+        m_RebakeRequested = true;
     }
 
     /* ==================== 烘焙结果缓存 ==================== */
@@ -75,6 +91,119 @@ namespace Helios
             default:                     return false;
             }
         }
+
+        /* ==================== 烘焙结果预览（十字展开图） ==================== */
+
+        /* 预览里每个面的目标边长：取到 64 就够看清结构（从 mip 链里取，不回读全尺寸） */
+        constexpr uint32_t kBakePreviewFaceSize = 64;
+
+        /* 预览生成在烘焙完成后至少等待的帧数：让承载烘焙绘制的命令缓冲区先提交 */
+        constexpr uint8_t kBakePreviewFrameDelay = 1;
+
+        /* IEEE 754 半精度 -> float。回读的 RGBA16F 是原始字节，CPU 侧要自己解出数值；
+         * 不用平台的 _Float16 —— 跨编译器（MSVC / clang）行为一致更重要。 */
+        float HalfToFloat(uint16_t half)
+        {
+            const uint32_t sign = static_cast<uint32_t>(half & 0x8000u) << 16;
+            const uint32_t exponent = (half >> 10) & 0x1Fu;
+            uint32_t mantissa = half & 0x03FFu;
+
+            uint32_t bits = 0;
+            if (exponent == 0)
+            {
+                if (mantissa == 0)
+                {
+                    bits = sign; /* ±0 */
+                }
+                else
+                {
+                    /* 非规格化数：左移规范化，直到隐含位进入 mantissa 的 bit10 */
+                    int32_t shift = -1;
+                    do
+                    {
+                        ++shift;
+                        mantissa <<= 1;
+                    } while ((mantissa & 0x400u) == 0);
+                    mantissa &= 0x03FFu;
+                    bits = sign | (static_cast<uint32_t>(112 - shift) << 23) | (mantissa << 13);
+                }
+            }
+            else if (exponent == 0x1Fu)
+            {
+                bits = sign | 0x7F800000u | (mantissa << 13); /* Inf / NaN */
+            }
+            else
+            {
+                bits = sign | ((exponent + 112u) << 23) | (mantissa << 13);
+            }
+
+            float result = 0.0f;
+            std::memcpy(&result, &bits, sizeof(float));
+            return result;
+        }
+
+        /* HDR 值 -> 8 位显示值：Reinhard 压缩 + sRGB 近似 gamma。
+         * 预览是"看结构"用的，不做精确色彩管理。 */
+        uint8_t TonemapToByte(float value)
+        {
+            value = std::max(value, 0.0f);
+            const float mapped = value / (1.0f + value);
+            return static_cast<uint8_t>(std::pow(mapped, 1.0f / 2.2f) * 255.0f + 0.5f);
+        }
+
+        /* 十字展开布局（4 列 x 3 行）里每个面的格子坐标；面序 = +X,-X,+Y,-Y,+Z,-Z（与捕获相机一致） */
+        constexpr uint32_t kCrossColumn[6] = { 2, 0, 1, 1, 1, 3 };
+        constexpr uint32_t kCrossRow[6] = { 1, 1, 0, 2, 1, 1 };
+
+        /* 预览 mip 的选取结果：往低分辨率走，直到封面边长不超过目标（不能越过可用 mip 链）。
+         * GPU 回读路径与公共构建（BuildPreviewTexture）共用同一套选取。 */
+        struct PreviewMipSelection
+        {
+            uint32_t Mip{ 0 };
+            uint32_t FaceSize{ 1 };
+        };
+
+        PreviewMipSelection SelectPreviewMip(uint32_t mip0_size, uint32_t mip_count)
+        {
+            PreviewMipSelection selection{ 0, std::max(mip0_size, 1u) };
+            while (selection.FaceSize > kBakePreviewFaceSize && selection.Mip + 1 < std::max(mip_count, 1u))
+            {
+                selection.FaceSize = std::max(selection.FaceSize >> 1, 1u);
+                ++selection.Mip;
+            }
+
+            return selection;
+        }
+
+        /* GPU 侧：从设备立方图回读预览用的那个 mip，组成一张"单 mip"的缓存图，
+         * 其余交给公共的 BuildPreviewTexture —— 与"读 .probe 文件"走同一条转换路径。
+         * 只回读一个 mip（封面到 ~64px），不搬全尺寸数据。 */
+        SharedPtr<DeviceTexture> BuildGpuBakePreviewTexture(const std::string& name, const SharedPtr<DeviceTexture>& source)
+        {
+            if (source == nullptr)
+                return nullptr;
+
+            const TextureDesc& source_desc = source->GetTextureDesc();
+            const PreviewMipSelection selection = SelectPreviewMip(source_desc.Width,
+                std::max<uint32_t>(1u, source_desc.MipLevels));
+
+            ReflectionProbeBakeCache::Image image;
+            image.Format = source_desc.Format;
+            image.Size = selection.FaceSize;    /* 这张"图"就是选中的那个 mip */
+            image.Mips.resize(1);
+            image.Mips[0].resize(6);
+
+            for (uint32_t face = 0; face < 6; ++face)
+            {
+                if (!source->ReadbackPixels(image.Mips[0][face], selection.Mip, face))
+                {
+                    CORE_LOG_WARN("ReflectionProbe preview: readback failed for '{}' (mip {}, face {})", name, selection.Mip, face);
+                    return nullptr;
+                }
+            }
+
+            return ReflectionProbe::BuildPreviewTexture(name, image);
+        }
     }
 
     void ReflectionProbe::RequestBakeCacheWrite(const std::string& path)
@@ -91,7 +220,7 @@ namespace Helios
         m_CacheWriteState = BakeCacheWriteState::Requested;
     }
 
-    std::string ReflectionProbe::MakeDefaultBakeCachePath() const
+    std::string ReflectionProbe::MakeDefaultBakeCachePath(const std::string& scene_path) const
     {
         std::string name = GetDebugName();
         if (name.empty())
@@ -109,7 +238,28 @@ namespace Helios
                 character = '_';
         }
 
-        return "BakedReflectionProbes/" + name + ".probe";
+        /* 缓存子目录 = 场景相对资源根的路径（去扩展名）：镜像场景在资源树里的位置，
+         * 场景另存/搬移后缓存目录跟着走。场景不在资源根下时相对路径会带 .. ——
+         * 不能把它拼进资源相对路径，退回只用场景文件名起一个目录。 */
+        std::string scene_directory;
+        std::filesystem::path scene_file;
+        if (!scene_path.empty() && TryPathFromUtf8(scene_path, scene_file))
+        {
+            std::error_code error;
+            const std::filesystem::path relative = std::filesystem::relative(scene_file, g_AssetsPath, error);
+            const bool under_assets_root = !error && !relative.empty()
+                && std::none_of(relative.begin(), relative.end(),
+                    [](const std::filesystem::path& part) { return part == ".."; });
+
+            scene_directory = PathToUtf8(under_assets_root
+                ? (relative.parent_path() / relative.stem())
+                : scene_file.stem());
+        }
+
+        const std::string directory = scene_directory.empty()
+            ? "BakedReflectionProbes/"
+            : "BakedReflectionProbes/" + scene_directory + "/";
+        return directory + name + ".probe";
     }
 
     void ReflectionProbe::TickBakeCacheWrite()
@@ -269,6 +419,199 @@ namespace Helios
         return true;
     }
 
+    /* ==================== 烘焙结果预览 ==================== */
+
+    void ReflectionProbe::RequestBakePreview()
+    {
+        if (m_PreviewState != BakePreviewState::Idle)
+            return; /* 已在生成中：幂等 */
+
+        m_PreviewFailed = false;
+        m_PreviewState = BakePreviewState::Requested;
+    }
+
+    void ReflectionProbe::TickBakePreview()
+    {
+        /* 重烘焙请求：UI 帧里点的（当帧绘制列表可能还引用着预览纹理，
+         * 当场销毁会悬垂），在这里统一执行 —— Prepare 先于本帧的绘制/UI */
+        if (m_RebakeRequested)
+        {
+            m_RebakeRequested = false;
+            Reset();
+        }
+
+        if (m_PreviewState == BakePreviewState::Idle)
+            return;
+
+        if (m_PreviewState == BakePreviewState::Requested)
+        {
+            /* 等烘焙结果就绪（请求可能先于烘焙完成到达，例如同一帧里先点 Rebake） */
+            if (!m_BakeCompleted)
+                return;
+
+            m_PreviewState = BakePreviewState::WaitingForGPU;
+            m_PreviewCountdown = kBakePreviewFrameDelay;
+            return;
+        }
+
+        if (m_PreviewCountdown > 0)
+        {
+            --m_PreviewCountdown;
+            return;
+        }
+
+        /* 承载烘焙绘制的命令缓冲区可能还在执行：回读前先等它执行完（与缓存写入同因） */
+        if (auto render_api = Renderer::GetRenderAPI())
+            render_api->WaitForGPU();
+
+        m_PreviewFailed = !BuildBakePreviews();
+        m_PreviewState = BakePreviewState::Idle;
+    }
+
+    bool ReflectionProbe::BuildBakePreviews()
+    {
+        constexpr size_t count = kBakePreviewCount;
+        static constexpr const char* kNames[count] = { "_EnvPreview", "_IrradiancePreview", "_PrefilterPreview" };
+
+        const SharedPtr<DeviceTexture>* sources[count] = {
+            &m_BakeResult.EnvColorCubemap,
+            &m_BakeResult.IrradianceMap,
+            &m_BakeResult.PrefilterMap,
+        };
+
+        /* 全部构建成功才一次性换上：避免一半新一半旧 */
+        SharedPtr<DeviceTexture> built[count];
+        for (size_t index = 0; index < count; ++index)
+        {
+            if (*sources[index] == nullptr)
+                continue; /* 该图未烘焙（配置省略）：预览也没有 */
+
+            built[index] = BuildGpuBakePreviewTexture(GetDebugName() + kNames[index], *sources[index]);
+            if (built[index] == nullptr)
+                return false;
+        }
+
+        for (size_t index = 0; index < count; ++index)
+            m_BakePreviews[index] = std::move(built[index]);
+
+        return m_BakePreviews[0] != nullptr;
+    }
+
+    /* ==================== 烘焙结果预览（公共构建） ====================
+     * 输入是一张立方图的原始字节（来自 GPU 回读、或直接读 .probe 缓存文件），
+     * 输出是可直接给 UI 采样的十字展开 RGBA8 纹理。 */
+
+    SharedPtr<DeviceTexture> ReflectionProbe::BuildPreviewTexture(const std::string& name,
+        const ReflectionProbeBakeCache::Image& image, int mip_index)
+    {
+        /* 没有渲染后端实例（headless 检查程序没调过 Renderer::Init）：无处上传 2D 纹理。
+         * Metal 的纹理/回读全依赖 Init 时注册的设备，这里先短路，别往下走。 */
+        if (Renderer::GetRenderAPI() == nullptr)
+            return nullptr;
+
+        const uint32_t bytes_per_texel = GetTextureFormatTexelSize(image.Format);
+        if (bytes_per_texel == 0)
+            return nullptr;
+
+        /* 选 mip：显式指定就用指定层（资源详情的手动切换）——越界视为数据不完整；
+         * 否则自动取封面到 ≤64px 的那层 */
+        const uint32_t mip_count = static_cast<uint32_t>(std::max<size_t>(image.Mips.size(), 1));
+        const uint32_t mip = (mip_index < 0)
+            ? SelectPreviewMip(image.Size, mip_count).Mip
+            : static_cast<uint32_t>(mip_index);
+
+        if (mip >= image.Mips.size() || image.Mips[mip].size() < 6)
+            return nullptr;
+
+        const uint32_t face_size = PreviewMipFaceSize(image.Size, mip);
+        const size_t expected_face_bytes = static_cast<size_t>(face_size) * face_size * bytes_per_texel;
+        for (const std::vector<uint8_t>& face : image.Mips[mip])
+        {
+            if (face.size() < expected_face_bytes)
+                return nullptr;
+        }
+
+        const uint32_t cross_width = face_size * 4;
+        const uint32_t cross_height = face_size * 3;
+        /* 空位保持全 0（alpha 0）：显示时透出面板底色，十字形状一眼可辨 */
+        std::vector<uint8_t> pixels(static_cast<size_t>(cross_width) * cross_height * 4, 0);
+
+        for (uint32_t face = 0; face < 6; ++face)
+        {
+            const std::vector<uint8_t>& raw = image.Mips[mip][face];
+            const uint32_t base_x = kCrossColumn[face] * face_size;
+            const uint32_t base_y = kCrossRow[face] * face_size;
+
+            for (uint32_t y = 0; y < face_size; ++y)
+            {
+                for (uint32_t x = 0; x < face_size; ++x)
+                {
+                    const uint8_t* texel = raw.data() + (static_cast<size_t>(y) * face_size + x) * bytes_per_texel;
+
+                    float r = 0.0f;
+                    float g = 0.0f;
+                    float b = 0.0f;
+                    switch (image.Format)
+                    {
+                    case TextureFormat::RGBA16F:
+                    {
+                        uint16_t half[4] = {};
+                        std::memcpy(half, texel, sizeof(half));
+                        r = HalfToFloat(half[0]);
+                        g = HalfToFloat(half[1]);
+                        b = HalfToFloat(half[2]);
+                        break;
+                    }
+                    case TextureFormat::RGBA32F:
+                    {
+                        float rgba[4] = {};
+                        std::memcpy(rgba, texel, sizeof(rgba));
+                        r = rgba[0];
+                        g = rgba[1];
+                        b = rgba[2];
+                        break;
+                    }
+                    default:
+                        return nullptr;
+                    }
+
+                    uint8_t* dst = pixels.data()
+                        + (static_cast<size_t>(base_y + y) * cross_width + (base_x + x)) * 4;
+                    dst[0] = TonemapToByte(r);
+                    dst[1] = TonemapToByte(g);
+                    dst[2] = TonemapToByte(b);
+                    dst[3] = 255;
+                }
+            }
+        }
+
+        TextureDesc preview_desc;
+        preview_desc.SamplerType = SamplerType::Sampler2D;
+        preview_desc.Width = cross_width;
+        preview_desc.Height = cross_height;
+        preview_desc.Format = TextureFormat::RGBA8;
+        preview_desc.Usage = TextureUsage::Sampleable;
+        preview_desc.MipLevels = 1;
+
+        SharedPtr<DeviceTexture> preview = DeviceTexture::Create(name, preview_desc);
+        if (preview == nullptr)
+            return nullptr;
+
+        preview->SetData(pixels.data(), PixelDesc{ PixelFormat::RGBA, PixelType::UnsignedByte });
+        return preview;
+    }
+
+    uint32_t ReflectionProbe::AutoPreviewMip(const ReflectionProbeBakeCache::Image& image)
+    {
+        return SelectPreviewMip(image.Size,
+            static_cast<uint32_t>(std::max<size_t>(image.Mips.size(), 1))).Mip;
+    }
+
+    uint32_t ReflectionProbe::PreviewMipFaceSize(uint32_t mip0_size, uint32_t mip_index)
+    {
+        return std::max<uint32_t>(mip0_size >> std::min(mip_index, 31u), 1u);
+    }
+
     /* 构造一个带 Color0(立方体贴图) + Depth 的离屏帧缓冲，用于把场景渲染到立方体贴图的某一面。 */
     SharedPtr<DeviceFrameBuffer> ReflectionProbe::MakeSceneCaptureFrameBuffer(const SharedPtr<DeviceTexture>& color_target, const SharedPtr<DeviceTexture>& depth_target, uint32_t size)
     {
@@ -385,7 +728,12 @@ namespace Helios
             Renderer::Clear();
 
             const glm::mat4 view = GetCaptureViewMatrix(face);
-            Renderer::SetViewUniforms(view, capture_projection, capture_position);
+            /* 捕获相机在探针位置：视图 = 朝向 × 平移(-探针位置)（标准 lookAt 约定
+             * R·T(-eye)）——只给朝向矩阵会让捕获发生在世界原点，探针离原点越远、
+             * 烘焙出的环境越离谱。 */
+            Renderer::SetViewUniforms(
+                view * glm::translate(glm::mat4(1.0f), -capture_position),
+                capture_projection, capture_position);
 
             for (const auto& mesh_object : visible_objects)
             {
@@ -588,14 +936,22 @@ namespace Helios
             /* 推进「烘焙结果落盘」状态机：等烘焙完成、再等 GPU 执行完，最后回读写出 */
             probe->TickBakeCacheWrite();
 
+            /* 推进「烘焙结果预览」状态机：同样等烘焙完成 + GPU 执行完，再转换上传 */
+            probe->TickBakePreview();
+
             if (probe->IsRealtime() || !probe->IsBaked())
                 m_NeedBakeProbes.push_back(probe);
         }
     }
 
-    void ReflectionProbeManager::RequestBakeCacheWrites()
+    void ReflectionProbeManager::RequestBakeCacheWrites(const std::string& scene_path)
     {
         PROFILE_FUNCTION();
+
+        /* 同一场景允许存在重名探针（复制实体不会自动改名）：按登记顺序给重名者的
+         * 缓存文件加 _2 / _3 … 序号，否则它们会互相覆盖彼此的烘焙结果。
+         * 登记顺序与实体创建顺序一致，加载后仍然稳定。 */
+        std::unordered_set<std::string> assigned_paths;
 
         for (const auto& probe : m_RegisteredProbes)
         {
@@ -603,9 +959,26 @@ namespace Helios
             if (!probe || !probe->GetEnable() || !probe->IsBaked())
                 continue;
 
-            /* 已有路径的沿用场景里记录的那个；否则按探针名推导 */
-            const std::string& recorded = probe->GetBakeCachePath();
-            probe->RequestBakeCacheWrite(recorded.empty() ? probe->MakeDefaultBakeCachePath() : recorded);
+            /* 写入目标在保存时重新推导（缓存目录跟随场景）：场景另存/搬移后缓存跟着走，
+             * 场景文件里记录的旧路径只用于加载。 */
+            std::string path = probe->MakeDefaultBakeCachePath(scene_path);
+
+            if (!assigned_paths.insert(path).second)
+            {
+                constexpr char kExtension[] = ".probe";
+                const std::string base = path.substr(0, path.size() - (sizeof(kExtension) - 1));
+                for (uint32_t index = 2; ; ++index)
+                {
+                    std::string candidate = base + "_" + std::to_string(index) + kExtension;
+                    if (assigned_paths.insert(candidate).second)
+                    {
+                        path = std::move(candidate);
+                        break;
+                    }
+                }
+            }
+
+            probe->RequestBakeCacheWrite(path);
         }
     }
 

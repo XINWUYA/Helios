@@ -1,5 +1,6 @@
 #pragma once
 #include "SceneObject.h"
+#include "ReflectionProbeBakeCache.h"
 
 namespace Helios
 {
@@ -40,8 +41,13 @@ namespace Helios
 
         /* 执行烘焙 */
         void Bake(RenderView* render_view);
-        /* 重置烘焙状态，使下一次渲染重新烘焙 */
+        /* 重置烘焙状态、下次渲染重新烘焙。注意：它会当场销毁烘焙结果和预览纹理 —— 这些可能仍被
+         * 当前帧的 ImGui 绘制列表引用，直接销毁会留下悬垂指针。UI（Rebake 按钮）走 RequestRebake 推迟执行。 */
         void Reset();
+
+        /* 请求重烘焙：只在 UI 帧里置位，真正的 Reset 推迟到下一帧的 TickBakePreview
+         * （Prepare 阶段、先于绘制/UI）执行 —— 那时旧纹理已不在任何绘制列表里。 */
+        void RequestRebake();
 
         /* 获取烘焙结果 */
         SharedPtr<DeviceTexture> GetEnvCubemap() const { return m_BakeResult.EnvColorCubemap; }
@@ -71,8 +77,10 @@ namespace Helios
          * 由 Scene::Serializer 在保存场景时登记，实际写盘由 TickBakeCacheWrite 推进。 */
         void RequestBakeCacheWrite(const std::string& path);
 
-        /* 默认缓存位置：BakedReflectionProbes/<探针名>.probe（相对资源根） */
-        [[nodiscard]] std::string MakeDefaultBakeCachePath() const;
+        /* 默认缓存位置：BakedReflectionProbes/<场景相对路径去扩展名>/<探针名>.probe。缓存按场景分
+         * 目录（镜像场景的目录结构，避免互相覆盖）；场景不在资源根下时就按场景文件名建目录，
+         * scene_path 为空则退回旧的平铺布局。 */
+        [[nodiscard]] std::string MakeDefaultBakeCachePath(const std::string& scene_path) const;
 
         /* 每帧推进写入状态机（由 ReflectionProbeManager 驱动）。
          * 落盘必须等 GPU 执行完承载烘焙绘制的命令缓冲区，否则 Shared 存储模式下读到的是旧内容。 */
@@ -85,6 +93,56 @@ namespace Helios
         [[nodiscard]] BakeCacheWriteState GetBakeCacheWriteState() const { return m_CacheWriteState; }
         [[nodiscard]] bool HasBakeCacheWriteFailed() const { return m_CacheWriteFailed; }
 
+        /* ---- 烘焙结果的预览图 ----
+         * 立方体贴图 UI 没法直接采样：按需转成 RGBA8 的十字展开图（4x3 布局）给属性面板显示。
+         * 懒生成（第一次显示或者 Rebake 重建时才做）。 */
+
+        enum class BakePreviewKind : uint8_t
+        {
+            Environment = 0,
+            Irradiance,
+            Prefilter,
+            Count,
+        };
+
+        enum class BakePreviewState : uint8_t
+        {
+            Idle = 0,
+            Requested,      /* 已请求：等烘焙完成 */
+            WaitingForGPU,  /* 烘焙完成：等 GPU 执行完再回读 */
+        };
+
+        /* 请求生成（或刷新）预览。幂等：生成中重复调用不生效；
+         * 失败后不再自动重试（重烘焙 Reset 会重新武装）。 */
+        void RequestBakePreview();
+
+        /* 每帧推进预览生成状态机（由 ReflectionProbeManager 驱动，与缓存写入同一帧序） */
+        void TickBakePreview();
+
+        /* 预览图（懒生成，未生成时为空）。Environment 一定有（烘焙总产出环境图），
+         * Irradiance / Prefilter 取决于烘焙配置。 */
+        [[nodiscard]] SharedPtr<DeviceTexture> GetBakePreviewTexture(BakePreviewKind kind) const
+        {
+            return m_BakePreviews[static_cast<size_t>(kind)];
+        }
+        [[nodiscard]] BakePreviewState GetBakePreviewState() const { return m_PreviewState; }
+        [[nodiscard]] bool HasBakePreview() const { return m_BakePreviews[0] != nullptr; }
+        [[nodiscard]] bool HasBakePreviewFailed() const { return m_PreviewFailed; }
+
+        /* 把烘焙数据（立方图，含 mip）转成十字展开的 RGBA8 预览纹理：half / float 解码、Reinhard +
+         * gamma、拼 4x3（空角透明）、上传 2D 纹理。mip_index < 0 = 自动（≤64px 那层）、≥ 0 = 指定层级。
+         * 返回空 = 上下文缺失 / 格式不支持 / 数据不完整 / 越界。 */
+        static SharedPtr<DeviceTexture> BuildPreviewTexture(const std::string& name,
+            const ReflectionProbeBakeCache::Image& image, int mip_index = -1);
+
+        /* 自动选取的预览 mip 序号（封面到 ≤64px 的那层）—— 与 BuildPreviewTexture 的
+         * 默认行为一致；资源详情用它把"Mip"组合框的初始选中项设成同一层。 */
+        static uint32_t AutoPreviewMip(const ReflectionProbeBakeCache::Image& image);
+
+        /* 某层 mip 的立方图面边长：max(1, Size >> mip)（与缓存文件写读的校验口径一致）。
+         * 资源详情的 Mip 组合框用它给每层拼标签。 */
+        static uint32_t PreviewMipFaceSize(uint32_t mip0_size, uint32_t mip_index);
+
     private:
         SharedPtr<DeviceFrameBuffer> MakeSceneCaptureFrameBuffer(const SharedPtr<DeviceTexture>& color_target, const SharedPtr<DeviceTexture>& depth_target, uint32_t size);
         /* 生成环境立方体贴图：BakeSkyBoxOnly 时用 EquirectToCube 生成；否则在探针位置用 6 个朝向的
@@ -94,6 +152,10 @@ namespace Helios
         void BakeIrradianceMap();
         /* 烘焙PrefilterMap */
         void BakePrefilterMap();
+
+        /* 生成预览图：把三张烘焙立方图回读、色调映射、拼成十字展开、上传为 2D 纹理。
+         * 需要 GPU 已完成烘焙绘制（调用方先 WaitForGPU）。 */
+        bool BuildBakePreviews();
 
         /* IBL烘焙结果 */
         struct BakeResult
@@ -116,6 +178,15 @@ namespace Helios
         /* 烘焙完成后还需等待的帧数，让承载烘焙绘制的命令缓冲区先提交 */
         uint8_t m_CacheWriteCountdown{ 0 };
         bool m_CacheWriteFailed{ false };
+
+        /* 烘焙结果预览（十字展开图）：懒生成状态机，由 UI 请求触发 */
+        static constexpr size_t kBakePreviewCount = static_cast<size_t>(BakePreviewKind::Count);
+        SharedPtr<DeviceTexture> m_BakePreviews[kBakePreviewCount]{};
+        BakePreviewState m_PreviewState{ BakePreviewState::Idle };
+        uint8_t m_PreviewCountdown{ 0 };
+        bool m_PreviewFailed{ false };
+        /* 重烘焙请求（UI 帧里只置位，TickBakePreview 里执行，见 RequestRebake） */
+        bool m_RebakeRequested{ false };
 
         friend class ReflectionProbeManager;
     };
@@ -150,8 +221,9 @@ namespace Helios
         void Prepare();
 
         /* 为所有已烘焙的探针登记缓存写入请求（由 Scene::Serializer 在保存场景时调用）。
-         * 没有烘焙结果的探针会被跳过：此时没有需要持久化的内容。 */
-        void RequestBakeCacheWrites();
+         * scene_path 为正在保存的场景文件路径：缓存路径在保存时按场景重新推导，
+         * 场景文件里记录的旧路径只用于加载；没有烘焙结果的探针会被跳过。 */
+        void RequestBakeCacheWrites(const std::string& scene_path);
 
         /* 将 BRDFLut 烘焙 Pass 与所有需要烘焙的 ReflectionProbe 的 Bake Pass 注入到当前 RenderView 的 FrameGraph 中。
          * BRDFLut 纹理句柄会被写入 FrameGraph 的 Blackboard（"ReflectionProbeBRDFLutHandle"），供后续 Pass 使用。 */

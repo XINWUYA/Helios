@@ -15,6 +15,7 @@
 namespace Helios
 {
 	class Scene;
+	class DeviceTexture;
 	class Material;
 	struct EntityTemplateDesc;
 
@@ -150,6 +151,8 @@ namespace Helios
 		/* 按 (路径, 写入时间) 缓存类型相关的深挖详情（图片尺寸 / 场景统计）——
 		 * 要读文件内容的那种，只在选中项或文件变化时重算 */
 		void RefreshAssetDetailRows(const AssetSelectionEntry& entry);
+		/* 切某张烘焙图卡的预览 mip：重开缓存文件（数据不常驻）、按新层级重生成十字展开图 */
+		void ApplyProbeCardMip(size_t card_index, int mip);
 		/* 面板头部：实体图标 + 名字 + 新增组件入口（让属性面板自带上下文） */
 		void ShowPropertiesHeader();
 		/* 显示选中实体的全部组件（遍历 ComponentRegistry，不认识具体类型） */
@@ -190,6 +193,21 @@ namespace Helios
 		std::string m_AssetDetailPath;
 		std::filesystem::file_time_type m_AssetDetailWriteTime{};
 		std::vector<std::pair<std::string, std::string>> m_AssetDetailRows;
+		/* .probe 文件的烘焙结果图卡（跟深挖行用同一个缓存键刷新；同级平铺在详情卡后面）：每张烘焙图
+		 * （环境 / 辐照度 / 预滤波）一张卡（名字 + 规格 + 十字展开预览）；多层带「Mip」切换。 */
+		struct ProbeImageCard
+		{
+			std::string Label;                  /* 显示名（Environment / Irradiance / Prefilter） */
+			std::string Spec;                   /* "512 x 512, RGBA16F, 10 mips" */
+			std::string SourcePath;             /* .probe 绝对路径（切 mip 时重读；缓存数据不常驻） */
+			std::string TextureName;            /* 设备纹理名（缓存文件名 + 标签） */
+			int ImageIndex{ 0 };                /* 该图在缓存文件里的序号 */
+			int Mip{ 0 };                       /* 当前预览的 mip 层级 */
+			int MipCount{ 1 };                  /* 缓存里的 mip 层数（> 1 才画切换行） */
+			uint32_t Mip0Size{ 0 };             /* mip0 边长（组合框标签用） */
+			SharedPtr<DeviceTexture> Texture;   /* 十字展开预览；无图形上下文时为空 */
+		};
+		std::vector<ProbeImageCard> m_AssetProbeCards;
 		/* 本帧请求的挂接（拖拽） */
 		PendingReparent m_PendingReparent;
 		/* 编辑历史（由所属 Layer 注入） */
