@@ -14,6 +14,8 @@ struct SGBufferData
 	vec3 Ambient;
 	float Anisotropy;
 	vec3 WorldPosition;
+	/* 接受阴影（0/1）：来自 default.glsl 写入的 GBufferTexture5.a */
+	float ReceiveShadow;
 };
 
 layout(binding = 0) uniform sampler2D u_GBufferTexture0;
@@ -43,6 +45,7 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 	gbuffer.Ambient = color4.rgb;
 	gbuffer.Anisotropy = color4.a;
 	gbuffer.WorldPosition = color5.rgb;
+	gbuffer.ReceiveShadow = color5.a;
 }
 
 #endif // GBUFFER_GLSL

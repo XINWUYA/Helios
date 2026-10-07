@@ -667,6 +667,11 @@ namespace Helios
 				const GizmoTransformParts parts = DecomposeGizmoTransform(scene->GetWorldTransform(entity));
 				const float world_scale = world_scale_at(parts.Translation, kLightGizmoPixelSize);
 
+				/* 图标朝向的实体旋转分量：定向类图标（太阳）把"规范朝向"直接旋到实际光向，
+				 * 方向本身已随实体旋转推导（见 DirectionalLight::SetTransform），
+				 * 再叠一次实体旋转会转两圈（R 作用两次）；点光 / 聚光的图标吃实体旋转 */
+				GizmoTransformParts icon_parts = parts;
+
 				SharedPtr<DeviceVertexArray> vertex_array;
 				glm::quat extra_rotation(1.0f, 0.0f, 0.0f, 0.0f);
 				glm::vec3 response(1.0f);
@@ -681,6 +686,7 @@ namespace Helios
 					const glm::vec3 direction = directional_light->GetDirection();
 					if (glm::length(direction) > 0.0f)
 						extra_rotation = glm::rotation(glm::vec3(0.0f, -1.0f, 0.0f), glm::normalize(direction));
+					icon_parts.Orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 					/* response 保持 1：概念图标无尺寸语义，不响应缩放（Unity 灯光图标惯例） */
 					break;
 				}
@@ -710,7 +716,7 @@ namespace Helios
 				if (vertex_array)
 				{
 					Renderer::FillObjectUniformBuffer(VisibleMeshObject{
-						-1, BuildGizmoModel(parts, world_scale, extra_rotation, response), nullptr, nullptr });
+						-1, BuildGizmoModel(icon_parts, world_scale, extra_rotation, response), nullptr, nullptr });
 					Renderer::Submit(material, MeshPrimitive{ vertex_array, PrimitiveType::Triangles });
 				}
 			}
@@ -984,6 +990,12 @@ namespace Helios
 		color_target_desc.Height = m_ViewportRegion.Height;
 		color_target_desc.TextureFormat = TextureFormat::RGBA8;
 
+		/* 世界位置通道用浮点格式：RGBA8 会把世界坐标钳制到 [0,1]（负值归零、
+		 * 大于 1 截平），光照阶段拿它做级联阴影变换时采样点全部落在错误位置 ——
+		 * 阴影与场景对不上（偏移、截断，甚至全域误判为受光/被遮）。 */
+		FrameGraphTexture::Descriptor world_pos_target_desc = color_target_desc;
+		world_pos_target_desc.TextureFormat = TextureFormat::RGBA32F;
+
 		FrameGraphTexture::Descriptor depth_target_desc;
 		depth_target_desc.Width = m_ViewportRegion.Width;
 		depth_target_desc.Height = m_ViewportRegion.Height;
@@ -1037,7 +1049,7 @@ namespace Helios
 				data.GBufferTexture2 = builder.CreateTexture("GBufferTexture2", color_target_desc);
 				data.GBufferTexture3 = builder.CreateTexture("GBufferTexture3", color_target_desc);
 				data.GBufferTexture4 = builder.CreateTexture("GBufferTexture4", color_target_desc);
-				data.GBufferTexture5 = builder.CreateTexture("GBufferTexture5", color_target_desc);
+				data.GBufferTexture5 = builder.CreateTexture("GBufferTexture5", world_pos_target_desc);
 				data.ObjectId = builder.CreateTexture("ObjectId", object_id_desc);
 				data.Depth = builder.CreateTexture("GBufferDepth", depth_target_desc);
 

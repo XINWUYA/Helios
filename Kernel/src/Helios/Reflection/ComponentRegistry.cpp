@@ -342,6 +342,10 @@ namespace Helios
 					: RELATIVE_PATH(model->GetPath()).c_str());
 			}
 
+			/* 投影 / 接受阴影：与光源 IsCastShadow 同一口径，默认值也写出 */
+			element->SetAttribute("CastShadow", model_component.m_CastShadow);
+			element->SetAttribute("ReceiveShadow", model_component.m_ReceiveShadow);
+
 			/* 槽的实体级绑定：引用形态只写路径；实例形态全量内嵌（不依赖来源资产存活） */
 			for (const auto& entry : model_component.m_SlotOverrides)
 			{
@@ -377,6 +381,10 @@ namespace Helios
 			const char* path = element->Attribute("ModelPath");
 			if (path != nullptr && *path != '\0')
 				model_component.m_Model = Model::Create(path);
+
+			/* 旧场景没有这两个属性：缺省即可见设定（投影 / 接受阴影都开） */
+			model_component.m_CastShadow = element->BoolAttribute("CastShadow", true);
+			model_component.m_ReceiveShadow = element->BoolAttribute("ReceiveShadow", true);
 
 			/* 槽绑定：引用形态走 MaterialAssetManager；实例形态读内嵌定义 */
 			model_component.m_SlotOverrides.clear();
@@ -723,6 +731,12 @@ namespace Helios
 			}
 
 			ImGuiExt::EndPropertyRow();
+
+			/* 投影 / 接受阴影：渲染端的逐对象开关（见 VisibleMeshObject 与阴影 Pass / 光照采样） */
+			if (ImGuiExt::DrawCheckboxUI("CastShadow", component.m_CastShadow))
+				changed = true;
+			if (ImGuiExt::DrawCheckboxUI("ReceiveShadow", component.m_ReceiveShadow))
+				changed = true;
 
 			/* 材质槽区块：每槽一行 + 当前材质属性（可就地编辑） */
 			if (model != nullptr)

@@ -131,7 +131,9 @@ void main()
 	vec3 L = -normalize(u_LightDir);
 
 	vec3 view_pos = (u_ViewMat * vec4(vert2frag.WorldPosition, 1.0f)).xyz;
-	float shadow = CalculateShadow(u_ShadowMap, vert2frag.WorldPosition, view_pos);
+	float shadow = CalculateShadow(u_ShadowMap, vert2frag.WorldPosition, view_pos, N, L);
+	/* 模型关闭「接受阴影」时阴影因子归零 */
+	shadow *= u_ReceiveShadow;
 
 	/* 直接光照 */
 	vec3 direct = max(vec3(0.0f), BRDF(L, V, N, mtl.Metallic, mtl.Roughness, mtl.Albedo));

@@ -249,6 +249,18 @@ namespace Helios
 		// 相机世界矩阵（用于把视图空间子视锥角点变换回世界空间）；view_mat 已在脏检测处获取
 		const glm::mat4 cam_world_mat = glm::inverse(view_mat);
 
+		/* 全部投射物在光照空间的并集 AABB：级联范围收敛用（见下方逐级联求交）。
+		 * "投射物"即全部可见网格 —— 阴影的接收面也来自它们，因此并集必然包住
+		 * 所有需要采样的像素；任何能遮挡这些像素的物体也都在并集内。 */
+		glm::vec3 caster_union_min(std::numeric_limits<float>::max());
+		glm::vec3 caster_union_max(-std::numeric_limits<float>::max());
+		const bool has_caster_union = !caster_bounds.empty();
+		for (const auto& bounds : caster_bounds)
+		{
+			caster_union_min = glm::min(caster_union_min, bounds.Min);
+			caster_union_max = glm::max(caster_union_max, bounds.Max);
+		}
+
 		// 透视相机视锥参数（用于构造子视锥角点）；非透视（正交）相机退化为整段
 		const float fov        = camera ? camera->GetFov() : 45.0f;
 		const float aspect     = camera ? camera->GetAspectRatio() : 1.0f;
@@ -295,6 +307,21 @@ namespace Helios
 			/* tight-fit 基础范围：子视锥在光照空间的真实 AABB；别用 CascadeRadius 去钳（几何体会被
 			 * 投到 [-1,1] 外写不进阴影图），那个值只当最小半边长下限。级联范围收敛：XY 与投射物并集求交，
 			 * 没有投射物或不相交时退回子视锥拟合。 */
+			bool range_clamped_to_casters = false;
+			if (has_caster_union)
+			{
+				const glm::vec3 clipped_min = glm::max(ls_min, caster_union_min);
+				const glm::vec3 clipped_max = glm::min(ls_max, caster_union_max);
+				if (clipped_min.x <= clipped_max.x && clipped_min.y <= clipped_max.y)
+				{
+					ls_min.x = clipped_min.x;
+					ls_max.x = clipped_max.x;
+					ls_min.y = clipped_min.y;
+					ls_max.y = clipped_max.y;
+					range_clamped_to_casters = true;
+				}
+			}
+
 			const float radius = shadow_map_info->CascadeRadius[cascade_id];
 
 			// 居中并取对称正方形范围（以较长边为准），提升 PCF 采样稳定性
@@ -306,6 +333,13 @@ namespace Helios
 			// 下限：保证范围不小于级联半径（仅放大、不缩小真实 AABB）
 			if (radius > 0.0f)
 				half_extent = std::max(half_extent, radius);
+
+			/* 收敛生效时加 2 纹素边距：PCF 邻接采样与光栅化边界不被卷积截断 */
+			if (range_clamped_to_casters)
+			{
+				const float texel_est = (2.0f * half_extent) / static_cast<float>(shadow_map_info->Size);
+				half_extent += 2.0f * texel_est;
+			}
 
 			float ortho_left   = center_x - half_extent;
 			float ortho_right  = center_x + half_extent;
@@ -348,8 +382,18 @@ namespace Helios
 			const bool has_intersecting_geometry = geometry_z_min <= geometry_z_max;
 			if (has_intersecting_geometry)
 			{
-				ls_depth_z_min = std::min(ls_depth_z_min, geometry_z_min);
-				ls_depth_z_max = std::max(ls_depth_z_max, geometry_z_max);
+				if (range_clamped_to_casters)
+				{
+					/* 收敛生效：几何体跨度即完整依据（接收面与遮挡物都在其中），
+					 * 不再并入子视锥跨度 —— 避免把包围盒外的空白空气算进深度板。 */
+					ls_depth_z_min = geometry_z_min;
+					ls_depth_z_max = geometry_z_max;
+				}
+				else
+				{
+					ls_depth_z_min = std::min(ls_depth_z_min, geometry_z_min);
+					ls_depth_z_max = std::max(ls_depth_z_max, geometry_z_max);
+				}
 			}
 
 			// near/far 由光照空间 Z 范围推导（视图空间 Z = -光照空间 Z）
@@ -363,6 +407,7 @@ namespace Helios
 			// 计算并设置光照视图投影矩阵
 			glm::mat4 light_view_proj_mat = light_proj_mat * light_view_mat;
 			m_CascadeShadowMaps[cascade_id]->SetLightViewProjectionMat(light_view_proj_mat);
+			m_CascadeShadowMaps[cascade_id]->SetDepthRange(ortho_far - ortho_near);
 
 			// 记录该级联远边界（视图空间距离），供着色阶段选择级联
 			cascade_splits[cascade_id] = seg_far;
@@ -591,6 +636,10 @@ namespace Helios
 
 					for (const auto& mesh_object : render_view->GetVisibleMeshObjects())
 					{
+						/* 模型关闭「投影」后不写入阴影图（仍可接受阴影）：级联与点状共用这条 */
+						if (!mesh_object.CastShadow)
+							continue;
+
 						Renderer::FillObjectUniformBuffer(mesh_object);
 						Renderer::Submit(shadow_material, mesh_object.MeshSegment->GetMeshPrimitive());
 					}
@@ -610,13 +659,19 @@ namespace Helios
 				/* 渲染每级联阴影，复用UpdateCascadeMatrices已计算好的VP矩阵与Layer */
 				if (!m_CascadeShadowMaps.empty())
 				{
-					/* 一次性将全部级联的VP矩阵写入光照UBO（u_LightViewProjectionMat 数组），
-					 * 供阴影Pass（按级联索引取对应矩阵）与后续LightingPass（按视距选级联）共同使用。 */
+					/* 一次性把全部级联 VP 矩阵写进光照 UBO（u_LightViewProjectionMat 数组），给阴影 Pass（按
+					 * 级联索引取矩阵）和 LightingPass（按视距选级联）用；深度跨度和逐级联偏移也一起下发。 */
 					std::vector<glm::mat4> light_vp_mats;
+					std::vector<float> cascade_depth_spans;
 					light_vp_mats.reserve(m_CascadeShadowMaps.size());
+					cascade_depth_spans.reserve(m_CascadeShadowMaps.size());
 					for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
+					{
 						light_vp_mats.push_back(cascade_shadow_map->GetLightViewProjectionMat());
-					Renderer::FillLightUniformBuffer(m_CascadeShadowMaps[0]->m_pLight, light_vp_mats, m_CascadeSplits);
+						cascade_depth_spans.push_back(cascade_shadow_map->GetDepthRange());
+					}
+					Renderer::FillLightUniformBuffer(m_CascadeShadowMaps[0]->m_pLight, light_vp_mats, m_CascadeSplits,
+						cascade_depth_spans.empty() ? nullptr : &cascade_depth_spans);
 
 					for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
 					{

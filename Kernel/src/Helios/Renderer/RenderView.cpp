@@ -140,7 +140,8 @@ namespace Helios
 				/* 收集时按解析链定下最终材质：实体绑定 ?: 模型槽表默认 ?: 内置白模 */
 				const auto material = ResolveSlotMaterial(
 					*model_component.m_Model, mesh_segment->GetSlotIndex(), &model_component.m_SlotOverrides);
-				m_VisibleMeshObjects.emplace_back((int)entity, local_2_world, mesh_segment, material);
+				m_VisibleMeshObjects.emplace_back((int)entity, local_2_world, mesh_segment, material,
+					model_component.m_CastShadow, model_component.m_ReceiveShadow);
 			}
 		}
 

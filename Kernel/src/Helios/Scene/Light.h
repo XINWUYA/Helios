@@ -82,6 +82,10 @@ namespace Helios
 		[[nodiscard]] const glm::vec3& GetDirection() const { return m_Direciton; }
 		void SetDirection(const glm::vec3& dir) { m_Direciton = dir; }
 
+		/* 实体旋转变化时重推光向：方向 = 旋转作用下的 -Y 规范朝向（跟图标基准朝向、默认光向同源）。
+		 * 只在旋转变化时覆盖，脚本直接 SetDirection 的显式设定会保留。 */
+		void SetTransform(const glm::mat4& transform) override;
+
 	private:
 		/* 光源方向 */
 		glm::vec3 m_Direciton{ 0.0f, -1.0f, 0.0f };

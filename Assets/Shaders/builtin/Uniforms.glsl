@@ -22,6 +22,9 @@ layout(std140, binding = 1) uniform ObjectUniformBuffer
 {
 	mat4 u_Local2WorldMat;
 	int  u_ObjectId;
+	/* 是否接受阴影（0/1，来自 ModelComponent）：乘进阴影因子；
+	 * 延迟管线里由 GBuffer（GBufferTexture5.a）带给光照阶段 */
+	float u_ReceiveShadow;
 };
 
 layout(std140, binding = 3) uniform LightUniformBuffer
@@ -35,6 +38,10 @@ layout(std140, binding = 3) uniform LightUniformBuffer
 	uint u_CascadeCount;   /* 实际使用的级联数量（0 = 该光源无级联阴影） */
 	vec4 u_CascadeSplits;
 	float u_ShadowBias;    /* 阴影深度偏移（来自 ShadowMapInfo::ConstantBias），缓解阴影失真 */
+	/* 各级联的 z 空间常数偏移（= ConstantBias / 该级联的光照空间深度跨度）。
+	 * ConstantBias 以世界单位计，不同相机 far 下单靠固定 z 偏移无法通用：
+	 * 大跨度时偏移过小（阴影被自身遮挡吞掉），小跨度时又过大（阴影整体消失）。 */
+	vec4 u_CascadeShadowBias;
 
 	/* ---- 点光/聚光阴影（光照阶段逐光源填充） ---- */
 	/* 各阴影面的视图投影矩阵（点光 6 面 / 聚光只用 [0]），面顺序：+X,-X,+Y,-Y,+Z,-Z */

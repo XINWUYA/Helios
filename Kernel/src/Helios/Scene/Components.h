@@ -145,6 +145,10 @@ namespace Helios
 		SharedPtr<Model> m_Model{ nullptr };
 		/* 槽名 → 实体级绑定（"覆盖"与"实例"，见 MaterialSlotOverride） */
 		std::unordered_map<std::string, MaterialSlotOverride> m_SlotOverrides;
+		/* 投影：开启后本模型写入阴影图（见 ShadowMap 的投射体提交）；
+		 * 接受阴影：关闭后本模型不采样阴影（见 GBuffer / 前向着色器的 u_ReceiveShadow）。 */
+		bool m_CastShadow{ true };
+		bool m_ReceiveShadow{ true };
 
 		ModelComponent() = default;
 
@@ -152,7 +156,8 @@ namespace Helios
 		 * 组件的撤销快照（Capture/Restore）靠这条把实例参数一起保存 / 还原；
 		 * "覆盖 / 默认"是共享资产，SharedPtr 浅拷贝保持共享。 */
 		ModelComponent(const ModelComponent& other)
-			: ComponentBase(other), m_Model(other.m_Model), m_SlotOverrides(other.m_SlotOverrides)
+			: ComponentBase(other), m_Model(other.m_Model), m_SlotOverrides(other.m_SlotOverrides),
+			  m_CastShadow(other.m_CastShadow), m_ReceiveShadow(other.m_ReceiveShadow)
 		{
 			for (auto& entry : m_SlotOverrides)
 			{
@@ -169,6 +174,8 @@ namespace Helios
 				ModelComponent copy(other); /* 走深拷贝构造 */
 				std::swap(m_Model, copy.m_Model);
 				std::swap(m_SlotOverrides, copy.m_SlotOverrides);
+				std::swap(m_CastShadow, copy.m_CastShadow);
+				std::swap(m_ReceiveShadow, copy.m_ReceiveShadow);
 			}
 			return *this;
 		}

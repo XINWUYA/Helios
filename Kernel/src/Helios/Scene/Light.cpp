@@ -13,11 +13,30 @@ namespace Helios
 			m_pShadowMapInfo = CreateSharedPtr<ShadowMapInfo>();
 	}
 
+	/* 光向推导的统一形式：旋转作用下的规范朝向轴。
+	 * 聚光的规范轴 = -Z 前向；方向光的规范轴 = -Y（灯光图标的基准朝向，
+	 * 与"单位旋转 = 光从头顶直下"的默认光向一致）。 */
+	static glm::vec3 RotatedLightDirection(const glm::vec3& rotation, const glm::vec3& canonical_axis)
+	{
+		const glm::mat4 rotation_mat = glm::toMat4(glm::quat(rotation));
+		return glm::normalize(glm::vec3(rotation_mat * glm::vec4(canonical_axis, 0.0f)));
+	}
+
 	/* 光传播方向 = 实体旋转下的 -Z 前向（与 SceneObject::GetTransform 同一套旋转表达） */
 	glm::vec3 SpotLight::GetDirection() const
 	{
-		const glm::mat4 rotation = glm::toMat4(glm::quat(GetRotation()));
-		return glm::normalize(glm::vec3(rotation * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+		return RotatedLightDirection(GetRotation(), glm::vec3(0.0f, 0.0f, -1.0f));
+	}
+
+	/* 方向光的实体旋转是光向的输入：旋转一变就把方向重推一遍。
+	 * 旋转未变时保持现状 —— 直接 SetDirection 的显式设定不被每帧的变换同步覆盖。 */
+	void DirectionalLight::SetTransform(const glm::mat4& transform)
+	{
+		const glm::vec3 previous_rotation = GetRotation();
+		Light::SetTransform(transform);
+
+		if (GetRotation() != previous_rotation)
+			m_Direciton = RotatedLightDirection(GetRotation(), glm::vec3(0.0f, -1.0f, 0.0f));
 	}
 
 	/* 创建指定类型光源 */

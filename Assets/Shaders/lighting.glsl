@@ -74,7 +74,7 @@ void main()
 		if (u_CascadeCount > 0u)
 		{
 			vec3 view_pos = (u_ViewMat * vec4(world_pos, 1.0f)).xyz;
-			shadow = CalculateShadow(u_ShadowMap, world_pos, view_pos);
+			shadow = CalculateShadow(u_ShadowMap, world_pos, view_pos, n, l);
 		}
 	}
 	else if (u_LightType == 1u)
@@ -103,6 +103,9 @@ void main()
 		if (u_PunctualShadowParams.y > 0.5f)
 			shadow = CalculateSpotShadow(u_ShadowMap, world_pos);
 	}
+
+	/* 模型关闭「接受阴影」时阴影因子归零（延迟管线只能随 G-Buffer 拿到该标记） */
+	shadow *= gbuffer.ReceiveShadow;
 
 	vec3 direct = max(vec3(0.0f), BRDF(l, v, n, gbuffer.Metallic, gbuffer.Roughness, gbuffer.Albedo));
 	direct *= u_ColorIntensity.rgb * u_ColorIntensity.a * attenuation;

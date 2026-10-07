@@ -51,7 +51,7 @@ layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal; a: Metallic 
 layout(location = 2) out vec4 GBufferTexture2; /* rgb: Specular; a: AO */
 layout(location = 3) out vec4 GBufferTexture3; /* rgb: Emission; a: IOR */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
-layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition */
+layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition; a: 接受阴影(0/1) */
 layout(location = 6) out int  ObjectId;
 
 struct SVextex2Frag
@@ -119,7 +119,8 @@ void main()
 	GBufferTexture2 = vec4(mtl.Specular, mtl.AO);
 	GBufferTexture3 = vec4(mtl.Emission, mtl.IOR);
 	GBufferTexture4 = vec4(mtl.Ambient, mtl.Anisotropy);
-	GBufferTexture5 = vec4(vert2frag.Position, 1.0f);
+	/* a 通道承载"接受阴影"标记：延迟光照阶段没有逐对象数据，只能随 G-Buffer 带过去 */
+	GBufferTexture5 = vec4(vert2frag.Position, u_ReceiveShadow);
 	
 	ObjectId = u_ObjectId;
 }

@@ -24,11 +24,16 @@ namespace Helios
 		SharedPtr<MeshSegment> MeshSegment;
 		/* 收集时按解析链定下的最终材质（实体绑定 ?: 模型默认 ?: 内置白模） */
 		SharedPtr<Material> Material;
+		/* 投影/接受阴影（来自 ModelComponent）：分别为"是否写入阴影图"与"是否采样阴影" */
+		bool CastShadow{ true };
+		bool ReceiveShadow{ true };
 
 		VisibleMeshObject() = default;
 		VisibleMeshObject(int object_id, const glm::mat4& local_2_world,
-			const SharedPtr<class MeshSegment>& mesh_segment, const SharedPtr<class Material>& material)
-			: ObjectId(object_id), Local2WorldMat(local_2_world), MeshSegment(mesh_segment), Material(material)
+			const SharedPtr<class MeshSegment>& mesh_segment, const SharedPtr<class Material>& material,
+			bool cast_shadow = true, bool receive_shadow = true)
+			: ObjectId(object_id), Local2WorldMat(local_2_world), MeshSegment(mesh_segment), Material(material),
+			  CastShadow(cast_shadow), ReceiveShadow(receive_shadow)
 		{}
 	};
 

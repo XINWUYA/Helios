@@ -44,10 +44,11 @@ namespace Helios
 
 		static void FillObjectUniformBuffer(const VisibleMeshObject& mesh_object);
 
-		/* 填充光照UniformBuffer；light_vp_mats 为级联阴影的光照视图投影矩阵数组，
-		 * cascade_splits 为各级联在视图空间的分割距离（远边界）。
-		 * 供阴影 Pass 在渲染级联前调用（Shadow.glsl 按 u_CascadeIndex 取矩阵）。 */
-		static void FillLightUniformBuffer(const SharedPtr<Light>& light, const std::vector<glm::mat4>& light_vp_mats, const glm::vec4& cascade_splits);
+		/* 填充光照 UniformBuffer：light_vp_mats = 级联的光照视图投影矩阵数组，cascade_splits = 各级联
+		 * 的视图空间分割距离（远边界），cascade_depth_spans = 深度跨度（折算阴影偏移用，可空）。
+		 * 供阴影 Pass 渲染级联前调用。 */
+		static void FillLightUniformBuffer(const SharedPtr<Light>& light, const std::vector<glm::mat4>& light_vp_mats, const glm::vec4& cascade_splits,
+			const std::vector<float>* cascade_depth_spans = nullptr);
 		/* 光照阶段入口：填充完整数据 —— 光源参数 + 该光源的阴影数据
 		 * （方向光取级联数组，点光/聚光取面矩阵与层信息，均来自本视图的阴影管理器）。
 		 * shadow_maps 为空表示本光源不参与阴影（字段按"无阴影"填充）。 */

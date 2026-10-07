@@ -36,6 +36,11 @@ namespace Helios
 		void SetLightViewProjectionMat(const glm::mat4& vp_mat) { m_LightViewProjectionMat = vp_mat; }
 		[[nodiscard]] const glm::mat4& GetLightViewProjectionMat() const { return m_LightViewProjectionMat; }
 
+		/* 该阴影的光照空间深度跨度（世界单位，= 投影正交盒的 near..far 距离）。
+		 * 供 CPU 把世界单位的阴影偏移折算成 z 空间偏移（见 Renderer::FillLightUniformData）。 */
+		void SetDepthRange(float depth_range) { m_DepthRange = depth_range; }
+		[[nodiscard]] float GetDepthRange() const { return m_DepthRange; }
+
 		static glm::mat4 GetDirectionalLightViewMatrix(const glm::vec3& direction, const glm::vec3& origin = {}) noexcept;
 		static glm::mat4 GetPunctualLightViewMatrix(uint8_t face_idx, const glm::vec3& origin) noexcept;
 
@@ -49,6 +54,9 @@ namespace Helios
 
 		/* 级联阴影的光照视图投影矩阵 */
 		glm::mat4 m_LightViewProjectionMat{ 1.0f };
+
+		/* 光照空间深度跨度（世界单位），级联由 UpdateCascadeMatrices 写入 */
+		float m_DepthRange{ 1.0f };
 
 		friend class ShadowMapManager;
 	};

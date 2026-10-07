@@ -26,7 +26,7 @@ float SampleShadowPCF(sampler2DArray shadowMap, vec2 shadow_uv, float layer, flo
 /* 级联阴影计算（前向 / 延迟渲染通用）：依赖 LightUniformBuffer 里的 u_CascadeCount /
  * u_LightViewProjectionMat / u_CascadeSplits / u_CascadeShadowBias；采样器作参数传入、跟具体绑定
  * 点解耦。深度偏移 = 斜率自适应项 + CPU 折算的常数项。返回阴影因子：0 受光，1 被遮挡。 */
-float CalculateShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 view_pos)
+float CalculateShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 view_pos, vec3 normal, vec3 light_dir)
 {
 	int cascade_id = 0;
 	float view_depth = abs(view_pos.z);
@@ -51,7 +51,11 @@ float CalculateShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 view_pos)
 		return 0.0f;
 
 	/* Reversed-Z 下自阴影偏移方向反转：接收点深度加 bias 后更靠近光源（值更大） */
-	current_depth += u_ShadowBias;
+	float ndl = clamp(dot(normalize(normal), light_dir), 0.0f, 1.0f);
+	float slope_tan = sqrt(max(1.0f - ndl * ndl, 0.0f)) / max(ndl, 1e-3f);
+	float slope_bias = min(0.02f, 1.5f * slope_tan / float(textureSize(shadowMap, 0).x));
+	float constant_bias = u_CascadeShadowBias[cascade_id];
+	current_depth += slope_bias + constant_bias;
 
 	return SampleShadowPCF(shadowMap, shadow_uv, float(cascade_id), current_depth);
 }

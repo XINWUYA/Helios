@@ -42,6 +42,7 @@ namespace Helios
 	{
 		glm::mat4 LocalToWorldMat{ 1 };	/* 模型矩阵 */
 		uint32_t ObjectId{ 0 };				/* 模型ID，用于Picking */
+		float ReceiveShadow{ 1.0f };		/* 是否接受阴影（来自 ModelComponent，着色阶段乘进阴影因子） */
 	};
 
 	/* Per light uniform data */
@@ -58,12 +59,13 @@ namespace Helios
 		glm::vec3 LightPos{ 0.0f };
 		uint32_t CascadeCount{ 0 };
 		glm::vec4 CascadeSplits{ 0.0f };
-		/* 阴影深度偏移（来自 ShadowMapInfo::ConstantBias），缓解阴影失真（peter-panning / acne）。
+		/* 阴影深度偏移（来自 ShadowMapInfo::ConstantBias，世界单位），缓解阴影失真（peter-panning / acne）。
 		 * 置于 Light UBO 中，避免作为独立 uniform 被遗漏赋值。 */
 		float ShadowBias{ 0.0f };
-		/* std140 对齐补齐：下面的 mat4 数组须落在 16 字节边界（GLSL 侧自动对齐，
-		 * C++ 侧 glm::mat4 无对齐要求，不补会错位 12 字节）。 */
-		float Reserved0[3]{ 0.0f, 0.0f, 0.0f };
+		/* std140 对齐补齐：下面的 vec4 / mat4 数组须落在 16 字节边界（GLSL 侧自动对齐，
+		 * C++ 侧无对齐要求，不补会错位 12 字节）。顺带承载逐级联的 z 空间常数偏移：
+		 * x..w = CascadeShadowBias（见 FillLightUniformData）。 */
+		alignas(16) glm::vec4 CascadeShadowBias{ 0.0f };
 
 		/* ---- 点光/聚光阴影（光照阶段逐光源填充） ---- */
 		/* 各阴影面的视图投影矩阵（点光 6 面 / 聚光只用 [0]），与采样端的面索引约定一致 */
@@ -245,16 +247,18 @@ namespace Helios
 		static ObjectUniformData data;
 		data.LocalToWorldMat = mesh_object.Local2WorldMat;
 		data.ObjectId = mesh_object.ObjectId;
+		data.ReceiveShadow = mesh_object.ReceiveShadow ? 1.0f : 0.0f;
 		s_RenderData.pObjectUniformBuffer->SetData(&data, sizeof(ObjectUniformData));
 	}
 
 	namespace
 	{
-		/* 光照 UBO 的公共填充体：光源参数 + 级联矩阵数组 + 点光/聚光阴影块。
-		 * punctual_shadow 为 nullptr 或 invalid 时按"无点状阴影"填充。 */
+		/* 光照 UBO 的公共填充体：光源参数 + 级联矩阵数组 + 点光 / 聚光阴影块。punctual_shadow 是
+		 * nullptr / invalid 时按"没有点状阴影"填；cascade_depth_spans 是各级联的深度跨度（世界单位，
+		 * 折算 ConstantBias 用），为空就按跨度 1 处理。 */
 		void FillLightUniformData(LightUniformData& data, const SharedPtr<Light>& light,
 			const std::vector<glm::mat4>& light_vp_mats, const glm::vec4& cascade_splits,
-			const PunctualShadowData* punctual_shadow)
+			const PunctualShadowData* punctual_shadow, const std::vector<float>* cascade_depth_spans = nullptr)
 		{
 			/* 拷贝级联阴影的光照视图投影矩阵数组 */
 			const uint32_t cascade_count = std::min<uint32_t>(static_cast<uint32_t>(light_vp_mats.size()), MAX_LIGHT_VIEW_PROJ);
@@ -268,6 +272,17 @@ namespace Helios
 				data.ShadowBias = shadow_map_info->ConstantBias;
 			else
 				data.ShadowBias = 0.0f;
+
+			/* 逐级联的 z 空间常数偏移 = 世界偏移 / 该级联的深度跨度。
+			 * 深度跨度随机型 far / ShadowFar 变化，固定 z 偏移在大跨度下会被
+			 * 相对精度吞掉（阴影全部消失）、小跨度下又会把阴影整体压没。 */
+			data.CascadeShadowBias = glm::vec4(0.0f);
+			for (uint32_t i = 0; i < cascade_count; ++i)
+			{
+				const float span = (cascade_depth_spans != nullptr && i < cascade_depth_spans->size())
+					? (*cascade_depth_spans)[i] : 1.0f;
+				data.CascadeShadowBias[i] = data.ShadowBias / std::max(span, 1e-4f);
+			}
 
 			/* 光源公共参数 */
 			const auto& light_color = light->GetColor();
@@ -322,10 +337,11 @@ namespace Helios
 		}
 	}
 
-	void Renderer::FillLightUniformBuffer(const SharedPtr<Light>& light, const std::vector<glm::mat4>& light_vp_mats, const glm::vec4& cascade_splits)
+	void Renderer::FillLightUniformBuffer(const SharedPtr<Light>& light, const std::vector<glm::mat4>& light_vp_mats, const glm::vec4& cascade_splits,
+		const std::vector<float>* cascade_depth_spans)
 	{
 		static LightUniformData data;
-		FillLightUniformData(data, light, light_vp_mats, cascade_splits, nullptr);
+		FillLightUniformData(data, light, light_vp_mats, cascade_splits, nullptr, cascade_depth_spans);
 		s_RenderData.pLightUniformBuffer->SetData(&data, sizeof(LightUniformData));
 	}
 
@@ -336,6 +352,7 @@ namespace Helios
 		/* 方向光：级联数据来自本视图的阴影管理器 —— 容器里存的就是"负责投影的方向光"，
 		 * 其它方向光没有级联，按无阴影填充（CascadeCount = 0，着色阶段跳过采样）。 */
 		std::vector<glm::mat4> light_vp_mats;
+		std::vector<float> cascade_depth_spans;
 		glm::vec4 cascade_splits(0.0f);
 		if (shadow_maps != nullptr && light->GetLightType() == LightType::Directional)
 		{
@@ -343,8 +360,12 @@ namespace Helios
 			if (!cascade_maps.empty() && cascade_maps[0]->GetLight().get() == light.get())
 			{
 				light_vp_mats.reserve(cascade_maps.size());
+				cascade_depth_spans.reserve(cascade_maps.size());
 				for (const auto& cascade_map : cascade_maps)
+				{
 					light_vp_mats.push_back(cascade_map->GetLightViewProjectionMat());
+					cascade_depth_spans.push_back(cascade_map->GetDepthRange());
+				}
 				cascade_splits = shadow_maps->GetCascadeSplits();
 			}
 		}
@@ -354,7 +375,8 @@ namespace Helios
 		if (shadow_maps != nullptr)
 			punctual_shadow = shadow_maps->GetPunctualShadowData(light.get());
 
-		FillLightUniformData(data, light, light_vp_mats, cascade_splits, &punctual_shadow);
+		FillLightUniformData(data, light, light_vp_mats, cascade_splits, &punctual_shadow,
+			cascade_depth_spans.empty() ? nullptr : &cascade_depth_spans);
 		s_RenderData.pLightUniformBuffer->SetData(&data, sizeof(LightUniformData));
 	}
 }
