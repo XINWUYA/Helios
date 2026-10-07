@@ -258,6 +258,48 @@ namespace Helios
 		}
 	}
 
+	namespace
+	{
+		/* 无源码默认值时按类型零值兜底（与参数表同款值类型；Texture 不参与） */
+		std::any ZeroValueForParamType(ParamType type)
+		{
+			switch (type)
+			{
+			case ParamType::Int: return std::any(0);
+			case ParamType::Float: return std::any(0.0f);
+			case ParamType::Vec2: return std::any(glm::vec2(0.0f));
+			case ParamType::Vec3: return std::any(glm::vec3(0.0f));
+			case ParamType::Vec4: return std::any(glm::vec4(0.0f));
+			case ParamType::Mat4: return std::any(glm::mat4(0.0f));
+			case ParamType::Texture: break;
+			}
+			return std::any{};
+		}
+	}
+
+	/* 收集"Shader 已声明、本材质没有写"的值参数及其默认值 */
+	std::vector<MaterialParamInfo> Material::CollectMissingValueParamDefaults() const
+	{
+		PROFILE_FUNCTION();
+
+		std::vector<MaterialParamInfo> fills;
+		if (m_pShader == nullptr)
+			return fills;
+
+		for (const ReflectedMaterialParam& reflected : m_pShader->GetReflectionData().MaterialParams)
+		{
+			if (reflected.Type == ParamType::Texture)
+				continue;
+			if (m_Parameters.find(ToID(reflected.Name)) != m_Parameters.end())
+				continue;
+
+			fills.emplace_back(reflected.Type, reflected.Name,
+				reflected.Default.has_value()
+					? reflected.Default : ZeroValueForParamType(reflected.Type));
+		}
+		return fills;
+	}
+
 	uint32_t Material::ResolveTextureBinding(const std::string& name) const
 	{
 		if (!m_pShader)

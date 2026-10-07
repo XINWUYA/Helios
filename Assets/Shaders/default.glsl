@@ -75,10 +75,17 @@ layout(binding = 6) uniform sampler2D u_MetallicTexture;
 layout(binding = 7) uniform sampler2D u_EmissiveTexture;
 layout(binding = 8) uniform sampler2D u_AmbientTexture;
 
+/* 主贴图 UV 缩放与偏移：xy = 缩放(tiling)，zw = 偏移(offset)。
+ * 与 ForwardShaders（BuiltinLit / PBRStandard）同名同语义：普通材质在编辑器里
+ * 转换为本 shader 渲染，该参数经此生效；缺省 vec4(1,1,0,0) 不变换。 */
+layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
+
 void CalculateMaterial(inout SMaterialInput mtl)
 {
-	
-	mtl.Albedo = texture(u_AlbedoTexture, vert2frag.TexCoord).rgb;
+	/* 主贴图 UV 缩放与偏移（与 ForwardShaders 的采样口径一致） */
+	vec2 base_uv = vert2frag.TexCoord * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
+
+	mtl.Albedo = texture(u_AlbedoTexture, base_uv).rgb;
 
 	/* TBN */
 	vec3 T = normalize(vert2frag.Tangent);
@@ -89,8 +96,8 @@ void CalculateMaterial(inout SMaterialInput mtl)
 	/* Calculate Parallax Mapping */
 	vec3 view_dir = u_ViewPos - vert2frag.Position;
 	view_dir = normalize(TBN * view_dir);
-	float height = texture(u_BumpTexture, vert2frag.TexCoord).x;
-	vec2 uv = vert2frag.TexCoord - view_dir.xy / view_dir.z * height;
+	float height = texture(u_BumpTexture, base_uv).x;
+	vec2 uv = base_uv - view_dir.xy / view_dir.z * height;
 
 	vec3 normal = texture(u_NormalTexture, uv).xyz * 2.0f - 1.0f;
 	//normal.z = sqrt(max(1.0f - normal.x * normal.x - normal.y * normal.y, 0.0f));

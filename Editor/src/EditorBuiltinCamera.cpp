@@ -4,15 +4,28 @@
 #include <cmath>
 
 #include "Helios/Application/Application.h"
+#include "Helios/Application/AssetManager.h"
 #include "Helios/Common/Math.h"
+#include "Helios/Common/Utils.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 #include "Helios/Scene/Material.h"
 #include "Helios/Scene/ShadowMap.h"
+#include "Helios/VirtualDevice/DeviceTexture.h"
 
 namespace Helios
 {
 	namespace
 	{
+		/* G-Buffer 采样点缺省时补的默认贴图：法线图按名字认，亮度类（Albedo / Roughness）用白，其余用黑。 */
+		SharedPtr<DeviceTexture> DefaultTextureForSampler(const std::string& sampler_name)
+		{
+			if (sampler_name.find("Normal") != std::string::npos)
+				return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/normal.png"));
+			if (sampler_name.find("Albedo") != std::string::npos || sampler_name.find("Roughness") != std::string::npos)
+				return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/White.png"));
+			return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Black.png"));
+		}
+
 		SharedPtr<Material> CreateGBufferMaterial(
 			const SharedPtr<Material>& source, const SharedPtr<DeviceShader>& gbuffer_shader)
 		{
@@ -31,6 +44,18 @@ namespace Helios
 					material->SetParameters(parameter.Type, parameter.Name, parameter.Value);
 				}
 			}
+
+			/* 源材质没覆盖到的采样点补默认贴图：default.glsl 的采样点必须全部有绑定，
+			 * 缺一张就是未定义输入（Metal 校验层会直接断言）。参数不全的老材质、新建材质
+			 * 都靠这一步在编辑器里兜住 —— 直接遍历目标 shader 的反射列表，与 shader 声明保持同步。 */
+			for (const auto& sampler_entry : gbuffer_shader->GetReflectionData().SamplerBindings)
+			{
+				const std::string& sampler_name = sampler_entry.first;
+				if (material->GetAllParameters().find(ToID(sampler_name)) != material->GetAllParameters().end())
+					continue;
+				material->SetTexture(sampler_name, DefaultTextureForSampler(sampler_name));
+			}
+
 			material->SetRasterState(source->GetRasterState());
 			return material;
 		}
@@ -1079,6 +1104,9 @@ namespace Helios
 			[&, gbuffer_shader](const FrameGraphResources& resources, const GBufferPassData& data)
 			{
 				std::unordered_map<const Material*, SharedPtr<Material>> gbuffer_materials;
+						/* 目标 shader 已声明、材质没写的值参数 → 用默认值补齐。块式 uniform 是 per-program 状态：
+						 * 不写会残留上一个对象的取值。 */
+				std::unordered_map<const Material*, std::vector<MaterialParamInfo>> gbuffer_param_fills;
 				const auto render_pass_info = resources.GetPassRenderTarget();
 				render_view.EmplacePassFrameBuffer("GBufferPass", render_pass_info);
 
@@ -1109,7 +1137,16 @@ namespace Helios
 								cached->second = CreateGBufferMaterial(material, gbuffer_shader);
 							gbuffer_material = cached->second;
 						}
-						Renderer::Submit(gbuffer_material, mesh_object.MeshSegment->GetMeshPrimitive());
+
+						/* 按材质对象缓存补齐结果（转换材质是源材质的复制，参数同源） */
+						auto fills = gbuffer_param_fills.try_emplace(material.get());
+						if (fills.second)
+							fills.first->second = gbuffer_material->CollectMissingValueParamDefaults();
+
+						DrawParams per_draw;
+						per_draw.Overrides = fills.first->second;
+						Renderer::Submit(gbuffer_material, mesh_object.MeshSegment->GetMeshPrimitive(),
+							per_draw.Overrides.empty() ? nullptr : &per_draw);
 					}
 				}
 				render_pass_info->Unbind();

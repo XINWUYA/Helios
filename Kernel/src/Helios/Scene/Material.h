@@ -24,6 +24,14 @@ namespace Helios
 		}
 	};
 
+	/* 单次绘制的覆盖参数（per-draw）。
+	 * 由渲染通道随提交通道应用：只写当前绑定的 Shader 与纹理，不落材质对象 ——
+	 * 用于 IBL 这类"每次绘制不同"的绑定（探针选择），避免污染共享材质。 */
+	struct DrawParams
+	{
+		std::vector<MaterialParamInfo> Overrides;
+	};
+
 	/*
 	 * 材质类
 	 */
@@ -82,6 +90,11 @@ namespace Helios
 		 * 保存材质资产前调用 —— 反射没声明的不再留在参数表里、不会写进文件。
 		 * Shader 为空、或反射为空（后端不反射材质参数）时不做任何事。 */
 		void RetainShaderDeclaredParams();
+
+		/* 收集"Shader 声明了、本材质没写"的值参数和默认值（默认取反射里的源码值、没有就按类型零值；
+		 * Texture 不参与）。块式 uniform 是 per-program 状态，不写会残留上一个对象的取值 —— 材质
+		 * 转换到通用 Shader 绘制时（延迟 GBufferMaterial）用它做 per-draw 补齐。 */
+		[[nodiscard]] std::vector<MaterialParamInfo> CollectMissingValueParamDefaults() const;
 
 		/* 默认材质 */
 		static SharedPtr<Material>& Default();

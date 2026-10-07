@@ -12,6 +12,7 @@ namespace Helios
 	class ScopedShadowMapBinding;
 	class ShadowMapManager;
 	struct VisibleMeshObject;
+	struct DrawParams;
 	class Light;
 	struct MeshPrimitive;
 
@@ -32,7 +33,10 @@ namespace Helios
 		/* 指定ViewUniformBuffer */
 		static void SetViewUniforms(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& view_pos);
 
-		static void Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive, uint32_t index_count = 0);
+		/* per_draw：单次绘制的覆盖参数（IBL 这类"每次绘制不同"的绑定）。
+	 * 只写当前绑定的 Shader 与纹理、不落材质对象 —— 共享材质因此保持只读。 */
+	static void Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
+	                   const DrawParams* per_draw = nullptr, uint32_t index_count = 0);
 
 		static int CurrentAPI() { return RenderAPI::GetAPI(); }
 

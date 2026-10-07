@@ -174,7 +174,8 @@ namespace Helios
 		return previous;
 	}
 
-	void Renderer::Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive, uint32_t index_count)
+	void Renderer::Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
+	                      const DrawParams* per_draw, uint32_t index_count)
 	{
 		PROFILE_FUNCTION();
 
@@ -187,6 +188,13 @@ namespace Helios
 	s_RenderData.pLightUniformBuffer->Bind();
 
 	material->Bind();
+
+	/* per-draw 覆盖：只写当前绑定的 Shader / 纹理，不落材质对象（共享材质保持只读） */
+	if (per_draw != nullptr)
+	{
+		for (const auto& param : per_draw->Overrides)
+			material->ApplyParam(param);
+	}
 
 	/* 按 Shader 声明绑定当前 Pass 的阴影纹理。 */
 	if (m_pCurrentShadowMap != nullptr)
