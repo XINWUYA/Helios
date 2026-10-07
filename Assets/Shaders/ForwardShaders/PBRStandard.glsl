@@ -61,7 +61,7 @@ layout(location = 0) in SVextex2Frag vert2frag;
 layout(location = 0) out vec4 OutFragColor;
 layout(location = 1) out int  ObjectId;
 
-/* 材质贴图，绑定点与 default.glsl 保持一致 */
+/* 材质贴图，绑定点与 GBufferMaterial.glsl 保持一致 */
 layout(binding = 0) uniform sampler2D u_AlbedoTexture;
 layout(binding = 1) uniform sampler2D u_SpecularTexture;
 layout(binding = 2) uniform sampler2D u_NormalTexture;

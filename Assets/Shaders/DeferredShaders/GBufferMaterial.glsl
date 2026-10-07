@@ -7,7 +7,7 @@ layout(location = 2) in vec4 a_Color;
 layout(location = 3) in vec3 a_TexCoord;
 layout(location = 4) in vec3 a_Tangent;
 
-#include "builtin/Uniforms.glsl"
+#include "../builtin/Uniforms.glsl"
 
 struct SVextex2Frag
 {
@@ -41,10 +41,10 @@ void main()
 #type fragment
 #version 410 core
 
-#include "common.glsl"
-#include "builtin/Math.glsl"
-#include "builtin/Uniforms.glsl"
-#include "builtin/MaterialCommon.glsl"
+#include "../common.glsl"
+#include "../builtin/Math.glsl"
+#include "../builtin/Uniforms.glsl"
+#include "../builtin/MaterialCommon.glsl"
 
 layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: Roughness */
 layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal; a: Metallic */

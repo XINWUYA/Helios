@@ -419,7 +419,7 @@ namespace Helios
 			/* 初始化材质 */
 			m_pMaterialGroup->ClearAllMaterials();
 			for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-				m_pMaterialGroup->EmplaceMaterial(Material::Create(ShaderAssetManager::Instance().GetOrLoad("assets/shaders/default.glsl")));
+				m_pMaterialGroup->EmplaceMaterial(Material::Create(ShaderAssetManager::Instance().GetOrLoad("Shaders/DeferredShaders/GBufferMaterial.glsl")));
 
 			/* 更新场景模型信息 */
 			UpdateModel();
@@ -443,7 +443,7 @@ namespace Helios
 			/* 初始化材质 */
 			m_pMaterialGroup->ClearAllMaterials();
 			for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-				m_pMaterialGroup->EmplaceMaterial(Material::Create(ShaderAssetManager::Instance().GetOrLoad("assets/shaders/default.glsl")));
+				m_pMaterialGroup->EmplaceMaterial(Material::Create(ShaderAssetManager::Instance().GetOrLoad("Shaders/DeferredShaders/GBufferMaterial.glsl")));
 
 			/* 更新场景模型信息 */
 			UpdateModel();

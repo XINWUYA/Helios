@@ -194,7 +194,7 @@ namespace Helios
 				tinyxml2::XMLElement* mtl_inst = mtl_root->InsertNewChildElement("Material");
 				mtl_inst->SetAttribute("ID", static_cast<unsigned int>(material_idx));
 				mtl_inst->SetAttribute("Name", material_data.name.c_str());
-				mtl_inst->SetAttribute("Shader", ABSOLUTE_PATH("Shaders/default.glsl").c_str()); /* 首次加载使用默认材质 */
+				mtl_inst->SetAttribute("Shader", ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl").c_str()); /* 首次加载使用默认材质 */
 
 				if (!material_data.diffuse_texname.empty())
 					mtl_inst->SetAttribute("AlbedoTex", (basedir + material_data.diffuse_texname).c_str());

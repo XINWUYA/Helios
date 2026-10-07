@@ -82,6 +82,11 @@ namespace Helios
 		void EmplacePassFrameBuffer(const std::string& name, const SharedPtr<DeviceFrameBuffer>& frame_buffer);
 		[[nodiscard]] const SharedPtr<DeviceFrameBuffer>& GetPassFrameBuffer(const std::string& name) const;
 
+		/* 为渲染图组织阴影所需的 Pass：中性阴影图恒建（任何着色阶段都能采样到合法纹理），
+		 * 本视图有投影光源时再建真实阴影 Pass；句柄统一落进 Blackboard 的 "ShadowMapHandle"。
+		 * 需要采样阴影的管线（前向 / 延迟）在挂接自己的 Pass 前调用一次。 */
+		void AddShadowMapPasses();
+
 		/* 准备一帧的RenderView数据 */
 		void Prepare();
 

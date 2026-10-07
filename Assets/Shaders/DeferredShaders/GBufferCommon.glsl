@@ -14,7 +14,7 @@ struct SGBufferData
 	vec3 Ambient;
 	float Anisotropy;
 	vec3 WorldPosition;
-	/* 接受阴影（0/1）：来自 default.glsl 写入的 GBufferTexture5.a */
+	/* 接受阴影（0/1）：来自 GBufferMaterial.glsl 写入的 GBufferTexture5.a */
 	float ReceiveShadow;
 };
 

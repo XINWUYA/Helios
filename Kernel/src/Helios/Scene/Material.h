@@ -111,7 +111,7 @@ namespace Helios
 		static SharedPtr<Material>& Default();
 		/* 错误材质 */
 		static SharedPtr<Material>& Error();
-		/* 内置白模材质：default.glsl + 默认贴图满配（White / normal / Black），零外部依赖。
+		/* 内置白模材质：GBufferMaterial.glsl + 默认贴图满配（White / normal / Black），零外部依赖。
 		 * "槽未绑定"的兜底与"拖 .mesh 起步"的初始外观都是它 —— 白模 = 正常未配置；
 		 * 紫色 Error 只代表异常。 */
 		static SharedPtr<Material>& BuiltinWhite();

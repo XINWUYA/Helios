@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Materials Count="1">
-    <Material ID="0" ShaderPath="Shaders/default.glsl">
+    <Material ID="0" ShaderPath="Shaders/DeferredShaders/GBufferMaterial.glsl">
         <Parameters>
             <ParamInfo Type="0" Name="AmbientTex">
                 <Texture Path="Textures/Black.png" Slot="8">

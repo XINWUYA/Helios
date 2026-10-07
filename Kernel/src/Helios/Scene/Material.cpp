@@ -155,7 +155,7 @@ namespace Helios
 		if (!m_pDefaultMaterial->GetShader())
 		{
 			/* 只能在获取时设置Shader，在静态编译期，OpenGL尚未初始化，无法正确创建ShaderProgram */
-			m_pDefaultMaterial->SetShader(ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/default.glsl")));
+			m_pDefaultMaterial->SetShader(ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl")));
 		}
 
 		return m_pDefaultMaterial;
@@ -176,11 +176,11 @@ namespace Helios
 	{
 		if (!m_pBuiltinWhiteMaterial->GetShader())
 		{
-			/* 同 Default/Error：只能在获取时初始化（静态期 GL 尚未就绪）。
-			 * default.glsl 是全贴图驱动的 G-Buffer 材质，9 个采样点必须全部有贴图 ——
-			 * 白模用内置默认贴图把它配满，因此零外部依赖、编辑器延迟与前向路径都可用。 */
+			/* 跟 Default/Error 一样：只能在获取时初始化（静态期 GL 还没就绪）。GBufferMaterial.glsl
+			 * （延迟 G-Buffer 写入）全贴图驱动，9 个采样点必须全有贴图 —— 白模就用内置默认贴图配满，
+			 * 零外部依赖，编辑器的延迟和前向路径都能用。 */
 			m_pBuiltinWhiteMaterial->SetShader(
-				ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/default.glsl")));
+				ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl")));
 
 			auto& white = *m_pBuiltinWhiteMaterial;
 			const auto texture_white = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/White.png"));

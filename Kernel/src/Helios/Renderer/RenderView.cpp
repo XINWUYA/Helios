@@ -65,6 +65,25 @@ namespace Helios
 		return {};
 	}
 
+	/* 为本视图的渲染图准备阴影：中性深度数组恒建（保证任何着色阶段都能采样到合法纹理），
+	 * 本视图有投影光源时再生成真实阴影图；句柄都落进 Blackboard 的 "ShadowMapHandle"。 */
+	void RenderView::AddShadowMapPasses()
+	{
+		PROFILE_FUNCTION();
+
+		m_pShadowMapManager->AddNoShadowMapPass(*m_pFrameGraph);
+		if (m_IsHasShadowCast)
+		{
+			m_pShadowMapManager->AddShadowPass(*m_pFrameGraph, GetOwnerScene(), this);
+		}
+		else
+		{
+			const auto fallback_handle = m_pFrameGraph->GetBlackboard()
+				.GetResourceHandle<FrameGraphTexture>("NoShadowMapHandle");
+			m_pFrameGraph->GetBlackboard()["ShadowMapHandle"] = fallback_handle;
+		}
+	}
+
 	/* 准备一帧的RenderView数据 */
 	void RenderView::Prepare()
 	{
@@ -204,17 +223,7 @@ namespace Helios
 		if (!organized_by_camera)
 		{
 			/* Probe 捕获使用无阴影图；ScenePass 有级联阴影时使用当前视图的阴影图。 */
-			m_pShadowMapManager->AddNoShadowMapPass(*m_pFrameGraph);
-			if (m_IsHasShadowCast)
-			{
-				m_pShadowMapManager->AddShadowPass(*m_pFrameGraph, scene, this);
-			}
-			else
-			{
-				const auto fallback_handle = m_pFrameGraph->GetBlackboard()
-					.GetResourceHandle<FrameGraphTexture>("NoShadowMapHandle");
-				m_pFrameGraph->GetBlackboard()["ShadowMapHandle"] = fallback_handle;
-			}
+			AddShadowMapPasses();
 
 			/* 烘焙ReflectionProbe */
 			auto probe_manager = scene->GetReflectionProbeManager();

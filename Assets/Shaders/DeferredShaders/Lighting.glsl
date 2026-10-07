@@ -21,11 +21,11 @@ void main()
 #type fragment
 #version 410 core
 
-#include "builtin/Uniforms.glsl"
-#include "builtin/GBuffer.glsl"
-#include "builtin/Math.glsl"
-#include "builtin/BRDF.glsl"
-#include "builtin/ShadowUtils.glsl"
+#include "../builtin/Uniforms.glsl"
+#include "GBufferCommon.glsl"
+#include "../builtin/Math.glsl"
+#include "../builtin/BRDF.glsl"
+#include "../builtin/ShadowUtils.glsl"
 
 struct SVextex2Frag
 {
