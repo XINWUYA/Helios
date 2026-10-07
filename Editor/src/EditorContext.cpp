@@ -52,6 +52,13 @@ namespace Helios
 			layer->SaveSceneAs();
 	}
 
+	/* 与层级面板根节点的脏标记同源：主壳层不做第二份计算 */
+	bool EditorContext::IsSceneDirty()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->IsSceneDirty();
+	}
+
 	bool EditorContext::Undo()
 	{
 		auto* layer = GetSceneLayer();

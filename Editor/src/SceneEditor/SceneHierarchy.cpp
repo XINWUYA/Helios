@@ -1361,9 +1361,10 @@ namespace Helios
 		if (is_accessor)
 			field.Set(component, field_ptr);
 
-		/* 只有用户正在操作控件时才生成命令：外部改动（如 Gizmo 拖拽、
-		 * 组件被移除）不是字段编辑，不应产生历史 */
-		if (m_pCommandStack == nullptr || !ImGui::IsAnyItemActive())
+		/* 只有用户真的在操作控件时才生成命令（Gizmo 拖拽这类外部改动不产生历史）。判据要连
+		 * "帧开始时活不活跃"一起看：点击类控件在松开的那帧才提交值，那一刻 ActiveId 已经清掉了
+		 * —— 只看画完之后的状态，改动会整段丢掉。 */
+		if (m_pCommandStack == nullptr || !(item_active || ImGui::IsAnyItemActive()))
 			return;
 
 		const bool changed = is_text

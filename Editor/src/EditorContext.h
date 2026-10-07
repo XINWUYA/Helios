@@ -22,6 +22,10 @@ namespace Helios
 		void SaveScene();
 		void SaveSceneAs();
 
+		/* 场景有没有未保存的改动：工具栏的保存按钮据此启用 / 禁用，
+		 * 与层级面板根节点的脏标记同一判据（SceneEditorLayer::IsSceneDirty）。 */
+		[[nodiscard]] bool IsSceneDirty();
+
 		/* ---- 编辑历史：所有编辑改动经这条通道撤销 / 重做 ---- */
 		bool Undo();
 		bool Redo();

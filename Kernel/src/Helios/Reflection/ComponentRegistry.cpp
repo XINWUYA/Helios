@@ -346,12 +346,14 @@ namespace Helios
 		}
 
 		/* 贴图是资源引用，需要拖入与悬停预览，故整块自定义绘制；
-		 * BaseColor 与 TilingFactor 走 schema 字段（见注册处）。 */
+		 * BaseColor 与 TilingFactor 走 schema 字段（见注册处）。
+		 * 返回是否改动：换贴图要生成快照命令（撤销与场景脏标记都靠它）。 */
 		bool DrawSpriteBlock(void* raw)
 		{
 			auto& component = *static_cast<SpriteComponent*>(raw);
+			const SharedPtr<DeviceTexture> before = component.m_Texture;
 			ImGuiExt::DrawTextureUI("Texture", component.m_Texture);
-			return false;
+			return component.m_Texture != before;
 		}
 
 		/* 投影类型决定哪些参数有意义：透视看 Fov，正交看 HeightSize */
@@ -683,18 +685,23 @@ namespace Helios
 			}
 		}
 
-		/* 天空盒是资源引用，需要选择与悬停预览，故整块自定义绘制；
-		 * 烘焙参数走 schema 字段（见注册处）。 */
+		/* 天空盒是资源引用，要能选择、悬停预览，所以整块自定义绘制；烘焙参数走 schema 字段。
+		 * 返回值是"有没有改动"：换天空盒会生成快照命令（撤销和脏标记靠它）；Rebake 是异步操作、不算改动。 */
 		bool DrawProbeBlock(void* raw)
 		{
 			auto& probe = static_cast<ReflectionProbeComponent*>(raw)->m_ReflectionProbe;
 			if (probe == nullptr)
 				return false;
 
+			bool changed = false;
+
 			SharedPtr<DeviceTexture> skybox = probe->GetSkyBoxTexture();
 			ImGuiExt::DrawTextureUI("SkyBox", skybox);
 			if (skybox != probe->GetSkyBoxTexture())
+			{
 				probe->SetSkyBoxTexture(skybox);
+				changed = true;
+			}
 
 			ImGui::Separator();
 
@@ -727,7 +734,7 @@ namespace Helios
 			if (state == WriteState::Idle && ImGui::Button("Rebake"))
 				probe->Reset();
 
-			return false;
+			return changed;
 		}
 
 		/* 探针为空时整个组件块不显示 */

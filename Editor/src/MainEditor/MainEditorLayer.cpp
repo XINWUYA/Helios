@@ -418,9 +418,12 @@ namespace Helios
 			if (Icons::IconButton(Icons::Id::OpenScene, button_size, false, "Open Scene  (Ctrl+O)"))
 				m_Context.ImportScene();
 
+			/* 保存按钮只在场景有未保存改动时可用（与层级面板根节点的脏标记同一判据） */
 			ImGui::SameLine();
+			ImGui::BeginDisabled(!m_Context.IsSceneDirty());
 			if (Icons::IconButton(Icons::Id::Save, button_size, false, "Save Scene  (Ctrl+S)"))
 				m_Context.SaveScene();
+			ImGui::EndDisabled();
 
 			/* ---- 编辑历史 ---- */
 			ToolbarSeparator(kButtonSize, kGroupGap);
