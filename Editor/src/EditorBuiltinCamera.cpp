@@ -1095,6 +1095,12 @@ namespace Helios
 						if (material == nullptr)
 							continue;
 
+						/* 天空盒不进 G-Buffer：它输出的是最终颜色、顶点着色器把网格
+						 * 折叠成全屏天空，转成 G-Buffer 材质只会得到一颗实心球。
+						 * 由 SkyPass 在光照之后专绘背景。 */
+						if (material->IsSkyBox())
+							continue;
+
 						auto gbuffer_material = material;
 						if (material->GetShader() != gbuffer_shader)
 						{
@@ -1209,6 +1215,58 @@ namespace Helios
 			}
 			);
 		frame_graph->GetBlackboard()["LightingPassOutput"] = lighting_pass->GetData().LightingResult;
+
+			/* 天空背景 Pass：天空盒材质按原样画进光照结果。顶点着色器折叠成全屏天空、深度恒为远平面
+			 * （Reversed-Z），跟 GBuffer 深度做 GreaterEqual 比较（只在背景像素落笔）。要在光照之后、
+			 * 叠加层之前。 */
+		struct SkyPassData
+		{
+			FrameGraphResourceHandleTyped<FrameGraphTexture> Output;
+			FrameGraphResourceHandleTyped<FrameGraphTexture> Depth;
+		};
+
+		frame_graph->AddPass<SkyPassData>("SkyPass",
+			[&](FrameGraphBuilder& builder, SkyPassData& data)
+			{
+				data.Output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("LightingPassOutput");
+				data.Depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
+				builder.BindInputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment);
+				builder.BindInputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
+
+				FrameGraphPassInfo::Descriptor pass_desc;
+				pass_desc.Attachments.ColorAttachments(0) = data.Output;
+				pass_desc.Attachments.DepthAttachment() = data.Depth;
+				/* 保留光照结果与场景深度（天空只在背景像素落笔） */
+				pass_desc.PreserveContent = true;
+				pass_desc.ViewportRegion = m_ViewportRegion;
+				builder.CreateRenderPass("SkyPassRenderTarget", pass_desc);
+
+				/* 与 AxisPass 同理：叠加型 Pass 的产物是"写进已有资源"，
+				 * 不声明为目标会被图裁剪剔除 */
+				builder.AsSideEffect();
+			},
+			[&](const FrameGraphResources& resources, const SkyPassData&)
+			{
+				const auto render_pass_info = resources.GetPassRenderTarget();
+				render_view.EmplacePassFrameBuffer("SkyPass", render_pass_info);
+
+				render_pass_info->Bind();
+				{
+					/* 天空盒材质按原样提交（不做 G-Buffer 转换）：u_SkyTex 采样、
+					 * 远平面 z、面剔除姿态都由材质自身的光栅状态决定 */
+					for (const auto& mesh_object : render_view.GetVisibleMeshObjects())
+					{
+						const auto& material = mesh_object.Material;
+						if (material == nullptr || !material->IsSkyBox())
+							continue;
+
+						Renderer::FillObjectUniformBuffer(mesh_object);
+						Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive());
+					}
+				}
+				render_pass_info->Unbind();
+			}
+			);
 
 		/* 场景 gizmo Pass（编辑器视口叠加层：地面网格 + 坐标轴 + 实体图标，见 SceneGizmos）。
 		 * 直接复用管线输出和场景深度：PreserveContent 不清除附件，gizmo 画进输出、与场景深度

@@ -42,6 +42,10 @@ namespace Helios
 		/* 设置Shader */
 		void SetShader(const SharedPtr<DeviceShader>& shader);
 		[[nodiscard]] const SharedPtr<DeviceShader>& GetShader() const { return m_pShader; }
+		/* 是否天空盒材质：以 SkyBox.glsl 为着色器的材质（天空盒的几何约定：
+		 * 顶点着色器把网格铺满全屏、深度取远平面）。这类材质不进延迟管线 G-Buffer、
+		 * 不参与阴影投射，由天空背景通道专绘。 */
+		[[nodiscard]] bool IsSkyBox() const;
 		/* 设置参数 */
 		void SetParameters(ParamType type, const std::string& name, const std::any& param);
 		[[nodiscard]] const ParameterMap& GetAllParameters() const { return m_Parameters; }

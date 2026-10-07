@@ -36,6 +36,18 @@ namespace Helios
 		RefreshTextureBindings();
 	}
 
+	bool Material::IsSkyBox() const
+	{
+		PROFILE_FUNCTION();
+
+		/* 天空盒的识别以着色器为单一来源（样例场景的约定同源）：资产里的天空
+		 * 就是"网格 + SkyBox.glsl 材质"，由顶点着色器折叠成全屏天空。
+		 * ShaderAssetManager 按路径缓存，指针比较即可。 */
+		static const SharedPtr<DeviceShader> s_skybox_shader =
+			ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
+		return m_pShader != nullptr && m_pShader == s_skybox_shader;
+	}
+
 	void Material::SetParameters(ParamType type, const std::string& name, const std::any& param)
 	{
 		PROFILE_FUNCTION();

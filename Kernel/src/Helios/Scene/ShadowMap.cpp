@@ -226,6 +226,11 @@ namespace Helios
 				if (!mesh_object.MeshSegment)
 					continue;
 
+				/* 天空盒不参与拟合：它铺满全屏（顶点着色器置 z = 远平面），
+				 * 包围盒会把光源视锥的深度范围撑飞 */
+				if (mesh_object.Material && mesh_object.Material->IsSkyBox())
+					continue;
+
 				const glm::vec3& aabb_min = mesh_object.MeshSegment->GetAABBMin();
 				const glm::vec3& aabb_max = mesh_object.MeshSegment->GetAABBMax();
 				LightSpaceBounds bounds{
@@ -636,6 +641,11 @@ namespace Helios
 
 					for (const auto& mesh_object : render_view->GetVisibleMeshObjects())
 					{
+						/* 天空盒不产生投影：顶点着色器把它铺满全屏（z = 远平面），
+						 * 如果参与投射，整个深度图会被压成一层"天空" */
+						if (mesh_object.Material && mesh_object.Material->IsSkyBox())
+							continue;
+
 						/* 模型关闭「投影」后不写入阴影图（仍可接受阴影）：级联与点状共用这条 */
 						if (!mesh_object.CastShadow)
 							continue;
