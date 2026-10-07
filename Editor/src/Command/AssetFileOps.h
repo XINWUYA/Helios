@@ -44,6 +44,11 @@ namespace Helios
 	/* 校验用户输入的资源名：合法返回空串，否则返回给人看的原因 */
 	std::string AssetNameError(const std::string& name);
 
+	/* 拖拽移动的裁决：把 from 移进 target_dir 可不可行。合法返回空串，否则返回原因（跟
+	 * AssetNameError 同一契约）。只判"能不能"：源存在、目标是目录、不是原位、不会自嵌套成环、
+	 * 不覆盖同名项。 */
+	std::string AssetMoveError(const std::filesystem::path& from, const std::filesystem::path& target_dir);
+
 /* 在 dir 下取一个不冲突的路径：被占了就依次试 "name 2"、"name 3"…
  * 扩展名待在它该在的位置（`.png` 在序号之后）。新建文件夹与回收站落点都用它。 */
 std::filesystem::path MakeUniquePath(const std::filesystem::path& dir, const std::string& file_name);

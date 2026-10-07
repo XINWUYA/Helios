@@ -221,12 +221,26 @@ namespace Helios
 		/* 把命令塞进编辑历史（没有注入通道时直接执行） */
 		void ExecuteCommand(UniquePtr<ICommand> command);
 
+		/* ---- 目录树拖拽移动 = 复用重命名命令（改名即移动）----
+		 * 落盘延后到面板画完（ApplyPendingDropMove）：这一帧树还在按旧节点遍历，挪走目录会让递归中
+		 * 的父子路径失真 —— 跟层级面板"挂接延后"同一个理由。 */
+
+		/* 拖放目标收到 payload：登记待办（into_dir 是相对 Assets 的口径，空串 = 资源根） */
+		void RecordDropMove(const ImGuiPayload* payload, const std::string& into_dir);
+		/* 待办落盘：裁决（AssetMoveError）通过就发一条 RenameAssetCommand 进编辑历史 */
+		void ApplyPendingDropMove();
+
 		/* 相对 Assets 的路径 → 绝对路径 */
 		static std::filesystem::path AbsoluteAssetPath(const std::string& relative_path);
 
 		/* 待办：新建时是父目录，重命名时是被改名的目标；两个都空 = 没有待办 */
 		std::string m_PendingParentPath;
 		std::string m_PendingRenamePath;
+		/* 目录树拖拽的待办落点（画完后统一落盘，见 ApplyPendingDropMove）：
+		 * 两个路径都是相对 Assets 的口径；m_PendingDropFrom 为空 = 没有待办，
+		 * m_PendingDropInto 为空串 = 资源根（拖到树下方的空白）。 */
+		std::string m_PendingDropFrom;
+		std::string m_PendingDropInto;
 		/* 新建资源文件要求的后缀（含点，如 ".scn"；空 = 不限后缀），只在 NamePopupMode::NewFile 用 */
 		std::string m_PendingNewFileExtension;
 		/* 删除确认里的目标 */
@@ -294,6 +308,10 @@ namespace Helios
 		float m_TreePaneRatio{ 0.32f };
 		/* 待办：把当前目录在目录树里露出来（展开祖先 + 滚到可见），下一次画完树即清 */
 		bool m_RevealCurrentNode{ true };
+		/* 目录树行"按下时是点击意图"的待办：松开那一帧才决定要不要真的切目录 ——
+		 * 中途变成拖拽（把文件夹拖去别处）就不算点击，与"拖动不是查看"同一套语义
+		 * （见 DrawFolderNode 的松开判定）。 */
+		SharedPtr<FileNode> m_PendingTreeNav;
 		/* 缩略图尺寸与间距：视图菜单里可调，属于"用户偏好"，所以留在实例上 */
 		float m_ThumbnailSize{ 64.0f };
 

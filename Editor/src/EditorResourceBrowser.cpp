@@ -67,6 +67,11 @@ namespace Helios
 		constexpr float kPopupButtonSize = 84.0f;
 		constexpr float kPopupInputWidth = 240.0f;
 
+		/* 资源浏览器拖拽的 payload 名：负载 = 相对 Assets 的路径（UTF-8 + '\0'）。
+		 * 内容区拖出与目录树拖出用的是同一种身份（拖给别的面板用时接收方也只认这一种）；
+		 * 目录树的行又是它的拖放目标 —— 落点 = "搬进这一行指的目录"。 */
+		constexpr const char* kAssetDragPayload = "RESOURCE_BROWSER_ITEM";
+
 		/* 顶栏「新建」菜单里能建的文件类型（文件夹单列，不算文件）。这张表是"能建哪些资源"
 		 * 的唯一来源：菜单项、名字预填、后缀约束、初始内容全靠它。只列资源树认得出类型的格式；
 		 * 最后一项是兜底的不限后缀（.glsl / .mat 自己写后缀）。 */
@@ -567,6 +572,10 @@ namespace Helios
 		ImGui::End();
 
 		ImGui::PopStyleVar();
+		/* 目录树拖拽的待办在这一刻落盘：面板已经画完（本帧的树不会再被读到），
+		 * 命令进同一条编辑历史 —— 撤销即可把东西搬回原处。
+		 * 与层级面板"挂接延后到遍历之后"是同一个位置上的同一条理由。 */
+		ApplyPendingDropMove();
 	}
 
 	/* 主体：左右两栏 —— 左「Folders」目录树、中间可拖的分隔条、右内容区（含底部的路径栏）。
@@ -612,6 +621,28 @@ namespace Helios
 
 				ImGui::BeginChild("##FolderTree", ImVec2(0.0f, tree_height));
 				DrawFolderNode(m_RootFileNodeTree);
+
+				/* 条目之下的空白区域：拖到这里 = 提升到资源根（与层级"空白 = 提升到根"同款）。
+				 * 只覆盖空白、不盖到行上 —— 落在行上的拖拽归那一行管（行自己的目标更小，
+				 * 交错时 ImGui 也优先接受最小目标）。 */
+				{
+					ImGuiWindow* const tree = ImGui::GetCurrentWindow();
+					const ImVec2 blank_top = ImGui::GetCursorScreenPos();
+					const ImVec2 tree_max(tree->Pos.x + tree->Size.x, tree->Pos.y + tree->Size.y);
+
+					if (tree_max.y > blank_top.y + 1.0f)
+					{
+						const ImRect blank_area(blank_top, tree_max);
+						if (ImGui::BeginDragDropTargetCustom(blank_area, ImGui::GetID("##FolderRootDrop")))
+						{
+							if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetDragPayload))
+								RecordDropMove(payload, std::string());
+
+							ImGui::EndDragDropTarget();
+						}
+					}
+				}
+
 				ImGui::EndChild();
 
 				/* 树画完，本次"把当前目录露出来"的请求已兑现 */
@@ -705,9 +736,44 @@ namespace Helios
 			if (is_current)
 				ImGui::PopStyleColor();
 
-			/* 点目录名（不是点展开箭头）= 切换当前目录 */
+			/* 点目录名（不是点展开箭头）= 切换当前目录 —— 但按下帧只记意图：
+			 * 松开那一帧再兑现（拖动起手就不算点击，见下面的松开判定）。 */
 			if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
-				SetCurrentNode(child_node);
+				m_PendingTreeNav = child_node;
+
+			/* 拖拽源：把文件夹拖去别的目录（树里拖到别的行、拖到树下方空白 = 提升到根），
+			 * 也可以拖给别的面板用（同一个 payload，内容区拖出的是同一种身份）。
+			 * 路径会被 ImGui 拷进 payload 缓冲，重建把节点指针换掉也不影响。 */
+			if (ImGui::BeginDragDropSource())
+			{
+				const char* item_path = child_node->FilePath.c_str();
+				ImGui::SetDragDropPayload(kAssetDragPayload, item_path, strlen(item_path) + 1);
+				ImGui::TextUnformatted(child_node->FileName.c_str());
+				ImGui::EndDragDropSource();
+			}
+
+			/* 拖拽目标：别处拖来的项落在这一行上 = 搬进这个目录。
+			 * 落到自己身上会被 ImGui 拒（源与目标同为这一行）—— "拖起来又原位放下" = 取消；
+			 * 其余非法落点（自己的子孙 / 原目录 / 重名）由落盘前的裁决挡住（见 ApplyPendingDropMove）。 */
+			if (ImGui::BeginDragDropTarget())
+			{
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetDragPayload))
+					RecordDropMove(payload, child_node->FilePath);
+
+				ImGui::EndDragDropTarget();
+			}
+
+			/* 松开那一帧：按下是"点击意图"、没越过拖拽阈值、指针还在这行上 —— 才真的切目录。
+			 * 把文件夹拖去别处的那一下不该顺带"进这个目录"（拖动是拿去用，不是查看）。 */
+			if (m_PendingTreeNav == child_node && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+			{
+				const bool was_drag = ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left);
+				const bool on_row = ImGui::IsItemHovered();
+				m_PendingTreeNav = nullptr;
+
+				if (!was_drag && on_row)
+					SetCurrentNode(child_node);
+			}
 
 			/* 目录树里也能新建 / 改名 / 删除：改名的目标是点到的这一项，
 			 * 与内容区的选中项无关（右键不动选中项 —— 只想改个目录名，不该把选择清掉） */
@@ -952,6 +1018,47 @@ namespace Helios
 
 		/* 没有注入通道（面板单独跑 / headless 测试）：直接执行 —— 功能对，只是没有历史 */
 		command->Do();
+	}
+
+	/* 拖放目标收到 payload：只登记"把谁搬进哪"（落盘延后，见 ApplyPendingDropMove）。
+	 * payload 是相对 Assets 的路径；into_dir 空串 = 资源根。 */
+	void EditorResourceBrowser::RecordDropMove(const ImGuiPayload* payload, const std::string& into_dir)
+	{
+		if (payload == nullptr)
+			return;
+
+		std::filesystem::path dropped;
+		if (payload->DataSize <= 1 || !TryPathFromUtf8Payload(
+			payload->Data, static_cast<size_t>(payload->DataSize), dropped))
+			return;
+
+		m_PendingDropFrom = PathToUtf8(dropped);
+		m_PendingDropInto = into_dir;
+	}
+
+	/* 拖拽移动的待办落盘：裁决通过就发一条重命名命令（改名即移动，撤销即搬回）。
+	 * 不合法（自身 / 自己的子孙 / 原目录 / 重名 / 源已不在）时什么都不做 ——
+	 * 留一行日志说清原因，免得"拖了没反应"无从排查。 */
+	void EditorResourceBrowser::ApplyPendingDropMove()
+	{
+		if (m_PendingDropFrom.empty())
+			return;
+
+		const std::string from = std::move(m_PendingDropFrom);
+		const std::string into = std::move(m_PendingDropInto);
+		m_PendingDropFrom.clear();
+		m_PendingDropInto.clear();
+
+		const std::filesystem::path from_abs = AbsoluteAssetPath(from);
+		const std::filesystem::path into_abs = AbsoluteAssetPath(into);
+
+		if (const std::string reason = AssetMoveError(from_abs, into_abs); !reason.empty())
+		{
+			CORE_LOG_INFO("拖拽移动已忽略：{0}（{1}）", from, reason);
+			return;
+		}
+
+		ExecuteCommand(CreateUniquePtr<RenameAssetCommand>(this, from_abs, into_abs / from_abs.filename()));
 	}
 
 	void EditorResourceBrowser::OnAssetPathChanged(const std::string& from, const std::string& to)
@@ -1913,11 +2020,11 @@ namespace Helios
 							ImGui::GetColorU32(EditorTheme::Token::Accent), ImGui::GetStyle().FrameRounding, 0, 1.5f);
 					}
 
-					/* 拖拽 */
+					/* 拖拽（拖给别的面板用，或拖进目录树里换个目录 —— 见目录树行的拖放目标） */
 					if (ImGui::BeginDragDropSource())
 					{
 						const char* item_path = child_node->FilePath.c_str();
-						ImGui::SetDragDropPayload("RESOURCE_BROWSER_ITEM", item_path, strlen(item_path) + 1);
+						ImGui::SetDragDropPayload(kAssetDragPayload, item_path, strlen(item_path) + 1);
 						ImGui::EndDragDropSource();
 					}
 

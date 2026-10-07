@@ -7,8 +7,11 @@ namespace Helios
 		const std::filesystem::path& to)
 		: m_Sink(sink), m_From(from), m_To(to)
 	{
-		/* 标签给的是新名字：撤销后菜单写 "Undo Rename hero.png"，重命名后看的是新名字 */
-		m_Label = std::string("Rename ") + PathToUtf8(m_To.filename());
+		/* 标签按"这次操作干了什么"给，撤销菜单里一眼分得开两种来路：同目录下换名字 = Rename
+		 * （重命名弹层），换了目录 = Move（目录树拖拽移动 / 带着改名的移动）。标签给的都是
+		 * 结果那一侧的名字：撤销后菜单写 "Undo Move hero.png"，看到的是它叫什么。 */
+		const bool same_directory = (m_From.parent_path() == m_To.parent_path());
+		m_Label = std::string(same_directory ? "Rename " : "Move ") + PathToUtf8(m_To.filename());
 	}
 
 	void RenameAssetCommand::Do()

@@ -23,6 +23,30 @@ namespace Helios
 			std::replace(name.begin(), name.end(), '\\', '_');
 			return name;
 		}
+
+		/* prefix 是不是 path 的祖先（或与它相等）—— 按路径分量逐段比，不拼字符串：
+		 * 分隔符风格（/ 与 \）与 "." / ".." 之类的词法差别都由 path 自己归一化掉。 */
+		bool IsPathPrefix(const std::filesystem::path& prefix, const std::filesystem::path& path)
+		{
+			std::error_code error;
+			const std::filesystem::path prefix_abs = std::filesystem::absolute(prefix, error).lexically_normal();
+			if (error)
+				return false;
+			const std::filesystem::path path_abs = std::filesystem::absolute(path, error).lexically_normal();
+			if (error)
+				return false;
+
+			auto prefix_component = prefix_abs.begin();
+			auto path_component = path_abs.begin();
+
+			for (; prefix_component != prefix_abs.end(); ++prefix_component, ++path_component)
+			{
+				if (path_component == path_abs.end() || *path_component != *prefix_component)
+					return false;
+			}
+
+			return true;
+		}
 	}
 
 	std::filesystem::path AssetTrashRoot()
@@ -92,6 +116,35 @@ namespace Helios
 		/* Windows 上这些字符建不出文件；资源要跨平台，直接一起挡掉 */
 		if (name.find_first_of("<>:\"|?*") != std::string::npos)
 			return "名字里不能有 < > : \" | ? * 这些字符";
+
+		return {};
+	}
+
+	std::string AssetMoveError(const std::filesystem::path& from, const std::filesystem::path& target_dir)
+	{
+		std::error_code error;
+
+		/* 移动不改名：落点就是"目标目录 / 源自己的名字" */
+		if (from.empty() || PathToUtf8(from.filename()).empty())
+			return "源的名字为空";
+
+		if (!std::filesystem::exists(from, error) || error)
+			return "源已经不在了";
+
+		if (!std::filesystem::is_directory(target_dir, error) || error)
+			return "目标不是目录";
+
+		/* 拖回它所在的目录（含"拖到它自己身上"）= 原位放下，不算一次移动 */
+		if (target_dir / from.filename() == from)
+			return "它已经在这个目录里";
+
+		/* 不能把目录搬进它自己或它的子孙里（磁盘上必然失败，先挡下来） */
+		if (IsPathPrefix(from, target_dir))
+			return "不能移动到自身内部";
+
+		/* 目标里已有同名项：与重命名同一条原则 —— 不覆盖（换名字是用户自己的事） */
+		if (std::filesystem::exists(target_dir / from.filename(), error) && !error)
+			return "目标目录里已有同名项";
 
 		return {};
 	}
