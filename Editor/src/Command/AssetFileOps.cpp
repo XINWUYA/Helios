@@ -78,10 +78,11 @@ namespace Helios
 			 * 两样都是"一个着色器"，筛 Shaders 时一起出来。 */
 			{ ".GLSL", AssetFileKind::Shader }, { ".METAL", AssetFileKind::Shader },
 			/* 模型：引擎自己只导 .obj（tinyobjloader），.mesh 是它旁边那份二进制网格缓存；
-			 * .fbx / .dae / .stl 是随模型一起带进来的交换格式 —— 都算"这个模型的文件"。
-			 * .mtl 是材质库（跟着 .obj 走的那份），不是模型，归 Other。 */
+			 * .fbx / .dae / .stl 是随模型一起带进来的交换格式 —— 都算"这个模型的文件"。 */
 			{ ".OBJ", AssetFileKind::Model }, { ".MESH", AssetFileKind::Model }, { ".FBX", AssetFileKind::Model },
 			{ ".DAE", AssetFileKind::Model }, { ".STL", AssetFileKind::Model },
+			/* 材质资产：.mtl 既是独立单条目材质资产，也是模型伴生的槽表（同一份 schema） */
+			{ ".MTL", AssetFileKind::Material },
 			/* 反射探针的烘焙缓存（保存场景时落盘，加载时直接恢复） */
 			{ ".PROBE", AssetFileKind::Probe },
 		};
@@ -205,6 +206,28 @@ namespace Helios
 				"    <Links>\n"
 				"    </Links>\n"
 				"</MaterialGraph>\n";
+		}
+
+		/* 单材质资产：与内置白模同一套配置（default.glsl + 默认贴图满配）——
+		 * 零外部依赖、编辑器延迟与前向两条路径都直接可预览，用户随后改参数 / 换贴图。 */
+		if (ext == ".mtl")
+		{
+			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+				"<Materials Count=\"1\">\n"
+				"    <Material ID=\"0\" ShaderPath=\"Shaders/default.glsl\">\n"
+				"        <Parameters>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_AlbedoTexture\"><Texture Path=\"Textures/White.png\" Slot=\"0\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_SpecularTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"1\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_NormalTexture\"><Texture Path=\"Textures/normal.png\" Slot=\"2\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_BumpTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"3\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_DisplacementTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"4\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_RoughnessTexture\"><Texture Path=\"Textures/White.png\" Slot=\"5\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_MetallicTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"6\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_EmissiveTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"7\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"            <ParamInfo Type=\"0\" Name=\"u_AmbientTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"8\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        </Parameters>\n"
+				"    </Material>\n"
+				"</Materials>\n";
 		}
 
 		/* 认不出的（.glsl / .txt / .mat …）：空文件。模板内容不该由我们凭空发明，

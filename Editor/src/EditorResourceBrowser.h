@@ -65,6 +65,7 @@ namespace Helios
 			MtlGraph,
 			Shader,
 			Model,
+			Material,
 			Probe,
 		};
 
@@ -80,6 +81,7 @@ namespace Helios
 			MtlGraph,
 			Shader,
 			Model,
+			Material,
 			Probe,
 			COUNT
 		};

@@ -87,6 +87,7 @@ namespace Helios
 		{
 			{ "Scene",          ".scn",      "New Scene",          Icons::Id::FileScene },
 			{ "Material Graph", ".mtlgraph", "New Material Graph", Icons::Id::FileMtlGraph },
+			{ "Material",       ".mtl",      "New Material",       Icons::Id::FileMaterial },
 			{ "File...",        "",          "New File",           Icons::Id::File },
 		};
 
@@ -282,6 +283,7 @@ namespace Helios
 		case FileType::MtlGraph: return Icons::Id::FileMtlGraph;
 		case FileType::Shader:   return Icons::Id::FileShader;
 		case FileType::Model:    return Icons::Id::FileModel;
+		case FileType::Material: return Icons::Id::FileMaterial;
 		case FileType::Probe:    return Icons::Id::FileProbe;
 		}
 
@@ -300,6 +302,7 @@ namespace Helios
 		case AssetFileKind::MtlGraph: return FileType::MtlGraph;
 		case AssetFileKind::Shader:   return FileType::Shader;
 		case AssetFileKind::Model:    return FileType::Model;
+		case AssetFileKind::Material: return FileType::Material;
 		case AssetFileKind::Probe:    return FileType::Probe;
 		}
 
@@ -317,6 +320,7 @@ namespace Helios
 		case FileType::MtlGraph: return AssetFileKind::MtlGraph;
 		case FileType::Shader:   return AssetFileKind::Shader;
 		case FileType::Model:    return AssetFileKind::Model;
+		case FileType::Material: return AssetFileKind::Material;
 		case FileType::Probe:    return AssetFileKind::Probe;
 		case FileType::Folder:   return AssetFileKind::Other;   /* 文件夹不看大类（看 IsFolder） */
 		}
@@ -337,6 +341,7 @@ namespace Helios
 		case TypeFilter::MtlGraph: return "Mtl Graphs";
 		case TypeFilter::Shader:   return "Shaders";
 		case TypeFilter::Model:    return "Models";
+		case TypeFilter::Material: return "Materials";
 		case TypeFilter::Probe:    return "Reflection Probes";
 		}
 
@@ -354,6 +359,7 @@ namespace Helios
 		case TypeFilter::MtlGraph: return type == FileType::MtlGraph;
 		case TypeFilter::Shader:   return type == FileType::Shader;
 		case TypeFilter::Model:    return type == FileType::Model;
+		case TypeFilter::Material: return type == FileType::Material;
 		case TypeFilter::Probe:    return type == FileType::Probe;
 		}
 

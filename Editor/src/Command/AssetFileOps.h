@@ -15,6 +15,7 @@ namespace Helios
 		MtlGraph,    /* .mtlgraph */
 		Shader,      /* .glsl（源） / .metal（Metal 目标，编译产物） */
 		Model,       /* .obj（引擎自己导的） / .mesh（网格缓存） / .fbx / .dae / .stl */
+		Material,    /* .mtl（材质资产：独立单条目 / 模型伴生的槽表） */
 		Probe,       /* .probe（反射探针的烘焙缓存：属性面板里直接预览烘焙结果） */
 	};
 

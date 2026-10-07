@@ -17,6 +17,7 @@ namespace Helios
 	class Scene;
 	class DeviceTexture;
 	class Material;
+	class MaterialGroup;
 	struct EntityTemplateDesc;
 
 	/* 场景实体层级树 + 属性面板。层级树按父子关系展开；层级面板 = 顶栏（搜索 + 筛选 + 新建）+
@@ -146,6 +147,15 @@ namespace Helios
 		void ShowAssetProperties();
 		/* 资源的详情卡：类型（卡头）/ 路径 / 大小 / 修改时间 + 类型相关的深挖行 + 图片预览 */
 		void DrawAssetDetailsCard(const AssetSelectionEntry& entry);
+		/* .mtl 的材质编辑卡：每条目一张，同级平铺在详情卡之后（与 probe 图卡同一路数）——
+		 * Shader 可选可改、参数与光栅化状态可就地编辑；改动即时热更（同步缓存里的
+		 * 共享材质 → 场景窗口立刻可见），「Apply」（没有改动时禁用）只负责序列化回文件 */
+		void DrawAssetMaterialCards(const std::filesystem::path& absolute_path);
+		/* 材质编辑卡的卡身：Shader 下拉（按目录分组的子菜单）+ 参数行 + 光栅化状态行；
+		 * on_edit：任何改动走这里（调用方记脏 + 热更新） */
+		void DrawAssetMaterialBody(Material& material, const std::function<void()>& on_edit);
+		/* 「Apply」：保存修改并序列化到本地，并同步材质管理器里已缓存的共享实例 */
+		void ApplyAssetMaterialEdits(const std::filesystem::path& absolute_path);
 		/* 多选摘要卡：数量 / 合计大小 / 类型分布 */
 		void DrawMultiAssetCard();
 		/* 按 (路径, 写入时间) 缓存类型相关的深挖详情（图片尺寸 / 场景统计）——
@@ -208,6 +218,13 @@ namespace Helios
 			SharedPtr<DeviceTexture> Texture;   /* 十字展开预览；无图形上下文时为空 */
 		};
 		std::vector<ProbeImageCard> m_AssetProbeCards;
+		/* 材质资产（.mtl）的编辑缓冲与可选 Shader：与深挖详情同一缓存键（路径 + 写入时间）
+		 * 从磁盘读入；编辑只改缓冲（不碰场景与缓存），点「Apply」才序列化回文件。 */
+		SharedPtr<MaterialGroup> m_AssetMaterialGroup;
+		std::vector<std::string> m_AssetMaterialShaderOptions;
+		/* 编辑缓冲有没有未保存的改动（Apply 按钮的禁用依据）：改 Shader / 参数时置位，
+		 * 重读缓冲（换选中项 / 文件变化 / Apply 写盘后）清掉 */
+		bool m_AssetMaterialDirty{ false };
 		/* 本帧请求的挂接（拖拽） */
 		PendingReparent m_PendingReparent;
 		/* 编辑历史（由所属 Layer 注入） */

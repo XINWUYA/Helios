@@ -934,6 +934,30 @@ namespace Helios::Icons
 			dl->AddLine(c.At(0.53f, 0.58f), c.At(0.53f, 0.82f), color, t);
 		}
 
+		/* 材质文件：页里一滴颜料（"材质 / 上色"的通用隐喻；与"着色器"的材质球刻意分开）。 */
+		void DrawFileMaterial(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			StrokePage(dl, c, t, color);
+
+			/* 泪滴：尖顶 + 两侧贝塞尔 + 底部半圆（弧心与两侧肩点严格衔接；几何与 SVG 版同一副数） */
+			const auto build_drop = [&]()
+			{
+				dl->PathLineTo(c.At(0.50f, 0.35f));
+				dl->PathBezierCubicCurveTo(c.At(0.588f, 0.469f), c.At(0.634f, 0.538f), c.At(0.634f, 0.60f));
+				dl->PathArcTo(c.At(0.50f, 0.60f), c.Len(0.134f), 0.0f, 3.1415927f, 12);
+				dl->PathBezierCubicCurveTo(c.At(0.366f, 0.538f), c.At(0.412f, 0.469f), c.At(0.50f, 0.35f));
+			};
+			build_drop();
+			dl->PathFillConvex(PaletteColor(color, kViolet, 0.16f));
+			build_drop();
+			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+
+			dl->AddCircleFilled(c.At(0.444f, 0.609f), c.Len(0.034f), PaletteColor(color, kMint));
+		}
+
 		/* 探针缓存文件：页里一个八面体 + 中心星芒（与场景树里的 ReflectionProbe 同一处标记——
 		 * 那边是"场景里的探针实体"，这里是"磁盘上的烘焙结果"）。 */
 		void DrawFileProbe(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -1799,6 +1823,7 @@ namespace Helios::Icons
 			{ "FileMtlGraph",      &DrawFileMtlGraph,       0.86f },
 			{ "FileShader",        &DrawFileShader,         0.86f },
 			{ "FileModel",         &DrawFileModel,          0.86f },
+			{ "FileMaterial",      &DrawFileMaterial,       0.86f },
 			{ "FileProbe",         &DrawFileProbe,          0.86f },
 			{ "Gizmos",            &DrawGizmos,             0.90f },
 			{ "Grid",              &DrawGrid,               0.90f },

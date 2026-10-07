@@ -11,6 +11,7 @@
 #include "Helios/Scene/ReflectionProbe.h"	/* .probe 详情的烘焙结果预览（BuildPreviewTexture） */
 #include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
+#include "Helios/VirtualDevice/DeviceShader.h"
 #include "EntityTemplateRegistry.h"
 #include "Command/ComponentFieldCommand.h"
 #include "Command/AddComponentCommand.h"
@@ -1356,6 +1357,47 @@ namespace Helios
 			return "Image";
 		}
 
+		/* 可选 Shader：Assets 下所有 .glsl 源（相对路径，字典序）。
+		 * 跳过 Cache（编译产物目录，里面是 .metal）；.glsl 允许建在任何子目录，所以整树扫 ——
+		 * 与材质编辑缓冲共用同一缓存键，只在选中材质或文件变化时重扫一次。 */
+		std::vector<std::string> CollectShaderOptions()
+		{
+			std::vector<std::string> options;
+
+			std::error_code error;
+			for (std::filesystem::recursive_directory_iterator iter(g_AssetsPath,
+					std::filesystem::directory_options::skip_permission_denied, error), end;
+				iter != end; iter.increment(error))
+			{
+				if (error)
+					break;
+
+				const std::filesystem::directory_entry& item = *iter;
+				if (item.is_directory())
+				{
+					if (item.path().filename() == "Cache")
+						iter.disable_recursion_pending();
+					continue;
+				}
+
+				if (!item.is_regular_file())
+					continue;
+
+				std::string extension = PathToUtf8(item.path().extension());
+				for (char& character : extension)
+				{
+					if (character >= 'A' && character <= 'Z')
+						character = static_cast<char>(character - 'A' + 'a');
+				}
+				if (extension != ".glsl")
+					continue;
+
+				options.emplace_back(RELATIVE_PATH(PathToUtf8(item.path())));
+			}
+
+			std::sort(options.begin(), options.end());
+			return options;
+		}
 	}
 
 	void SceneHierarchy::ShowAssetProperties()
@@ -1494,6 +1536,9 @@ namespace Helios
 			ImGui::PopID();
 		}
 
+		/* .mtl：材质编辑卡（同 probe 图卡：同级平铺在详情卡之后）—— Shader 可选可改、
+		 * 参数可就地编辑，「Apply」把编辑缓冲序列化回文件。 */
+		DrawAssetMaterialCards(absolute_path);
 	}
 
 	void SceneHierarchy::DrawMultiAssetCard()
@@ -1554,6 +1599,9 @@ namespace Helios
 			m_AssetDetailPath.clear();
 			m_AssetDetailRows.clear();
 			m_AssetProbeCards.clear();
+			m_AssetMaterialGroup = nullptr;
+			m_AssetMaterialShaderOptions.clear();
+			m_AssetMaterialDirty = false;
 			return;
 		}
 
@@ -1564,6 +1612,9 @@ namespace Helios
 		m_AssetDetailWriteTime = write_time;
 		m_AssetDetailRows.clear();
 		m_AssetProbeCards.clear();
+		m_AssetMaterialGroup = nullptr;
+		m_AssetMaterialShaderOptions.clear();
+		m_AssetMaterialDirty = false;
 
 		if (entry.Kind == AssetFileKind::Image)
 		{
@@ -1651,6 +1702,25 @@ namespace Helios
 
 				m_AssetProbeCards.push_back(std::move(image_card));
 			}
+		}
+		else if (entry.Kind == AssetFileKind::Material)
+		{
+			/* 材质资产：整个文件读进编辑缓冲（全部条目，引用形态条目只显示不编辑）。
+			 * 条目标题下的「Materials」行给出条目数；读不回来的文件明确说 unreadable。 */
+			auto group = CreateSharedPtr<MaterialGroup>();
+			if (group->Deserializer(PathToUtf8(absolute_path)))
+			{
+				m_AssetMaterialGroup = std::move(group);
+				m_AssetDetailRows.emplace_back("Materials",
+					std::to_string(m_AssetMaterialGroup->GetEntries().size()));
+			}
+			else
+			{
+				m_AssetDetailRows.emplace_back("Materials", "unreadable");
+			}
+
+			m_AssetMaterialShaderOptions = CollectShaderOptions();
+			m_AssetMaterialDirty = false;	/* 刚读上来的缓冲与文件一致（Apply 的禁用依据） */
 		}
 	}
 
@@ -2475,6 +2545,240 @@ namespace Helios
 			PanelChrome::EndCard(card);
 			ImGui::PopID();
 		}
+	}
+
+	/* ==================== 材质资产编辑卡（.mtl 的资源详情）====================
+	 * 资源浏览器选中 .mtl 时画在详情卡后面（每条目一张）。编辑只落编辑缓冲，点了 Apply 才
+	 * 序列化回文件 —— 没保存的改动不影响场景（Model 槽位读的是加载时那份）。 */
+
+	/* 卡身：Shader 下拉（按目录分组的子菜单）+ 参数行 + 光栅化状态行（与 Model 材质卡共用控件）。
+	 * on_edit：任何改动走这里 —— 调用方记脏并做热更新（同步缓存里的共享材质）。 */
+	void SceneHierarchy::DrawAssetMaterialBody(Material& material, const std::function<void()>& on_edit)
+	{
+		PROFILE_FUNCTION();
+
+		/* Shader 行：值 = 一枚下拉按钮（显示当前 Shader 的文件名、右缘一枚朝下的箭头；
+		 * 悬停看全路径）；点开的分组菜单按目录做子菜单（文件夹先、文件后），点一条即选中。
+		 * 还没有 Shader 的条目按钮上是占位文案，菜单照常能开、选一个即可补上。 */
+		const SharedPtr<DeviceShader> shader = material.GetShader();
+		const std::string current = (shader != nullptr) ? RELATIVE_PATH(shader->GetPath()) : std::string();
+
+		const float value_width = ImGuiExt::BeginPropertyRow("Shader", EditorTheme::Token::PropertyLabelWidth, true);
+
+		/* 菜单开着的按钮提亮一档（与组合框打开时的状态语言一致） */
+		const bool menu_open = ImGui::IsPopupOpen("##ShaderMenu");
+		if (menu_open)
+			ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+		const bool picker_clicked = ImGui::Button("##ShaderPicker", ImVec2(value_width, 0.0f));
+		if (menu_open)
+			ImGui::PopStyleColor();
+
+		if (picker_clicked)
+			ImGui::OpenPopup("##ShaderMenu");
+
+		/* 按钮的自绘内容：文件名居中、右缘一枚朝下的箭头（与 Button 自身同一套
+		 * RenderTextClipped 画法 —— 长名字按按钮宽度裁剪，不撑破行） */
+		{
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const ImVec2 min = ImGui::GetItemRectMin();
+			const ImVec2 max = ImGui::GetItemRectMax();
+
+			const std::string display = current.empty()
+				? std::string(kNoShaderOption)
+				: PathToUtf8(PathFromUtf8(current).filename());
+
+			const float arrow_size = ImGui::GetFontSize() * 0.55f;
+			const float arrow_zone = arrow_size + style.FramePadding.x * 2.0f;
+
+			const ImVec2 text_size = ImGui::CalcTextSize(display.c_str());
+			const ImRect clip(min, max);
+			ImGui::RenderTextClipped(ImVec2(min.x + style.FramePadding.x, min.y + style.FramePadding.y),
+				ImVec2(max.x - arrow_zone, max.y - style.FramePadding.y),
+				display.c_str(), nullptr, &text_size, ImVec2(0.5f, 0.5f), &clip);
+
+			PanelChrome::DrawDisclosureArrow(ImGui::GetWindowDrawList(),
+				ImVec2(max.x - style.FramePadding.x - arrow_size * 0.5f, (min.y + max.y) * 0.5f),
+				arrow_size, true, ImGui::GetColorU32(EditorTheme::Token::TextDim));
+		}
+
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("%s", current.empty() ? "Pick a shader" : current.c_str());
+
+		/* 分组菜单：清单很小，打开的每帧现拼一棵树（Apply 后面板重载缓冲，树自然跟着新清单走）。
+		 * 弹层给一条最小宽度约束：各行铺满弹层，勾选列因此对齐在同一条纵线上。 */
+		ImGui::SetNextWindowSizeConstraints(ImVec2(200.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+		if (ImGui::BeginPopup("##ShaderMenu"))
+		{
+			/* 菜单打开时重扫一遍可选 Shader：清单平时只在"选中材质 / 材质文件变化"时刷新，
+			 * 新建的 .glsl 不必等这些时机 —— 一开菜单就能选到 */
+			if (ImGui::IsWindowAppearing())
+				m_AssetMaterialShaderOptions = CollectShaderOptions();
+
+			std::vector<ShaderMenuNode> nodes = BuildShaderMenuTree(m_AssetMaterialShaderOptions);
+
+			/* 清单都窝在同一层壳里时（如 Assets/Shaders/…）把空壳脱掉，顶层直接放内容。
+			 * 注意：先搬到局部再赋回 —— children 住在 nodes 自己的缓冲里，直接自引用 move 行为未定义
+			 * （实测会得到空树）。 */
+			if (nodes.size() == 1 && nodes[0].IsFolder())
+			{
+				std::vector<ShaderMenuNode> inner = std::move(nodes[0].Children);
+				nodes = std::move(inner);
+			}
+
+			/* 当前 Shader 不在清单里（资产外路径之类）：树顶补一条，选中态照常能看到 */
+			if (!current.empty()
+				&& std::find(m_AssetMaterialShaderOptions.begin(), m_AssetMaterialShaderOptions.end(), current)
+					== m_AssetMaterialShaderOptions.end())
+				nodes.insert(nodes.begin(), ShaderMenuNode{ current, current, {} });
+
+			std::string picked;
+			DrawShaderMenuLevel(nodes, current, picked);
+			ImGui::EndPopup();
+
+			if (!picked.empty() && picked != current)
+			{
+				material.SetShader(ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH(picked)));
+				on_edit();
+			}
+		}
+
+		ImGuiExt::EndPropertyRow();
+
+		/* 参数行：集合来自 Shader 反射（换 Shader 后立即按新 Shader 列行）；值取编辑缓冲，
+		 * 反射声明而缓冲里还没有的先显示反射默认值 —— 编辑时才落进缓冲；
+		 * 反射不到时画报错提示，不回退旧参数表 */
+		const std::vector<MaterialParamInfo> rows = BuildMaterialParamRows(material);
+		if (rows.empty())
+			DrawMaterialReflectionNotice(material);
+
+		for (const MaterialParamInfo& param_info : rows)
+		{
+			DrawMaterialParamRow(param_info, m_AssetRevealFunc,
+				[&material, &on_edit](ParamType type, const std::string& name, const std::any& value)
+				{
+					if (type == ParamType::Texture)
+						material.SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
+					else
+						material.SetParameters(type, name, value);
+
+					/* 有改动 → 记脏（Apply 变可用）+ 热更新（见 DrawAssetMaterialCards） */
+					on_edit();
+				});
+		}
+
+		/* 光栅化状态：可折叠分区（默认收起；值画在临时副本上，改动时才实例化写回）。上方压一条
+		 * 隔离线。注意：TreeNodeEx 只承担命中 / 折叠状态（标签传空串、三角自绘）；
+		 * NoTreePushOnOpen：内容不缩进（默认 TreePush 会 Indent 18px，跟参数行错位）。 */
+		DrawMaterialSectionDivider();
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 0.0f)); /* 藏掉 stock 箭头（自绘对位） */
+		const bool raster_open = ImGui::TreeNodeEx("##MaterialRasterState",
+			ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen, "%s", "");
+		ImGui::PopStyleColor();
+		DrawMaterialSectionHeader(raster_open, "Raster State");
+		if (raster_open)
+		{
+			if (DrawMaterialRasterStateRows(material.GetRasterState()))
+				on_edit();
+		}
+	}
+
+	/* 每条目一张卡：可编辑的条目（内嵌定义）= 卡身 + 「Apply」；引用形态 / 空条目明确说清是什么，
+	 * 而不是给一张空卡。 */
+	void SceneHierarchy::DrawAssetMaterialCards(const std::filesystem::path& absolute_path)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_AssetMaterialGroup == nullptr)
+			return;
+
+		const std::string asset_path = PathToUtf8(absolute_path);
+		const auto& entries = m_AssetMaterialGroup->GetEntries();
+		for (size_t index = 0; index < entries.size(); ++index)
+		{
+			const MaterialEntry& entry = entries[index];
+
+			/* 卡片键按索引：多条目各一张、折叠状态互不影响（槽名可空、可重名，不能当 ID） */
+			ImGui::PushID(static_cast<int>(index));
+
+			std::string title = "Material";
+			if (entries.size() > 1)
+				title += " " + std::to_string(index);
+			if (!entry.SlotName.empty())
+				title += " · " + entry.SlotName;
+
+			const PanelChrome::Card card = PanelChrome::BeginCard(title.c_str(), Icons::Id::FileMaterial);
+			if (card.Open)
+			{
+				if (entry.pMaterial != nullptr)
+				{
+					/* 编辑缓冲的改动即时热更：同步缓存里的共享材质（场景在渲染的那份）——
+					 * 场景窗口立刻看到结果，无需等 Apply（Apply 只管落盘）。
+					 * 资产约定单条目：只有第 0 条对应对缓存条目。 */
+					const SharedPtr<Material> editable = entry.pMaterial;
+					const bool hot_sync = (index == 0);
+					DrawAssetMaterialBody(*entry.pMaterial, [this, asset_path, editable, hot_sync]()
+					{
+						m_AssetMaterialDirty = true;
+						if (hot_sync)
+							MaterialAssetManager::Instance().Refresh(asset_path, editable);
+					});
+
+					/* 「Apply」：保存修改并序列化到本地（整份文件的全部条目一起写出）；
+					 * 没有改动时禁用 —— 点了也只是原样重写，没有意义 */
+					ImGui::Spacing();
+					const bool has_changes = m_AssetMaterialDirty;
+					if (!has_changes)
+						ImGui::BeginDisabled();
+					if (ImGui::Button("Apply", ImVec2(ImGui::GetContentRegionAvail().x, 0.0f)))
+						ApplyAssetMaterialEdits(absolute_path);
+					if (!has_changes)
+						ImGui::EndDisabled();
+					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+						ImGui::SetTooltip(has_changes ? "Save changes to this .mtl file" : "No changes to apply");
+				}
+				else if (!entry.AssetPath.empty())
+				{
+					/* 引用形态：定义在别处（独立材质资产）—— 要改它得选中那份资产 */
+					ImGuiExt::DrawCommonTextUI("Asset", RELATIVE_PATH(entry.AssetPath));
+					ImGuiExt::DrawCommonTextUI("Type", "Shared material asset");
+				}
+				else
+				{
+					ImGuiExt::DrawCommonTextUI("Status", "Invalid material entry");
+				}
+			}
+
+			PanelChrome::EndCard(card);
+			ImGui::PopID();
+		}
+	}
+
+	/* 「Apply」：保存修改并序列化到本地。
+	 * 独立材质资产（约定单条目）另做缓存同步：命中缓存时就地换定义 —— 场景里已引用它的
+	 * 槽位无需重载场景即可生效；模型伴生的槽表以文件为准，模型下次加载时读到新定义。 */
+	void SceneHierarchy::ApplyAssetMaterialEdits(const std::filesystem::path& absolute_path)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_AssetMaterialGroup == nullptr)
+			return;
+
+		/* 参数表按当前 Shader 收敛后再落盘（反射是集合的单一来源：面板看不到的不写进文件） */
+		for (const MaterialEntry& entry : m_AssetMaterialGroup->GetEntries())
+		{
+			if (entry.pMaterial != nullptr)
+				entry.pMaterial->RetainShaderDeclaredParams();
+		}
+
+		const std::string path = PathToUtf8(absolute_path);
+		m_AssetMaterialGroup->Serializer(path);
+
+		/* 缓冲已与文件一致：按钮回到禁用（下一帧文件写入时间变化触发的重读也会再清一遍） */
+		m_AssetMaterialDirty = false;
+
+		if (const MaterialEntry* first = m_AssetMaterialGroup->GetEntryByIndex(0);
+			first != nullptr && first->pMaterial != nullptr)
+			MaterialAssetManager::Instance().Refresh(path, first->pMaterial);
 	}
 
 	/* 层级里拖入 .mesh：给实体挂 / 换模型。
