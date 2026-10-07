@@ -24,6 +24,12 @@ namespace Helios
 		return *this;
 	}
 
+	EntityTemplateRegistrar& EntityTemplateRegistrar::Category(const char* category)
+	{
+		m_Desc.Category = category;
+		return *this;
+	}
+
 	EntityTemplateRegistrar& EntityTemplateRegistrar::Component(AddFunc add)
 	{
 		m_Desc.Components.push_back(add);
@@ -48,6 +54,42 @@ namespace Helios
 					.Icon(Icons::Id::Entity)
 					.Register();
 
+				/* 默认 3D 形状与通用模型：折叠进「3D」子菜单（同组连续注册）。
+				 * 内置形状是程序化几何（无资产文件），挂一个带内建模型的 Model 组件；
+				 * 初始化材质为内置白模（材质槽 "Default" 的默认绑定）。 */
+				EntityTemplateRegistrar("Cube")
+					.Icon(Icons::Id::Cube)
+					.Category("3D")
+					.Component([](Entity& entity)
+					{
+						entity.AddComponent<ModelComponent>().m_Model = Model::Create(BuiltinModelType::Cube);
+					})
+					.Register();
+
+				EntityTemplateRegistrar("Sphere")
+					.Icon(Icons::Id::Sphere)
+					.Category("3D")
+					.Component([](Entity& entity)
+					{
+						entity.AddComponent<ModelComponent>().m_Model = Model::Create(BuiltinModelType::Sphere);
+					})
+					.Register();
+
+				EntityTemplateRegistrar("Plane")
+					.Icon(Icons::Id::Plane)
+					.Category("3D")
+					.Component([](Entity& entity)
+					{
+						entity.AddComponent<ModelComponent>().m_Model = Model::Create(BuiltinModelType::Plane);
+					})
+					.Register();
+
+				EntityTemplateRegistrar("Model")
+					.Icon(Icons::Id::Model)
+					.Category("3D")
+					.Component([](Entity& entity) { entity.AddComponent<ModelComponent>(); })
+					.Register();
+
 				EntityTemplateRegistrar("Sprite")
 					.Icon(Icons::Id::Sprite)
 					.Component([](Entity& entity) { entity.AddComponent<SpriteComponent>(); })
@@ -58,28 +100,27 @@ namespace Helios
 					.Component([](Entity& entity) { entity.AddComponent<CameraComponent>(); })
 					.Register();
 
-				EntityTemplateRegistrar("Model")
-					.Icon(Icons::Id::Model)
-					.Component([](Entity& entity) { entity.AddComponent<ModelComponent>(); })
-					.Register();
-
 				EntityTemplateRegistrar("Reflection Probe")
 					.Icon(Icons::Id::ReflectionProbe)
 					.Component([](Entity& entity) { entity.AddComponent<ReflectionProbeComponent>(); })
 					.Register();
 
+				/* 三种光源：折叠进「Light」子菜单（同组连续注册） */
 				EntityTemplateRegistrar("Directional Light")
 					.Icon(Icons::Id::LightDirectional)
+					.Category("Light")
 					.Component([](Entity& entity) { entity.AddComponent<LightComponent>(LightType::Directional); })
 					.Register();
 
 				EntityTemplateRegistrar("Point Light")
 					.Icon(Icons::Id::LightPoint)
+					.Category("Light")
 					.Component([](Entity& entity) { entity.AddComponent<LightComponent>(LightType::Point); })
 					.Register();
 
 				EntityTemplateRegistrar("Spot Light")
 					.Icon(Icons::Id::LightSpot)
+					.Category("Light")
 					.Component([](Entity& entity) { entity.AddComponent<LightComponent>(LightType::Spot); })
 					.Register();
 			}

@@ -24,7 +24,7 @@ namespace Helios
 			/* 通用 */
 			Menu, Add, Remove, Return, Filter, Search, Visible,
 			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
-			Scene, Entity, Model, Camera, Light, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Sprite,
+			Scene, Entity, Model, Cube, Sphere, Plane, Shape3D, Camera, Light, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Sprite,
 			Audio, Particle, Terrain,
 			/* 组件卡头部：与实体类型图标分开，按"这是个什么组件"造型 */
 			Transform, Tag,
@@ -32,6 +32,8 @@ namespace Helios
 			Stats,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
 			Directory, File, FileImage, FileScene, FileMtlGraph, FileShader, FileModel,
+			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */
+			Gizmos, Grid, WorldAxis,
 			COUNT
 		};
 

@@ -43,6 +43,7 @@ namespace Helios::Icons
 
 		constexpr ImU32 kViolet = IM_COL32(108, 104, 217, 255);
 		constexpr ImU32 kMint = IM_COL32(39, 173, 145, 255);
+		constexpr ImU32 kRed = IM_COL32(213, 92, 85, 255);	/* 与调色板 #d55c55 同值 */
 
 		/* 归一化坐标 -> 屏幕坐标。
 		 * 约定：图标在 [0,1]² 内作图，(0,0) 为左上、(1,1) 为右下；
@@ -626,6 +627,98 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.045f), PaletteColor(color, kMint));
 		}
 
+		/* ---- 默认 3D 形状（新建菜单 / 场景树）----
+		 * 与 Model 的"线框盒 + 中心点"刻意分开：形状图标是"实心几何体"——
+		 * 盒子的两个可见面带填色、不带中心点；球与平面各用自己的剪影语言。 */
+
+		void DrawCubeShape(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 左面淡紫、顶面薄荷（右面留白）：两块带色的面给出实心体积感 */
+			static constexpr float kTop[4][2] = {
+				{ 0.50f, 0.08f }, { 0.92f, 0.30f }, { 0.50f, 0.52f }, { 0.08f, 0.30f }
+			};
+			static constexpr float kLeft[4][2] = {
+				{ 0.08f, 0.30f }, { 0.50f, 0.52f }, { 0.50f, 0.92f }, { 0.08f, 0.70f }
+			};
+			FillPoly(dl, c, kLeft, PaletteColor(color, kViolet, 0.20f));
+			FillPoly(dl, c, kTop, PaletteColor(color, kMint, 0.24f));
+
+			static constexpr float kShell[6][2] = {
+				{ 0.50f, 0.08f }, { 0.92f, 0.30f }, { 0.92f, 0.70f },
+				{ 0.50f, 0.92f }, { 0.08f, 0.70f }, { 0.08f, 0.30f }
+			};
+			StrokePolyline(dl, c, kShell, t, color, true);
+			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.08f, 0.30f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.92f, 0.30f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.50f, 0.92f), PaletteColor(color, kViolet), t);
+		}
+
+		void DrawSphereShape(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 圆面 + 经线（竖椭圆）+ 纬线（横弦）：一眼是球，不是"光圈 / 灯泡" */
+			const ImVec2 sphere_center = c.At(0.50f, 0.50f);
+			dl->AddCircleFilled(sphere_center, c.Len(0.42f), PaletteColor(color, kViolet, 0.16f));
+
+			constexpr int kMeridianSegments = 28;
+			for (int i = 0; i <= kMeridianSegments; ++i)
+			{
+				const float angle = 2.0f * kPi * static_cast<float>(i) / kMeridianSegments;
+				dl->PathLineTo(c.At(0.50f + std::cos(angle) * 0.16f, 0.50f + std::sin(angle) * 0.42f));
+			}
+			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+
+			dl->AddLine(c.At(0.08f, 0.50f), c.At(0.92f, 0.50f), PaletteColor(color, kViolet), t);
+			dl->AddCircle(sphere_center, c.Len(0.42f), color, 0, t);
+		}
+
+		void DrawPlaneShape(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 等轴测四边形（地砖）+ 中缝十字：用"摊平的菱形"表达零厚度的平面 */
+			static constexpr float kQuad[4][2] = {
+				{ 0.50f, 0.16f }, { 0.92f, 0.50f }, { 0.50f, 0.84f }, { 0.08f, 0.50f }
+			};
+			FillPoly(dl, c, kQuad, PaletteColor(color, kMint, 0.18f));
+			StrokePolyline(dl, c, kQuad, t, color, true);
+			dl->AddLine(c.At(0.29f, 0.33f), c.At(0.71f, 0.67f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.71f, 0.33f), c.At(0.29f, 0.67f), PaletteColor(color, kViolet), t);
+		}
+
+		/* 「3D」分组行（新建菜单）：线框小立方体 + 右下角一颗小球 —— "多种 3D 形状"
+		 * 的集合语义；与 Cube（实心大块）、Model（带中心点）刻意分开。 */
+		void DrawShape3D(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 小球先画（占右下角，不压几何） */
+			dl->AddCircleFilled(c.At(0.76f, 0.76f), c.Len(0.18f), PaletteColor(color, kViolet, 0.14f));
+			dl->AddCircle(c.At(0.76f, 0.76f), c.Len(0.18f), PaletteColor(color, kViolet), 0, t);
+
+			/* 线框立方体（左上）：轮廓 + 三条中棱；左面垫一层淡色给出体积 */
+			static constexpr float kShell[6][2] = {
+				{ 0.37f, 0.04f }, { 0.70f, 0.205f }, { 0.70f, 0.535f },
+				{ 0.37f, 0.70f }, { 0.04f, 0.535f }, { 0.04f, 0.205f }
+			};
+			static constexpr float kLeft[4][2] = {
+				{ 0.04f, 0.205f }, { 0.37f, 0.37f }, { 0.37f, 0.70f }, { 0.04f, 0.535f }
+			};
+			FillPoly(dl, c, kLeft, PaletteColor(color, kViolet, 0.16f));
+			StrokePolyline(dl, c, kShell, t, color, true);
+
+			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.37f, 0.70f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.70f, 0.535f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.04f, 0.535f), PaletteColor(color, kViolet), t);
+		}
+
 		void DrawSprite(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -841,6 +934,77 @@ namespace Helios::Icons
 			dl->AddLine(c.At(0.53f, 0.58f), c.At(0.53f, 0.82f), color, t);
 		}
 
+
+		/* ---- 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 ----
+		 * 造型与 SVG symbol 对齐：四角取景框 + 中心轴点（Gizmos）、
+		 * 3×3 网格（Grid）、三轴角标（WorldAxis）。 */
+
+		void DrawGizmos(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 mint = PaletteColor(color, kMint);
+
+			/* 四角取景框：视口里的辅助显示范围 */
+			dl->AddLine(c.At(0.10f, 0.32f), c.At(0.10f, 0.10f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.10f, 0.10f), c.At(0.32f, 0.10f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.68f, 0.10f), c.At(0.90f, 0.10f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.90f, 0.10f), c.At(0.90f, 0.32f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.90f, 0.68f), c.At(0.90f, 0.90f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.90f, 0.90f), c.At(0.68f, 0.90f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.32f, 0.90f), c.At(0.10f, 0.90f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.10f, 0.90f), c.At(0.10f, 0.68f), violet, t * 1.1f);
+
+			/* 中心十字 + 轴点：实体图标的位置标记 */
+			dl->AddLine(c.At(0.50f, 0.34f), c.At(0.50f, 0.66f), mint, t);
+			dl->AddLine(c.At(0.34f, 0.50f), c.At(0.66f, 0.50f), mint, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.055f), mint);
+		}
+
+		void DrawGrid(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 violet = PaletteColor(color, kViolet);
+
+			/* 3×3 网格：外框 + 两条纵 / 横内线（内线细一档区分主次） */
+			dl->AddRect(c.At(0.12f, 0.12f), c.At(0.88f, 0.88f), violet, c.Len(0.06f), 0, t * 1.1f);
+			const float p1 = 0.12f + 0.76f / 3.0f;
+			const float p2 = 0.12f + 0.76f * 2.0f / 3.0f;
+			dl->AddLine(c.At(p1, 0.12f), c.At(p1, 0.88f), violet, t * 0.72f);
+			dl->AddLine(c.At(p2, 0.12f), c.At(p2, 0.88f), violet, t * 0.72f);
+			dl->AddLine(c.At(0.12f, p1), c.At(0.88f, p1), violet, t * 0.72f);
+			dl->AddLine(c.At(0.12f, p2), c.At(0.88f, p2), violet, t * 0.72f);
+		}
+
+		void DrawWorldAxis(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 red = PaletteColor(color, kRed);
+			const ImU32 violet = PaletteColor(color, kViolet);
+
+			/* 三轴角标：Y 向上 / X 左下 / Z 右下，轴端各两撇小箭头 */
+			const ImVec2 origin = c.At(0.50f, 0.52f);
+			dl->AddLine(origin, c.At(0.50f, 0.14f), mint, t);
+			dl->AddLine(c.At(0.50f, 0.14f), c.At(0.39f, 0.31f), mint, t);
+			dl->AddLine(c.At(0.50f, 0.14f), c.At(0.61f, 0.31f), mint, t);
+
+			dl->AddLine(origin, c.At(0.15f, 0.85f), red, t);
+			dl->AddLine(c.At(0.15f, 0.85f), c.At(0.18f, 0.66f), red, t);
+			dl->AddLine(c.At(0.15f, 0.85f), c.At(0.34f, 0.82f), red, t);
+
+			dl->AddLine(origin, c.At(0.85f, 0.85f), violet, t);
+			dl->AddLine(c.At(0.85f, 0.85f), c.At(0.82f, 0.66f), violet, t);
+			dl->AddLine(c.At(0.85f, 0.85f), c.At(0.66f, 0.82f), violet, t);
+
+			/* 轴心点：继承墨色外圈 + 薄荷芯 */
+			dl->AddCircleFilled(origin, c.Len(0.06f), color);
+			dl->AddCircleFilled(origin, c.Len(0.028f), mint);
+		}
+
 		enum class SvgInk : uint8_t
 		{
 			None,
@@ -892,9 +1056,10 @@ namespace Helios::Icons
 			"", "new-scene", "open-scene", "save", "import", "new-asset", "undo", "redo", "back", "forward",
 			"translate", "rotate", "scale",
 			"play", "stop", "menu", "add", "remove", "return", "filter", "search", "visible", "scene",
-			"entity", "model", "camera", "light", "light-directional", "light-point", "light-spot",
+			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
 			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats",
 			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
+			"gizmos", "grid", "world-axis",
 		};
 		static_assert(IM_ARRAYSIZE(kSvgSymbolIds) == static_cast<size_t>(Id::COUNT),
 			"SVG symbol map must remain aligned with Icons::Id");
@@ -1581,6 +1746,10 @@ namespace Helios::Icons
 			{ "Scene",             &DrawScene,              0.90f },
 			{ "Entity",            &DrawEntity,             0.93f },
 			{ "Model",             &DrawModel,              0.93f },
+			{ "Cube",              &DrawCubeShape,          0.93f },
+			{ "Sphere",            &DrawSphereShape,        0.93f },
+			{ "Plane",             &DrawPlaneShape,         0.93f },
+			{ "Shape3D",           &DrawShape3D,            0.93f },
 			{ "Camera",            &DrawCamera,             0.83f },
 			{ "Light",             &DrawLight,              0.86f },
 			{ "LightDirectional",  &DrawDirectionalLight,   0.83f },
@@ -1601,6 +1770,9 @@ namespace Helios::Icons
 			{ "FileMtlGraph",      &DrawFileMtlGraph,       0.86f },
 			{ "FileShader",        &DrawFileShader,         0.86f },
 			{ "FileModel",         &DrawFileModel,          0.86f },
+			{ "Gizmos",            &DrawGizmos,             0.90f },
+			{ "Grid",              &DrawGrid,               0.90f },
+			{ "WorldAxis",         &DrawWorldAxis,          0.90f },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),

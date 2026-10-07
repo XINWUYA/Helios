@@ -1,6 +1,8 @@
 ﻿#include "Pch.h"
 #include "MainEditorLayer.h"
+#include "EditorBuiltinCamera.h"
 #include "EditorIcons.h"
+#include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "ImGuizmo.h"
 #include "Helios/ImGui/EditorTheme.h"
@@ -462,6 +464,47 @@ namespace Helios
 				running ? "Stop" : "Play"))
 			{
 				m_Context.SetPlayMode(running ? PlayMode::Edit : PlayMode::Runtime);
+			}
+
+			/* ---- 视图辅助（贴最右侧）：Gizmos 显隐菜单 ----
+			 * 状态读写全局 ViewportGizmoOptions（绘制侧同一数据源）。 */
+			const float toolbar_right = ImGui::GetContentRegionMax().x - kButtonSize;
+			const float play_right = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
+			ImGui::SameLine(std::max(play_right + kGroupGap, toolbar_right));
+
+			const bool gizmo_menu_open = ImGui::IsPopupOpen("##GizmoMenu");
+			if (Icons::IconButton(Icons::Id::Gizmos, button_size, gizmo_menu_open, "Gizmos") && !gizmo_menu_open)
+				ImGui::OpenPopup("##GizmoMenu");
+
+			/* 弹层锚在按钮正下方、右缘对齐（pivot 取右上角）——按钮贴着工具栏右缘，
+			 * 左对齐展开会伸出窗口；最小宽度取最长行标题 + 图标与勾选列的固定组分，
+			 * 撑足后各行的勾选列落在同一纵向基线上 */
+			const ImVec2 gizmo_button_max = ImGui::GetItemRectMax();
+			const float gizmo_menu_min_width = ImGui::CalcTextSize("Reflection Probes").x
+				+ ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f
+				+ ImGui::GetFontSize() * 2.0f + 24.0f;
+
+			ImGui::SetNextWindowPos(ImVec2(gizmo_button_max.x, gizmo_button_max.y + 4.0f),
+				ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
+			ImGui::SetNextWindowSizeConstraints(ImVec2(gizmo_menu_min_width, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+			if (ImGui::BeginPopup("##GizmoMenu"))
+			{
+				auto& gizmo_options = GetViewportGizmoOptions();
+
+				/* 总开关：关则全部隐藏（分项状态保留），下边的分项行随之禁用变淡 */
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Gizmos, "Show Gizmos", &gizmo_options.MasterEnabled);
+				ImGui::Separator();
+
+				const bool sub_enabled = gizmo_options.MasterEnabled;
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Grid, "Grid", &gizmo_options.ShowGrid, sub_enabled);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::WorldAxis, "World Axis", &gizmo_options.ShowWorldAxis, sub_enabled);
+				ImGui::Separator();
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Light, "Lights", &gizmo_options.ShowLight, sub_enabled);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Camera, "Cameras", &gizmo_options.ShowCamera, sub_enabled);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::ReflectionProbe, "Reflection Probes",
+					&gizmo_options.ShowReflectionProbe, sub_enabled);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Sprite, "Sprites", &gizmo_options.ShowSprite, sub_enabled);
+				ImGui::EndPopup();
 			}
 		}
 		ImGui::EndChild();

@@ -15,11 +15,16 @@ namespace Helios
 		Plane
 	};
 
+	/* 内建模型的身份名（BuiltinCube / BuiltinSphere / BuiltinPlane）：
+	 * 既是 Model::GetPath()，也是场景序列化里的身份标记 —— 内建模型没有资产文件，
+	 * 保存 / 加载都靠这个名字往返（见组件注册表的 SaveModelPath / LoadModelPath）。 */
+	[[nodiscard]] const char* BuiltinModelName(BuiltinModelType type);
 
-	/* 模型类
-	 * 默认为静态模型
-	 * 仅支持.mesh格式文件，通过ModelEditor导出
-	 */
+	/* 反查：身份名 -> 类型（非内建名返回 false） */
+	[[nodiscard]] bool TryParseBuiltinModelName(const std::string& name, BuiltinModelType& out_type);
+
+	/* 模型类：默认静态模型，仅支持 .mesh（由 ModelEditor 导出）。几何和材质解耦 —— 模型只描述
+	 * 几何与"材质槽表"；具体绑哪份材质由实体槽覆盖与模型默认绑定的解析链决定（见 ResolveSlotMaterial）。 */
 	class Model : public SceneObject
 	{
 	public:
@@ -31,6 +36,9 @@ namespace Helios
 
 		/* 模型路径 */
 		[[nodiscard]] const std::string& GetPath() const { return m_Path; }
+		/* 内建模型类型（无资产文件、程序化生成）；非内建模型返回 false。
+		 * UI（属性面板 / 场景树图标）与序列化判断"要不要当路径处理"都走它。 */
+		[[nodiscard]] bool TryGetBuiltinType(BuiltinModelType& out_type) const;
 		/* 模型的AABB */
 		[[nodiscard]] const glm::vec3& GetAABBMin() const { return m_AABBMin; }
 		[[nodiscard]] const glm::vec3& GetAABBMax() const { return m_AABBMax; }

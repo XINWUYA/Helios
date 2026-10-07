@@ -327,7 +327,15 @@ namespace Helios
 		{
 			const auto& model = static_cast<const ModelComponent*>(component)->m_Model;
 			if (model != nullptr)
-				element->SetAttribute("ModelPath", RELATIVE_PATH(model->GetPath()).c_str());
+			{
+				/* 内建模型（BuiltinCube 等）没有资产文件：存身份名，加载经
+				 * Model::Create 反查回 BuiltinModelType；文件模型存相对路径。 */
+				BuiltinModelType builtin_type{};
+				const bool is_builtin = model->TryGetBuiltinType(builtin_type);
+				element->SetAttribute("ModelPath", is_builtin
+					? model->GetPath().c_str()
+					: RELATIVE_PATH(model->GetPath()).c_str());
+			}
 		}
 
 		void LoadModelPath(const tinyxml2::XMLElement* element, void* component)
@@ -365,7 +373,15 @@ namespace Helios
 			bool changed = false;
 
 			if (model != nullptr)
-				ImGuiExt::DrawCommonTextUI("ModelPath", RELATIVE_PATH(model->GetPath()));
+			{
+				/* 内建模型显示身份名（BuiltinSphere 等）：它不是磁盘上的文件，
+				 * 拿去做 RELATIVE_PATH 只会得到一串上跳相对路径。 */
+				BuiltinModelType builtin_type{};
+				const std::string model_label = model->TryGetBuiltinType(builtin_type)
+					? model->GetPath()
+					: RELATIVE_PATH(model->GetPath());
+				ImGuiExt::DrawCommonTextUI("ModelPath", model_label);
+			}
 
 			const float value_width = ImGuiExt::BeginPropertyRow("Model");
 			const float frame_height = ImGui::GetFrameHeight();

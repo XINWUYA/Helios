@@ -633,9 +633,11 @@ namespace Helios
 			 * get<> 取不到池（entt 的编译期约束） */
 			auto& registry = scene->GetRegistry();
 
-			/* 全局显隐（Scene 视口右上角 Gizmos 菜单控制的单一数据源）：
+			/* 全局显隐（工具栏最右 Gizmos 菜单控制的单一数据源）：
 			 * 关掉的类型在其循环内全部跳过、不产生任何提交 */
 			const auto& gizmo_options = GetViewportGizmoOptions();
+			if (!gizmo_options.MasterEnabled)
+				return;	/* 总开关关：实体图标全部不提交 */
 
 			/* 屏幕恒定尺寸：世界尺寸 = 像素尺度 × 标称像素 × 到相机的距离 */
 			const auto world_scale_at = [&](const glm::vec3& position, float nominal_pixel_size)
@@ -1242,12 +1244,13 @@ namespace Helios
 
 				render_pass_info->Bind();
 				{
-					/* 视口 gizmo 的全局显隐（右上角 Gizmos 菜单控制的单一数据源） */
+					/* 视口 gizmo 的全局显隐（工具栏最右 Gizmos 菜单控制的单一数据源）：
+					 * 总开关与分项各管一层，总开关关则一律不提交 */
 					const auto& gizmo_options = GetViewportGizmoOptions();
 
 		/* 地面网格：patch 跟着相机平移、按格对齐（整数平移 → 线就一直落在世界整数坐标上）；
 		 * 远景淡出按到相机的水平距离在着色器里处理（见 Axis.glsl）。 */
-					if (gizmo_options.ShowGrid)
+					if (gizmo_options.MasterEnabled && gizmo_options.ShowGrid)
 					{
 						const glm::vec3 camera_pos = GetPosition();
 						const glm::vec3 grid_origin(std::round(camera_pos.x), 0.0f, std::round(camera_pos.z));
@@ -1257,7 +1260,7 @@ namespace Helios
 					}
 
 					/* 坐标轴固定在世界原点（单位变换）；轴带是三角形 */
-					if (gizmo_options.ShowWorldAxis)
+					if (gizmo_options.MasterEnabled && gizmo_options.ShowWorldAxis)
 					{
 						Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, glm::mat4(1.0f), nullptr, nullptr });
 						Renderer::Submit(axis_material, MeshPrimitive{ GetAxisVertexArray(), PrimitiveType::Triangles });

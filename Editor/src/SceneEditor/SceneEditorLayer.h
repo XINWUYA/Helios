@@ -88,9 +88,6 @@ namespace Helios
 		void ShowOperationGizmoUI();
 		/* 视口右上角的视图指示器：六轴盘，点击切视角 / 拖拽转视角 */
 		void ShowViewGizmoUI();
-		/* 视口右上角的 Gizmos 显隐菜单：按类型全局开关场景辅助与实体图标
-		 * （状态存于 ViewportGizmoOptions，绘制侧读同一份） */
-		void ShowGizmoOptionsUI();
 
 		/* 鼠标选中Entity时的响应 */
 		void CheckMouseSelectEntity();

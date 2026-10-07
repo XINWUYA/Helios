@@ -8,72 +8,111 @@
 
 namespace Helios
 {
+	/* 内建模型的身份名：单一来源 —— 创建时命名（GetPath）、序列化存取、
+	 * UI 判定都走这里，改名字只改这一个地方。 */
+	const char* BuiltinModelName(BuiltinModelType type)
+	{
+		switch (type)
+		{
+		case BuiltinModelType::Cube:   return "BuiltinCube";
+		case BuiltinModelType::Sphere: return "BuiltinSphere";
+		case BuiltinModelType::Plane:  return "BuiltinPlane";
+		}
+		return "";
+	}
+
+	bool TryParseBuiltinModelName(const std::string& name, BuiltinModelType& out_type)
+	{
+		for (BuiltinModelType type : { BuiltinModelType::Cube, BuiltinModelType::Sphere, BuiltinModelType::Plane })
+		{
+			if (name == BuiltinModelName(type))
+			{
+				out_type = type;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/* ==================== 内置几何的顶点契约 ====================
+	 * 跟导入的 .mesh 一致（元素声明顺序即 location 0..4）—— 这是 GBuffer / PBRStandard 能建出
+	 * 管线的前提（Metal 要求用到的 attribute 都在顶点描述符里）。切线按 UV 的 U 方向推导
+	 * （B = cross(T,N)），防法线贴图翻面。 */
+	static void SetBuiltinVertexLayout(const SharedPtr<DeviceVertexBuffer>& vertex_buffer)
+	{
+		vertex_buffer->SetLayout({
+			{ "a_Position", BufferDataType::Float3 },
+			{ "a_Normal",   BufferDataType::Float3 },
+			{ "a_Color",    BufferDataType::Float4 },
+			{ "a_TexCoord", BufferDataType::Float3 },
+			{ "a_Tangent",  BufferDataType::Float3 },
+		});
+	}
+
 	/* 创建一个Cube类型的模型 */
 	static SharedPtr<Model> CreateCube(const SharedPtr<Material>& material)
 	{
-		auto model = CreateSharedPtr<Model>("BuiltinCube");
+		const char* model_name = BuiltinModelName(BuiltinModelType::Cube);
+		auto model = CreateSharedPtr<Model>(model_name);
 
 		/* 仅需准备一次顶点数据 */
 		static SharedPtr<DeviceVertexArray> vertex_array = nullptr;
 		if (!vertex_array)
 		{
-			/* Cube vertices */
+			/* Cube vertices：位置 f3 | 法线 f3 | 颜色 f4 | UV f3 | 切线 f3。
+			 * 每个面按"从外侧看 CCW"排两个三角形（Cull_Back 才剔得对），
+			 * 法线与切线都贴着各自面的实际朝向（切线 = 该面 UV 的 U 轴）。 */
 			static constexpr float vertices[] = {
-				/* Position-----------Normal---------------TexCoord */
-				/* Bottom */
-				-0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 0.0f,
-				 0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 0.0f,
-				 0.5f,  0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f,
-				 0.5f,  0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f,
-				-0.5f,  0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 1.0f,
-				-0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  0.0f, 0.0f,
-				/* Top */
-				-0.5f, -0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f,
-				 0.5f, -0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 0.0f,
-				 0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f,
-				 0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f,
-				-0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 1.0f,
-				-0.5f, -0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  0.0f, 0.0f,
-				/* Left */
-				-0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
-				-0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
-				-0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
-				-0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
-				-0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
-				-0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
-				/* Right */
-				 0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
-				 0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f,
-				 0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
-				 0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 1.0f,
-				 0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  0.0f, 0.0f,
-				 0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f,
-				 /* Back */
-				-0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f,
-				 0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f,
-				 0.5f, -0.5f,  0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 0.0f,
-				 0.5f, -0.5f,  0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 0.0f,
-				-0.5f, -0.5f,  0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 0.0f,
-				-0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  0.0f, 1.0f,
-				/* Front */
-				-0.5f,  0.5f, -0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 1.0f,
-				 0.5f,  0.5f, -0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f,
-				 0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f,
-				 0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 0.0f,
-				-0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 0.0f,
-				-0.5f,  0.5f, -0.5f,  0.0f,  0.0f,  1.0f,  0.0f, 1.0f,
+				/* Front (+Z)：法线 (0, 0, 1)，切线 = +X */
+				-0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				-0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				-0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				/* Back (-Z)：法线 (0, 0, -1)，切线 = -X */
+				 0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f, -1.0f,  0.0f,  0.0f,
+				-0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 0.00f, 0.0f, -1.0f,  0.0f,  0.0f,
+				-0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f, -1.0f,  0.0f,  0.0f,
+				 0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f, -1.0f,  0.0f,  0.0f,
+				-0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f, -1.0f,  0.0f,  0.0f,
+				 0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 1.00f, 0.0f, -1.0f,  0.0f,  0.0f,
+				/* Right (+X)：法线 (1, 0, 0)，切线 = -Z */
+				 0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  0.0f,  0.0f, -1.0f,
+				 0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 0.00f, 0.0f,  0.0f,  0.0f, -1.0f,
+				 0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  0.0f,  0.0f, -1.0f,
+				 0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  0.0f,  0.0f, -1.0f,
+				 0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  0.0f,  0.0f, -1.0f,
+				 0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 1.00f, 0.0f,  0.0f,  0.0f, -1.0f,
+				/* Left (-X)：法线 (-1, 0, 0)，切线 = +Z */
+				-0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  0.0f,  0.0f,  1.0f,
+				-0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 0.00f, 0.0f,  0.0f,  0.0f,  1.0f,
+				-0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  0.0f,  0.0f,  1.0f,
+				-0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  0.0f,  0.0f,  1.0f,
+				-0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  0.0f,  0.0f,  1.0f,
+				-0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 1.00f, 0.0f,  0.0f,  0.0f,  1.0f,
+				/* Top (+Y)：法线 (0, 1, 0)，切线 = +X */
+				-0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				-0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				-0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				/* Bottom (-Y)：法线 (0, -1, 0)，切线 = +X */
+				-0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				-0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				 0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
+				-0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 1.00f, 0.0f,  1.0f,  0.0f,  0.0f,
 			};
 
 			/* Vertex Buffer */
-			SharedPtr<DeviceVertexBuffer> vertex_buffer = DeviceVertexBuffer::Create("BuiltinCube_VertexBuffer", vertices, sizeof(vertices));
-			VertexBufferLayout vertex_buffer_layout = {
-				{ "a_Position", BufferDataType::Float3 },
-				{ "a_Normal", BufferDataType::Float3 },
-				{ "a_TexCoord", BufferDataType::Float2 },
-			};
-			vertex_buffer->SetLayout(vertex_buffer_layout);
+			SharedPtr<DeviceVertexBuffer> vertex_buffer = DeviceVertexBuffer::Create(
+				std::string(model_name) + "_VertexBuffer", vertices, sizeof(vertices));
+			SetBuiltinVertexLayout(vertex_buffer);
 			/* Vertex Array */
-			vertex_array = DeviceVertexArray::Create("BuiltinCube_VertexArray");
+			vertex_array = DeviceVertexArray::Create(std::string(model_name) + "_VertexArray");
 			vertex_array->Bind();
 			vertex_array->AddVertexBuffer(vertex_buffer);
 		}
@@ -81,7 +120,7 @@ namespace Helios
 		/* 内建模型的顶点范围是固定的（±0.5 的立方体），显式写入局部 AABB。
 		 * 阴影视锥拟合、视锥体剔除等逻辑都依赖 MeshSegment 的 AABB，
 		 * 缺省值 (0,0,0) 是退化包围盒，会让这些逻辑把物体当成一个点。 */
-		auto mesh_segment = CreateSharedPtr<MeshSegment>("BuiltinCube", vertex_array, material);
+		auto mesh_segment = CreateSharedPtr<MeshSegment>(model_name, vertex_array, material);
 		mesh_segment->SetAABB(glm::vec3(-0.5f), glm::vec3(0.5f));
 		model->AddMeshSegment(mesh_segment);
 		return model;
@@ -90,7 +129,8 @@ namespace Helios
 	/* 创建一个Sphere类型的网格 */
 	static SharedPtr<Model> CreateSphere(const SharedPtr<Material>& material)
 	{
-		auto model = CreateSharedPtr<Model>("BuiltinSphere");
+		const char* model_name = BuiltinModelName(BuiltinModelType::Sphere);
+		auto model = CreateSharedPtr<Model>(model_name);
 
 		/* 仅需准备一次顶点数据 */
 		static SharedPtr<DeviceVertexArray> vertex_array = nullptr;
@@ -99,88 +139,96 @@ namespace Helios
 			constexpr int16_t segments_x = 32;
 			constexpr int16_t segments_y = 32;
 
-			/* Calculate vertices, normals, uvs */
-			std::vector<glm::vec3> vertices;
-			std::vector<glm::vec3> normals;
-			std::vector<glm::vec2> uvs;
-
+			/* 交错数据：位置 f3 | 法线 f3 | 颜色 f4 | UV f3 | 切线 f3（元素顺序即 location） */
 			constexpr int32_t vertex_count = (segments_x + 1) * (segments_y + 1);
-			vertices.reserve(vertex_count);
-			normals.reserve(vertex_count);
-			uvs.reserve(vertex_count);
+			constexpr int32_t floats_per_vertex = 16;
+
+			std::vector<float> vertex_data;
+			vertex_data.reserve(static_cast<size_t>(vertex_count) * floats_per_vertex);
 
 			for (int32_t x = 0; x <= segments_x; ++x)
 			{
-				float s_x = static_cast<float>(x) / segments_x;
+				const float s_x = static_cast<float>(x) / segments_x;
+				/* 切线 = dP/dU 的方向（经度方向，与 v 无关）——极点处也不退化，
+				 * 不像"差分法"那样在 sin(vπ)=0 时归零到 NaN */
+				const float tangent_u = -std::sin(s_x * 2.0f * PI);
+				const float tangent_w = std::cos(s_x * 2.0f * PI);
+
 				for (int32_t y = 0; y <= segments_y; ++y)
 				{
-					float s_y = static_cast<float>(y) / segments_y;
+					const float s_y = static_cast<float>(y) / segments_y;
 
-					glm::vec3 position(
+					const glm::vec3 position(
 						std::cos(s_x * 2.0f * PI) * std::sin(s_y * PI),
 						std::cos(s_y * PI),
 						std::sin(s_x * 2.0f * PI) * std::sin(s_y * PI)
 					);
 
-					vertices.emplace_back(position);
-					normals.emplace_back(position); /* 对球心在坐标原点的球，其normal与position相等 */
-					uvs.emplace_back(s_x, s_y);
+					/* 位置 / 法线（对球心在原点的单位球，normal 与 position 相等） */
+					vertex_data.emplace_back(position.x);
+					vertex_data.emplace_back(position.y);
+					vertex_data.emplace_back(position.z);
+					vertex_data.emplace_back(position.x);
+					vertex_data.emplace_back(position.y);
+					vertex_data.emplace_back(position.z);
+					/* 颜色：白（乘进材质是 no-op） */
+					vertex_data.emplace_back(1.0f);
+					vertex_data.emplace_back(1.0f);
+					vertex_data.emplace_back(1.0f);
+					vertex_data.emplace_back(1.0f);
+					/* UV（w 位补 0） */
+					vertex_data.emplace_back(s_x);
+					vertex_data.emplace_back(s_y);
+					vertex_data.emplace_back(0.0f);
+					/* 切线 */
+					vertex_data.emplace_back(tangent_u);
+					vertex_data.emplace_back(0.0f);
+					vertex_data.emplace_back(tangent_w);
 				}
 			}
 
-			/* Calculate indices */
+			/* Calculate indices：显式三角形列表（每格两个三角形，绕序为"从外侧看 CCW"，
+			 * 与 Cube / Plane 同一约定）。不用 Triangle_Strip：条带的奇偶绕序在
+			 * 后端之间语义微妙，曾导致一半三角形被背面剔除、球面镂空。 */
 			std::vector<uint16_t> indices;
-			bool odd_row = false;
+			indices.reserve(static_cast<size_t>(segments_x) * segments_y * 6);
 			for (int16_t y = 0; y < segments_y; ++y)
 			{
-				if (!odd_row) // even rows: y == 0, y == 2; and so on
+				for (int16_t x = 0; x < segments_x; ++x)
 				{
-					for (int16_t x = 0; x <= segments_x; ++x)
-					{
-						indices.emplace_back(y * (segments_x + 1) + x);
-						indices.emplace_back((y + 1) * (segments_x + 1) + x);
-					}
+					const uint16_t top_left = static_cast<uint16_t>(y * (segments_x + 1) + x);
+					const uint16_t bottom_left = static_cast<uint16_t>((y + 1) * (segments_x + 1) + x);
+					const uint16_t bottom_right = static_cast<uint16_t>((y + 1) * (segments_x + 1) + x + 1);
+					const uint16_t top_right = static_cast<uint16_t>(y * (segments_x + 1) + x + 1);
+
+					indices.emplace_back(top_left);
+					indices.emplace_back(bottom_left);
+					indices.emplace_back(bottom_right);
+
+					indices.emplace_back(top_left);
+					indices.emplace_back(bottom_right);
+					indices.emplace_back(top_right);
 				}
-				else
-				{
-					for (int16_t x = segments_x; x >= 0; --x)
-					{
-						indices.emplace_back((y + 1) * (segments_x + 1) + x);
-						indices.emplace_back(y * (segments_x + 1) + x);
-					}
-				}
-				odd_row = !odd_row;
 			}
 
-			vertex_array = DeviceVertexArray::Create("BuiltinSphere_VertexArray");
+			vertex_array = DeviceVertexArray::Create(std::string(model_name) + "_VertexArray");
 			vertex_array->Bind();
 			/* vertices */
 			{
-				auto vertex_buffer = DeviceVertexBuffer::Create("BuiltinSphere_VertexBuffer_Position", vertices.data(), vertex_count * sizeof(glm::vec3));
-				vertex_buffer->SetLayout({ { "a_Position", BufferDataType::Float3 } });
-				vertex_array->AddVertexBuffer(vertex_buffer);
-			}
-			/* normals */
-			{
-				auto vertex_buffer = DeviceVertexBuffer::Create("BuiltinSphere_VertexBuffer_Normal", normals.data(), vertex_count * sizeof(glm::vec3));
-				vertex_buffer->SetLayout({ { "a_Normal", BufferDataType::Float3 } });
-				vertex_array->AddVertexBuffer(vertex_buffer);
-			}
-			/* uvs */
-			{
-				auto vertex_buffer = DeviceVertexBuffer::Create("BuiltinSphere_VertexBuffer_TexCoord", uvs.data(), vertex_count * sizeof(glm::vec2));
-				vertex_buffer->SetLayout({ { "a_TexCoord", BufferDataType::Float2 } });
+				auto vertex_buffer = DeviceVertexBuffer::Create(std::string(model_name) + "_VertexBuffer",
+					vertex_data.data(), static_cast<uint32_t>(vertex_data.size() * sizeof(float)));
+				SetBuiltinVertexLayout(vertex_buffer);
 				vertex_array->AddVertexBuffer(vertex_buffer);
 			}
 			/* indices */
 			{
-				auto index_buffer = IndexBuffer::Create("BuiltinSphere_IndexBuffer", indices.data(), indices.size(), IndexType::UInt16);
+				auto index_buffer = IndexBuffer::Create(std::string(model_name) + "_IndexBuffer", indices.data(), static_cast<uint32_t>(indices.size()), IndexType::UInt16);
 				vertex_array->SetIndexBuffer(index_buffer);
 			}
 		}
 
 		/* 内建球为半径 1 的单位球（球心在局部原点） */
-		auto mesh_segment = MeshSegment::Create("BuiltinSphere", { vertex_array, PrimitiveType::Triangle_Strip }, material);
+		auto mesh_segment = MeshSegment::Create(model_name, { vertex_array, PrimitiveType::Triangles }, material);
 		mesh_segment->SetAABB(glm::vec3(-1.0f), glm::vec3(1.0f));
 		model->AddMeshSegment(mesh_segment);
 		return model;
@@ -189,39 +237,36 @@ namespace Helios
 	/* 创建一个Plane类型的网格 */
 	static SharedPtr<Model> CreatePlane(const SharedPtr<Material>& material)
 	{
-		auto model = CreateSharedPtr<Model>("BuiltinPlane");
+		const char* model_name = BuiltinModelName(BuiltinModelType::Plane);
+		auto model = CreateSharedPtr<Model>(model_name);
 		/* 仅需准备一次顶点数据 */
 		static SharedPtr<DeviceVertexArray> vertex_array = nullptr;
 		if (!vertex_array)
 		{
-			/* Plane Vertices */
+			/* Plane Vertices：位置 f3 | 法线 f3 | 颜色 f4 | UV f3 | 切线 f3，
+			 * 切线 = UV 的 U 轴（+X），与法线、UV 朝向自洽 */
 			static constexpr float vertices[] = {
-				// Position,        Normal,           TexCoord,
-				-0.5f, 0.0f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
-				-0.5f, 0.0f,  0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
-				 0.5f, 0.0f,  0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f,
-				 0.5f, 0.0f,  0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f,
-				 0.5f, 0.0f, -0.5f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f,
-				-0.5f, 0.0f, -0.5f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+				-0.5f, 0.0f, -0.5f,  0.0f, 1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  1.0f, 0.0f, 0.0f,
+				-0.5f, 0.0f,  0.5f,  0.0f, 1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 1.00f, 0.0f,  1.0f, 0.0f, 0.0f,
+				 0.5f, 0.0f,  0.5f,  0.0f, 1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  1.0f, 0.0f, 0.0f,
+				-0.5f, 0.0f, -0.5f,  0.0f, 1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  0.00f, 0.00f, 0.0f,  1.0f, 0.0f, 0.0f,
+				 0.5f, 0.0f,  0.5f,  0.0f, 1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 1.00f, 0.0f,  1.0f, 0.0f, 0.0f,
+				 0.5f, 0.0f, -0.5f,  0.0f, 1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f,  1.00f, 0.00f, 0.0f,  1.0f, 0.0f, 0.0f,
 			};
 
 			/* Vertex Buffer */
-			auto vertex_buffer = DeviceVertexBuffer::Create("BuiltinPlane_VertexBuffer", vertices, sizeof(vertices));
-			VertexBufferLayout vertex_buffer_layout = {
-				{ "a_Position", BufferDataType::Float3 },
-				{ "a_Normal", BufferDataType::Float3 },
-				{ "a_TexCoord", BufferDataType::Float2 },
-			};
-			vertex_buffer->SetLayout(vertex_buffer_layout);
+			auto vertex_buffer = DeviceVertexBuffer::Create(std::string(model_name) + "_VertexBuffer",
+				vertices, sizeof(vertices));
+			SetBuiltinVertexLayout(vertex_buffer);
 
 			/* Vertex Array */
-			vertex_array = DeviceVertexArray::Create("BuiltinPlane_VertexArray");
+			vertex_array = DeviceVertexArray::Create(std::string(model_name) + "_VertexArray");
 			vertex_array->Bind();
 			vertex_array->AddVertexBuffer(vertex_buffer);
 		}
 
 		/* 内建平面位于局部空间的 XZ 平面，范围 ±0.5（零厚度） */
-		auto mesh_segment = CreateSharedPtr<MeshSegment>("BuiltinPlane", vertex_array, material);
+		auto mesh_segment = CreateSharedPtr<MeshSegment>(model_name, vertex_array, material);
 		mesh_segment->SetAABB(glm::vec3(-0.5f, 0.0f, -0.5f), glm::vec3(0.5f, 0.0f, 0.5f));
 		model->AddMeshSegment(mesh_segment);
 		return model;
@@ -265,6 +310,12 @@ namespace Helios
 	/* 从路径加载一个模型 */
 	SharedPtr<Model> Model::Create(const std::string& path)
 	{
+		/* 内建模型的路径即身份名（BuiltinCube…）：直接路由到程序化创建，不落盘、不查资产。
+		 * 序列化加载与代码创建共用这一个入口 —— 存盘写身份名、读盘反查类型。 */
+		BuiltinModelType builtin_type{};
+		if (TryParseBuiltinModelName(path, builtin_type))
+			return Create(builtin_type);
+
 		/* 获取文件后缀名 */
 		std::string suffix = ExtractFileSuffix(path);
 		std::transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower);
@@ -410,6 +461,12 @@ namespace Helios
 		case BuiltinModelType::Plane:  return CreatePlane(material);
 		}
 		return nullptr;
+	}
+
+	/* 内建模型类型：路径即身份名（见 TryParseBuiltinModelName） */
+	bool Model::TryGetBuiltinType(BuiltinModelType& out_type) const
+	{
+		return TryParseBuiltinModelName(m_Path, out_type);
 	}
 
 	/* 加载模型时，加载材质 */

@@ -183,6 +183,204 @@ namespace Helios::PanelChrome
 		return clicked;
 	}
 
+	/* 带图标和勾选的切换菜单行（Gizmos 显隐那一类）：整行命中 / 悬停高亮跟 MenuItemWithIcon 一样；
+	 * 行右固定画一枚 Accent 色对勾，点击翻转 *value、不收起弹层。行高取控件档，行宽铺满弹层
+	 * （SpanAvailWidth），各行的勾选列对齐在一条竖线上。 */
+	inline bool MenuItemToggleWithIcon(Icons::Id icon, const char* label, bool* value, bool enabled = true)
+	{
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float icon_size = ImGui::GetFontSize();
+		const float icon_gap = style.ItemInnerSpacing.x;
+
+		if (!enabled)
+			ImGui::BeginDisabled();
+
+		ImGui::PushID(label);
+		const bool clicked = ImGui::Selectable("##row", false,
+			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover
+				| ImGuiSelectableFlags_SpanAvailWidth | ImGuiSelectableFlags_DontClosePopups,
+			ImVec2(0.0f, 0.0f));
+		ImGui::PopID();
+
+		const ImVec2 min = ImGui::GetItemRectMin();
+		const ImVec2 max = ImGui::GetItemRectMax();
+		const float center_y = (min.y + max.y) * 0.5f;
+
+		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+
+		/* 图标与文字都画在 Selectable 之后：悬停底色已经落好，不会被盖住 */
+		Icons::Draw(draw_list, icon,
+			ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
+			icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
+
+		draw_list->AddText(
+			ImVec2(min.x + style.FramePadding.x + icon_size + icon_gap,
+				center_y - ImGui::GetFontSize() * 0.5f),
+			ImGui::GetColorU32(EditorTheme::Token::Text), label);
+
+		/* 勾选标记：矢量对勾（两笔画）——勾选的画在行右缘的固定列里，
+		 * 未勾选也保留同一列（位置不随状态跳） */
+		if (value != nullptr && *value)
+		{
+			const float check_center_x = max.x - style.FramePadding.x - icon_size * 0.5f;
+			const float thickness = ImMax(1.5f, icon_size * 0.105f);
+			const ImU32 check_color = ImGui::GetColorU32(EditorTheme::Token::Accent);
+			const ImVec2 stroke_a(check_center_x - icon_size * 0.30f, center_y + icon_size * 0.03f);
+			const ImVec2 stroke_b(check_center_x - icon_size * 0.08f, center_y + icon_size * 0.24f);
+			const ImVec2 stroke_c(check_center_x + icon_size * 0.27f, center_y - icon_size * 0.26f);
+			draw_list->AddLine(stroke_a, stroke_b, check_color, thickness);
+			draw_list->AddLine(stroke_b, stroke_c, check_color, thickness);
+		}
+
+		if (!enabled)
+			ImGui::EndDisabled();
+
+		if (clicked && value != nullptr)
+			*value = !*value;
+
+		return clicked;
+	}
+
+	/* 带图标的子菜单行（「新建」下拉里的分组行）：外观 = 菜单行 + 右缘一个右向箭头；
+	 * 行为照搬 ImGui BeginMenu 的垂直弹层路径（悬停展开、链式关闭、ChildMenu）。
+	 * 只给弹层菜单用；键盘导航略过（这些菜单的键盘入口是搜索框）。 */
+	inline bool BeginMenuWithIcon(Icons::Id icon, const char* label)
+	{
+		ImGuiContext& g = *ImGui::GetCurrentContext();
+		ImGuiWindow* const window = g.CurrentWindow;
+		if (window->SkipItems)
+			return false;
+
+		const ImGuiStyle& style = g.Style;
+		const ImGuiID id = window->GetID(label);
+		bool menu_is_open = ImGui::IsPopupOpen(id, ImGuiPopupFlags_None);
+
+		/* 子菜单弹层旗标与原生一致：ChildMenu 让鼠标能"跨菜单悬停"
+		 *（不设的话上层弹层会把悬停抢走，指针进不了子菜单）。 */
+		ImGuiWindowFlags flags = ImGuiWindowFlags_ChildMenu | ImGuiWindowFlags_AlwaysAutoResize
+			| ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings
+			| ImGuiWindowFlags_NoNavFocus;
+		if (window->Flags & (ImGuiWindowFlags_Popup | ImGuiWindowFlags_ChildMenu))
+			flags |= ImGuiWindowFlags_ChildWindow;
+
+		/* ---- 行：整行命中（Selectable），图标 / 文本 / 箭头画在它之后 ----
+		 * Selectable 用空 label：空串的 ID 就是 ID 栈顶 —— 恰是 GetID(label) 的值
+		 *（PushID(label) 把它压上来），于是行 id 与 popup id 同源、悬停判定对得上。 */
+		const float icon_size = ImGui::GetFontSize();
+		const float icon_gap = style.ItemInnerSpacing.x;
+		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
+		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x
+			+ icon_gap + icon_size;   /* 尾部留一个图标宽的箭头格 */
+
+		const ImVec2 pos = window->DC.CursorPos;
+		const ImVec2 popup_pos(pos.x, pos.y - style.WindowPadding.y);
+
+		ImGui::PushID(label);
+		const bool pressed = ImGui::Selectable("", menu_is_open,
+			ImGuiSelectableFlags_NoHoldingActiveID | ImGuiSelectableFlags_SelectOnClick
+				| ImGuiSelectableFlags_DontClosePopups | ImGuiSelectableFlags_SpanAvailWidth,
+			ImVec2(width, 0.0f));
+		ImGui::PopID();
+
+		const bool hovered = (g.HoveredId == id);
+
+		{
+			const ImVec2 min = ImGui::GetItemRectMin();
+			const ImVec2 max = ImGui::GetItemRectMax();
+			const float center_y = (min.y + max.y) * 0.5f;
+			ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+
+			/* 图标与文本画在 Selectable 之后（悬停底色已经落好）——
+			 * 起点公式与 MenuItemWithIcon 一致，图标列 / 文本列自然对齐。 */
+			Icons::Draw(draw_list, icon,
+				ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
+				icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
+
+			draw_list->AddText(
+				ImVec2(min.x + style.FramePadding.x + icon_size + icon_gap,
+					center_y - ImGui::GetFontSize() * 0.5f),
+				ImGui::GetColorU32(EditorTheme::Token::Text), label);
+
+			/* 右向箭头：矢量笔画（两段线），画在行右缘的固定格（与勾选列同一位置语言） */
+			const float arrow_x = max.x - style.FramePadding.x - icon_size * 0.5f;
+			const float arrow_d = icon_size * 0.22f;
+			const float arrow_t = ImMax(1.5f, icon_size * 0.105f);
+			const ImU32 arrow_color = ImGui::GetColorU32(EditorTheme::Token::TextLabel);
+			draw_list->AddLine(ImVec2(arrow_x - arrow_d, center_y - arrow_d),
+				ImVec2(arrow_x, center_y), arrow_color, arrow_t);
+			draw_list->AddLine(ImVec2(arrow_x, center_y),
+				ImVec2(arrow_x - arrow_d, center_y + arrow_d), arrow_color, arrow_t);
+		}
+
+		/* ---- 开合（照抄 BeginMenuEx 的 vertical 分支） ---- */
+		bool want_open = false;
+		bool want_close = false;
+
+		/* "斜向驶向子菜单"的三角通道：指针离开本行、沿对角去子菜单的途中
+		 * 不该把子菜单关掉（否则穿过邻行的一瞬就闪没了） */
+		bool moving_toward_child_menu = false;
+		ImGuiWindow* child_menu_window = (g.BeginPopupStack.Size < g.OpenPopupStack.Size
+			&& g.OpenPopupStack[g.BeginPopupStack.Size].SourceWindow == window)
+			? g.OpenPopupStack[g.BeginPopupStack.Size].Window : nullptr;
+		if (g.HoveredWindow == window && child_menu_window != nullptr
+			&& !(window->Flags & ImGuiWindowFlags_MenuBar))
+		{
+			const float ref_unit = g.FontSize;
+			const ImRect next_window_rect = child_menu_window->Rect();
+			/* 不用 ImVec2 运算符（operator- 要求 IMGUI_DEFINE_MATH_OPERATORS 在
+			 * 包含 imgui.h 时已生效，本头文件的使用方不保证这个前提），显式分量相减 */
+			ImVec2 ta(g.IO.MousePos.x - g.IO.MouseDelta.x, g.IO.MousePos.y - g.IO.MouseDelta.y);
+			ImVec2 tb = (window->Pos.x < child_menu_window->Pos.x) ? next_window_rect.GetTL() : next_window_rect.GetTR();
+			ImVec2 tc = (window->Pos.x < child_menu_window->Pos.x) ? next_window_rect.GetBL() : next_window_rect.GetBR();
+			const float extra = ImClamp(ImFabs(ta.x - tb.x) * 0.30f, ref_unit * 0.5f, ref_unit * 2.5f);
+			ta.x += (window->Pos.x < child_menu_window->Pos.x) ? -0.5f : +0.5f;
+			tb.y = ta.y + ImMax((tb.y - extra) - ta.y, -ref_unit * 8.0f);
+			tc.y = ta.y + ImMin((tc.y + extra) - ta.y, +ref_unit * 8.0f);
+			moving_toward_child_menu = ImTriangleContainsPoint(ta, tb, tc, g.IO.MousePos);
+		}
+		if (menu_is_open && !hovered && g.HoveredWindow == window
+			&& g.HoveredIdPreviousFrame != 0 && g.HoveredIdPreviousFrame != id
+			&& !moving_toward_child_menu)
+			want_close = true;
+
+		if (!menu_is_open && (pressed || (hovered && !moving_toward_child_menu)))
+			want_open = true;
+
+		if (want_close && ImGui::IsPopupOpen(id, ImGuiPopupFlags_None))
+			ImGui::ClosePopupToLevel(g.BeginPopupStack.Size, true);
+
+		if (!menu_is_open && want_open && g.OpenPopupStack.Size > g.BeginPopupStack.Size)
+		{
+			/* 别的同级子菜单还开着：先请它让位，本帧不再展开（照抄原生 ——
+			 * 别在同一个帧里回收同级的菜单层，让出去一帧） */
+			ImGui::OpenPopupEx(id, ImGuiPopupFlags_None);
+			return false;
+		}
+
+		menu_is_open |= want_open;
+		if (want_open)
+			ImGui::OpenPopupEx(id, ImGuiPopupFlags_None);
+
+		if (menu_is_open)
+		{
+			/* popup_pos 只是 FindBestWindowPosForPopup 的参考点（最终位置由弹层自选） */
+			ImGui::SetNextWindowPos(popup_pos, ImGuiCond_Always);
+			menu_is_open = ImGui::BeginPopupEx(id, flags);
+		}
+		else
+		{
+			g.NextWindowData.ClearFlags();
+		}
+
+		return menu_is_open;
+	}
+
+	/* 配对收尾（= EndMenu 的 EndPopup 部分；键盘 nav 的 Left 关闭逻辑不参与，从略） */
+	inline void EndMenuWithIcon()
+	{
+		ImGui::EndPopup();
+	}
+
 	/* ==================== 可拖拽分隔条 ==================== */
 
 	/* 左右两块之间的拖拽分隔条：按住左右拖，按 delta.x 改「左块占比」。

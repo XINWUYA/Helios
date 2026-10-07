@@ -9,6 +9,7 @@ namespace Helios
 	 * 是交互工具，不在此列。 */
 	struct ViewportGizmoOptions
 	{
+		bool MasterEnabled{ true };			/* 总开关：关则场景辅助与实体图标全部隐藏（分项状态保留） */
 		bool ShowGrid{ true };				/* 地面刻度网格 */
 		bool ShowWorldAxis{ true };			/* 世界坐标轴（原点三轴） */
 		bool ShowLight{ true };				/* 光源图标（平行 / 点 / 聚光） */

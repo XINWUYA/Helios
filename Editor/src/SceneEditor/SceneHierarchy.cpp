@@ -77,6 +77,22 @@ namespace Helios
 			return entity.HasComponent<ModelComponent>();
 		}
 
+		/* 内建形状实体（默认 Cube / Sphere / Plane）：带模型、且模型是内建几何时，
+		 * 树里显示各自的形状图标（排在最泛化的 Model 规则之前，先匹配者胜）。 */
+		bool IsBuiltinShape(const Entity& entity, BuiltinModelType type)
+		{
+			if (!entity.HasComponent<ModelComponent>())
+				return false;
+
+			const auto& model = entity.GetComponent<ModelComponent>().m_Model;
+			BuiltinModelType actual{};
+			return model != nullptr && model->TryGetBuiltinType(actual) && actual == type;
+		}
+
+		bool IsBuiltinCube(const Entity& entity) { return IsBuiltinShape(entity, BuiltinModelType::Cube); }
+		bool IsBuiltinSphere(const Entity& entity) { return IsBuiltinShape(entity, BuiltinModelType::Sphere); }
+		bool IsBuiltinPlane(const Entity& entity) { return IsBuiltinShape(entity, BuiltinModelType::Plane); }
+
 		bool HasSpriteComponent(const Entity& entity)
 		{
 			return entity.HasComponent<SpriteComponent>();
@@ -114,6 +130,9 @@ namespace Helios
 			{ Icons::Id::LightSpot,        &IsSpotLight },
 			{ Icons::Id::LightPoint,       &IsOtherLight },
 			{ Icons::Id::ReflectionProbe,  &HasReflectionProbeComponent },
+			{ Icons::Id::Cube,             &IsBuiltinCube },
+			{ Icons::Id::Sphere,           &IsBuiltinSphere },
+			{ Icons::Id::Plane,            &IsBuiltinPlane },
 			{ Icons::Id::Model,            &HasModelComponent },
 			{ Icons::Id::Sprite,           &HasSpriteComponent },
 		};
@@ -128,6 +147,66 @@ namespace Helios
 			}
 
 			return Icons::Id::Entity;
+		}
+
+		/* ---- 「新建」菜单的分组视图（顶栏 / 右键共用）----
+		 * 按 Category 折叠：没分组的条目各自成节，同组的在首项注册的位置聚成一节（组内保持注册
+		 * 顺序）；组行图标按组名集中映射（组只是展示概念，不进注册表）。 */
+		struct EntityMenuEntry
+		{
+			const char* Group{ nullptr };                       /* nullptr = 未分组的单项 */
+			const EntityTemplateDesc* Single{ nullptr };        /* Group == nullptr 时有效 */
+			std::vector<const EntityTemplateDesc*> Members;     /* Group != nullptr 时有效 */
+		};
+
+		Icons::Id CategoryIconOf(const char* category)
+		{
+			if (std::strcmp(category, "3D") == 0)
+				return Icons::Id::Shape3D;
+			if (std::strcmp(category, "Light") == 0)
+				return Icons::Id::Light;
+
+			return Icons::Id::Entity;
+		}
+
+		std::vector<EntityMenuEntry> BuildEntityMenuEntries(const std::vector<EntityTemplateDesc>& templates)
+		{
+			std::vector<EntityMenuEntry> entries;
+
+			for (const EntityTemplateDesc& desc : templates)
+			{
+				if (desc.Category == nullptr)
+				{
+					EntityMenuEntry single;
+					single.Single = &desc;
+					entries.push_back(std::move(single));
+					continue;
+				}
+
+				/* 组已出现过就跳过：成员在首项处一次性收集 */
+				bool seen = false;
+				for (const EntityMenuEntry& entry : entries)
+				{
+					if (entry.Group != nullptr && std::strcmp(entry.Group, desc.Category) == 0)
+					{
+						seen = true;
+						break;
+					}
+				}
+				if (seen)
+					continue;
+
+				EntityMenuEntry group;
+				group.Group = desc.Category;
+				for (const EntityTemplateDesc& member : templates)
+				{
+					if (member.Category != nullptr && std::strcmp(member.Category, desc.Category) == 0)
+						group.Members.push_back(&member);
+				}
+				entries.push_back(std::move(group));
+			}
+
+			return entries;
 		}
 
 		/* ---- 组件卡头部图标 ----
@@ -422,17 +501,35 @@ namespace Helios
 		ApplyPendingReparent();
 	}
 
-	/* 「新建实体」菜单项：条目来自实体预设注册表，新增预设这里零改动 */
+	/* 「新建实体」菜单项：条目来自实体预设注册表，新增预设这里零改动。
+	 * 分组条目折叠成子菜单（与顶栏下拉共用 BuildEntityMenuEntries 的折叠规则）。 */
 	void SceneHierarchy::ShowCreateEntityMenu()
 	{
 		PROFILE_FUNCTION();
 
 		if (ImGui::BeginMenu("New A Entity"))
 		{
-			for (const EntityTemplateDesc& template_desc : EntityTemplateRegistry::Instance().All())
+			const auto draw_leaf = [this](const EntityTemplateDesc& template_desc)
 			{
 				if (ImGui::MenuItem(template_desc.Name))
 					m_SelectedEntity = CreateEntityFromTemplate(template_desc);
+			};
+
+			for (const EntityMenuEntry& entry : BuildEntityMenuEntries(EntityTemplateRegistry::Instance().All()))
+			{
+				if (entry.Group == nullptr)
+				{
+					if (entry.Single != nullptr)
+						draw_leaf(*entry.Single);
+					continue;
+				}
+
+				if (ImGui::BeginMenu(entry.Group))
+				{
+					for (const EntityTemplateDesc* member : entry.Members)
+						draw_leaf(*member);
+					ImGui::EndMenu();
+				}
 			}
 
 			ImGui::EndMenu();
@@ -459,7 +556,7 @@ namespace Helios
 		 * 新建图标复用资源浏览器的「新建资源」：图案一样，靠 tooltip 和菜单内容区分。 */
 		ImGui::SetCursorScreenPos(ImVec2(row.Min.x, control_y));
 		if (Icons::IconButton(Icons::Id::NewAsset, ImVec2(control_height, control_height), false,
-			"New entity  (empty / sprite / camera / model / reflection probe / light)"))
+			"New entity  (empty / 3D / sprite / camera / reflection probe / light)"))
 		{
 			ImGui::OpenPopup(m_PopupNewEntity);
 		}
@@ -617,9 +714,9 @@ namespace Helios
 		PanelChrome::EndHeaderRow(row, false);
 	}
 
-	/* 顶栏「新建」按钮的下拉菜单。与右键菜单里那份是同一个数据源（实体预设注册表），
-	 * 只是入口不同：常驻入口，不必先右键。
-	 * 版式与属性面板的「添加组件」菜单同款（搜索框 + 列表）：打开即清空并自动聚焦。 */
+	/* 顶栏「新建」下拉：跟右键菜单同一个数据源（实体预设注册表），是个常驻入口。版式跟
+	 * 「添加组件」菜单一样（搜索框 + 列表，打开就清空重聚焦）。没有搜索词时分组收成子菜单；
+	 * 有搜索词就平铺列出全部匹配条目，组名也参与匹配。 */
 	void SceneHierarchy::DrawNewEntityMenu()
 	{
 		PROFILE_FUNCTION();
@@ -644,22 +741,50 @@ namespace Helios
 		Icons::EndSearchInput();
 		ImGui::Separator();
 
-		const std::string needle = ToLowercase(m_NewEntityFilter);
-		bool any_match = false;
-
-		for (const EntityTemplateDesc& template_desc : EntityTemplateRegistry::Instance().All())
+		const auto draw_leaf = [this](const EntityTemplateDesc& template_desc)
 		{
-			if (!ContainsCaseInsensitive(template_desc.Name, needle))
-				continue;
-
-			any_match = true;
-
 			if (PanelChrome::MenuItemWithIcon(template_desc.Icon, template_desc.Name))
 				m_SelectedEntity = CreateEntityFromTemplate(template_desc);
-		}
+		};
 
-		if (!any_match)
-			ImGui::TextDisabled("No matching entity");
+		const std::string needle = ToLowercase(m_NewEntityFilter);
+
+		if (needle.empty())
+		{
+			for (const EntityMenuEntry& entry : BuildEntityMenuEntries(EntityTemplateRegistry::Instance().All()))
+			{
+				if (entry.Group == nullptr)
+				{
+					if (entry.Single != nullptr)
+						draw_leaf(*entry.Single);
+					continue;
+				}
+
+				if (PanelChrome::BeginMenuWithIcon(CategoryIconOf(entry.Group), entry.Group))
+				{
+					for (const EntityTemplateDesc* member : entry.Members)
+						draw_leaf(*member);
+					PanelChrome::EndMenuWithIcon();
+				}
+			}
+		}
+		else
+		{
+			bool any_match = false;
+			for (const EntityTemplateDesc& template_desc : EntityTemplateRegistry::Instance().All())
+			{
+				if (!ContainsCaseInsensitive(template_desc.Name, needle)
+					&& (template_desc.Category == nullptr
+						|| !ContainsCaseInsensitive(template_desc.Category, needle)))
+					continue;
+
+				any_match = true;
+				draw_leaf(template_desc);
+			}
+
+			if (!any_match)
+				ImGui::TextDisabled("No matching entity");
+		}
 
 		ImGui::EndPopup();
 	}
@@ -690,6 +815,10 @@ namespace Helios
 		case Icons::Id::LightDirectional:
 		case Icons::Id::LightSpot:
 		case Icons::Id::LightPoint:      return TypeFilter::Light;
+		/* 默认形状是模型实体：类型筛选归 Models（它们持有的就是 Model 组件） */
+		case Icons::Id::Cube:
+		case Icons::Id::Sphere:
+		case Icons::Id::Plane:
 		case Icons::Id::Model:           return TypeFilter::Model;
 		case Icons::Id::Sprite:          return TypeFilter::Sprite;
 		case Icons::Id::ReflectionProbe: return TypeFilter::ReflectionProbe;
