@@ -64,8 +64,14 @@ namespace Helios
 			upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(character))));
 
 		static constexpr struct { const char* Extension; AssetFileKind Kind; } kByExtension[] = {
-			{ ".PNG", AssetFileKind::Image }, { ".JPG", AssetFileKind::Image }, { ".DDS", AssetFileKind::Image },
-			{ ".TGA", AssetFileKind::Image }, { ".BMP", AssetFileKind::Image },
+			/* 贴图：与纹理解码器（stb_image）能解的格式对齐 —— 网格缩略图与属性面板的
+			 * 预览 / 尺寸行对每一种都出得来。.dds 也在贴图档（它确实是贴图容器），
+			 * 但解码器解不出像素：浏览器对它回落成图片图标、详情卡没有尺寸行。 */
+			{ ".PNG", AssetFileKind::Image }, { ".JPG", AssetFileKind::Image },
+			{ ".JPEG", AssetFileKind::Image }, { ".BMP", AssetFileKind::Image },
+			{ ".TGA", AssetFileKind::Image }, { ".PSD", AssetFileKind::Image },
+			{ ".GIF", AssetFileKind::Image }, { ".HDR", AssetFileKind::Image },
+			{ ".DDS", AssetFileKind::Image },
 			{ ".SCN", AssetFileKind::Scene },
 			{ ".MTLGRAPH", AssetFileKind::MtlGraph },
 			/* 着色器：.glsl 是源，.metal 是同一次编译的产物（落在 Assets/Cache/Shaders 下）——

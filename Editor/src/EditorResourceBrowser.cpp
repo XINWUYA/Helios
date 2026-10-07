@@ -304,6 +304,23 @@ namespace Helios
 		return FileType::Default;
 	}
 
+	/* 与 FileTypeOfKind 反方向；不留 default：两边的档位要一起长 */
+	AssetFileKind EditorResourceBrowser::AssetKindOfFileType(FileType type)
+	{
+		switch (type)
+		{
+		case FileType::Default:  return AssetFileKind::Other;
+		case FileType::Image:    return AssetFileKind::Image;
+		case FileType::Scene:    return AssetFileKind::Scene;
+		case FileType::MtlGraph: return AssetFileKind::MtlGraph;
+		case FileType::Shader:   return AssetFileKind::Shader;
+		case FileType::Model:    return AssetFileKind::Model;
+		case FileType::Folder:   return AssetFileKind::Other;   /* 文件夹不看大类（看 IsFolder） */
+		}
+
+		return AssetFileKind::Other;
+	}
+
 	const char* EditorResourceBrowser::TypeFilterName(TypeFilter filter)
 	{
 		/* 不留 default：TypeFilter 加了一项却没给显示名时 -Wswitch 会报出来
@@ -432,6 +449,9 @@ namespace Helios
 	void EditorResourceBrowser::OnImGuiRenderer()
 	{
 		PROFILE_FUNCTION();
+
+		/* 就地改名的"本帧画过没有"每帧从头记：帧末据此收起画不出来的编辑器（见函数尾） */
+		m_RenameEditDrawn = false;
 
 		/* 资源可能被编辑器之外的操作改动（新建场景、另存为、外部增删），定期比对目录状态 */
 		m_RefreshElapsed += ImGui::GetIO().DeltaTime;
@@ -572,10 +592,19 @@ namespace Helios
 		ImGui::End();
 
 		ImGui::PopStyleVar();
+
 		/* 目录树拖拽的待办在这一刻落盘：面板已经画完（本帧的树不会再被读到），
 		 * 命令进同一条编辑历史 —— 撤销即可把东西搬回原处。
 		 * 与层级面板"挂接延后到遍历之后"是同一个位置上的同一条理由。 */
 		ApplyPendingDropMove();
+
+		/* 就地改名这一帧没能画出来（项被过滤 / 切了目录 / 被删掉）：静默收起，别让状态悬着 */
+		if (!m_RenameEditPath.empty() && !m_RenameEditDrawn)
+			FinishInlineRename(nullptr, false);
+
+		/* 帧末统一发布选中项：本帧所有交互（点选 / 连选 / Esc / 重建后的路径对齐）都已完成，
+		 * 只此一处出口 —— 属性面板看到的选中态与浏览器一致。 */
+		PublishAssetSelection();
 	}
 
 	/* 主体：左右两栏 —— 左「Folders」目录树、中间可拖的分隔条、右内容区（含底部的路径栏）。
@@ -814,12 +843,60 @@ namespace Helios
 		ApplyCurrentNode(node);
 	}
 
-	/* 落位：切目录 + 清选中项（它们属于上一个目录）+ 置上「下次画目录树时把它露出来
-	 * （展开祖先 + 滚到可见）」。浏览历史跳转与用户导航共用这里，差别只在记不记历史。 */
+	/* 定位一个资源：切到它所在目录（算一次用户导航，记历史）再选中它。
+	 * 树还没建 / 正在重建 / 目标还不在树里：记为「待选中」，重建后的对齐逻辑会消费它
+	 * （与新建项选中同一个通道 —— m_PendingSelectPath）。 */
+	void EditorResourceBrowser::RevealAsset(const std::string& relative_path)
+	{
+		PROFILE_FUNCTION();
+
+		if (relative_path.empty())
+			return;
+
+		/* Assets 之外的引用（"../" 开头）没有可定位的树节点，直接忽略 */
+		if (relative_path.rfind("..", 0) == 0)
+			return;
+
+		if (m_RootFileNodeTree == nullptr || m_IsDirty)
+		{
+			m_PendingSelectPath = relative_path;
+			return;
+		}
+
+		const std::filesystem::path parent = PathFromUtf8(relative_path).parent_path();
+		const std::string parent_path = PathToUtf8(parent);
+		const SharedPtr<FileNode> dir = parent_path.empty()
+			? m_RootFileNodeTree
+			: FindNode(m_RootFileNodeTree, parent_path);
+		const SharedPtr<FileNode> target = FindNode(m_RootFileNodeTree, relative_path);
+
+		if (dir == nullptr || target == nullptr)
+		{
+			/* 树里还没有（外部新增、目录轮询未到）：记为待选中并触发一次重建 */
+			m_PendingSelectPath = relative_path;
+			m_IsDirty = true;
+			return;
+		}
+
+		/* 先切目录（落位会清选择），再选中目标 */
+		SetCurrentNode(dir);
+		SelectSingle(target);
+	}
+
+	/* 落位：切目录 + 清掉选中项 + 记上"下次画目录树时露出来（展开祖先 + 滚到可见）"。
+	 * 清选择对属性面板是静默的（清基准线、吞掉这次选择动作）；点选 / Ctrl+A / Esc 照常发布。 */
 	void EditorResourceBrowser::ApplyCurrentNode(const SharedPtr<FileNode>& node)
 	{
 		m_CurrentFileNode = node;
-		ClearSelection();
+
+		m_Selection.clear();
+		m_SelectionAnchor = nullptr;
+		m_SelectionActivated = false;
+		m_PublishedSelectionPaths.clear();
+
+		/* 慢双击候选属于上一个目录的项，跟着作废 */
+		ClearRenameCandidate();
+
 		m_RevealCurrentNode = true;
 	}
 
@@ -879,6 +956,7 @@ namespace Helios
 
 	void EditorResourceBrowser::SelectSingle(const SharedPtr<FileNode>& node)
 	{
+		m_SelectionActivated = true;
 		m_Selection.clear();
 		if (node != nullptr)
 			m_Selection.push_back(node);
@@ -890,6 +968,8 @@ namespace Helios
 	{
 		if (node == nullptr)
 			return;
+
+		m_SelectionActivated = true;
 
 		for (auto it = m_Selection.begin(); it != m_Selection.end(); ++it)
 		{
@@ -908,6 +988,8 @@ namespace Helios
 	void EditorResourceBrowser::SelectRangeTo(const SharedPtr<FileNode>& node,
 	                                          const std::vector<SharedPtr<FileNode>>& visible)
 	{
+		m_SelectionActivated = true;
+
 		const auto index_of = [&visible](const FileNode* target)
 		{
 			for (size_t i = 0; i < visible.size(); ++i)
@@ -951,8 +1033,81 @@ namespace Helios
 
 	void EditorResourceBrowser::ClearSelection()
 	{
+		m_SelectionActivated = true;
 		m_Selection.clear();
 		m_SelectionAnchor = nullptr;
+		ClearRenameCandidate();
+	}
+
+	/* 面板自己的 FileType → 资源大类：跨面板摘要用 AssetFileKind 讲话
+	 * （属性面板据此选图标、给类型名，不必认识浏览器的枚举）。 */
+
+	void EditorResourceBrowser::PublishAssetSelection()
+	{
+		/* 按住左键（或已在拖动会话）就先不发布：结局还没定 —— 可能是点击（松开才发布），也可能
+		 * 是拖动（拿去别处，比如拖贴图到材质卡）。按下那帧就发布会把材质卡的拖放目标当场切掉。
+		 * 等松开再分别处置。 */
+		const bool dragging = ImGui::GetDragDropPayload() != nullptr;
+		if (dragging)
+			m_PressWasDrag = true;
+
+		if (dragging || ImGui::IsMouseDown(ImGuiMouseButton_Left))
+			return; /* 按住期间攒着：等松开后按「点击 / 拖动」两种结局分别处置 */
+
+		/* 每帧比的是路径列表：文件树重建后节点指针会换，路径才是稳定身份；
+		 * 另外"本次按住有选择动作"也算变化 —— 同一项被再次点选要能重新激活属性面板。 */
+		bool changed = m_SelectionActivated || m_Selection.size() != m_PublishedSelectionPaths.size();
+		for (size_t i = 0; !changed && i < m_Selection.size(); ++i)
+			changed = (m_Selection[i]->FilePath != m_PublishedSelectionPaths[i]);
+
+		if (!changed)
+		{
+			m_PressWasDrag = false;
+			return;
+		}
+
+		/* 这次按下的结局是拖动：高亮 / 底栏只留给浏览器自己，不通知属性面板。
+		 * 同步基准并吞掉"选择动作"—— 拖完也不能补发（否则面板会在拖动结束时切走），
+		 * 想看这个资源再点一下即可（点击的结局照常发布）。 */
+		if (m_PressWasDrag)
+		{
+			m_PressWasDrag = false;
+			m_SelectionActivated = false;
+			m_PublishedSelectionPaths.clear();
+			m_PublishedSelectionPaths.reserve(m_Selection.size());
+			for (const SharedPtr<FileNode>& node : m_Selection)
+			{
+				if (node != nullptr)
+					m_PublishedSelectionPaths.push_back(node->FilePath);
+			}
+			return;
+		}
+
+		m_SelectionActivated = false;
+		m_PublishedSelectionPaths.clear();
+		m_PublishedSelectionPaths.reserve(m_Selection.size());
+
+		std::vector<AssetSelectionEntry> entries;
+		entries.reserve(m_Selection.size());
+		for (const SharedPtr<FileNode>& node : m_Selection)
+		{
+			if (node == nullptr)
+				continue;
+
+			AssetSelectionEntry entry;
+			entry.Name = node->FileName;
+			entry.Path = node->FilePath;
+			entry.IsFolder = (node->Type == FileType::Folder);
+			entry.Kind = AssetKindOfFileType(node->Type);
+			entry.SizeBytes = static_cast<uintmax_t>(node->FileSize * 1024.0f); /* FileSize 以 KB 计 */
+			entry.ChildCount = entry.IsFolder ? node->ChildNodes.size() : 0;
+
+			entries.push_back(std::move(entry));
+			m_PublishedSelectionPaths.push_back(node->FilePath);
+		}
+
+		if (m_AssetSelectionSink.Changed)
+			m_AssetSelectionSink.Changed(entries);
 	}
 
 	void EditorResourceBrowser::HandleSelectionShortcuts(const std::vector<SharedPtr<FileNode>>& visible)
@@ -976,6 +1131,7 @@ namespace Helios
 		{
 			m_Selection = visible;
 			m_SelectionAnchor = visible.empty() ? nullptr : visible.front();
+			ClearRenameCandidate();
 		}
 
 		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
@@ -1350,6 +1506,127 @@ namespace Helios
 			ImGui::CloseCurrentPopup();
 
 		ImGui::EndPopup();
+	}
+
+	/* ---- 内容区就地改名 ----
+	 * 文件：快速双击直接改；文件夹：双击是进目录，改名 = 选中后停一下再点一次（Finder 同款）。
+	 * 只把"改名"落盘；撤销 / 重做跟弹层共用 RenameAssetCommand。 */
+
+	void EditorResourceBrowser::ClearRenameCandidate()
+	{
+		m_RenameCandPath.clear();
+		m_RenameCandTime = -1.0;
+	}
+
+	void EditorResourceBrowser::BeginInlineRename(const SharedPtr<FileNode>& node)
+	{
+		if (node == nullptr)
+			return;
+
+		m_RenameEditPath = node->FilePath;
+		snprintf(m_RenameEditBuffer, sizeof(m_RenameEditBuffer), "%s", node->FileName.c_str());
+		m_RenameEditFocus = true;
+
+		ClearRenameCandidate();
+	}
+
+	void EditorResourceBrowser::FinishInlineRename(const SharedPtr<FileNode>& node, bool commit)
+	{
+		const std::string typed = m_RenameEditBuffer;
+
+		m_RenameEditPath.clear();
+		m_RenameEditBuffer[0] = '\0';
+		m_RenameEditFocus = false;
+
+		/* 取消 / 目标已不在 / 没改过 / 非法名（编辑时已标红）：只收起，不动磁盘 */
+		if (!commit || node == nullptr || typed == node->FileName || !AssetNameError(typed).empty())
+			return;
+
+		/* 撞名与新建同一条原则：让开而不是覆盖（MakeUniquePath 挑一个不冲突的） */
+		const std::filesystem::path source = AbsoluteAssetPath(node->FilePath);
+		ExecuteCommand(CreateUniquePtr<RenameAssetCommand>(this, source,
+			MakeUniquePath(source.parent_path(), typed)));
+	}
+
+	/* 内容项"松开"时的慢双击判定（网格 / 列表共用）：点一下已选中的项先记候选；再点同一项、
+	 * 且间隔超过双击窗口 → 就地改名；拖动 / 带修饰键 / 快速双击的第二击都不算，候选作废。 */
+	void EditorResourceBrowser::HandleItemRenameRelease(const SharedPtr<FileNode>& node)
+	{
+		const ImGuiIO& io = ImGui::GetIO();
+
+		const bool skip = m_PressSkipsSlowClick;
+		m_PressSkipsSlowClick = false;
+
+		const bool plain_click = !skip
+			&& ImGui::IsItemHovered()
+			&& !ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left)
+			&& !io.KeyCtrl && !io.KeyShift && !io.KeySuper;
+
+		if (!plain_click)
+		{
+			ClearRenameCandidate();
+			return;
+		}
+
+		if (m_RenameCandPath == node->FilePath
+			&& ImGui::GetTime() - m_RenameCandTime >= io.MouseDoubleClickTime)
+		{
+			/* 停顿后的第二击：就地在原地改名（候选在 Begin 里清掉） */
+			BeginInlineRename(node);
+			return;
+		}
+
+		/* 第一击：只有"它已是唯一选中"才留候选 —— 单击已选中项本身仍是"点选 /
+		 * 把属性面板切回来"（同一项再次点选照常重新发布），后一下才改名 */
+		if (m_Selection.size() == 1 && IsNodeSelected(node.get()))
+		{
+			m_RenameCandPath = node->FilePath;
+			m_RenameCandTime = ImGui::GetTime();
+		}
+		else
+		{
+			ClearRenameCandidate();
+		}
+	}
+
+	/* 就地改名的输入框：回车提交 / Esc 取消 / 点到别处提交；名字非法时标红、回车不提交。
+	 * 调用方负责把光标摆到名字的落点与宽度上；"##InlineRename" 在各自的作用域里唯一。 */
+	void EditorResourceBrowser::DrawInlineRenameEditor(const SharedPtr<FileNode>& node)
+	{
+		m_RenameEditDrawn = true;
+
+		/* 激活后的第一帧把键盘焦点交给输入框（SetKeyboardFocusHere 是"下一次项"
+		 * 的聚焦请求，只发一次；之后焦点归 ImGui 与用户管） */
+		if (m_RenameEditFocus)
+		{
+			ImGui::SetKeyboardFocusHere();
+			m_RenameEditFocus = false;
+		}
+
+		const bool invalid = !AssetNameError(m_RenameEditBuffer).empty();
+		if (invalid)
+			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::Danger);
+
+		const bool submitted = ImGui::InputText("##InlineRename", m_RenameEditBuffer,
+			sizeof(m_RenameEditBuffer), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+		if (invalid)
+			ImGui::PopStyleColor();
+
+		if (submitted)
+		{
+			/* 非法名留在编辑态（下一帧重新聚焦）继续改 —— 别"按了没反应" */
+			if (invalid)
+				m_RenameEditFocus = true;
+			else
+				FinishInlineRename(node, true);
+			return;
+		}
+
+		/* 失焦一律走"提交"通道（点到别处 / Tab）。Esc 不用单独判：InputText 在 Esc 时会把输入
+		 * 缓冲恢复成初始值，这条通道看到"没改过"就只收不落盘 —— 取消语义由它兜住。 */
+		if (ImGui::IsItemDeactivated())
+			FinishInlineRename(node, true);
 	}
 
 	/* 右键菜单的条目：结点自己的操作（内容区的网格 / 列表与目录树共用同一份） */
@@ -2020,28 +2297,57 @@ namespace Helios
 							ImGui::GetColorU32(EditorTheme::Token::Accent), ImGui::GetStyle().FrameRounding, 0, 1.5f);
 					}
 
-					/* 拖拽（拖给别的面板用，或拖进目录树里换个目录 —— 见目录树行的拖放目标） */
-					if (ImGui::BeginDragDropSource())
-					{
-						const char* item_path = child_node->FilePath.c_str();
-						ImGui::SetDragDropPayload(kAssetDragPayload, item_path, strlen(item_path) + 1);
-						ImGui::EndDragDropSource();
-					}
+					/* 正在改名的那一格：交互全让给输入框（点到别处 = 提交），这一格只当垫底 ——
+					 * 点击仍要记进 clicked_an_item，才不会被当成"点空白"清掉选择 */
+					const bool is_editing_this = (m_RenameEditPath == child_node->FilePath);
 
-					/* 单击 = 选中（Shift 连选 / Ctrl 加选，见 ApplyClickSelection），
-					 * 双击文件夹 = 进去（目录树会跟着跳过去） */
-					if (ImGui::IsItemClicked())
+					if (is_editing_this)
 					{
-						clicked_an_item = true;
-						ApplyClickSelection(child_node, visible);
+						if (ImGui::IsItemClicked())
+						{
+							clicked_an_item = true;
+							m_PressSkipsSlowClick = true;   /* 这一按是"收起编辑器"，不作慢双击判定 */
+						}
 					}
+					else
+					{
+						/* 拖拽（拖给别的面板用，或拖进目录树里换个目录 —— 见目录树行的拖放目标） */
+						if (ImGui::BeginDragDropSource())
+						{
+							const char* item_path = child_node->FilePath.c_str();
+							ImGui::SetDragDropPayload(kAssetDragPayload, item_path, strlen(item_path) + 1);
+							ImGui::EndDragDropSource();
+						}
+
+						/* 单击 = 选中（Shift 连选 / Ctrl 加选，见 ApplyClickSelection）；
+						 * 按下帧同时记下"这一按是不是双击的第二击"（松开帧判定慢双击用） */
+						if (ImGui::IsItemClicked())
+						{
+							clicked_an_item = true;
+							ApplyClickSelection(child_node, visible);
+							m_PressSkipsSlowClick = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+						}
 
 						/* 快速双击的第二击：文件夹 = 进去，文件 = 就地改名。注意：带修饰键的双击不算"打开" ——
 						 * Ctrl / Shift 连点同一个文件夹是在加选 / 移出，两次落在同一格被判成双击会意外进目录（选择被清空）。 */
-					if (child_node->Type == FileType::Folder
-						&& !ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper
-						&& ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-						SetCurrentNode(child_node);
+						if (!ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper
+							&& ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+						{
+							if (child_node->Type == FileType::Folder)
+							{
+								ClearRenameCandidate();
+								SetCurrentNode(child_node);
+							}
+							else
+							{
+								BeginInlineRename(child_node);
+							}
+						}
+
+						/* 慢双击（停顿后的第二击）= 就地改名（判定见 HandleItemRenameRelease） */
+						if (ImGui::IsItemDeactivated())
+							HandleItemRenameRelease(child_node);
+					}
 
 					/* 右键菜单：点在没选中的项上先把它选中（已在选中集合里就保持多选不变） */
 					if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)
@@ -2059,8 +2365,17 @@ namespace Helios
 					 * 正在改名的那一项换成输入框 —— 同一落点、同宽，看起来就在原地。 */
 					ImGui::SetCursorScreenPos(ImVec2(
 						cell_left + (m_ThumbnailSize - name_width) * 0.5f, ImGui::GetCursorScreenPos().y));
-					DrawCenteredWrappedText(child_node->FileName, name_width,
-						ImGui::GetColorU32(is_selected ? EditorTheme::Token::Accent : EditorTheme::Token::Text));
+
+					if (m_RenameEditPath == child_node->FilePath)
+					{
+						ImGui::SetNextItemWidth(name_width);
+						DrawInlineRenameEditor(child_node);
+					}
+					else
+					{
+						DrawCenteredWrappedText(child_node->FileName, name_width,
+							ImGui::GetColorU32(is_selected ? EditorTheme::Token::Accent : EditorTheme::Token::Text));
+					}
 
 					grid_draw->PopClipRect();
 
@@ -2100,9 +2415,15 @@ namespace Helios
 		}
 
 		/* 点空白处 = 清空选择：条目一个都没被点到，而左键确实按在这一栏里
-	 * （走完所有条目再判，理由见上面 clicked_an_item 的说明）。 */
+		 * （走完所有条目再判，理由见上面 clicked_an_item 的说明）。 */
 		if (!clicked_an_item && ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 			ClearSelection();
+
+		/* 慢双击候选只在"点在同一项上"的连击里成立：这一帧的左键没按在任何条目上
+		 * （空白 / 面板别的部件 / 面板之外）→ 候选作废 —— 否则"点资源 → 点实体 →
+		 * 再点资源"的最后那一下会被当成慢双击，把改名框带出来。 */
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !clicked_an_item)
+			ClearRenameCandidate();
 
 		/* 空处右键 = 在当前目录下操作（新建文件夹）；条目自己有一份菜单（NoOpenOverItems 分开） */
 		if (ImGui::BeginPopupContextWindow("##AssetBackground",
@@ -2192,6 +2513,8 @@ namespace Helios
 			/* 名字列内容的落点要在进 Selectable 之前取：这是本列内容的起点（与表头的
 			 * Name 同一条竖线）；进 Selectable 之后光标已被推到下一行。 */
 			const ImVec2 name_origin = ImGui::GetCursorScreenPos();
+			/* 名字列可用宽度（同样在进 Selectable 之前量）：就地改名的输入框按它收宽 */
+			const float name_column_width = ImGui::GetContentRegionAvail().x;
 
 			/* 整行一个 Selectable（`SpanAllColumns`）：高亮与命中区都是整行（含"类型 / 大小"两列）。
 			 * `AllowItemOverlap`：右侧两列的自绘文字不抢整行的悬停。 */
@@ -2205,17 +2528,49 @@ namespace Helios
 			if (is_selected)
 				ImGui::PopStyleColor();
 
-			/* 单击 = 选中（Shift 连选 / Ctrl 加选），双击文件夹 = 进去 */
-			if (ImGui::IsItemClicked())
-			{
-				clicked_an_item = true;
-				ApplyClickSelection(child_node, visible);
-			}
+			/* 正在改名的那一行：交互全让给输入框（点到别处 = 提交），这一行只当垫底 ——
+			 * 点击仍要记进 clicked_an_item，才不会被当成"点空白"清掉选择 */
+			const bool is_editing_this = (m_RenameEditPath == child_node->FilePath);
 
-			/* 同上：带修饰键的双击是加选 / 移出，不是"打开" */
-			if (is_folder && !ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper
-				&& ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-				SetCurrentNode(child_node);
+			if (is_editing_this)
+			{
+				if (ImGui::IsItemClicked())
+				{
+					clicked_an_item = true;
+					m_PressSkipsSlowClick = true;   /* 这一按是"收起编辑器"，不作慢双击判定 */
+				}
+			}
+			else
+			{
+				/* 单击 = 选中（Shift 连选 / Ctrl 加选，见 ApplyClickSelection）；
+				 * 按下帧同时记下"这一按是不是双击的第二击"（松开帧判定慢双击用） */
+				if (ImGui::IsItemClicked())
+				{
+					clicked_an_item = true;
+					ApplyClickSelection(child_node, visible);
+					m_PressSkipsSlowClick = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+				}
+
+				/* 快速双击的第二击：文件夹 = 进去、文件 = 就地改名（见网格里那段说明）；
+				 * 带修饰键的双击是加选 / 移出，不是"打开" */
+				if (!ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper
+					&& ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+				{
+					if (is_folder)
+					{
+						ClearRenameCandidate();
+						SetCurrentNode(child_node);
+					}
+					else
+					{
+						BeginInlineRename(child_node);
+					}
+				}
+
+				/* 慢双击（停顿后的第二击）= 就地改名（判定见 HandleItemRenameRelease） */
+				if (ImGui::IsItemDeactivated())
+					HandleItemRenameRelease(child_node);
+			}
 
 			/* 右键菜单：点在没选中的项上先把它选中 */
 			if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)
@@ -2229,7 +2584,8 @@ namespace Helios
 			}
 
 			/* 名字列的内容（图标 + 文件名）：自己画在 Selectable 之上 —— `DrawTreeRowLabel` 的
-			 * 树形让位（箭头 + 缩进）会让图标落不到列首、与表头的 Name 对不齐。 */
+			 * 树形让位（箭头 + 缩进）会让图标落不到列首、与表头的 Name 对不齐。
+			 * 正在改名的那一项：图标照旧，名字换成输入框（接在图标后、吃满本列剩余宽度）。 */
 			{
 				const float icon_size = ImGui::GetFontSize();
 				const ImU32 text_color = ImGui::GetColorU32(EditorTheme::Token::Text);
@@ -2237,8 +2593,21 @@ namespace Helios
 
 				Icons::Draw(draw_list, ResolveFileIcon(child_node->Type),
 					ImVec2(name_origin.x + icon_size * 0.5f, name_origin.y + icon_size * 0.5f), icon_size, text_color);
-				draw_list->AddText(ImVec2(name_origin.x + icon_size + ImGui::GetStyle().ItemInnerSpacing.x,
-					name_origin.y), text_color, child_node->FileName.c_str());
+
+				if (m_RenameEditPath == child_node->FilePath)
+				{
+					const float rename_width = ImMax(name_column_width
+						- icon_size - ImGui::GetStyle().ItemInnerSpacing.x, 60.0f);
+					ImGui::SetCursorScreenPos(ImVec2(
+						name_origin.x + icon_size + ImGui::GetStyle().ItemInnerSpacing.x, name_origin.y));
+					ImGui::SetNextItemWidth(rename_width);
+					DrawInlineRenameEditor(child_node);
+				}
+				else
+				{
+					draw_list->AddText(ImVec2(name_origin.x + icon_size + ImGui::GetStyle().ItemInnerSpacing.x,
+						name_origin.y), text_color, child_node->FileName.c_str());
+				}
 			}
 
 			/* 文件类型 */

@@ -20,6 +20,17 @@ namespace Helios
 		void OnImGuiRender() override;
 		void OnEvent(IEvent* event) override;
 
+		/* 资源定位：层级面板的材质卡点了贴图 → 资源浏览器切目录并选中它。
+		 * 跨面板通道由装配层（EditorApp）接线到 SceneEditorLayer。 */
+		void RevealAsset(const std::string& relative_path) { m_ResourceBrowser.RevealAsset(relative_path); }
+
+		/* 资源选中 → 属性面板（跨面板通道，反方向）：装配层把浏览器发布的选中项
+		 * 接到 SceneEditorLayer 的属性面板上。 */
+		void SetAssetSelectionSink(EditorResourceBrowser::AssetSelectionSink sink)
+		{
+			m_ResourceBrowser.SetAssetSelectionSink(std::move(sink));
+		}
+
 	private:
 		/* 响应键盘 */
 		bool OnKeyPressed(class KeyPressedEvent* event);

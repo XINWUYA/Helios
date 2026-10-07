@@ -45,6 +45,18 @@ namespace Helios
 		ILayer::OnDetached();
 	}
 
+	/* 资源定位通道：转给层级面板（材质卡里的贴图点击用它定位资源浏览器）。 */
+	void SceneEditorLayer::SetAssetRevealFunc(AssetRevealFunc func)
+	{
+		m_SceneHierarchy.SetAssetRevealFunc(std::move(func));
+	}
+
+	/* 资源选中通道：转给层级面板（属性面板显示资源的详细内容）。 */
+	void SceneEditorLayer::SetAssetSelection(const std::vector<AssetSelectionEntry>& selection)
+	{
+		m_SceneHierarchy.SetAssetSelection(selection);
+	}
+
 	void SceneEditorLayer::OnImGuiRender()
 	{
 		PROFILE_FUNCTION();

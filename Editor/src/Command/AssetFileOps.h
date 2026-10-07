@@ -10,7 +10,7 @@ namespace Helios
 	enum class AssetFileKind : uint8_t
 	{
 		Other = 0,   /* 认不出的后缀：通用文件图标，只在「All types」下出现 */
-		Image,       /* .png / .jpg / .dds / .tga / .bmp */
+		Image,       /* .png / .jpg / .jpeg / .bmp / .tga / .psd / .gif / .hdr / .dds */
 		Scene,       /* .scn */
 		MtlGraph,    /* .mtlgraph */
 		Shader,      /* .glsl（源） / .metal（Metal 目标，编译产物） */
@@ -21,6 +21,19 @@ namespace Helios
 	 * 后缀与大类的对应关系只在这一处（表在 .cpp 里）：加一种资源类型 = 枚举加一项 + 表里加几行，
 	 * 图标与类型筛选都跟着走，不必各自再列一遍后缀。 */
 	AssetFileKind AssetFileKindOf(const std::string& extension);
+
+	/* 资源浏览器里"当前选中"的一项（跨面板摘要：资源浏览器 → 属性面板）。
+	 * 只带展示所需的字段，不暴露浏览器内部的节点结构 —— 面板之间只交换值；
+	 * 路径与浏览器的 FilePath 同口径（相对 Assets）。 */
+	struct AssetSelectionEntry
+	{
+		std::string   Name;                          /* 文件 / 文件夹名 */
+		std::string   Path;                          /* 相对 Assets 的路径 */
+		AssetFileKind Kind{ AssetFileKind::Other };  /* 文件大类；文件夹看 IsFolder（不走它） */
+		bool          IsFolder{ false };
+		uintmax_t     SizeBytes{ 0 };                /* 单个文件的字节数；文件夹不累计（0） */
+		size_t        ChildCount{ 0 };               /* 文件夹直接子项数；文件为 0 */
+	};
 
 	/* 资源改动（新建 / 重命名 / 删除，含撤销重做）的观察者：文件命令只管改磁盘，界面靠回调同步
 	 * "选中项 / 当前目录"（不然撤销一次重命名，选中项会先凭空消失）。传的是相对 Assets 的路径：

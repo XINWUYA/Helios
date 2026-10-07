@@ -34,6 +34,21 @@ namespace Helios
 
 		void SetHistorySink(HistorySink sink) { m_History = std::move(sink); }
 
+		/* 选中项 → 属性面板的通道（跨面板能力，由主壳层注入）：
+		 * 面板之间互不认识，这里只把"选了什么"交给外壳转达。
+		 * 选中项变化过（含同一项被再次点选、按路径对齐后的改名）才会通知一次。 */
+		struct AssetSelectionSink
+		{
+			std::function<void(const std::vector<AssetSelectionEntry>&)> Changed;
+		};
+
+		void SetAssetSelectionSink(AssetSelectionSink sink) { m_AssetSelectionSink = std::move(sink); }
+
+		/* 在浏览器里定位一个资源（跨面板能力：属性面板点贴图 → 跳到这里）：
+		 * 切到它所在目录并选中它。路径按相对 Assets 的口径给；
+		 * 找不到（外部新增、轮询未到）就记为待选中并触发一次重建。 */
+		void RevealAsset(const std::string& relative_path);
+
 		/* 资源改动的观察者（IAssetChangeSink）：文件命令做完 —— 含撤销与重做 —— 通知它，
 		 * 界面据此同步当前目录与选中项，并立刻重建文件树（不用等目录轮询）。 */
 		void OnAssetPathChanged(const std::string& from, const std::string& to) override;
@@ -164,7 +179,8 @@ namespace Helios
 
 		/* 切换当前目录（用户导航：目录树点击 / 面包屑 / 双击文件夹）：记一条历史 */
 		void SetCurrentNode(const SharedPtr<FileNode>& node);
-		/* 落位到某个节点：切目录 + 清选择 + 置上「下次画目录树时把它露出来」（见 SetCurrentNode）。
+		/* 落位到某个节点：切目录 + 清选择（静默 —— 浏览位置变化不通知属性面板，
+		 * 见 .cpp 同名函数）+ 置上「下次画目录树时把它露出来」（见 SetCurrentNode）。
 		 * 从历史里跳转时不重复记历史，所以"记历史"与"落位"拆开。 */
 		void ApplyCurrentNode(const SharedPtr<FileNode>& node);
 		/* 记一条浏览历史：从历史中间走新路时丢掉"前进"的那一段（与浏览器一致） */
@@ -182,6 +198,9 @@ namespace Helios
 		 * 面板比大类多两档：Folder（来自"这是不是目录"，与后缀无关）、
 		 * Default（= 大类里的 Other，认不出的后缀）。 */
 		static FileType FileTypeOfKind(AssetFileKind kind);
+
+		/* 面板自己的 FileType -> 资源大类（跨面板摘要用 AssetFileKind 讲话） */
+		static AssetFileKind AssetKindOfFileType(FileType type);
 
 		/* 节点的显示名：根节点的 FileName 存的是整条绝对路径，用最后一级目录名代替 */
 		static std::string DisplayNodeName(const FileNode& node);
@@ -217,6 +236,21 @@ namespace Helios
 
 		/* 名字输入弹层（新建与重命名共用：mode 决定标题、后缀约束与确认后建什么） */
 		void DrawNamePopup(ImGuiID popup_id, NamePopupMode mode);
+
+		/* ---- 内容区就地改名 ----
+		 * 文件快速双击直接改；文件夹双击是进目录，改名 = 选中后停一下再点（慢双击）。回车提交
+		 * （RenameAssetCommand 进历史）、Esc 取消、点到别处也提交。 */
+
+		/* 开始就地改名：名字装进输入框，焦点交给它 */
+		void BeginInlineRename(const SharedPtr<FileNode>& node);
+		/* 收起编辑器：commit 且名字确实改过（合法）才落盘；node 为空 = 目标已不在（只清状态） */
+		void FinishInlineRename(const SharedPtr<FileNode>& node, bool commit);
+		/* 慢双击（停顿后的第二击）判定：内容项"松开"时网格 / 列表共用 */
+		void HandleItemRenameRelease(const SharedPtr<FileNode>& node);
+		/* 就地改名的输入框（共用：调用方把光标摆到名字的落点与宽度上） */
+		void DrawInlineRenameEditor(const SharedPtr<FileNode>& node);
+		/* 作废慢双击候选（拖动 / 修饰键点击 / 点到别处 / 选择被清 / 切目录） */
+		void ClearRenameCandidate();
 
 		/* 把命令塞进编辑历史（没有注入通道时直接执行） */
 		void ExecuteCommand(UniquePtr<ICommand> command);
@@ -256,6 +290,25 @@ namespace Helios
 		ImGuiID m_PopupRename{ 0 };
 		ImGuiID m_PopupDelete{ 0 };
 
+		/* ---- 内容区就地改名的编辑态与慢双击候选 ---- */
+
+		/* 正在就地改名的那一项（相对 Assets 的路径；空 = 没有） */
+		std::string m_RenameEditPath;
+		/* 输入框内容（提交 / 取消后清掉） */
+		char m_RenameEditBuffer[128]{};
+		/* 激活后的第一帧把键盘焦点交给输入框（SetKeyboardFocusHere 只发一次请求） */
+		bool m_RenameEditFocus{ false };
+		/* 本帧编辑器画没画：没画（被过滤 / 切了目录 / 被删掉）就在帧末静默收起 */
+		bool m_RenameEditDrawn{ false };
+		/* 慢双击候选：上一次"落在唯一选中项上"的点击（路径 + 松开时刻）。
+		 * 下一击落在同一项、且隔开了双击窗口，才算"停顿后的第二击" → 就地改名。 */
+		std::string m_RenameCandPath;
+		double m_RenameCandTime{ -1.0 };
+		/* 按下帧记下"这一按在松开时跳过慢双击判定"（按下帧写、松开帧消费）：
+		 * 快速双击的第二击（打开 / 进目录 / 文件的直接改名），以及点在正在改名的那一项上
+		 * （那是"收起编辑器"，不是慢双击的前一下）。 */
+		bool m_PressSkipsSlowClick{ false };
+
 		/* 文件操作（含撤销 / 重做）改过路径后，下一次重建文件树时按它对齐：
 		 * from 为空 = 新建（顺带选中新建的那一项），to 为空 = 删除（找不到就丢掉）。 */
 		std::string m_RemapFrom;
@@ -265,6 +318,21 @@ namespace Helios
 		/* 跨面板通道：编辑历史（文件操作要进同一条历史 —— 撤销 / 重做由菜单与主工具栏触发）。
 		 * 只为这一个用途，由主壳层注入。 */
 		HistorySink m_History;
+
+		/* 选中项 → 属性面板（见 AssetSelectionSink，由主壳层注入） */
+		AssetSelectionSink m_AssetSelectionSink;
+		/* 本帧有"选择动作"（点选 / 清空）—— 同一项被再次点选也要重新通知一次，
+		 * 否则"点资源 → 点实体 → 再点同一资源"的第三次点击不会把属性面板切回来。
+		 * 切目录的静默清空把它也一并吞掉（那次清空不通知面板，见 ApplyCurrentNode）。 */
+		bool m_SelectionActivated{ false };
+		/* 这次按住左键的结局是不是拖动：是的话，按住期间的选择变化就不通知属性面板（拖动是
+		 * "拿去别处用"）—— 否则拖动一起手就发布，属性面板切到资源详情、材质卡的拖放目标当场消失。 */
+		bool m_PressWasDrag{ false };
+		/* 上次发布过的选中路径：文件树重建后节点指针会换，路径才是稳定身份。
+		 * 切目录时随选择一起静默清掉（浏览位置变化不发布，见 ApplyCurrentNode）。 */
+		std::vector<std::string> m_PublishedSelectionPaths;
+		/* 选中项变了就通知属性面板（每帧末尾调用一次） */
+		void PublishAssetSelection();
 
 		/* 资源目录是否被改动（新增 / 删除资源，或编辑器之外的操作） */
 		[[nodiscard]] bool HasDirectoryChanged() const;

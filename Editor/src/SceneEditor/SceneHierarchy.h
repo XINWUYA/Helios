@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "Command/AssetFileOps.h"
 #include "Helios/Command/CommandStack.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Entity.h"
@@ -46,6 +47,11 @@ namespace Helios
 		/* 选中实体 */
 		const Entity& GetSelectedEntity() const { return m_SelectedEntity; }
 		void SetSelectedEntity(const Entity& entity);
+
+		/* 资源选中（跨面板能力，由外壳接线：资源浏览器 → 这里）：
+		 * 属性面板切换到该资源的详细内容；最近一次选择说了算 —— 点实体即切回组件视图
+		 * （见 SetSelectedEntity）。传空（切目录 / Esc / 被删掉）则交回实体视图。 */
+		void SetAssetSelection(const std::vector<AssetSelectionEntry>& selection);
 
 	private:
 		/* 父节点 -> 子节点。每帧由当前层级关系现算：父子关系只有 ParentComponent
@@ -135,6 +141,15 @@ namespace Helios
 		void ReparentEntity(Entity entity, entt::entity parent);
 		/* 显示选中实体属性 */
 		void ShowEntityPropertiesUI();
+		/* 显示选中的资源（头部 + 详情卡；多选时是摘要） */
+		void ShowAssetProperties();
+		/* 资源的详情卡：类型（卡头）/ 路径 / 大小 / 修改时间 + 类型相关的深挖行 + 图片预览 */
+		void DrawAssetDetailsCard(const AssetSelectionEntry& entry);
+		/* 多选摘要卡：数量 / 合计大小 / 类型分布 */
+		void DrawMultiAssetCard();
+		/* 按 (路径, 写入时间) 缓存类型相关的深挖详情（图片尺寸 / 场景统计）——
+		 * 要读文件内容的那种，只在选中项或文件变化时重算 */
+		void RefreshAssetDetailRows(const AssetSelectionEntry& entry);
 		/* 面板头部：实体图标 + 名字 + 新增组件入口（让属性面板自带上下文） */
 		void ShowPropertiesHeader();
 		/* 显示选中实体的全部组件（遍历 ComponentRegistry，不认识具体类型） */
@@ -167,6 +182,14 @@ namespace Helios
 		bool m_SceneDirty{ false };
 		/* 选中实体 */
 		Entity m_SelectedEntity;
+		/* 资源浏览器里选中的资源（由外壳推送；空 = 没有） */
+		std::vector<AssetSelectionEntry> m_AssetSelection;
+		/* 属性面板正显示资源详情（最近一次选择是资源） */
+		bool m_AssetFocus{ false };
+		/* 深挖详情的缓存键（路径 + 写入时间）与结果行 */
+		std::string m_AssetDetailPath;
+		std::filesystem::file_time_type m_AssetDetailWriteTime{};
+		std::vector<std::pair<std::string, std::string>> m_AssetDetailRows;
 		/* 本帧请求的挂接（拖拽） */
 		PendingReparent m_PendingReparent;
 		/* 编辑历史（由所属 Layer 注入） */

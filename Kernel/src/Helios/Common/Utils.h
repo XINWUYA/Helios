@@ -1,4 +1,6 @@
 ﻿#pragma once
+#include <cstdint>
+#include <filesystem>
 #include <regex>
 #include <string>
 #include <magic_enum.hpp>
@@ -204,4 +206,20 @@ namespace Helios
 	{
 		return magic_enum::enum_name(enum_idx).data();
 	}
+
+	/* ============================ 文件信息展示 ============================
+	 * 属性面板（探针缓存详情 / 资源详情）共用 —— 两处的显示口径必须一致，
+	 * 换一种格式化规则只改这一处。 */
+
+	/* 人类可读的文件大小：B / KB / MB / GB（一位小数） */
+	std::string FormatFileSize(uintmax_t bytes);
+
+	/* 文件最后写入时间：本地时区的 MM-DD HH:MM（面板的窄值列放不下完整日期）；
+	 * 读取失败时返回 "unknown"。 */
+	std::string FormatFileWriteTime(const std::filesystem::path& path);
+
+	/* 只读文件头取图片的尺寸与通道数（不解码像素，走 stb 的 info 接口）：
+	 * 属性面板展示图片信息用，比整图加载便宜几个数量级。
+	 * 不是支持的图片 / 读不出文件头时返回 false。 */
+	bool QueryImageInfo(const std::string& path, int& out_width, int& out_height, int& out_channels);
 }

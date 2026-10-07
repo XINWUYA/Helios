@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <functional>
 #include "SceneHierarchy.h"
 #include "EditorBuiltinCamera.h"
 #include "EditorCommon.h"
@@ -55,6 +56,15 @@ namespace Helios
 
 		void SetGizmoType(int type) { m_GizmoType = type; }
 		void SetPlayMode(PlayMode mode) { m_PlayMode = mode; }
+
+		/* 资源定位通道（跨面板能力）：层级面板画材质卡的贴图，点击要定位到资源浏览器。
+		 * 面板不查 Layer —— 由装配层（EditorApp）接线后直接转发给层级面板。 */
+		using AssetRevealFunc = std::function<void(const std::string&)>;
+		void SetAssetRevealFunc(AssetRevealFunc func);
+
+		/* 资源选中通道（跨面板能力，反方向）：资源浏览器选中资源 → 属性面板显示它的详情。
+		 * 同样由装配层接线，转发给层级面板（属性面板与层级树同属一个面板实现）。 */
+		void SetAssetSelection(const std::vector<AssetSelectionEntry>& selection);
 
 	private:
 		/* 切换到指定场景并重置一切与「旧场景内容」绑定的状态。

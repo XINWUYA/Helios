@@ -6,6 +6,7 @@
 #include "PanelRegistry.h"
 #include "Helios/Application/AssetManager.h"
 #include "Helios/Common/PathUtils.h"
+#include "Helios/Common/Utils.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
@@ -19,6 +20,7 @@
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/Components.h"
 #include <glm/gtc/type_ptr.hpp>
+#include <tinyxml2.h>
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -399,6 +401,19 @@ namespace Helios
 	void SceneHierarchy::SetSelectedEntity(const Entity& entity)
 	{
 		m_SelectedEntity = entity;
+
+		/* 最近一次选择说了算：点实体（层级 / 视口）把属性面板切回组件视图 */
+		m_AssetFocus = false;
+	}
+
+	/* 资源选中（跨面板能力，由外壳接线：资源浏览器 → 这里）。 */
+	void SceneHierarchy::SetAssetSelection(const std::vector<AssetSelectionEntry>& selection)
+	{
+		m_AssetSelection = selection;
+
+		/* 非空 = 刚点了资源（含同一项被再次点选）：切到资源详情；
+		 * 空（切目录 / Esc / 选中项被删）则交回实体视图。 */
+		m_AssetFocus = !m_AssetSelection.empty();
 	}
 
 	void SceneHierarchy::ShowSceneHierarchyUI()
@@ -531,7 +546,7 @@ namespace Helios
 			const auto draw_leaf = [this](const EntityTemplateDesc& template_desc)
 			{
 				if (ImGui::MenuItem(template_desc.Name))
-					m_SelectedEntity = CreateEntityFromTemplate(template_desc);
+					SetSelectedEntity(CreateEntityFromTemplate(template_desc));
 			};
 
 			for (const EntityMenuEntry& entry : BuildEntityMenuEntries(EntityTemplateRegistry::Instance().All()))
@@ -763,7 +778,7 @@ namespace Helios
 		const auto draw_leaf = [this](const EntityTemplateDesc& template_desc)
 		{
 			if (PanelChrome::MenuItemWithIcon(template_desc.Icon, template_desc.Name))
-				m_SelectedEntity = CreateEntityFromTemplate(template_desc);
+				SetSelectedEntity(CreateEntityFromTemplate(template_desc));
 		};
 
 		const std::string needle = ToLowercase(m_NewEntityFilter);
@@ -901,7 +916,7 @@ namespace Helios
 
 		/* 场景自身不是实体：点它就把选中项清掉，属性面板随之空出来 */
 		if (ImGui::IsItemClicked())
-			m_SelectedEntity = {};
+			SetSelectedEntity({});
 
 		/* 拖实体到场景上 = 提升到根层级（与拖到空白处等价，但更直观） */
 		if (ImGui::BeginDragDropTarget())
@@ -1160,7 +1175,24 @@ namespace Helios
 		}
 
 		if (m_SelectedEntity == entity)
-			m_SelectedEntity = {};
+			SetSelectedEntity({});
+	}
+
+	/* 设置实体可见性（走命令栈、可撤销）：visible 是目标状态 —— 隐藏 = 补上组件置 false、
+	 * 显示 = 移除组件（没有组件 = 可见）。相机不受影响；探针隐藏后不烘焙、也不参与 IBL。 */
+	void SceneHierarchy::SetEntityVisibility(Entity entity, bool visible)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(entity))
+			return;
+
+		/* 无命令栈时也要走同一份应用逻辑：命令自带"补组件 / 去组件"的完整语义 */
+		auto command = CreateUniquePtr<SetEntityVisibilityCommand>(m_pOwnerScene, entity, visible);
+		if (m_pCommandStack != nullptr)
+			m_pCommandStack->Execute(std::move(command));
+		else
+			command->Do();
 	}
 
 	void SceneHierarchy::ShowEntityPropertiesUI()
@@ -1175,7 +1207,11 @@ namespace Helios
 			if (m_SelectedEntity && (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(m_SelectedEntity)))
 				m_SelectedEntity = {};
 
-			if (m_SelectedEntity)
+			if (m_AssetFocus && !m_AssetSelection.empty())
+			{
+				ShowAssetProperties();
+			}
+			else if (m_SelectedEntity)
 			{
 				ShowPropertiesHeader();
 				ShowEntityComponents();
@@ -1238,7 +1274,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		static constexpr const char* kHint = "Select an entity to edit its components";
+		static constexpr const char* kHint = "Select an entity to edit its components, or an asset to inspect it";
 
 		const float wrap_width = ImGui::GetContentRegionAvail().x;
 		const float text_width = ImGui::CalcTextSize(kHint).x;
@@ -1253,6 +1289,253 @@ namespace Helios
 		ImGui::PopStyleColor();
 		ImGui::PopTextWrapPos();
 	}
+
+	/* ==================== 资源详情（属性面板） ====================
+	 * 资源浏览器选中资源时显示它的详细内容。最近一次选择说了算：
+	 * 点实体即切回组件视图（见 SetSelectedEntity）；这里的绘制全部只读。 */
+
+	namespace
+	{
+		/* 预览图的尺寸上限：宽度吃满值列，超高 / 超宽的图按比例缩进来 */
+		constexpr float kAssetPreviewMaxWidth = 220.0f;
+		constexpr float kAssetPreviewMaxHeight = 240.0f;
+
+		/* 资源大类 -> 头部图标（与资源浏览器同一套图标语言；文件夹单独一档） */
+		Icons::Id AssetIconOf(const AssetSelectionEntry& entry)
+		{
+			if (entry.IsFolder)
+				return Icons::Id::Directory;
+
+			switch (entry.Kind)
+			{
+			case AssetFileKind::Image:    return Icons::Id::FileImage;
+			case AssetFileKind::Scene:    return Icons::Id::FileScene;
+			case AssetFileKind::MtlGraph: return Icons::Id::FileMtlGraph;
+			case AssetFileKind::Shader:   return Icons::Id::FileShader;
+			case AssetFileKind::Model:    return Icons::Id::FileModel;
+			case AssetFileKind::Material: return Icons::Id::FileMaterial;
+			case AssetFileKind::Probe:    return Icons::Id::FileProbe;
+			case AssetFileKind::Other:    return Icons::Id::File;
+			}
+
+			return Icons::Id::File;
+		}
+
+		/* 资源大类 -> 显示名（单数；资源浏览器的筛选下拉用的是复数，是另一套词表） */
+		const char* AssetKindName(AssetFileKind kind, bool is_folder)
+		{
+			if (is_folder)
+				return "Folder";
+
+			switch (kind)
+			{
+			case AssetFileKind::Other:    return "File";
+			case AssetFileKind::Image:    return "Image";
+			case AssetFileKind::Scene:    return "Scene";
+			case AssetFileKind::MtlGraph: return "Material Graph";
+			case AssetFileKind::Shader:   return "Shader";
+			case AssetFileKind::Model:    return "Model";
+			case AssetFileKind::Material: return "Material";
+			case AssetFileKind::Probe:    return "Reflection Probe";
+			}
+
+			return "File";
+		}
+
+
+	}
+
+	void SceneHierarchy::ShowAssetProperties()
+	{
+		PROFILE_FUNCTION();
+
+		/* 头部：资源图标 + 名字（只读 —— 改名走资源浏览器的右键菜单，资源名不是实体名） */
+		const AssetSelectionEntry& first = m_AssetSelection.front();
+		const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(AssetIconOf(first));
+		PanelChrome::DrawHeaderTitle(header, first.Name, header.Right - header.TitleX);
+		PanelChrome::EndHeaderRow(header);
+
+		if (m_AssetSelection.size() == 1)
+			DrawAssetDetailsCard(first);
+		else
+			DrawMultiAssetCard();
+	}
+
+	void SceneHierarchy::DrawAssetDetailsCard(const AssetSelectionEntry& entry)
+	{
+		PROFILE_FUNCTION();
+
+		const std::filesystem::path absolute_path = g_AssetsPath / PathFromUtf8(entry.Path);
+		const PanelChrome::Card card = PanelChrome::BeginCard(
+			AssetKindName(entry.Kind, entry.IsFolder), AssetIconOf(entry));
+
+		ImGuiExt::DrawCommonTextUI("Path", entry.Path);
+		if (entry.IsFolder)
+			ImGuiExt::DrawCommonTextUI("Items", std::to_string(entry.ChildCount));
+		else
+			ImGuiExt::DrawCommonTextUI("Size", FormatFileSize(entry.SizeBytes));
+		ImGuiExt::DrawCommonTextUI("Modified", FormatFileWriteTime(absolute_path));
+
+		/* 类型相关的深挖行（图片尺寸 / 场景统计）：按 (路径, 写入时间) 缓存 */
+		RefreshAssetDetailRows(entry);
+		for (const auto& [label, value] : m_AssetDetailRows)
+			ImGuiExt::DrawCommonTextUI(label, value);
+
+		/* 图片给一张更大的预览：与资源浏览器的缩略图共用 TextureAssetManager 的缓存
+		 * （同一张贴图不会加载两份；headless 下没有图形上下文时贴图为空，跳过即可）。 */
+		if (!entry.IsFolder && entry.Kind == AssetFileKind::Image)
+		{
+			const SharedPtr<DeviceTexture> preview = TextureAssetManager::Instance().GetOrCreateTexture(
+				PathToUtf8(absolute_path));
+			if (preview != nullptr && preview->IsLoaded())
+			{
+				ImGui::Spacing();
+
+				const float max_width = ImMin(ImGui::GetContentRegionAvail().x, kAssetPreviewMaxWidth);
+				const float aspect = static_cast<float>(preview->GetHeight())
+					/ static_cast<float>(ImMax(preview->GetWidth(), 1u));
+
+				float width = max_width;
+				float height = width * aspect;
+				if (height > kAssetPreviewMaxHeight)
+				{
+					height = kAssetPreviewMaxHeight;
+					width = height / ImMax(aspect, 1.0e-6f);
+				}
+
+				ImGui::Image((ImTextureID)preview.get(), ImVec2(width, height),
+					ImVec2(0, 1), ImVec2(1, 0));
+			}
+		}
+
+		PanelChrome::EndCard(card);
+
+
+	}
+
+	void SceneHierarchy::DrawMultiAssetCard()
+	{
+		PROFILE_FUNCTION();
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("Assets", Icons::Id::File);
+
+		int kind_counts[8] = {};
+		int folder_count = 0;
+		uintmax_t total_bytes = 0;
+		for (const AssetSelectionEntry& entry : m_AssetSelection)
+		{
+			total_bytes += entry.SizeBytes;
+			if (entry.IsFolder)
+				++folder_count;
+			else
+				++kind_counts[static_cast<size_t>(entry.Kind)];
+		}
+
+		ImGuiExt::DrawCommonTextUI("Items", std::to_string(m_AssetSelection.size()));
+		ImGuiExt::DrawCommonTextUI("Total Size", FormatFileSize(total_bytes));
+
+		/* 类型分布："2 Images, 1 Scene, 1 Folder"（按大类的枚举顺序，文件夹收尾） */
+		std::string types;
+		const auto append = [&types](int count, const char* name)
+		{
+			if (count <= 0)
+				return;
+
+			if (!types.empty())
+				types += ", ";
+			types += std::to_string(count) + " " + name + ((count > 1) ? "s" : "");
+		};
+
+		for (size_t kind = 0; kind < 8; ++kind)
+			append(kind_counts[kind], AssetKindName(static_cast<AssetFileKind>(kind), false));
+		append(folder_count, "Folder");
+
+		ImGuiExt::DrawCommonTextUI("Types", types);
+
+		PanelChrome::EndCard(card);
+	}
+
+	void SceneHierarchy::RefreshAssetDetailRows(const AssetSelectionEntry& entry)
+	{
+		PROFILE_FUNCTION();
+
+		/* 深挖详情要打开文件（图片读文件头 / 场景解析 XML），不必每帧做：
+		 * 只在选中项或它的写入时间变化时重算。 */
+		const std::filesystem::path absolute_path = g_AssetsPath / PathFromUtf8(entry.Path);
+
+		std::error_code error;
+		const std::filesystem::file_time_type write_time =
+			std::filesystem::last_write_time(absolute_path, error);
+		if (error)
+		{
+			m_AssetDetailPath.clear();
+			m_AssetDetailRows.clear();
+			return;
+		}
+
+		if (entry.Path == m_AssetDetailPath && write_time == m_AssetDetailWriteTime)
+			return;
+
+		m_AssetDetailPath = entry.Path;
+		m_AssetDetailWriteTime = write_time;
+		m_AssetDetailRows.clear();
+
+		if (entry.Kind == AssetFileKind::Image)
+		{
+			int width = 0;
+			int height = 0;
+			int channels = 0;
+			if (QueryImageInfo(PathToUtf8(absolute_path), width, height, channels))
+			{
+				m_AssetDetailRows.emplace_back("Dimensions",
+					std::to_string(width) + " x " + std::to_string(height));
+				m_AssetDetailRows.emplace_back("Channels", std::to_string(channels));
+			}
+		}
+		else if (entry.Kind == AssetFileKind::Scene)
+		{
+			/* 场景统计：实体数 + 各类别的数量（本地解析一遍，结果缓存在成员里） */
+			auto scene_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+				OpenUtf8File(absolute_path, "rb"), &std::fclose);
+			if (scene_file == nullptr)
+				return;
+
+			tinyxml2::XMLDocument doc;
+			if (doc.LoadFile(scene_file.get()) != tinyxml2::XML_SUCCESS)
+				return;
+
+			const tinyxml2::XMLElement* scene_root = doc.FirstChildElement("Scene");
+			const tinyxml2::XMLElement* entities_root = (scene_root != nullptr)
+				? scene_root->FirstChildElement("Entities") : nullptr;
+			if (entities_root == nullptr)
+				return;
+
+			int entity_count = 0;
+			int light_count = 0;
+			int camera_count = 0;
+			int probe_count = 0;
+			for (const tinyxml2::XMLElement* entity = entities_root->FirstChildElement("Entity");
+				entity != nullptr; entity = entity->NextSiblingElement("Entity"))
+			{
+				++entity_count;
+				if (entity->FirstChildElement("Light") != nullptr)
+					++light_count;
+				if (entity->FirstChildElement("Camera") != nullptr)
+					++camera_count;
+				if (entity->FirstChildElement("ReflectionProbe") != nullptr)
+					++probe_count;
+			}
+
+			m_AssetDetailRows.emplace_back("Entities", std::to_string(entity_count));
+			if (light_count > 0)
+				m_AssetDetailRows.emplace_back("Lights", std::to_string(light_count));
+			if (camera_count > 0)
+				m_AssetDetailRows.emplace_back("Cameras", std::to_string(camera_count));
+			if (probe_count > 0)
+				m_AssetDetailRows.emplace_back("Probes", std::to_string(probe_count));
+		}
+	}
+
 
 	/* 按字段类型绘制单个控件，field_ptr 指向可写的字段存储 */
 	static void DrawFieldControl(const FieldDesc& field, void* field_ptr)
