@@ -202,7 +202,30 @@ namespace Helios
 			m_pReflectionProbeManager->ClearProbes();
 	}
 
-	void Scene::OnUpdate(float delta_time, Camera* editor_camera)
+	/* 外部相机登记：不属于场景、但要渲染本场景的相机（编辑器视口 / 工具预览等）。
+	 * 重复登记无效果；生命周期由调用方保证（相机销毁前先摘除）。 */
+	void Scene::AddExternalCamera(Camera* camera)
+	{
+		PROFILE_FUNCTION();
+
+		if (camera == nullptr)
+			return;
+		if (std::find(m_ExternalCameras.begin(), m_ExternalCameras.end(), camera) != m_ExternalCameras.end())
+			return;
+		m_ExternalCameras.push_back(camera);
+	}
+
+	/* 外部相机摘除：不在册时无效果 */
+	void Scene::RemoveExternalCamera(Camera* camera)
+	{
+		PROFILE_FUNCTION();
+
+		m_ExternalCameras.erase(
+			std::remove(m_ExternalCameras.begin(), m_ExternalCameras.end(), camera),
+			m_ExternalCameras.end());
+	}
+
+	void Scene::OnUpdate(float delta_time)
 	{
 		PROFILE_FUNCTION();
 
@@ -245,10 +268,13 @@ namespace Helios
 			m_RenderViews.emplace_back(render_view);
 		}
 
-		/* Editor Camera's RenderView, 最后一个是编辑器RenderView */
-		if (editor_camera)
+		/* 外部相机（编辑器视口 / 工具预览等）：登记后与场景相机一起收集，排在场景相机之后 */
+		for (Camera* external_camera : m_ExternalCameras)
 		{
-			auto* render_view = editor_camera->GetRenderView();
+			if (external_camera == nullptr)
+				continue;
+
+			auto* render_view = external_camera->GetRenderView();
 			render_view->SetOwnerScene(shared_from_this());
 			m_RenderViews.emplace_back(render_view);
 		}

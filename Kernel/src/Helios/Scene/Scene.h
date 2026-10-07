@@ -66,8 +66,14 @@ namespace Helios
 		entt::registry& GetRegistry() { return m_Registry; }
 		const entt::registry& GetRegistry() const { return m_Registry; }
 
-		/* 更新相机 */
-		void OnUpdate(float delta_time, Camera* editor_camera = nullptr);
+		/* 每帧更新：同步实体变换、收集本帧要渲染的视图（场景相机 + 已登记的外部相机） */
+		void OnUpdate(float delta_time);
+
+		/* 外部相机登记 / 摘除。外部相机 = 不属于场景、但要渲染本场景的相机
+		 * （编辑器视口相机、工具预览相机等）。登记后每帧与场景相机一起收集渲染
+		 * （场景相机在前）；重复登记无效果。生命周期由调用方保证：相机销毁前先摘除。 */
+		void AddExternalCamera(Camera* camera);
+		void RemoveExternalCamera(Camera* camera);
 
 		/* 渲染所有相机 */
 		void Render();
@@ -103,6 +109,8 @@ namespace Helios
 
 		/* RenderView列表 */
 		std::vector<RenderView*> m_RenderViews;
+		/* 外部相机（编辑器视口 / 工具预览等，登记式；见 AddExternalCamera） */
+		std::vector<Camera*> m_ExternalCameras;
 
         /* 反射探针管理器，统一管理需要烘焙的反射探针 */
         SharedPtr<ReflectionProbeManager> m_pReflectionProbeManager;

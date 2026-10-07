@@ -26,6 +26,8 @@ namespace Helios
 		m_pEditorCamera = CreateUniquePtr<EditorCamera>(30.0f);
 
 		m_pMainScene = CreateSharedPtr<Scene>();
+		/* 编辑器相机登记为外部相机：初始场景也要挂上（此后随 SetActiveScene 迁移） */
+		m_pMainScene->AddExternalCamera(m_pEditorCamera.get());
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
 
 		/* 属性面板的字段改动与撤销重做共用同一条历史 */
@@ -41,6 +43,10 @@ namespace Helios
 	void SceneEditorLayer::OnDetached()
 	{
 		PROFILE_FUNCTION();
+
+		/* 相机先于场景销毁：按登记契约摘除 */
+		if (m_pMainScene)
+			m_pMainScene->RemoveExternalCamera(m_pEditorCamera.get());
 
 		ILayer::OnDetached();
 	}
@@ -266,12 +272,18 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 旧场景摘除编辑器相机（场景可能仍被别处引用而继续存活） */
+		if (m_pMainScene)
+			m_pMainScene->RemoveExternalCamera(m_pEditorCamera.get());
+
 		m_pMainScene = scene;
 		SetActiveScenePath(path);
 
-		/* 层级面板与 RenderView 都要指向新场景 */
+		/* 层级面板与 RenderView 都要指向新场景；编辑器相机登记为外部相机
+		 * （每帧随场景相机一起收集渲染，见 Scene::AddExternalCamera） */
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
 		m_pEditorCamera->GetRenderView()->SetOwnerScene(m_pMainScene);
+		m_pMainScene->AddExternalCamera(m_pEditorCamera.get());
 
 		/* 场景内容已整体替换：缓存的实体句柄（悬停 / 选中）与旧命令都不再有效 */
 		m_HoveredEntity = {};
@@ -784,11 +796,11 @@ namespace Helios
 				m_pEditorCamera->OnUpdate(delta_time);
 
 				/* 更新场景中的实体 */
-				m_pMainScene->OnUpdate(delta_time, m_pEditorCamera.get());
+				m_pMainScene->OnUpdate(delta_time);
 				break;
 			case PlayMode::Runtime:
 				/* 运行模式下编辑器相机不响应输入，但编辑器视口仍要由它呈现 */
-				m_pMainScene->OnUpdate(delta_time, m_pEditorCamera.get());
+				m_pMainScene->OnUpdate(delta_time);
 				break;
 			}
 

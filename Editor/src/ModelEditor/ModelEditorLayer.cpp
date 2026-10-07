@@ -57,6 +57,8 @@ namespace Helios
 
 		m_pEditorCamera = CreateUniquePtr<EditorCamera>();
 		m_pDefaultScene = CreateSharedPtr<Scene>();
+		/* 编辑器相机登记为外部相机：每帧随场景相机一起收集渲染（见 Scene::AddExternalCamera） */
+		m_pDefaultScene->AddExternalCamera(m_pEditorCamera.get());
 		m_pModelInfo = CreateUniquePtr<ModelInfo>();
 		m_pMaterialGroup = CreateSharedPtr<MaterialGroup>();
 
@@ -72,6 +74,10 @@ namespace Helios
 	void ModelEditorLayer::OnDetached()
 	{
 		PROFILE_FUNCTION();
+
+		/* 相机先于场景销毁：按登记契约摘除 */
+		if (m_pDefaultScene && m_pEditorCamera)
+			m_pDefaultScene->RemoveExternalCamera(m_pEditorCamera.get());
 
 		ILayer::OnDetached();
 	}
@@ -89,7 +95,7 @@ namespace Helios
 		/* 相机导航：指针在视口上才授权起手 */
 		m_pEditorCamera->SetNavigationAllowed(m_IsViewportHovered);
 		m_pEditorCamera->OnUpdate(delta_time);
-		m_pDefaultScene->OnUpdate(delta_time, m_pEditorCamera.get());
+		m_pDefaultScene->OnUpdate(delta_time);
 
 		/* 执行本帧收集到的渲染视图：模型视口的内容在这里产生 */
 		m_pDefaultScene->Render();
