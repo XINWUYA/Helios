@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Materials Count="1">
+    <Material ID="0" ShaderPath="Shaders/ForwardShaders/BuiltinLit.glsl">
+        <Parameters>
+            <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.000000 4.000000 0.000000 0.000000"/>
+            <ParamInfo Type="0" Name="u_AlbedoTexture">
+                <Texture Path="Textures/Grass2.png" Slot="0">
+                    <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0"/>
+                </Texture>
+            </ParamInfo>
+        </Parameters>
+        <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
+    </Material>
+</Materials>

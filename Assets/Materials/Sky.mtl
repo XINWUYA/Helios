@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Materials Count="1">
+    <Material ID="0" ShaderPath="Shaders/SkyBox.glsl">
+        <Parameters>
+            <ParamInfo Type="0" Name="u_SkyTex">
+                <Texture Path="Textures/drakensberg_solitary_mountain_4k.hdr" Slot="0">
+                    <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0"/>
+                </Texture>
+            </ParamInfo>
+        </Parameters>
+        <RasterState CullMode="0" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
+    </Material>
+</Materials>

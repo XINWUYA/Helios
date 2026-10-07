@@ -9,25 +9,60 @@
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Camera IsPrimary="true" IsFixedAspectRatio="false" ProjectionType="0" Fov="45" Near="0.1" Far="1000"/>
         </Entity>
-        <Entity ID="2" Name="Model">
-            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Model/>
+        <Entity ID="2" Name="Directional Light">
+            <Transform Position="-4.436856 3.931013 0.000000" Rotation="0.555050 0.688880 1.209722" Scale="6.299987 1.000000 1.000000"/>
+            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="5" IsCastShadow="true" ShadowSize="1024" ShadowBias="0.0099999998" CascadeCount="1" ShadowFar="0"/>
         </Entity>
-        <Entity ID="3" Name="Directional Light">
-            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="1" IsCastShadow="false"/>
+        <Entity ID="3" Name="Reflection Probe">
+            <Transform Position="1.737903 0.647669 3.682614" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe.probe" Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
-        <Entity ID="4" Name="Model">
+        <Entity ID="4" Name="Reflection Probe">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Model/>
+            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_2.probe" Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
-        <Entity ID="5" Name="Reflection Probe">
-            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <ReflectionProbe Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="true" BakeDiffuse="true" BakeSpecular="true"/>
+        <Entity ID="5" Name="Cottage">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="0.500000 0.500000 0.500000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.mesh" CastShadow="true" ReceiveShadow="true"/>
         </Entity>
-        <Entity ID="6" Name="Reflection Probe">
+        <Entity ID="6" Name="Point Light">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <ReflectionProbe Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="true" BakeDiffuse="true" BakeSpecular="true"/>
+            <Light LightType="1" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="1" IsCastShadow="false" LightRange="10"/>
+        </Entity>
+        <Entity ID="7" Name="Ground">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="15.000000 15.000000 15.000000"/>
+            <Model ModelPath="BuiltinPlane" CastShadow="true" ReceiveShadow="true">
+                <MaterialOverride Slot="Default" Instance="true" Source="Materials/Ground.mtl" ShaderPath="Shaders/ForwardShaders/BuiltinLit.glsl">
+                    <Parameters>
+                        <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.120000 4.000000 0.000000 0.000000"/>
+                        <ParamInfo Type="0" Name="u_AlbedoTexture">
+                            <Texture Path="Textures/Grass2.png" Slot="0">
+                                <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0"/>
+                            </Texture>
+                        </ParamInfo>
+                    </Parameters>
+                    <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
+                </MaterialOverride>
+            </Model>
+        </Entity>
+        <Entity ID="8" Name="Sky">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Model ModelPath="BuiltinSphere" CastShadow="false" ReceiveShadow="false">
+                <MaterialOverride Slot="Default" Instance="true" Source="Materials/Sky.mtl" ShaderPath="Shaders/SkyBox.glsl">
+                    <Parameters>
+                        <ParamInfo Type="0" Name="u_SkyTex">
+                            <Texture Path="Textures/drakensberg_solitary_mountain_4k.hdr" Slot="0">
+                                <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0"/>
+                            </Texture>
+                        </ParamInfo>
+                    </Parameters>
+                    <RasterState CullMode="1" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
+                </MaterialOverride>
+            </Model>
+        </Entity>
+        <Entity ID="9" Name="Reflection Probe">
+            <Transform Position="3.824024 1.004549 0.876802" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_3.probe" Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
     </Entities>
 </Scene>
