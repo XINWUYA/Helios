@@ -26,6 +26,11 @@ namespace Helios
 		CameraProjectionType GetProjectionType() const { return m_ProjectionType; }
 		void SetProjectionType(CameraProjectionType type);
 
+		/* 渲染管线（前向 / 延迟）：状态在 RenderView 上（每个视图单独对应一套渲染组织），
+		 * 这里转发保持"相机即其视图"的调用面（与 SetViewportRegion 的镜像惯例一致）。 */
+		RenderPipeline GetRenderPipeline() const { return m_pRenderView->GetRenderPipeline(); }
+		void SetRenderPipeline(RenderPipeline pipeline) { m_pRenderView->SetRenderPipeline(pipeline); }
+
 		/* 相机位置（复用 SceneObject 基类存储） */
 		void SetPosition(const glm::vec3& position) override;
 

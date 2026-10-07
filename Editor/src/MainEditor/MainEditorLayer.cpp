@@ -303,7 +303,7 @@ namespace Helios
 					ImGui::EndMenu();
 				}
 
-				/* View：面板显隐 + 布局重置。
+				/* View：面板显隐 + 渲染管线 + 布局重置。
 				 * 分两级：视口窗口（窗口右上角的关闭按钮只能靠这里恢复）与面板整层启用；
 				 * 场景的新建 / 打开也会自动唤回视口窗口，避免「关掉后再也打不开」。 */
 				if (ImGui::BeginMenu("View"))
@@ -315,6 +315,15 @@ namespace Helios
 					bool model_viewport_visible = m_Context.IsModelViewportVisible();
 					if (ImGui::MenuItem("Model Viewport", nullptr, &model_viewport_visible))
 						m_Context.SetModelViewportVisible(model_viewport_visible);
+
+					ImGui::Separator();
+
+					/* 渲染管线（编辑器场景视口）：前向 / 延迟 二选一 —— 相机每帧按选择重建渲染图 */
+					const RenderPipeline render_pipeline = m_Context.GetRenderPipeline();
+					if (ImGui::MenuItem("Forward Pipeline", nullptr, render_pipeline == RenderPipeline::Forward))
+						m_Context.SetRenderPipeline(RenderPipeline::Forward);
+					if (ImGui::MenuItem("Deferred Pipeline", nullptr, render_pipeline == RenderPipeline::Deferred))
+						m_Context.SetRenderPipeline(RenderPipeline::Deferred);
 
 					ImGui::Separator();
 

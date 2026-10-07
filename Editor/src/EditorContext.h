@@ -2,6 +2,7 @@
 #include "EditorCommon.h"
 #include "Helios/Command/Command.h"
 #include "Helios/Common/Common.h"
+#include "Helios/Scene/Camera.h"
 
 namespace Helios
 {
@@ -44,6 +45,11 @@ namespace Helios
 
 		[[nodiscard]] PlayMode GetPlayMode() const { return m_PlayMode; }
 		void SetPlayMode(PlayMode mode);
+
+		/* ---- 渲染管线（编辑器场景视口）：前向 / 延迟。
+		 * 状态在相机的视图上（单一数据源），这里只做通道转发。 ---- */
+		[[nodiscard]] RenderPipeline GetRenderPipeline();
+		void SetRenderPipeline(RenderPipeline pipeline);
 
 		/* ---- 面板显隐：整层启用 ---- */
 		[[nodiscard]] bool IsSceneEditorActive();

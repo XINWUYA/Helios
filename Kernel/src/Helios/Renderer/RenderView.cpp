@@ -7,6 +7,7 @@
 #include <Helios/Scene/ShadowMap.h>
 #include <Helios/Scene/Light.h>
 #include <Helios/Scene/ReflectionProbe.h>
+#include <Helios/Renderer/RenderPasses/DeferredPasses.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
 
 namespace Helios
@@ -203,6 +204,20 @@ namespace Helios
 			m_pShadowMapManager->PrepareForShadowMaps(owner_scene, GetCullingCamera());
 	}
 
+	namespace
+	{
+		/* 场景级维护：推进探针烘焙状态机并挂接烘焙 Pass —— 与渲染管线选择无关，两种管线共用 */
+		void PrepareReflectionProbeBaking(RenderView& render_view, const SharedPtr<Scene>& scene)
+		{
+			auto probe_manager = scene->GetReflectionProbeManager();
+			if (probe_manager)
+			{
+				probe_manager->Prepare();
+				probe_manager->AddBakeReflectionProbePass(&render_view);
+			}
+		}
+	}
+
 	/* 更新FrameGraph */
 	void RenderView::UpdateFrameGraph()
 	{
@@ -217,24 +232,28 @@ namespace Helios
 
         auto scene = m_pOwnerScene.lock();
 
-		/* 相机可以自行组织渲染图（如编辑器相机用延迟渲染图，以便按像素拾取实体）。
-		 * 未自行组织的回落到默认的前向渲染图。 */
+		/* 相机可以自行组织渲染图（如编辑器相机：按管线分派 + 拾取通道 + gizmo 叠加）。
+		 * 未自行组织的按本视图的管线选择组织默认渲染图 —— 前向 / 延迟两种都从这里走。 */
 		const bool organized_by_camera = (m_pOwnerCamera != nullptr) && m_pOwnerCamera->ConstructRenderView(*this);
 		if (!organized_by_camera)
 		{
-			/* Probe 捕获使用无阴影图；ScenePass 有级联阴影时使用当前视图的阴影图。 */
-			AddShadowMapPasses();
-
-			/* 烘焙ReflectionProbe */
-			auto probe_manager = scene->GetReflectionProbeManager();
-			if (probe_manager)
+			if (m_RenderPipeline == RenderPipeline::Deferred)
 			{
-				probe_manager->Prepare();
-				probe_manager->AddBakeReflectionProbePass(this);
+				/* 延迟：阴影前置 / 材质转换 / 探针选择都在模块内；输出（光照结果）为视图纹理 */
+				Deferred::AddDeferredPasses(this);
+			}
+			else
+			{
+				/* 前向：Probe 捕获使用无阴影图；ScenePass 有级联阴影时使用当前视图的阴影图。 */
+				AddShadowMapPasses();
+
+				/* ScenePass（渲染到默认目标） */
+				Forward::AddScenePass(this);
 			}
 
-			/* ScenePass */
-			Forward::AddScenePass(this);
+			/* 场景级维护：探针烘焙（推进状态机 + 挂接烘焙 Pass）—— 与管线选择无关，
+			 * 两支共用；挂在管线之后，烘焙结果从下一帧起被场景 / 光照采样 */
+			PrepareReflectionProbeBaking(*this, scene);
 		}
 
 		/* 生成当前FrameGraph */

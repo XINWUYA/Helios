@@ -57,6 +57,10 @@ namespace Helios
 		void SetGizmoType(int type) { m_GizmoType = type; }
 		void SetPlayMode(PlayMode mode) { m_PlayMode = mode; }
 
+		/* 渲染管线（场景视口）：前向 / 延迟 —— 状态在编辑器相机的视图上（相机转发） */
+		void SetRenderPipeline(RenderPipeline pipeline) { m_pEditorCamera->SetRenderPipeline(pipeline); }
+		[[nodiscard]] RenderPipeline GetRenderPipeline() const { return m_pEditorCamera->GetRenderPipeline(); }
+
 		/* 资源定位通道（跨面板能力）：层级面板画材质卡的贴图，点击要定位到资源浏览器。
 		 * 面板不查 Layer —— 由装配层（EditorApp）接线后直接转发给层级面板。 */
 		using AssetRevealFunc = std::function<void(const std::string&)>;

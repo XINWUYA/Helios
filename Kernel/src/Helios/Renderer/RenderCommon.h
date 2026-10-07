@@ -324,6 +324,15 @@ namespace Helios
 	static constexpr uint32_t MAX_COLOR_ATTACHMENT_NUM = 8;
 	static constexpr uint32_t MAX_TEXTURE_UNIT_NUM = 32;
 
+	/* 渲染管线：一个视图的成像路径。Forward = 材质各自的着色器直画（渲染到默认目标）；
+	 * Deferred = G-Buffer → 延迟光照 → 天空（输出到视图纹理）。状态挂在 RenderView 上；
+	 * Camera 上也有同名的转发读写。 */
+	enum class RenderPipeline : uint8_t
+	{
+		Forward = 0,
+		Deferred = 1
+	};
+
 	/* 视口区域信息 */
 	struct ViewportRegion
 	{

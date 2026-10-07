@@ -6,6 +6,7 @@
 
 #include "Helios/Common/Math.h"
 #include "Helios/Renderer/RenderPasses/DeferredPasses.h"
+#include "Helios/Renderer/RenderPasses/ScenePass.h"
 
 namespace Helios
 {
@@ -26,6 +27,9 @@ namespace Helios
 		: Camera(CameraProjectionType::Perspective, fov, aspect_ratio, near_clip, far_clip)
 	{
 		PROFILE_FUNCTION();
+
+		/* 编辑器视口缺省走延迟管线（可在 View 菜单切前向 / 延迟） */
+		SetRenderPipeline(RenderPipeline::Deferred);
 
 		UpdateCameraDirections();
 
@@ -192,8 +196,22 @@ namespace Helios
 		/* 渲染图已由 RenderView 先重置再回调本函数，这里直接追加各 Pass */
 		auto& frame_graph = render_view.GetFrameGraph();
 
-		/* 延迟管线全流程：输出（光照结果）由模块落为视图输出；阴影句柄等前置资源也在模块内就绪 */
-		Deferred::AddDeferredPasses(&render_view);
+		/* 按管线分派：两条管线的输出（颜色 + 深度）都落 Blackboard，供叠加层与拾取复用 */
+		FrameGraphResourceHandleTyped<FrameGraphTexture> overlay_output;
+		FrameGraphResourceHandleTyped<FrameGraphTexture> overlay_depth;
+		if (render_view.GetRenderPipeline() == RenderPipeline::Deferred)
+		{
+			Deferred::AddDeferredPasses(&render_view);
+			overlay_output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("LightingPassOutput");
+			overlay_depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
+		}
+		else
+		{
+			render_view.AddShadowMapPasses();
+			Forward::AddScenePassToTexture(&render_view);
+			overlay_output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassOutput");
+			overlay_depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassDepth");
+		}
 
 		/* 场景 gizmo Pass（编辑器视口叠加层：地面网格 + 坐标轴 + 实体图标，见 SceneGizmos）。
 		 * 直接复用管线输出和场景深度：PreserveContent 不清除附件，gizmo 画进输出、与场景深度
@@ -205,10 +223,10 @@ namespace Helios
 		};
 
 		frame_graph->AddPass<AxisPassData>("AxisPass",
-			[&](FrameGraphBuilder& builder, AxisPassData& data)
+			[&, overlay_output, overlay_depth](FrameGraphBuilder& builder, AxisPassData& data)
 			{
-				data.Output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("LightingPassOutput");
-				data.Depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
+				data.Output = overlay_output;
+				data.Depth = overlay_depth;
 				builder.BindInputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment);
 				builder.BindInputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
 
@@ -247,9 +265,15 @@ namespace Helios
 	int32_t EditorCamera::PickingEntityByPixelPos(uint32_t x, uint32_t y) const
 	{
 		int32_t entity_id = -1;
-		if (const auto& gbuffer_framebuffer = m_pRenderView->GetPassFrameBuffer("GBufferPass"))
+
+		/* 拾取通道随管线不同：延迟 = GBufferPass 的第 6 张附件（ObjectId）；
+		 * 前向 = ScenePass 的第 1 张附件（颜色在 0）。两者清值都是 -1。 */
+		const bool deferred = m_pRenderView->GetRenderPipeline() == RenderPipeline::Deferred;
+		const SharedPtr<DeviceFrameBuffer> pass_framebuffer = m_pRenderView->GetPassFrameBuffer(
+			deferred ? "GBufferPass" : "ScenePass");
+		if (pass_framebuffer)
 		{
-			gbuffer_framebuffer->ReadPixel(6, x, y, { PixelFormat::R_Integer, PixelType::Int }, &entity_id);
+			pass_framebuffer->ReadPixel(deferred ? 6 : 1, x, y, { PixelFormat::R_Integer, PixelType::Int }, &entity_id);
 		}
 		return entity_id;
 	}

@@ -1279,6 +1279,11 @@ namespace Helios
 						&Camera::GetProjectionType, &Camera::SetProjectionType>(),
 						"ProjectionType", FieldType::Enum)
 					.EnumOf<CameraProjectionType>()
+					/* 渲染管线（前向 / 延迟）：同样经嵌套相机读写；缺省前向（旧场景兼容） */
+					.Field(MakeEnumAccessor<&CameraComponent::m_Camera,
+						&Camera::GetRenderPipeline, &Camera::SetRenderPipeline>(),
+						"RenderPipeline", FieldType::Enum)
+					.EnumOf<RenderPipeline>()
 					.Field(MakeAccessor<&CameraComponent::m_Camera, &Camera::GetFov, &Camera::SetFov>(),
 						"Fov", FieldType::Float)
 					.When(FieldCondition{ 0, FieldType::Bool, ConditionOp::IsTrue, 0.0, &IsPerspectiveProjection })

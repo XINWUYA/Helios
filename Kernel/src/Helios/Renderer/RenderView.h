@@ -56,6 +56,12 @@ namespace Helios
 		void SetEnableFrustumCulling(bool enable) { m_IsEnableCulling = enable; }
 		[[nodiscard]] bool IsEnableFrustumCulling() const { return m_IsEnableCulling; }
 
+		/* 渲染管线（前向 / 延迟）：决定本视图的渲染图如何组织 —— 缺省的
+		 * UpdateFrameGraph 路径按它分派（自行组织渲染图的相机读它做同样分派）。
+		 * 缺省前向；相机上有同名转发（Camera::SetRenderPipeline）。 */
+		void SetRenderPipeline(RenderPipeline pipeline) { m_RenderPipeline = pipeline; }
+		[[nodiscard]] RenderPipeline GetRenderPipeline() const { return m_RenderPipeline; }
+
 		/* 设置视口区域 */
 		void SetViewportRegion(const ViewportRegion& region);
 		[[nodiscard]] const ViewportRegion& GetViewportRegion() const { return m_ViewportRegion; }
@@ -115,6 +121,8 @@ namespace Helios
 		ViewportRegion m_ViewportRegion{};
 		/* 是否启用视锥体剔除 */
 		bool m_IsEnableCulling{ true };
+		/* 渲染管线（前向 / 延迟） */
+		RenderPipeline m_RenderPipeline{ RenderPipeline::Forward };
 		/* 相机 */
 		Camera* m_pOwnerCamera{ nullptr };
 		/* 所属的Scene */

@@ -426,6 +426,11 @@ namespace Helios
 			if (render_view == nullptr)
 				return;
 
+			/* 视口尺寸无效时不组织渲染图（0 尺寸纹理创建会失败；空图不执行任何 Pass）。 */
+			const auto& viewport_region = render_view->GetViewportRegion();
+			if (viewport_region.Width == 0 || viewport_region.Height == 0)
+				return;
+
 			/* 阴影前置（中性阴影图 + 视情况的真实阴影图）：光照着色器总要能采样到合法纹理 */
 			render_view->AddShadowMapPasses();
 

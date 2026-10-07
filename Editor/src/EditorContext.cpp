@@ -115,6 +115,20 @@ namespace Helios
 			layer->SetPlayMode(mode);
 	}
 
+	/* 渲染管线读写都经场景面板落到编辑器相机（权威值在相机上）。
+	 * 面板未就绪时读回缺省延迟（相机缺省值），写为无操作。 */
+	RenderPipeline EditorContext::GetRenderPipeline()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr ? layer->GetRenderPipeline() : RenderPipeline::Deferred;
+	}
+
+	void EditorContext::SetRenderPipeline(RenderPipeline pipeline)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->SetRenderPipeline(pipeline);
+	}
+
 	bool EditorContext::IsSceneEditorActive()
 	{
 		const auto* layer = GetSceneLayer();
