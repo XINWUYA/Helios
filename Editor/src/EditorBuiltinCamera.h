@@ -2,24 +2,6 @@
 
 namespace Helios
 {
-	/* 视口 gizmo 的全局显隐（编辑器会话级，所有视口共用一份）。
-	 * 绘制侧（AxisPass 的网格 / 坐标轴、实体类型 gizmo）只读、UI 侧
-	 * （工具栏最右的 Gizmos 菜单）读写 —— 单一数据源。
-	 * 仅管"场景辅助与实体图标"的显隐；操作 gizmo（ImGuizmo）与视图指示器
-	 * 是交互工具，不在此列。 */
-	struct ViewportGizmoOptions
-	{
-		bool MasterEnabled{ true };			/* 总开关：关则场景辅助与实体图标全部隐藏（分项状态保留） */
-		bool ShowGrid{ true };				/* 地面刻度网格 */
-		bool ShowWorldAxis{ true };			/* 世界坐标轴（原点三轴） */
-		bool ShowLight{ true };				/* 光源图标（平行 / 点 / 聚光） */
-		bool ShowCamera{ true };			/* 相机图标（视锥 + 机身盒） */
-		bool ShowReflectionProbe{ true };	/* 反射探针盒 */
-		bool ShowSprite{ true };			/* 精灵框 */
-	};
-
-	ViewportGizmoOptions& GetViewportGizmoOptions();
-
 	/* 编辑器内建相机类 */
 	class EditorCamera final : public Camera
 	{

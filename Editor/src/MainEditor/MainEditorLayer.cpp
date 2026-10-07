@@ -1,6 +1,6 @@
 ﻿#include "Pch.h"
 #include "MainEditorLayer.h"
-#include "EditorBuiltinCamera.h"
+#include "SceneEditor/SceneGizmos.h"
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
