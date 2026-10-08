@@ -124,12 +124,15 @@ namespace Helios
 			// DeviceTexture
 			constexpr TextureDesc desc{ 2,2 };
 			texture = DeviceTexture::Create("DefaultNormalTex", desc);
+			/* 平面法线 = (128,128,255)：采样后经 *2-1 解码为 (0,0,1)（切空间朝上、不加扰动）。
+			 * 不能存 (0,0,255)——那是"原始蓝"约定，在本引擎（消费方一律 *2-1）解出 (-1,-1,1)，
+			 * TBN 后是倾斜 55° 的错法线（地面等缺省补图材质会整片明暗失真）。 */
 			uint32_t default_texture_data[4] = {
-				0xffff0000,
-				0xffff0000,
-				0xffff0000,
-				0xffff0000,
-			}; // Normal
+				0xffff8080,
+				0xffff8080,
+				0xffff8080,
+				0xffff8080,
+			}; // Flat normal (128,128,255)
 			texture->SetData(default_texture_data, {});
 		}
 

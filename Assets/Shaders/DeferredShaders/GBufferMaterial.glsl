@@ -85,11 +85,16 @@ void CalculateMaterial(inout SMaterialInput mtl)
 	/* 主贴图 UV 缩放与偏移（与 ForwardShaders 的采样口径一致） */
 	vec2 base_uv = vert2frag.TexCoord * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
 
-	mtl.Albedo = texture(u_AlbedoTexture, base_uv).rgb;
+	/* Albedo 与 ForwardShaders（PBRStandard / BuiltinLit）同口径：sRGB 解码后再乘顶点色。
+	 * 少了这一步，延迟管线的间接光 / 直接光都会把未解码的 sRGB 值当线性值用 ——
+	 * 与同场景的前向渲染相比整体发白、发灰。 */
+	mtl.Albedo = SrgbToLinear(texture(u_AlbedoTexture, base_uv).rgb) * vert2frag.BaseColor.rgb;
 
 	/* TBN */
 	vec3 T = normalize(vert2frag.Tangent);
 	vec3 N = normalize(vert2frag.Normal);
+	/* Gram-Schmidt 正交化（与 PBRStandard 同口径：导入网格的顶点切线并不保证与法线垂直） */
+	T = normalize(T - dot(T, N) * N);
 	vec3 B = cross(T, N);
 	mat3 TBN = mat3(T, B, N);
 
@@ -97,7 +102,8 @@ void CalculateMaterial(inout SMaterialInput mtl)
 	vec3 view_dir = u_ViewPos - vert2frag.Position;
 	view_dir = normalize(TBN * view_dir);
 	float height = texture(u_BumpTexture, base_uv).x;
-	vec2 uv = base_uv - view_dir.xy / view_dir.z * height;
+	/* 除零保护与 PBRStandard 同口径：掠射角下 view_dir.z 趋零，不加钳制会放大成噪声 */
+	vec2 uv = base_uv - view_dir.xy / max(view_dir.z, 1e-3f) * height;
 
 	vec3 normal = texture(u_NormalTexture, uv).xyz * 2.0f - 1.0f;
 	//normal.z = sqrt(max(1.0f - normal.x * normal.x - normal.y * normal.y, 0.0f));
@@ -122,7 +128,9 @@ void main()
 	CalculateMaterial(mtl);
 	
 	GBufferTexture0 = vec4(mtl.Albedo, mtl.Roughness);
-	GBufferTexture1 = vec4(mtl.Normal, mtl.Metallic);
+	/* 世界法线以 n * 0.5 + 0.5 编码进 RGBA8：有符号分量直接写会被无符号格式钳到 0，
+	 * 负向分量全部丢失（屋顶背向坡等大面积失真）；解码在 GBufferCommon.glsl。 */
+	GBufferTexture1 = vec4(mtl.Normal * 0.5f + 0.5f, mtl.Metallic);
 	GBufferTexture2 = vec4(mtl.Specular, mtl.AO);
 	GBufferTexture3 = vec4(mtl.Emission, mtl.IOR);
 	GBufferTexture4 = vec4(mtl.Ambient, mtl.Anisotropy);

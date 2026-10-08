@@ -1,9 +1,12 @@
 #type vertex
 #version 410 core
 
+/* 顶点属性按引擎统一契约（见 Model.cpp 的 SetBuiltinVertexLayout / 导入 .mesh 的元素声明序）：
+ * location 0..4 = 位置 / 法线 / 颜色 / UV / 切线 —— 本 shader 只用到 0/1/3，
+ * 但 UV 的槽位是 3（不是 2；2 是颜色槽，读错槽位会拿到顶点色当 UV 使）。 */
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
-layout(location = 2) in vec2 a_TexCoord;
+layout(location = 3) in vec3 a_TexCoord;
 
 #include "../builtin/Uniforms.glsl"
 
@@ -23,7 +26,7 @@ void main()
 	gl_Position = u_ViewProjectionMat * world_pos;
 
 	vert2frag.WorldPosition = world_pos.xyz;
-	vert2frag.TexCoord      = a_TexCoord;
+	vert2frag.TexCoord      = a_TexCoord.xy;
 
 	/* 法线矩阵：处理非等比缩放 */
 	mat3 normal_mat = transpose(inverse(mat3(u_Local2WorldMat)));

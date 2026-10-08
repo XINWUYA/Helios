@@ -200,7 +200,8 @@ void main()
 		}
 		else
 		{
-			lighting_result += max(vec3(0.0f), gbuffer.Ambient * gbuffer.Albedo * gbuffer.AO);
+			/* 平面环境项与 ForwardShaders 的无 IBL 回退同口径（PBRStandard / BuiltinLit 都带 0.3 系数） */
+			lighting_result += max(vec3(0.0f), gbuffer.Ambient * gbuffer.Albedo * gbuffer.AO * 0.3f);
 		}
 		lighting_result += gbuffer.Emission;
 	}

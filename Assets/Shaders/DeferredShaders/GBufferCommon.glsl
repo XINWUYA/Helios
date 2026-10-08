@@ -36,7 +36,8 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 
 	gbuffer.Albedo = color0.rgb;
 	gbuffer.Roughness = color0.a;
-	gbuffer.WorldNormal = color1.rgb;
+	/* 法线解码：GBufferMaterial 以 n * 0.5 + 0.5 编码（RGBA8 无符号格式存不了负值） */
+	gbuffer.WorldNormal = color1.rgb * 2.0f - 1.0f;
 	gbuffer.Metallic = color1.a;
 	gbuffer.Specular = color2.rgb;
 	gbuffer.AO = color2.a;

@@ -185,6 +185,9 @@ namespace Helios
 			auto& white = *m_pBuiltinWhiteMaterial;
 			const auto texture_white = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/White.png"));
 			const auto texture_black = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Black.png"));
+			/* u_NormalTexture 的缺省平面法线：normal.png 必须存 (128,128,255)——采样经 *2-1
+			 * 解码后为 (0,0,1)（切空间朝上、不加扰动）。该文件是所有"缺省补图"（本处、
+			 * DeferredPasses 的 DefaultTextureForSampler、新建材质模板）共用的单一来源。 */
 			const auto texture_normal = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/normal.png"));
 
 			white.SetTexture("u_AlbedoTexture", texture_white);

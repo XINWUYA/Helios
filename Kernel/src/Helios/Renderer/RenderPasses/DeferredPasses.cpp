@@ -22,12 +22,16 @@ namespace Helios
 		 * 场景内探针多于上限时取离相机最近的若干个（见 CollectClosestBakedProbes）。 */
 		constexpr size_t kMaxDeferredIBLProbes = 3;
 
-		/* G-Buffer 采样点缺省时补的默认贴图：法线图按名字认，亮度类（Albedo / Roughness）用白，其余用黑。 */
+		/* G-Buffer 采样点缺省时补的默认贴图：法线图按名字认；乘法类（Albedo / Roughness / Ambient）
+		 * 用白，其余用黑。注意：Ambient 不能用黑 —— 缺贴图的材质走 "albedo × 0.3" 回退环境项，
+		 * 黑贴图会让延迟端在没有探针时把这个环境项丢掉。 */
 		SharedPtr<DeviceTexture> DefaultTextureForSampler(const std::string& sampler_name)
 		{
 			if (sampler_name.find("Normal") != std::string::npos)
 				return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/normal.png"));
-			if (sampler_name.find("Albedo") != std::string::npos || sampler_name.find("Roughness") != std::string::npos)
+			if (sampler_name.find("Albedo") != std::string::npos
+				|| sampler_name.find("Roughness") != std::string::npos
+				|| sampler_name.find("Ambient") != std::string::npos)
 				return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/White.png"));
 			return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Black.png"));
 		}
