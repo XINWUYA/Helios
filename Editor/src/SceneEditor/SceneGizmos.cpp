@@ -60,15 +60,18 @@ namespace Helios
 		constexpr float kSunRayShort = 0.47f;
 		constexpr float kSunRodLength = 1.25f;
 
-		/* 点光：球体线框；反射探针：方盒（Unity 式） */
-		constexpr float kPointGizmoRadius = 0.5f;
+		/* 点光：单位球线框（半径 1 —— 绘制时 × range 得衰减半径）；
+		 * 反射探针：方盒（Unity 式） */
+		constexpr float kPointGizmoUnitRadius = 1.0f;
 		constexpr float kProbeBoxHalfExtent = 0.5f;
 
-		/* 聚光：锥体（轴心点 + 中段圆 + 底圆 + 四条母线） */
-		constexpr float kSpotGizmoLength = 1.25f;
-		/* 规范锥角 30°（弧度）：几何一次构建，实际锥角由绘制时的"形状缩放"张开
-		 * 到光源的真实外锥角（与相机视锥的 FOV 处理同范式） */
-		constexpr float kSpotGizmoAngle = 0.5236f;
+		/* 聚光：单位锥（顶点在原点、轴 = 本地 -Z、长 1、底半径 1）；绘制时按
+		 * range 与锥角做各向异性缩放：横向 × range·tan(锥角/2)、轴向 × range */
+		constexpr float kSpotGizmoUnitLength = 1.0f;
+		/* range 下限保护：防零尺寸缩放矩阵让线框整个消失 */
+		constexpr float kGizmoMinRange = 1.0e-3f;
+		/* 聚光内锥配色：外锥同色的压暗档（内外双锥同屏时区分） */
+		const glm::vec3 kLightGizmoInnerColor = kLightGizmoColor * 0.55f;
 
 		/* 相机：视锥（近 / 远矩形 + 棱 + 上向标记）+ 成像背盒。视锥按规范形状（45° / 16:9）建，
 		 * 绘制时乘"真实量 / 规范量"因子张开到真实的 near / far 与 FOV / 宽高比。
@@ -82,7 +85,13 @@ namespace Helios
 		constexpr float kCameraGizmoBodyHalfH = 0.14f;
 		constexpr float kCameraGizmoDefaultTanHalfFov = 0.4142f;	/* tan(45° / 2)：规范形状的张开 */
 		constexpr float kCameraGizmoDefaultAspect = 1.778f;		/* 规范形状的宽高比（16:9） */
-		/* 显示长度的对数基准：远平面 = 该值时显示长度 = 1 倍基准（取引擎默认 Far） */
+		/* 近平面显示比例 / 视锥长度倍率的钳制区间（见 CameraGizmoNearDepth /
+		 * CameraGizmoFarLengthScale）：极小比值贴下限保可见、超大 far 封顶防拉爆屏幕 */
+		constexpr float kCameraGizmoNearRatioMin = 0.05f;
+		constexpr float kCameraGizmoNearRatioMax = 0.7f;
+		constexpr float kCameraGizmoFarScaleMin = 0.1f;
+		constexpr float kCameraGizmoFarScaleMax = 4.0f;
+		/* 显示长度的线性基准：far = 该值时整体尺寸 = 1 倍（取引擎默认 Far） */
 		constexpr float kCameraGizmoFarRef = 1000.0f;
 
 		/* 精灵：框 + 对角线（图像占位样式） */
@@ -270,42 +279,47 @@ namespace Helios
 			return vertices;
 		}
 
-		/* 点光：三正交圆环（球体线框）+ 轴心点 */
+		/* 点光：三正交圆环（单位球线框；半径 1，绘制时 × range 得衰减半径）。
+		 * 轴心点不在这一组里 —— 它保持屏幕恒定小尺寸、单独提交（见 SubmitLightGizmos） */
 		std::vector<float> BuildPointLightGizmoVertices()
 		{
 			std::vector<float> vertices;
 			PushCircleBand(vertices, glm::vec3(0.0f), glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f),
-				kPointGizmoRadius, kGizmoCircleSegments, kLightGizmoColor);
+				kPointGizmoUnitRadius, kGizmoCircleSegments, kLightGizmoColor);
 			PushCircleBand(vertices, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f),
-				kPointGizmoRadius, kGizmoCircleSegments, kLightGizmoColor);
+				kPointGizmoUnitRadius, kGizmoCircleSegments, kLightGizmoColor);
 			PushCircleBand(vertices, glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.0f, 0.0f),
-				kPointGizmoRadius, kGizmoCircleSegments, kLightGizmoColor);
-			PushPivotDot(vertices, glm::vec3(0.0f), kLightGizmoColor);
+				kPointGizmoUnitRadius, kGizmoCircleSegments, kLightGizmoColor);
 			return vertices;
 		}
 
-		/* 聚光：锥体线框（轴心点 + 中段圆 + 底圆 + 四条母线；轴向本地 -Z =
-		 * 与光传播方向同源；规范锥角 30°，真实锥角经绘制时的形状缩放张开） */
-		std::vector<float> BuildSpotLightGizmoVertices()
+		/* 聚光：单位锥线框（顶点在原点、轴 = 本地 -Z、长 1、底半径 1）。内 / 外锥共用同一份几何，
+		 * 各用一套各向异性缩放张开到真实锥角（外锥满色 / 内锥压暗）。 */
+		std::vector<float> BuildSpotLightConeVertices(const glm::vec3& color)
 		{
 			std::vector<float> vertices;
 			const glm::vec3 axis(0.0f, 0.0f, -1.0f);
 			const glm::vec3 axis_u(1.0f, 0.0f, 0.0f);
 			const glm::vec3 axis_v(0.0f, 1.0f, 0.0f);
-			const glm::vec3 base_center = axis * kSpotGizmoLength;
-			const float base_radius = kSpotGizmoLength * std::tan(kSpotGizmoAngle * 0.5f);
+			const glm::vec3 base_center = axis * kSpotGizmoUnitLength;
 
-			PushCircleBand(vertices, base_center, axis_u, axis_v, base_radius, kGizmoCircleSegments, kLightGizmoColor);
-			PushCircleBand(vertices, axis * (kSpotGizmoLength * 0.5f), axis_u, axis_v, base_radius * 0.5f,
-				kGizmoCircleSegments, kLightGizmoColor);
+			PushCircleBand(vertices, base_center, axis_u, axis_v, kSpotGizmoUnitLength,
+				kGizmoCircleSegments, color);
 
 			for (int32_t side = 0; side < 4; ++side)
 			{
 				const float angle = 0.5f * PI * static_cast<float>(side);
 				const glm::vec3 rim = base_center
-					+ (axis_u * std::cos(angle) + axis_v * std::sin(angle)) * base_radius;
-				PushLineBand(vertices, glm::vec3(0.0f), rim, kLightGizmoColor);
+					+ (axis_u * std::cos(angle) + axis_v * std::sin(angle)) * kSpotGizmoUnitLength;
+				PushLineBand(vertices, glm::vec3(0.0f), rim, color);
 			}
+			return vertices;
+		}
+
+		/* 光源的位置标记：轴心点（点光 / 聚光）—— 屏幕恒定小尺寸、不随影响范围变形 */
+		std::vector<float> BuildLightPivotDotVertices()
+		{
+			std::vector<float> vertices;
 			PushPivotDot(vertices, glm::vec3(0.0f), kLightGizmoColor);
 			return vertices;
 		}
@@ -443,11 +457,29 @@ namespace Helios
 			return vertex_array;
 		}
 
-		SharedPtr<DeviceVertexArray> GetSpotLightGizmoVertexArray()
+		SharedPtr<DeviceVertexArray> GetSpotLightOuterConeVertexArray()
 		{
 			static SharedPtr<DeviceVertexArray> vertex_array;
 			if (!vertex_array)
-				vertex_array = MakeGizmoVertexArray("EditorSpotLightGizmo_VertexArray", BuildSpotLightGizmoVertices());
+				vertex_array = MakeGizmoVertexArray("EditorSpotLightOuterCone_VertexArray",
+					BuildSpotLightConeVertices(kLightGizmoColor));
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetSpotLightInnerConeVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorSpotLightInnerCone_VertexArray",
+					BuildSpotLightConeVertices(kLightGizmoInnerColor));
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetLightPivotDotVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorLightPivotDot_VertexArray", BuildLightPivotDotVertices());
 			return vertex_array;
 		}
 
@@ -458,15 +490,16 @@ namespace Helios
 		{
 			const float near_safe = std::max(near_clip, 1.0e-4f);
 			const float far_safe = std::max(far_clip, near_safe * 1.001f);
-			return glm::clamp(std::pow(near_safe / far_safe, 0.25f), 0.05f, 0.7f);
+			return glm::clamp(near_safe / far_safe, kCameraGizmoNearRatioMin, kCameraGizmoNearRatioMax);
 		}
 
-		/* 视锥显示长度随 far 对数增长（far = kCameraGizmoFarRef 时 = 1 倍基准）——
-		 * 保留"far 越远、视锥越长"的直觉，同时不被超大 far 拉爆屏幕 */
+		/* 视锥（含机身）的显示长度对 far 的响应：以 kCameraGizmoFarRef 为 1 倍的
+		 * 线性映射、钳制 [0.1, 4] 倍 —— 远近如实成比例（far 翻倍 → 尺寸翻倍），
+		 * 超小 far 不缩到不可见、超大 far 不被拉爆屏幕 */
 		float CameraGizmoFarLengthScale(float far_clip)
 		{
 			const float far_safe = std::max(far_clip, 1.0e-4f);
-			return std::log(1.0f + far_safe) / std::log(1.0f + kCameraGizmoFarRef);
+			return glm::clamp(far_safe / kCameraGizmoFarRef, kCameraGizmoFarScaleMin, kCameraGizmoFarScaleMax);
 		}
 
 		/* 视锥几何随 near / far 的显示布局变化（几十个顶点）：参数变化时重建并缓存
@@ -592,8 +625,8 @@ namespace Helios
 			return parts;
 		}
 
-		/* 缩放合并到标量时取最大轴：各向同性 / 旋转对称形状（球、正圆锥）没有表达
-		 * 各轴差异的自由度，取最大维度保证图标不被某个收缩轴带崩（可读性优先） */
+		/* 缩放合并到标量时取最大轴：相机图标的显示尺寸取实体最长轴 ——
+		 * 不表达各轴差异、保证图标不被某个收缩轴带崩（可读性优先） */
 		float MaxAxisOf(const glm::vec3& scale)
 		{
 			return std::max(std::max(scale.x, scale.y), scale.z);
@@ -649,7 +682,9 @@ namespace Helios
 			Renderer::Submit(material, MeshPrimitive{ GetAxisVertexArray(), PrimitiveType::Triangles });
 		}
 
-		/* 光源（平行 / 点 / 聚光）：按 LightComponent 的类型选几何 */
+		/* 光源（平行 / 点 / 聚光）：平行光 = 屏幕恒定的太阳图标；点光 / 聚光 = 真世界尺度的光照
+		 * 范围（球半径 = range、双锥延伸到 range，锥口 = 内 / 外锥角）。位置另外画一个屏幕恒定
+		 * 的轴心点 —— 范围线框再大再小，标记也都看得见。 */
 		void SubmitLightGizmos(const SharedPtr<Scene>& scene, const SharedPtr<Material>& material,
 			const glm::vec3& camera_position, float gizmo_screen_scale)
 		{
@@ -669,48 +704,69 @@ namespace Helios
 					continue;
 
 				const GizmoTransformParts parts = DecomposeGizmoTransform(scene->GetWorldTransform(entity));
+				/* 屏幕恒定基准：位置标记（轴心点）用；真尺度影响范围用绘制基准 1 */
 				const float world_scale = GizmoWorldScaleAt(camera_position, parts.Translation,
 					kLightGizmoPixelSize, gizmo_screen_scale);
 
-				/* 图标朝向的实体旋转分量：定向类图标（太阳）把"规范朝向"直接旋到实际光向，
-				 * 方向本身已随实体旋转推导（见 DirectionalLight::SetTransform），
-				 * 再叠一次实体旋转会转两圈（R 作用两次）；点光 / 聚光的图标吃实体旋转 */
-				GizmoTransformParts icon_parts = parts;
+				/* 提交一份线框：base_scale = 绘制基准（真尺度形状传 1、屏幕恒定标记
+				 * 传世界尺寸基准），response = 基准之上的各轴缩放 */
+				const auto submit = [&](const GizmoTransformParts& transform_parts,
+					const SharedPtr<DeviceVertexArray>& vertex_array, float base_scale,
+					const glm::quat& extra_rotation, const glm::vec3& response)
+				{
+					Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
+						BuildGizmoModel(transform_parts, base_scale, extra_rotation, response), nullptr, nullptr });
+					Renderer::Submit(material, MeshPrimitive{ vertex_array, PrimitiveType::Triangles });
+				};
 
-				SharedPtr<DeviceVertexArray> vertex_array;
-				glm::quat extra_rotation(1.0f, 0.0f, 0.0f, 0.0f);
-				glm::vec3 response(1.0f);
+				bool submit_pivot_dot = false;
 				switch (light_component.m_Light->GetLightType())
 				{
 				case LightType::Directional:
 				{
-					vertex_array = GetDirectionalLightGizmoVertexArray();
-					/* 太阳图标沿真实光向摆放：方向读自光照用的同一份数据
-					 * （几何按“光向 = -Y”的规范朝向建，这里旋到实际方向） */
+					/* 太阳图标沿真实光向摆放（几何按"光向 = -Y"建，这里再旋到实际方向）。方向已经跟着实体旋转
+					 * 换算过，方向杆就不要再叠实体旋转（R 作用两次会转两圈）；图标屏上尺寸恒定。 */
 					const auto directional_light = std::static_pointer_cast<DirectionalLight>(light_component.m_Light);
+					glm::quat extra_rotation(1.0f, 0.0f, 0.0f, 0.0f);
 					const glm::vec3 direction = directional_light->GetDirection();
 					if (glm::length(direction) > 0.0f)
 						extra_rotation = glm::rotation(glm::vec3(0.0f, -1.0f, 0.0f), glm::normalize(direction));
+					GizmoTransformParts icon_parts = parts;
 					icon_parts.Orientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-					/* response 保持 1：概念图标无尺寸语义，不响应缩放（Unity 灯光图标惯例） */
+					submit(icon_parts, GetDirectionalLightGizmoVertexArray(), world_scale, extra_rotation,
+						glm::vec3(1.0f));
 					break;
 				}
 				case LightType::Point:
-					vertex_array = GetPointLightGizmoVertexArray();
-					/* 球各向同性：合并到最大轴，贴合实体最大维度 */
-					response = glm::vec3(MaxAxisOf(parts.Scale));
+				{
+					/* 单位球 × range：球半径 = 衰减半径（真世界尺度；不吃实体缩放 ——
+					 * range 是影响范围的唯一来源） */
+					const auto point_light = std::static_pointer_cast<PointLight>(light_component.m_Light);
+					const float range = std::max(point_light->GetRange(), kGizmoMinRange);
+					submit(parts, GetPointLightGizmoVertexArray(), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+						glm::vec3(range));
+					submit_pivot_dot = true;
 					break;
+				}
 				case LightType::Spot:
 				{
-					vertex_array = GetSpotLightGizmoVertexArray();
-					/* 旋转对称锥：Z 调射程、横向调口径；横向合并到最大轴并保持正圆。
-					 * 锥角吃"形状缩放"：按规范角 30° 建的几何张开到光源的真实外锥角
-					 * （角度读自光照用的同一份数据），锥轴 = 实体旋转（与光向同源）。 */
+					/* 单位锥两套各向异性缩放：横向 = range·tan(锥角/2)、轴向 = range ——
+					 * 外锥张开到外锥角、内锥张开到内锥角（同一份几何两次绘制、颜色区分）。
+					 * 锥轴 = 实体旋转（与光向同源），不吃实体缩放 */
 					const auto spot_light = std::static_pointer_cast<SpotLight>(light_component.m_Light);
-					const float angle = glm::clamp(spot_light->GetAngle(), 1.0f, 170.0f);
-					const float angle_shape = std::tan(glm::radians(angle) * 0.5f) / std::tan(kSpotGizmoAngle * 0.5f);
-					const float radial_scale = std::max(parts.Scale.x, parts.Scale.y) * angle_shape;
-					response = glm::vec3(radial_scale, radial_scale, parts.Scale.z);
+					const float range = std::max(spot_light->GetRange(), kGizmoMinRange);
+					const auto cone_openness = [](float angle_deg)
+					{
+						return std::tan(glm::radians(glm::clamp(angle_deg, 1.0f, 170.0f)) * 0.5f);
+					};
+					const float outer_radius = range * cone_openness(spot_light->GetAngle());
+					const float inner_radius = range * cone_openness(spot_light->GetInnerAngle());
+					const glm::quat no_extra_rotation(1.0f, 0.0f, 0.0f, 0.0f);
+					submit(parts, GetSpotLightOuterConeVertexArray(), 1.0f, no_extra_rotation,
+						glm::vec3(outer_radius, outer_radius, range));
+					submit(parts, GetSpotLightInnerConeVertexArray(), 1.0f, no_extra_rotation,
+						glm::vec3(inner_radius, inner_radius, range));
+					submit_pivot_dot = true;
 					break;
 				}
 				case LightType::Area:
@@ -718,18 +774,18 @@ namespace Helios
 					break;	/* 暂无面光 / 体积光的图标 */
 				}
 
-				if (vertex_array)
+				/* 位置标记：屏幕恒定小尺寸（不随 range / 实体缩放变形） */
+				if (submit_pivot_dot)
 				{
-					Renderer::FillObjectUniformBuffer(VisibleMeshObject{
-						-1, BuildGizmoModel(icon_parts, world_scale, extra_rotation, response), nullptr, nullptr });
-					Renderer::Submit(material, MeshPrimitive{ vertex_array, PrimitiveType::Triangles });
+					submit(parts, GetLightPivotDotVertexArray(), world_scale,
+						glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f));
 				}
 			}
 		}
 
-		/* 相机：视锥形状由相机参数（FOV / 宽高比）决定、深度布局随 near / far ——
-		 * 视锥组吃"形状缩放"与布局参数，机身盒与轴心点不变形；
-		 * 显示尺寸响应实体缩放（Blender 相机缩放放大显示） */
+		/* 相机：视锥按真实世界尺度画 —— near / far 落在真实距离、矩形按真实 FOV / 宽高比张开
+		 * （不吃实体缩放）；机身盒是屏幕恒定的位置标记。注意：视锥长度 = far，编辑器相机远裁剪面
+		 * 要给得足够大（见 EditorCamera）。 */
 		void SubmitCameraGizmos(const SharedPtr<Scene>& scene, const SharedPtr<Material>& material,
 			const glm::vec3& camera_position, float gizmo_screen_scale)
 		{
@@ -770,15 +826,16 @@ namespace Helios
 				}
 
 				/* 视锥（近 / 远矩形 + 棱 + 上向标记）：形状缩放 × 实体缩放，
-				 * 显示长度随 far 对数增长（near / far 的显示映射） */
+				 * 整体再乘 far 的长度倍率（near / far 的显示映射见 CameraGizmo*） */
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
 					BuildGizmoModel(parts, world_scale * far_length_scale, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
 						glm::vec3(shape_x * entity_scale, shape_y * entity_scale, entity_scale)), nullptr, nullptr });
 				Renderer::Submit(material, MeshPrimitive{ GetCameraFrustumVertexArray(near_depth_unit), PrimitiveType::Triangles });
 
-				/* 机身盒 + 轴心点：只随尺寸基准与实体缩放 */
+				/* 机身盒 + 轴心点：随尺寸基准（含 far 倍率）与实体缩放 ——
+				 * 与视锥同一倍率，远近整体一致缩放 */
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
-					BuildGizmoModel(parts, world_scale, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+					BuildGizmoModel(parts, world_scale * far_length_scale, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
 						glm::vec3(entity_scale)), nullptr, nullptr });
 				Renderer::Submit(material, MeshPrimitive{ GetCameraBodyVertexArray(), PrimitiveType::Triangles });
 			}
