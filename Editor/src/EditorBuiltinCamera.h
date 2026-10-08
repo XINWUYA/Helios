@@ -2,11 +2,13 @@
 
 namespace Helios
 {
-	/* 编辑器内建相机类 */
+	/* 编辑器内建相机类。
+	 * 远裁剪面取 1e5：场景相机的 Far 可达数千 / 数万（真世界尺度的视锥 gizmo
+	 * 要能看到完整视锥），反向 Z 的浮点深度在整个区间保持精度。 */
 	class EditorCamera final : public Camera
 	{
 	public:
-		EditorCamera(float fov = 45.0f, float aspect_ratio = 1.778f, float near_clip = 0.1f, float far_clip = 1000.0f);
+		EditorCamera(float fov = 45.0f, float aspect_ratio = 1.778f, float near_clip = 0.1f, float far_clip = 100000.0f);
 		~EditorCamera() override;
 
 		/* 每帧推进相机：视口导航 + 视图矩阵。

@@ -503,19 +503,35 @@ namespace Helios
 			{
 				auto& gizmo_options = GetViewportGizmoOptions();
 
-				/* 总开关：关则全部隐藏（分项状态保留），下边的分项行随之禁用变淡 */
-				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Gizmos, "Show Gizmos", &gizmo_options.MasterEnabled);
+				/* 全选行（纯三态复选框，不加图标与文案）：全开 = 勾、部分开 = 横杠、
+				 * 全关 = 空框；点击 = 全开 ↔ 全关（部分状态点击补齐为全开）—— 各分项
+				 * 状态互相独立，这一行只是聚合显示与批量开关 */
+				const bool all_on = gizmo_options.ShowGrid && gizmo_options.ShowWorldAxis
+					&& gizmo_options.ShowLight && gizmo_options.ShowCamera
+					&& gizmo_options.ShowReflectionProbe && gizmo_options.ShowSprite;
+				const bool none_on = !gizmo_options.ShowGrid && !gizmo_options.ShowWorldAxis
+					&& !gizmo_options.ShowLight && !gizmo_options.ShowCamera
+					&& !gizmo_options.ShowReflectionProbe && !gizmo_options.ShowSprite;
+				if (PanelChrome::MenuItemTristateBox(all_on, none_on))
+				{
+					const bool target = !all_on;
+					gizmo_options.ShowGrid = target;
+					gizmo_options.ShowWorldAxis = target;
+					gizmo_options.ShowLight = target;
+					gizmo_options.ShowCamera = target;
+					gizmo_options.ShowReflectionProbe = target;
+					gizmo_options.ShowSprite = target;
+				}
 				ImGui::Separator();
 
-				const bool sub_enabled = gizmo_options.MasterEnabled;
-				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Grid, "Grid", &gizmo_options.ShowGrid, sub_enabled);
-				PanelChrome::MenuItemToggleWithIcon(Icons::Id::WorldAxis, "World Axis", &gizmo_options.ShowWorldAxis, sub_enabled);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Grid, "Grid", &gizmo_options.ShowGrid);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::WorldAxis, "World Axis", &gizmo_options.ShowWorldAxis);
 				ImGui::Separator();
-				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Light, "Lights", &gizmo_options.ShowLight, sub_enabled);
-				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Camera, "Cameras", &gizmo_options.ShowCamera, sub_enabled);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Light, "Lights", &gizmo_options.ShowLight);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Camera, "Cameras", &gizmo_options.ShowCamera);
 				PanelChrome::MenuItemToggleWithIcon(Icons::Id::ReflectionProbe, "Reflection Probes",
-					&gizmo_options.ShowReflectionProbe, sub_enabled);
-				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Sprite, "Sprites", &gizmo_options.ShowSprite, sub_enabled);
+					&gizmo_options.ShowReflectionProbe);
+				PanelChrome::MenuItemToggleWithIcon(Icons::Id::Sprite, "Sprites", &gizmo_options.ShowSprite);
 				ImGui::EndPopup();
 			}
 		}

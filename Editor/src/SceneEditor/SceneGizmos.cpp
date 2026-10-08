@@ -50,8 +50,9 @@ namespace Helios
 		const glm::vec3 kProbeGizmoColor{ 0.45f, 0.90f, 0.78f };	/* 青绿：反射探针 */
 		const glm::vec3 kSpriteGizmoColor{ 0.95f, 0.62f, 0.85f };	/* 粉紫：精灵 */
 
-		constexpr int32_t kGizmoCircleSegments = 16;		/* 线框圆段数 */
-		constexpr int32_t kGizmoDotSegments = 8;			/* 轴心点小圆段数 */
+		/* 线框圆段数：真世界尺度的球 / 锥可占屏很大，段数低时折线棱角明显 */
+		constexpr int32_t kGizmoCircleSegments = 128;
+		constexpr int32_t kGizmoDotSegments = 16;			/* 轴心点小圆段数 */
 		constexpr float kGizmoDotRadius = 0.045f;			/* 轴心点半径（各类型共用） */
 
 		/* 平行光（太阳）：圆环 + 8 条长短交替射线 + 方向杆 */
@@ -77,7 +78,7 @@ namespace Helios
 		 * 绘制时乘"真实量 / 规范量"因子张开到真实的 near / far 与 FOV / 宽高比。
 		 * 注意：视锥长度 = far，编辑器相机的远裁剪面要给得足够大（见 EditorCamera）。 */
 		constexpr float kCameraGizmoNear = 0.5f;	/* 缺省近平面显示位置（无相机组件时兜底） */
-		constexpr float kCameraGizmoFar = 1.5f;		/* 规范形状的显示总长（远平面所在的 z） */
+		constexpr float kCameraGizmoFar = 1.5f;		/* 规范形状的显示总长（远平面所在的 z；亦作 far 的尺度归一） */
 		constexpr float kCameraGizmoMarkerHeight = 0.24f;	/* 远平面上向标记高度 */
 		constexpr float kCameraGizmoBodyNear = 0.08f;		/* 机身盒沿 +Z 的范围 */
 		constexpr float kCameraGizmoBodyFar = 0.5f;
@@ -85,14 +86,6 @@ namespace Helios
 		constexpr float kCameraGizmoBodyHalfH = 0.14f;
 		constexpr float kCameraGizmoDefaultTanHalfFov = 0.4142f;	/* tan(45° / 2)：规范形状的张开 */
 		constexpr float kCameraGizmoDefaultAspect = 1.778f;		/* 规范形状的宽高比（16:9） */
-		/* 近平面显示比例 / 视锥长度倍率的钳制区间（见 CameraGizmoNearDepth /
-		 * CameraGizmoFarLengthScale）：极小比值贴下限保可见、超大 far 封顶防拉爆屏幕 */
-		constexpr float kCameraGizmoNearRatioMin = 0.05f;
-		constexpr float kCameraGizmoNearRatioMax = 0.7f;
-		constexpr float kCameraGizmoFarScaleMin = 0.1f;
-		constexpr float kCameraGizmoFarScaleMax = 4.0f;
-		/* 显示长度的线性基准：far = 该值时整体尺寸 = 1 倍（取引擎默认 Far） */
-		constexpr float kCameraGizmoFarRef = 1000.0f;
 
 		/* 精灵：框 + 对角线（图像占位样式） */
 		constexpr float kSpriteGizmoHalfExtent = 0.5f;
@@ -483,26 +476,7 @@ namespace Helios
 			return vertex_array;
 		}
 
-		/* 相机视锥的规范形状（45° / 16:9）：近 / 远矩形 + 四条棱 + 远平面向上标记。
-		 * near_depth_unit = 近平面深度（真实比例 = near / far）；真实 FOV / 宽高比与距离
-		 * 由绘制时的尺度因子补上。 */
-		float CameraGizmoNearDepth(float near_clip, float far_clip)
-		{
-			const float near_safe = std::max(near_clip, 1.0e-4f);
-			const float far_safe = std::max(far_clip, near_safe * 1.001f);
-			return glm::clamp(near_safe / far_safe, kCameraGizmoNearRatioMin, kCameraGizmoNearRatioMax);
-		}
-
-		/* 视锥（含机身）的显示长度对 far 的响应：以 kCameraGizmoFarRef 为 1 倍的
-		 * 线性映射、钳制 [0.1, 4] 倍 —— 远近如实成比例（far 翻倍 → 尺寸翻倍），
-		 * 超小 far 不缩到不可见、超大 far 不被拉爆屏幕 */
-		float CameraGizmoFarLengthScale(float far_clip)
-		{
-			const float far_safe = std::max(far_clip, 1.0e-4f);
-			return glm::clamp(far_safe / kCameraGizmoFarRef, kCameraGizmoFarScaleMin, kCameraGizmoFarScaleMax);
-		}
-
-		/* 视锥几何随 near / far 的显示布局变化（几十个顶点）：参数变化时重建并缓存
+		/* 视锥几何随近平面比例（near / far）变化（几十个顶点）：参数变化时重建并缓存
 		 * 最近一组 —— 参数稳定时零重建，多相机不同参数时逐相机重建（成本可忽略） */
 		SharedPtr<DeviceVertexArray> GetCameraFrustumVertexArray(float near_depth_unit)
 		{
@@ -625,13 +599,6 @@ namespace Helios
 			return parts;
 		}
 
-		/* 缩放合并到标量时取最大轴：相机图标的显示尺寸取实体最长轴 ——
-		 * 不表达各轴差异、保证图标不被某个收缩轴带崩（可读性优先） */
-		float MaxAxisOf(const glm::vec3& scale)
-		{
-			return std::max(std::max(scale.x, scale.y), scale.z);
-		}
-
 		/* 组装 gizmo 的模型矩阵：平移 × 纯旋转 × [额外旋转] × 尺寸基准（随距离收缩）× 各轴缩放响应 */
 		glm::mat4 BuildGizmoModel(const GizmoTransformParts& parts, float world_scale,
 			const glm::quat& extra_rotation, const glm::vec3& response)
@@ -662,8 +629,8 @@ namespace Helios
 		void SubmitGridGizmo(const SharedPtr<Material>& material, const glm::vec3& camera_position)
 		{
 			const auto& gizmo_options = GetViewportGizmoOptions();
-			if (!gizmo_options.MasterEnabled || !gizmo_options.ShowGrid)
-				return;	/* 总开关 / 分项关：网格不提交 */
+			if (!gizmo_options.ShowGrid)
+				return;	/* 分项关：网格不提交 */
 
 			const glm::vec3 grid_origin(std::round(camera_position.x), 0.0f, std::round(camera_position.z));
 			Renderer::FillObjectUniformBuffer(VisibleMeshObject{
@@ -675,8 +642,8 @@ namespace Helios
 		void SubmitWorldAxisGizmo(const SharedPtr<Material>& material)
 		{
 			const auto& gizmo_options = GetViewportGizmoOptions();
-			if (!gizmo_options.MasterEnabled || !gizmo_options.ShowWorldAxis)
-				return;	/* 总开关 / 分项关：坐标轴不提交 */
+			if (!gizmo_options.ShowWorldAxis)
+				return;	/* 分项关：坐标轴不提交 */
 
 			Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, glm::mat4(1.0f), nullptr, nullptr });
 			Renderer::Submit(material, MeshPrimitive{ GetAxisVertexArray(), PrimitiveType::Triangles });
@@ -802,41 +769,41 @@ namespace Helios
 				const GizmoTransformParts parts = DecomposeGizmoTransform(scene->GetWorldTransform(entity));
 				const float world_scale = GizmoWorldScaleAt(camera_position, parts.Translation,
 					kCameraGizmoPixelSize, gizmo_screen_scale);
-				const float entity_scale = MaxAxisOf(parts.Scale);
 
 				/* 视锥尺度 = "真实量 / 规范量"：长度 far / 1.5、近平面深度 near / far；半高乘
 				 * tan(fov/2) / tan(22.5°)、半宽乘 aspect / 16:9。没有相机组件 / 正交相机兜底：规范形状 ×
 				 * 屏幕恒定基准。 */
-				float shape_x = 1.0f;
-				float shape_y = 1.0f;
 				float near_depth_unit = kCameraGizmoNear / kCameraGizmoFar;
-				float far_length_scale = 1.0f;
+				glm::vec3 frustum_scale(world_scale);
 				if (camera_component.m_Camera)
 				{
 					const auto& camera = camera_component.m_Camera;
+					float tan_half_fov = kCameraGizmoDefaultTanHalfFov;
+					float aspect = kCameraGizmoDefaultAspect;
 					if (camera->GetProjectionType() == CameraProjectionType::Perspective)
 					{
 						const float fov = glm::clamp(camera->GetFov(), 1.0f, 179.0f);
-						const float tan_half_fov = std::tan(glm::radians(fov) * 0.5f);
-						shape_y = tan_half_fov / kCameraGizmoDefaultTanHalfFov;
-						shape_x = shape_y * (camera->GetAspectRatio() / kCameraGizmoDefaultAspect);
+						tan_half_fov = std::tan(glm::radians(fov) * 0.5f);
+						aspect = camera->GetAspectRatio();
 					}
-					near_depth_unit = CameraGizmoNearDepth(camera->GetNearClip(), camera->GetFarClip());
-					far_length_scale = CameraGizmoFarLengthScale(camera->GetFarClip());
+					const float near_safe = std::max(camera->GetNearClip(), 1.0e-4f);
+					const float far_safe = std::max(camera->GetFarClip(), near_safe * 1.001f);
+					near_depth_unit = near_safe / far_safe;
+					const float length_scale = far_safe / kCameraGizmoFar;
+					const float height_scale = length_scale * (tan_half_fov / kCameraGizmoDefaultTanHalfFov);
+					frustum_scale = glm::vec3(height_scale * (aspect / kCameraGizmoDefaultAspect),
+						height_scale, length_scale);
 				}
 
-				/* 视锥（近 / 远矩形 + 棱 + 上向标记）：形状缩放 × 实体缩放，
-				 * 整体再乘 far 的长度倍率（near / far 的显示映射见 CameraGizmo*） */
+				/* 视锥（近 / 远矩形 + 棱 + 上向标记）：真实尺度（基准 1 = 不经屏幕恒定） */
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
-					BuildGizmoModel(parts, world_scale * far_length_scale, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-						glm::vec3(shape_x * entity_scale, shape_y * entity_scale, entity_scale)), nullptr, nullptr });
+					BuildGizmoModel(parts, 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), frustum_scale), nullptr, nullptr });
 				Renderer::Submit(material, MeshPrimitive{ GetCameraFrustumVertexArray(near_depth_unit), PrimitiveType::Triangles });
 
-				/* 机身盒 + 轴心点：随尺寸基准（含 far 倍率）与实体缩放 ——
-				 * 与视锥同一倍率，远近整体一致缩放 */
+				/* 机身盒 + 轴心点：屏幕恒定小图标（位置标记） */
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
-					BuildGizmoModel(parts, world_scale * far_length_scale, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
-						glm::vec3(entity_scale)), nullptr, nullptr });
+					BuildGizmoModel(parts, world_scale, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
+						glm::vec3(1.0f)), nullptr, nullptr });
 				Renderer::Submit(material, MeshPrimitive{ GetCameraBodyVertexArray(), PrimitiveType::Triangles });
 			}
 		}
@@ -893,11 +860,6 @@ namespace Helios
 		{
 			const auto scene = render_view.GetOwnerScene();
 			if (!scene)
-				return;
-
-			/* 全局显隐（工具栏最右 Gizmos 菜单控制的单一数据源）：
-			 * 总开关关则实体图标全部不提交（分项状态保留） */
-			if (!GetViewportGizmoOptions().MasterEnabled)
 				return;
 
 			SubmitLightGizmos(scene, material, camera_position, gizmo_screen_scale);

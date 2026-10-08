@@ -217,7 +217,7 @@ namespace Helios::PanelChrome
 	/* 带图标和勾选的切换菜单行（Gizmos 显隐那一类）：整行命中 / 悬停高亮跟 MenuItemWithIcon 一样；
 	 * 行右固定画一枚 Accent 色对勾，点击翻转 *value、不收起弹层。行高取控件档，行宽铺满弹层
 	 * （SpanAvailWidth），各行的勾选列对齐在一条竖线上。 */
-	inline bool MenuItemToggleWithIcon(Icons::Id icon, const char* label, bool* value, bool enabled = true)
+	inline bool MenuItemToggleWithIcon(Icons::Id icon, const char* label, bool* value)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 		const float icon_size = ImGui::GetFontSize();
@@ -228,14 +228,11 @@ namespace Helios::PanelChrome
 		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x
 			+ icon_gap + icon_size;
 
-		if (!enabled)
-			ImGui::BeginDisabled();
-
 		ImGui::PushID(label);
 		const bool clicked = ImGui::Selectable("##row", false,
 			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover
 				| ImGuiSelectableFlags_SpanAvailWidth | ImGuiSelectableFlags_DontClosePopups,
-			ImVec2(width, 0.0f));
+			ImVec2(width, ImGui::GetFrameHeight()));
 		ImGui::PopID();
 
 		const ImVec2 min = ImGui::GetItemRectMin();
@@ -268,11 +265,83 @@ namespace Helios::PanelChrome
 			draw_list->AddLine(stroke_b, stroke_c, check_color, thickness);
 		}
 
-		if (!enabled)
-			ImGui::EndDisabled();
-
 		if (clicked && value != nullptr)
 			*value = !*value;
+
+		return clicked;
+	}
+
+	/* 三态复选框菜单行（"全选"这种聚合开关）：行右缘画三态复选框（全开 = 强调色实底 + 勾、
+	 * 部分开 = 实底 + 横杠、全关 = 空框）。版式跟其它菜单行一样（控件档行高、整行命中、点击不收起）；
+	 * 这一行自己不翻转任何值，只返回 clicked、由调用方决定。 */
+	inline bool MenuItemTristateBox(bool all_on, bool none_on)
+	{
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float icon_size = ImGui::GetFontSize();
+		const float box_half = ImMax(6.0f, icon_size * 0.54f);
+
+		/* 行宽＝三态框的内容宽；弹层宽度由分项行与最小宽约束撑足 */
+		const float width = style.FramePadding.x * 2.0f + box_half * 2.0f;
+
+		ImGui::PushID("tristate");
+		const bool clicked = ImGui::Selectable("##row", false,
+			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover
+				| ImGuiSelectableFlags_SpanAvailWidth | ImGuiSelectableFlags_DontClosePopups,
+			ImVec2(width, ImGui::GetFrameHeight()));
+		ImGui::PopID();
+
+		const ImVec2 min = ImGui::GetItemRectMin();
+		const ImVec2 max = ImGui::GetItemRectMax();
+		const float center_y = (min.y + max.y) * 0.5f;
+
+		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+
+		/* 三态复选框：外框在行右缘的勾选列（与下方各行的对勾同一列）。
+		 * 勾选态 = 强调色实底圆角方片 + 深色记号（呼应 Theme "激活 = 强调色"）；
+		 * 未勾选态 = 中性底 + 细描边空框（与原生 Checkbox 的框体同色系） */
+		const float box_center_x = max.x - style.FramePadding.x - icon_size * 0.5f;
+		const ImVec2 box_min(box_center_x - box_half, center_y - box_half);
+		const ImVec2 box_max(box_center_x + box_half, center_y + box_half);
+		constexpr float kBoxRounding = 4.0f;
+
+		if (all_on || !none_on)
+		{
+			draw_list->AddRectFilled(box_min, box_max,
+				ImGui::GetColorU32(EditorTheme::Token::Accent), kBoxRounding);
+
+			const ImU32 mark_color = ImGui::GetColorU32(EditorTheme::Token::Neutral0);
+			if (all_on)
+			{
+				/* 勾：ImGui::RenderCheckMark 的几何（内缩、三段折线、sz/5 笔画） */
+				const float pad = box_half * 0.30f;
+				float sz = box_half * 2.0f - pad * 2.0f;
+				const float mark_thickness = ImMax(sz / 5.0f, 1.0f);
+				sz -= mark_thickness * 0.5f;
+				const float third = sz / 3.0f;
+				const float bx = box_min.x + pad + mark_thickness * 0.25f + third;
+				const float by = box_min.y + pad + mark_thickness * 0.25f + sz - third * 0.5f;
+				draw_list->PathLineTo(ImVec2(bx - third, by - third));
+				draw_list->PathLineTo(ImVec2(bx, by));
+				draw_list->PathLineTo(ImVec2(bx + third * 2.0f, by - third * 2.0f));
+				draw_list->PathStroke(mark_color, 0, mark_thickness);
+			}
+			else
+			{
+				/* 部分开：居中横杠（走 PathStroke —— ImDrawList::AddLine 会给端点
+				 * 加 (0.5, 0.5) 像素偏移，粗描边下破坏居中） */
+				const float mark_thickness = ImMax(1.5f, box_half * 0.30f);
+				draw_list->PathLineTo(ImVec2(box_center_x - box_half * 0.44f, center_y));
+				draw_list->PathLineTo(ImVec2(box_center_x + box_half * 0.44f, center_y));
+				draw_list->PathStroke(mark_color, 0, mark_thickness);
+			}
+		}
+		else
+		{
+			draw_list->AddRectFilled(box_min, box_max,
+				ImGui::GetColorU32(EditorTheme::Token::Neutral4), kBoxRounding);
+			draw_list->AddRect(box_min, box_max,
+				ImGui::GetColorU32(EditorTheme::Token::Neutral6), kBoxRounding, 0, 1.25f);
+		}
 
 		return clicked;
 	}
