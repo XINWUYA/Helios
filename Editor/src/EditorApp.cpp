@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "EditorApp.h"
+#include "LogBuffer.h"
 #include "MainEditor/MainEditorLayer.h"
 #include "SceneEditor/SceneEditorLayer.h"
 #include "ModelEditor/ModelEditorLayer.h"
@@ -26,6 +27,9 @@ namespace Helios
 
 	EditorApp::EditorApp() : Application("Editor", 1920, 1080, true, &InstallEditorUiStyle)
 	{
+		/* 日志窗口的捕获通道：在 Logger::Init()（main）之后、任何层绘出之前接上 */
+		AttachLogCapture();
+
 		auto main_layer = CreateSharedPtr<MainEditorLayer>();
 		auto scene_layer = CreateSharedPtr<SceneEditorLayer>();
 

@@ -862,6 +862,25 @@ namespace Helios::Icons
 			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.56f, 0.71f), color, t);
 		}
 
+		/* 日志窗口（Log）：圆角面板 + 命令提示符 + 两行日志 —— "终端的日志输出"，
+		 * 与 FrameGraph 同属"面板类"图形（圆角框语言） */
+		void DrawLog(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const float radius = c.Len(0.06f);
+
+			dl->AddRect(c.At(0.06f, 0.09f), c.At(0.94f, 0.91f), color, radius, 0, t);
+
+			/* 提示符：左端小折线（软紫） */
+			dl->AddLine(c.At(0.19f, 0.30f), c.At(0.28f, 0.41f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.28f, 0.41f), c.At(0.19f, 0.52f), PaletteColor(color, kViolet), t);
+
+			/* 日志行：提示行（薄荷）+ 正文行 */
+			dl->AddLine(c.At(0.40f, 0.41f), c.At(0.80f, 0.41f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.19f, 0.70f), c.At(0.80f, 0.70f), color, t);
+		}
+
 		/* 适配视图（Fit）：四角取景框 + 内容块 —— "把整张图收进这方视野"。
 		 * 与 Gizmos 同族（四角框语言），中心从轴点换成内容块
 		 * （软紫圆角块 + 薄荷芯点 = 被收进来的"图"）。 */
@@ -1424,7 +1443,7 @@ namespace Helios::Icons
 			"translate", "rotate", "scale",
 			"play", "stop", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
 			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
-			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "fit-view",
+			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "log", "fit-view",
 			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
 			"file-material", "file-probe", "gizmos", "grid", "world-axis", "debug-view",
 			"albedo", "normal", "roughness", "metallic", "specular-color", "ambient-occlusion", "emission", "ambient",
@@ -2134,6 +2153,7 @@ namespace Helios::Icons
 			{ "Tag",               &DrawTag,                0.93f },
 			{ "Stats",             &DrawStats,              0.93f },
 			{ "FrameGraph",        &DrawFrameGraph,         0.93f },
+			{ "Log",               &DrawLog,                0.93f },
 			{ "FitView",           &DrawFitView,            0.90f },
 			{ "Directory",         &DrawDirectory,          0.86f },
 			{ "File",              &DrawFile,               0.86f },

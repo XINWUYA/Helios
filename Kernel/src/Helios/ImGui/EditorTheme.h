@@ -34,6 +34,8 @@ namespace Helios::EditorTheme
         /* 错误提示：只用于"当下就不对"的输入（如就地改名的非法名字），
          * 不参与状态色带（选中 / 悬停是 Accent 家族），也别拿它当装饰色 */
         inline const ImVec4 Danger    = ImVec4(0.851f, 0.482f, 0.459f, 1.00f); /* #D97B75 */
+        /* 警告提示：介于正文与错误之间的"需要注意"语义（日志窗口的 WARN 级标色） */
+        inline const ImVec4 Warning   = ImVec4(0.851f, 0.702f, 0.420f, 1.00f); /* #D9B36B */
 
         /* 淡紫强调色：与图标系统同源 —— 取 SvgInk::Violet 的深色画布落地色（EditorIcons.cpp，
          * #A69EFF），图标里的紫与 UI 状态色是同一个颜色。

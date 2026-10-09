@@ -32,6 +32,8 @@ namespace Helios
 			Stats,
 			/* 面板/分组：渲染图可视化页（Frame Graph）用 */
 			FrameGraph,
+			/* 面板/分组：日志窗口用 */
+			Log,
 			/* 面板工具动作：适配视图（把整张图收进视野） */
 			FitView,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */

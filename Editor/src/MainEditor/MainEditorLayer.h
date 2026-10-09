@@ -4,6 +4,7 @@
 #include "EditorCommon.h"
 #include "EditorContext.h"
 #include "EditorResourceBrowser.h"
+#include "LogPanel.h"
 
 namespace Helios
 {
@@ -51,6 +52,10 @@ namespace Helios
 		EditorContext m_Context;
 		/* 资源管理窗口 */
 		EditorResourceBrowser m_ResourceBrowser;
+		/* 日志窗口（Kernel / Editor 的运行时输出；数据源 = LogBuffer） */
+		LogPanel m_LogPanel;
+		/* 日志窗口是否显示（View 菜单 / 窗口右上角关闭按钮同源） */
+		bool m_IsLogVisible{ true };
 		/* 用户请求重置布局（View → Reset Layout），下一帧生效 */
 		bool m_ResetLayoutRequested{ false };
 		/* 实时样式编辑器（Options 菜单 / 工具栏选项开关） */

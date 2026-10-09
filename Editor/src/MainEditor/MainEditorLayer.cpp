@@ -42,6 +42,8 @@ namespace Helios
 		ShowMenuUI();
 		/* 资源管理窗口 */
 		m_ResourceBrowser.OnImGuiRenderer();
+		/* 日志窗口（Kernel / Editor 的运行时输出） */
+		m_LogPanel.OnImGuiRender(m_IsLogVisible);
 	}
 
 	void MainEditorLayer::OnEvent(IEvent* event)
@@ -263,18 +265,21 @@ namespace Helios
 		ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f, nullptr, &center);
 		ImGuiID left_bottom = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.40f, nullptr, &left);
 		ImGuiID right_bottom = ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.40f, nullptr, &right);
+		/* 中栏再切出底部一条（日志窗口）：只剖中栏，左右两栏的纵向划分不变 */
+		ImGuiID center_bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.30f, nullptr, &center);
 
 		/* 语义槽位 -> 实际 DockNode */
 		const auto slot_to_node = [&](Panel::DockSlot slot) -> ImGuiID
 		{
 			switch (slot)
 			{
-			case Panel::DockSlot::Center:      return center;
-			case Panel::DockSlot::LeftTop:     return left;
-			case Panel::DockSlot::LeftBottom:  return left_bottom;
-			case Panel::DockSlot::RightTop:    return right;
-			case Panel::DockSlot::RightBottom: return right_bottom;
-			default:                           return center;
+			case Panel::DockSlot::Center:       return center;
+			case Panel::DockSlot::LeftTop:      return left;
+			case Panel::DockSlot::LeftBottom:   return left_bottom;
+			case Panel::DockSlot::RightTop:     return right;
+			case Panel::DockSlot::RightBottom:  return right_bottom;
+			case Panel::DockSlot::CenterBottom: return center_bottom;
+			default:                            return center;
 			}
 		};
 
@@ -404,6 +409,9 @@ namespace Helios
 					bool frame_graph_visible = m_Context.IsFrameGraphVisible();
 					if (ImGui::MenuItem("Frame Graph", nullptr, &frame_graph_visible))
 						m_Context.SetFrameGraphVisible(frame_graph_visible);
+
+					/* 日志窗口：显隐状态在本层（窗口由本层提交） */
+					ImGui::MenuItem("Log", nullptr, &m_IsLogVisible);
 
 					ImGui::Separator();
 

@@ -19,6 +19,8 @@ namespace Helios
 		inline constexpr const char* kResourceBrowser = "Resource Browser";
 		/* 渲染图可视化页：依赖图 + 各 Pass 的中间渲染结果 */
 		inline constexpr const char* kFrameGraph      = "Frame Graph";
+		/* 日志窗口：Kernel / Editor 两个 logger 的输出（捕获 sink 实时填充） */
+		inline constexpr const char* kLog             = "Log";
 
 		/* 默认停靠的语义槽位，与 BuildDefaultLayout 里的 DockNode 划分一一对应 */
 		enum class DockSlot : uint8_t
@@ -28,6 +30,7 @@ namespace Helios
 			LeftBottom,   /* 左栏下半（资产浏览器） */
 			RightTop,     /* 右栏上半（属性 / 模型参数） */
 			RightBottom,  /* 右栏下半（统计） */
+			CenterBottom, /* 中栏下半（日志窗口） */
 		};
 
 		struct Desc
@@ -46,6 +49,7 @@ namespace Helios
 			{ kProperties,      DockSlot::RightTop    },
 			{ kModelHelper,     DockSlot::RightTop    },
 			{ kStatInfo,        DockSlot::RightBottom },
+			{ kLog,             DockSlot::CenterBottom },
 		};
 	}
 }
