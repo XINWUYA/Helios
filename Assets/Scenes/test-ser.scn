@@ -6,8 +6,8 @@
             <Sprite BaseColor="1.000000 1.000000 1.000000 1.000000"/>
         </Entity>
         <Entity ID="1" Name="Camera">
-            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Camera IsPrimary="true" IsFixedAspectRatio="false" ProjectionType="0" Fov="45" Near="0.1" Far="1000"/>
+            <Transform Position="0.361787 1.847466 7.667938" Rotation="-0.113852 0.077870 -0.008895" Scale="0.999990 1.000000 0.999999"/>
+            <Camera IsPrimary="true" IsFixedAspectRatio="false" ProjectionType="0" RenderPipeline="0" Fov="45" Near="0.1" Far="1000"/>
         </Entity>
         <Entity ID="2" Name="Directional Light">
             <Transform Position="-4.436856 3.931013 0.000000" Rotation="0.555050 0.688880 1.209722" Scale="6.299987 1.000000 1.000000"/>
@@ -15,10 +15,12 @@
         </Entity>
         <Entity ID="3" Name="Reflection Probe">
             <Transform Position="1.737903 0.647669 3.682614" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Visibility Visible="false"/>
             <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe.probe" Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
         <Entity ID="4" Name="Reflection Probe">
-            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Transform Position="-3.600211 0.503899 0.365885" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Visibility Visible="false"/>
             <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_2.probe" Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
         <Entity ID="5" Name="Cottage">
@@ -26,8 +28,8 @@
             <Model ModelPath="Models/big_cottage/Cottage.mesh" CastShadow="true" ReceiveShadow="true"/>
         </Entity>
         <Entity ID="6" Name="Point Light">
-            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Light LightType="1" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="1" IsCastShadow="false" LightRange="10"/>
+            <Transform Position="0.340175 0.597293 2.612085" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Light LightType="1" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="94" IsCastShadow="false" LightRange="0.5"/>
         </Entity>
         <Entity ID="7" Name="Ground">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="15.000000 15.000000 15.000000"/>
@@ -62,6 +64,7 @@
         </Entity>
         <Entity ID="9" Name="Reflection Probe">
             <Transform Position="3.824024 1.004549 0.876802" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Visibility Visible="false"/>
             <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_3.probe" Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
     </Entities>
