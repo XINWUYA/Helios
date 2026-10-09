@@ -6,6 +6,7 @@
 #include "Helios/Application/AssetManager.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
+#include <cctype>
 
 namespace Helios
 {
@@ -544,6 +545,23 @@ namespace Helios
 	/* ---- 材质体读写：.mtl 条目、独立材质资产、实例覆盖共用 ---- */
 	namespace MaterialIO
 	{
+		namespace
+		{
+			/* 按扩展名识别 HDR 贴图：老资产的 LoadConfig 没有 IsHdr 字段，
+			 * 缺省按扩展名推断（.hdr 用浮点解码；按 8bit 读会先转 LDR 再上传，
+			 * 既慢又丢动态范围）。 */
+			[[nodiscard]] bool IsHdrTexturePath(const char* path)
+			{
+				if (path == nullptr)
+					return false;
+
+				std::string suffix = ExtractFileSuffix(path);
+				std::transform(suffix.begin(), suffix.end(), suffix.begin(),
+					[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+				return suffix == "hdr";
+			}
+		}
+
 		void WriteBody(tinyxml2::XMLElement* material_element, const Material& material)
 		{
 			/* Shader */
@@ -576,6 +594,7 @@ namespace Helios
 						load_config_doc->SetAttribute("IsFlipV", load_config.IsFlipV);
 						load_config_doc->SetAttribute("IsGenMips", load_config.IsGenMips);
 						load_config_doc->SetAttribute("SamplerType", static_cast<uint32_t>(load_config.SamplerType));
+						load_config_doc->SetAttribute("IsHdr", load_config.IsHdr);
 					}
 					break;
 				case ParamType::Int:
@@ -647,6 +666,13 @@ namespace Helios
 								load_config.IsFlipV = load_config_doc->BoolAttribute("IsFlipV");
 								load_config.IsGenMips = load_config_doc->BoolAttribute("IsGenMips");
 								load_config.SamplerType = static_cast<SamplerType>(load_config_doc->IntAttribute("SamplerType"));
+								load_config.IsHdr = (load_config_doc->FindAttribute("IsHdr") != nullptr)
+									? load_config_doc->BoolAttribute("IsHdr")
+									: IsHdrTexturePath(texture_path);
+							}
+							else
+							{
+								load_config.IsHdr = IsHdrTexturePath(texture_path);
 							}
 
 							auto texture = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(texture_path), load_config);

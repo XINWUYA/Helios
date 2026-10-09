@@ -794,8 +794,31 @@ namespace Helios
         if (m_VertexDescriptor)
             descriptor->setVertexDescriptor(m_VertexDescriptor);
 
+        /* 接入管线编译产物缓存：先以「仅命中」模式创建——命中直接取用编译产物；
+         * 未命中立即失败，回退为源码编译。 */
+        MTL::BinaryArchive* pipeline_archive = MetalRuntime::PipelineArchive();
+        if (pipeline_archive != nullptr)
+            descriptor->setBinaryArchives(NS::Array::array(pipeline_archive));
+
         NS::Error* error = nullptr;
-        MTL::RenderPipelineState* pipeline = device->newRenderPipelineState(descriptor, &error);
+        MTL::RenderPipelineState* pipeline = nullptr;
+        if (pipeline_archive != nullptr)
+        {
+            pipeline = device->newRenderPipelineState(
+                descriptor, MTL::PipelineOptionFailOnBinaryArchiveMiss, nullptr, &error);
+        }
+
+        if (pipeline == nullptr)
+        {
+            /* 缓存未命中：从源码编译，并把真正新编译的条目写回缓存。
+             * 只写回未命中条目——命中条目重复添加会在缓存中堆积冗余记录
+             * （每条附带一份重命名的阶段产物），缓存文件会逐会话膨胀。 */
+            error = nullptr;
+            pipeline = device->newRenderPipelineState(descriptor, &error);
+
+            if (pipeline != nullptr && pipeline_archive != nullptr)
+                MetalRuntime::NotifyPipelineCompiled(descriptor);
+        }
 
         descriptor->release();
         vertex_function->release();

@@ -66,6 +66,18 @@ namespace Helios
          * 由 RenderAPI 在每帧结束时推进。 */
         uint32_t FrameIndex();
         void AdvanceFrame();
+
+        /* ---------- 管线编译产物缓存（MTLBinaryArchive） ----------
+         * 「着色器 × 渲染目标格式」的管线第一次创建要把 MSL 编译成 GPU 二进制；产物缓存到磁盘后，
+         * 后续进程就能直接命中。缓存文件缺失 / 损坏时自动回退成空缓存。 */
+
+        /* 缓存实例（懒加载；设备不可用时返回 nullptr） */
+        MTL::BinaryArchive* PipelineArchive();
+        /* 把「真正新编译（未命中缓存）」的管线条目写回缓存；命中缓存的条目不要传入
+         * ——重复添加会在缓存里堆积冗余记录。落盘在后续调用 / 退出时按静置窗口触发 */
+        void NotifyPipelineCompiled(MTL::RenderPipelineDescriptor* descriptor);
+        /* 收尾时把未落盘的条目写出（由 Unregister 统一调用） */
+        void FlushPipelineArchive();
     }
 
     /* 64 位哈希合并（boost::hash_combine 风格）。用于把 VertexDescriptor、
