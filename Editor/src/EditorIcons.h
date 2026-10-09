@@ -12,7 +12,7 @@ namespace Helios
 		{
 			None = 0,
 			/* 文件与资源操作 */
-			NewScene, OpenScene, Save, Import, NewAsset,
+			NewScene, OpenScene, Save, Import, Export, NewAsset,
 			/* 编辑历史 */
 			Undo, Redo,
 			/* 路径导航（资源管理器顶栏：回到上次路径 / 重进路径） */

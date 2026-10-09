@@ -170,6 +170,24 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.22f, 0.73f), c.Len(0.055f), PaletteColor(color, kMint));
 		}
 
+		/* 导出：导入图标的镜像 —— 承载托盘 + 向上的导出箭头（"数据送出去"，
+		 * 与导入的"文档 + 向下箭头"同族）。几何与 SVG symbol 同一副坐标。 */
+		void DrawExport(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddLine(c.At(0.50f, 0.66f), c.At(0.50f, 0.24f), PaletteColor(color, kViolet), t);
+			dl->PathLineTo(c.At(0.36f, 0.38f));
+			dl->PathLineTo(c.At(0.50f, 0.24f));
+			dl->PathLineTo(c.At(0.64f, 0.38f));
+			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+
+			dl->AddLine(c.At(0.22f, 0.84f), c.At(0.78f, 0.84f), color, t);
+			dl->AddLine(c.At(0.22f, 0.84f), c.At(0.22f, 0.73f), color, t);
+			dl->AddCircleFilled(c.At(0.22f, 0.73f), c.Len(0.055f), PaletteColor(color, kMint));
+		}
+
 		/* 新建资源：一枚加号、不加外框，用"动作"强调色（跟 Add / Return / Filter 同源）。跟通用的
 		 * 「Add」（圆圈加号）刻意分开：这里是"往当前目录建资源"、组件那个是"带圈加号"。笔画略重
 		 * （2.6 / 32），因为它是整枚图标唯一的内容。 */
@@ -1535,7 +1553,7 @@ namespace Helios::Icons
 		};
 
 		constexpr const char* kSvgSymbolIds[] = {
-			"", "new-scene", "open-scene", "save", "import", "new-asset", "undo", "redo", "back", "forward",
+			"", "new-scene", "open-scene", "save", "import", "export", "new-asset", "undo", "redo", "back", "forward",
 			"translate", "rotate", "scale",
 			"play", "stop", "live", "record", "previous-frame", "next-frame", "peak", "valley", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
 			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
@@ -2210,6 +2228,7 @@ namespace Helios::Icons
 			{ "OpenScene",         &DrawOpenScene,          0.86f },
 			{ "Save",              &DrawSave,               0.97f },
 			{ "Import",            &DrawImport,             0.93f },
+			{ "Export",            &DrawExport,             0.93f },
 			{ "NewAsset",          &DrawNewAsset,           1.0f },
 			{ "Undo",              &DrawUndo,               0.96f },
 			{ "Redo",              &DrawRedo,               1.04f },

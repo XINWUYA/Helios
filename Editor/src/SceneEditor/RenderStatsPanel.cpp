@@ -3,11 +3,17 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <cstdio>
+#include <fstream>
 #include <functional>
+#include <unordered_map>
+#include <vector>
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "Helios/Application/FileDialog.h"
+#include "Helios/Common/PathUtils.h"
 #include "Helios/Core/FrameTimeProfiler.h"
+#include "Helios/Core/Logger.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Renderer/RenderQuery.h"
@@ -575,8 +581,8 @@ namespace Helios
 		PanelChrome::EndCard(card);
 	}
 
-	/* 录制工具栏：录制 / 停止、上一帧 / 下一帧、峰值 / 谷值、清空 —— 一行等大图标按钮
-	 * （宽度均分内容区；无内容 / 录制中时回放按钮置灰）。 */
+	/* 录制工具栏：录制 / 停止、上一帧 / 下一帧、峰值 / 谷值、清空、导出 —— 一行等大图标按钮
+	 * （宽度均分内容区；无内容 / 录制中时回放与导出按钮置灰）。 */
 	void RenderStatsPanel::ShowGPUTimerToolbar()
 	{
 		PROFILE_FUNCTION();
@@ -587,7 +593,7 @@ namespace Helios
 		const int last_index = static_cast<int>(count) - 1;
 
 		const float button_gap = ImGui::GetStyle().ItemSpacing.x;
-		const float button_width = (ImGui::GetContentRegionAvail().x - button_gap * 5.0f) / 6.0f;
+		const float button_width = (ImGui::GetContentRegionAvail().x - button_gap * 6.0f) / 7.0f;
 		const ImVec2 button_size(button_width, ImGui::GetFrameHeight() * 1.5f);
 
 		/* 录制 / 停止（同一按钮位，按状态换图标与提示） */
@@ -635,6 +641,23 @@ namespace Helios
 		{
 			recorder.Clear();
 			m_ReplayFrame = -1;
+		}
+		ImGui::SameLine(0.0f, button_gap);
+		/* 导出：录制内容写 CSV（宽表见 BuildRecordingCsv）；落盘路径交给系统保存对话框。
+		 * 保存框不保证带后缀（macOS 面板不会自动加）—— 落盘前统一收尾补 ".csv"。 */
+		if (Icons::IconButton(Icons::Id::Export, button_size, false, "Export recording (CSV)"))
+		{
+			const std::string path = EnsureRecordingExtension(FileDialog::SaveFile("csv(*.csv)\0*.csv\0"));
+			const std::string csv = path.empty() ? std::string() : BuildRecordingCsv(recorder);
+			if (!csv.empty())
+			{
+				std::ofstream out(PathFromUtf8(path), std::ios::binary);
+				out.write(csv.data(), static_cast<std::streamsize>(csv.size()));
+				if (out.good())
+					EDITOR_LOG_INFO("GPU recording exported: \"{}\" ({} frames).", path, count);
+				else
+					EDITOR_LOG_ERROR("Failed to export GPU recording to \"{}\".", path);
+			}
 		}
 		ImGui::EndDisabled();
 	}
@@ -745,5 +768,168 @@ namespace Helios
 		ImGui::TextDisabled("%u frames   peak %.0f us @ #%u", count,
 			recorder.GetFrame(static_cast<uint32_t>(peak_index)).GPUTime,
 			recorder.GetFrameId(static_cast<uint32_t>(peak_index)));
+	}
+
+	/* GPU 录制导出（CSV 宽表：一行一帧）：帧号 · 根总耗时（v / f 细分）· 每个作用域节点两列
+	 * （总耗时 + 顶点细分，片元 = 总 − 顶点）。列名 = 标签路径 + ".total_us" / ".vertex_us"；
+	 * 节点集合取全部录制帧的并集（缺失留空）、列序 = 首次出现的先序。纯函数：headless 能直接断言。 */
+	std::string RenderStatsPanel::BuildRecordingCsv(const GPUTimerRecorder& recorder)
+	{
+		const uint32_t count = recorder.GetFrameCount();
+		if (count == 0)
+			return {};
+
+		/* 一、收集：节点列顺序（首现先序）+ 每帧的 (节点下标 → 总 / 顶点耗时之和) */
+		struct NodeValues
+		{
+			double Total = 0.0;
+			double Vertex = 0.0;
+		};
+
+		std::vector<std::string> nodes;
+		std::unordered_map<std::string, size_t> node_index;
+		std::vector<std::unordered_map<size_t, NodeValues>> frame_values(count);
+
+		std::function<void(const ResultGPUTimerNode&, const std::string&, std::unordered_map<size_t, NodeValues>&)> collect;
+		collect = [&node_index, &nodes, &collect](const ResultGPUTimerNode& node, const std::string& parent_path,
+			std::unordered_map<size_t, NodeValues>& values)
+			{
+				for (const ResultGPUTimerNode& child : node.Children)
+				{
+					/* 空标签节点不做列，用父路径继续向子层递归 */
+					if (child.Label.empty())
+					{
+						collect(child, parent_path, values);
+						continue;
+					}
+
+					const std::string path = parent_path.empty() ? child.Label : parent_path + "/" + child.Label;
+					const auto [entry, inserted] = node_index.try_emplace(path, nodes.size());
+					if (inserted)
+						nodes.emplace_back(path);
+					if (child.HasData)
+					{
+						NodeValues& value = values[entry->second]; /* 同路径重复出现 = 求和 */
+						value.Total += child.GPUTime;
+						value.Vertex += child.GPUTimeVertex;
+					}
+
+					collect(child, path, values);
+				}
+			};
+
+		for (uint32_t index = 0; index < count; ++index)
+			collect(recorder.GetFrame(index), {}, frame_values[index]);
+
+		/* 二、写表：UTF-8 BOM（Excel 打开中文实体名不乱码）→ 表头 → 每帧一行 */
+		std::string csv;
+		csv.reserve(256 + static_cast<size_t>(count) * (32 + nodes.size() * 24));
+
+		const auto append_field = [&csv](const std::string& field)
+			{
+				/* 含分隔符 / 引号 / 换行 / 首尾空格 → RFC 4180 引号包裹（引号翻倍） */
+				const bool needs_quotes = field.find_first_of(",\"\n\r") != std::string::npos
+					|| (!field.empty() && (field.front() == ' ' || field.back() == ' '));
+				if (!needs_quotes)
+				{
+					csv += field;
+					return;
+				}
+
+				csv += '"';
+				for (const char ch : field)
+				{
+					if (ch == '"')
+						csv += '"';
+					csv += ch;
+				}
+				csv += '"';
+			};
+
+		csv += "\xEF\xBB\xBF";
+		append_field("frame");
+		csv += ',';
+		append_field("total_us");
+		csv += ',';
+		append_field("vertex_us");
+		csv += ',';
+		append_field("fragment_us");
+		for (const std::string& node : nodes)
+		{
+			csv += ',';
+			append_field(node + ".total_us");
+			csv += ',';
+			append_field(node + ".vertex_us");
+		}
+		csv += '\n';
+
+		char cell[32];
+		for (uint32_t index = 0; index < count; ++index)
+		{
+			const ResultGPUTimerNode& frame = recorder.GetFrame(index);
+
+			snprintf(cell, sizeof(cell), "%u", recorder.GetFrameId(index));
+			csv += cell;
+
+			if (frame.HasData)
+			{
+				snprintf(cell, sizeof(cell), ",%.3f,%.3f,%.3f",
+					frame.GPUTime, frame.GPUTimeVertex, frame.GPUTimeFragment);
+				csv += cell;
+			}
+			else
+			{
+				csv += ",,,"; /* 无数据帧：占位留空（写 0 会被当成真实零耗时） */
+			}
+
+			for (size_t node = 0; node < nodes.size(); ++node)
+			{
+				csv += ',';
+				const auto value = frame_values[index].find(node);
+				if (value != frame_values[index].end())
+				{
+					snprintf(cell, sizeof(cell), "%.3f", value->second.Total);
+					csv += cell;
+				}
+
+				csv += ',';
+				if (value != frame_values[index].end())
+				{
+					snprintf(cell, sizeof(cell), "%.3f", value->second.Vertex);
+					csv += cell;
+				}
+			}
+			csv += '\n';
+		}
+
+		return csv;
+	}
+
+	/* 导出落盘的路径收尾：系统保存框不保证补后缀 —— 名称没以 ".csv"（大小写不敏感）结尾
+	 * 就补上，已有则不重复；空路径（用户取消）原样返回。纯函数：headless 直接断言。 */
+	std::string RenderStatsPanel::EnsureRecordingExtension(const std::string& path)
+	{
+		constexpr const char* kExtension = ".csv";
+		constexpr size_t kExtensionLength = 4;
+
+		if (path.size() >= kExtensionLength)
+		{
+			const auto ascii_lower = [](char ch)
+				{ return ch >= 'A' && ch <= 'Z' ? static_cast<char>(ch - 'A' + 'a') : ch; };
+
+			bool has_extension = true;
+			for (size_t index = 0; index < kExtensionLength; ++index)
+			{
+				if (ascii_lower(path[path.size() - kExtensionLength + index]) != kExtension[index])
+				{
+					has_extension = false;
+					break;
+				}
+			}
+			if (has_extension)
+				return path;
+		}
+
+		return path.empty() ? path : path + kExtension;
 	}
 }
