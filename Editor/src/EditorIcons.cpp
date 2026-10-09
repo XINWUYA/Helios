@@ -324,6 +324,102 @@ namespace Helios::Icons
 			dl->AddRectFilled(c.At(0.20f, 0.20f), c.At(0.80f, 0.80f), color, c.Len(0.16f));
 		}
 
+		/* GPU 计时面板的观测方式图标（SVG 为主渲染路径；这里是与 SVG 同构的后备画法） */
+
+		void DrawLive(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 活性脉冲线（实时数据流的通用符号） */
+			const ImVec2 points[] = {
+				c.At(0.09f, 0.50f), c.At(0.31f, 0.50f), c.At(0.45f, 0.22f),
+				c.At(0.64f, 0.78f), c.At(0.78f, 0.50f), c.At(0.92f, 0.50f),
+			};
+			dl->AddPolyline(points, IM_ARRAYSIZE(points), color, 0, t);
+		}
+
+		void DrawRecord(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 录制圆点：细环 + 实心红点（录像机 REC 的通用符号） */
+			dl->AddCircle(c.At(0.5f, 0.5f), c.Len(0.43f), color, 0, t);
+			dl->AddCircleFilled(c.At(0.5f, 0.5f), c.Len(0.225f), PaletteColor(color, kRed));
+		}
+
+		/* 帧格（上一帧 / 下一帧）：胶片格 + 齿孔刻线 + 内容行 + 指向箭头，forward 为镜像 */
+		void DrawFrameSlot(ImDrawList* dl, const Canvas& c, float t, ImU32 color, bool forward)
+		{
+			const float flip = forward ? -1.0f : 1.0f;
+			const auto at = [&](float x, float y) { return c.At(0.5f + flip * (x - 0.5f), y); };
+
+			/* 胶片格（圆角矩形，格内上下的齿孔刻线 + 三条内容行） */
+			dl->AddRect(at(0.375f, 0.156f), at(0.875f, 0.844f), color, c.Len(0.0625f), 0, t);
+			dl->AddLine(at(0.50f, 0.156f), at(0.50f, 0.281f), color, t);
+			dl->AddLine(at(0.75f, 0.156f), at(0.75f, 0.281f), color, t);
+			dl->AddLine(at(0.50f, 0.719f), at(0.50f, 0.844f), color, t);
+			dl->AddLine(at(0.75f, 0.719f), at(0.75f, 0.844f), color, t);
+			dl->AddLine(at(0.50f, 0.375f), at(0.75f, 0.375f), color, t);
+			dl->AddLine(at(0.50f, 0.500f), at(0.656f, 0.500f), color, t);
+			dl->AddLine(at(0.50f, 0.625f), at(0.75f, 0.625f), color, t);
+
+			/* 指向帧格的箭头 */
+			dl->AddLine(at(0.344f, 0.500f), at(0.094f, 0.500f), color, t);
+			dl->AddLine(at(0.094f, 0.500f), at(0.250f, 0.344f), color, t);
+			dl->AddLine(at(0.094f, 0.500f), at(0.250f, 0.656f), color, t);
+		}
+
+		void DrawPreviousFrame(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			DrawFrameSlot(dl, Canvas{ center, size }, StrokeWidth(size), color, false);
+		}
+
+		void DrawNextFrame(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			DrawFrameSlot(dl, Canvas{ center, size }, StrokeWidth(size), color, true);
+		}
+
+		/* 峰值（坐标轴 + 折线升至峰点 + 穿过圆心的十字） */
+		void DrawPeak(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddLine(c.At(0.156f, 0.812f), c.At(0.156f, 0.188f), color, t);
+			dl->AddLine(c.At(0.156f, 0.812f), c.At(0.844f, 0.812f), color, t);
+
+			const ImVec2 points[] = {
+				c.At(0.250f, 0.688f), c.At(0.406f, 0.531f), c.At(0.531f, 0.625f), c.At(0.781f, 0.313f),
+			};
+			dl->AddPolyline(points, IM_ARRAYSIZE(points), color, 0, t);
+
+			/* 十字画在圆之前：实心圆盖住中段，圆的四周露出等长标记 */
+			dl->AddLine(c.At(0.781f, 0.131f), c.At(0.781f, 0.494f), color, t);
+			dl->AddLine(c.At(0.600f, 0.313f), c.At(0.963f, 0.313f), color, t);
+			dl->AddCircleFilled(c.At(0.781f, 0.313f), c.Len(0.0875f), color);
+		}
+
+		/* 谷值（坐标轴 + 折线落至谷点再回升 + 穿过圆心的十字） */
+		void DrawValley(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddLine(c.At(0.156f, 0.812f), c.At(0.156f, 0.188f), color, t);
+			dl->AddLine(c.At(0.156f, 0.812f), c.At(0.844f, 0.812f), color, t);
+
+			const ImVec2 points[] = {
+				c.At(0.250f, 0.344f), c.At(0.438f, 0.688f), c.At(0.625f, 0.500f), c.At(0.781f, 0.281f),
+			};
+			dl->AddPolyline(points, IM_ARRAYSIZE(points), color, 0, t);
+
+			dl->AddLine(c.At(0.438f, 0.506f), c.At(0.438f, 0.869f), color, t);
+			dl->AddLine(c.At(0.256f, 0.688f), c.At(0.619f, 0.688f), color, t);
+			dl->AddCircleFilled(c.At(0.438f, 0.688f), c.Len(0.0875f), color);
+		}
+
 		/* ---- 通用 ---- */
 
 		void DrawMenu(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -1441,7 +1537,7 @@ namespace Helios::Icons
 		constexpr const char* kSvgSymbolIds[] = {
 			"", "new-scene", "open-scene", "save", "import", "new-asset", "undo", "redo", "back", "forward",
 			"translate", "rotate", "scale",
-			"play", "stop", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
+			"play", "stop", "live", "record", "previous-frame", "next-frame", "peak", "valley", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
 			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
 			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "log", "fit-view",
 			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
@@ -2124,6 +2220,12 @@ namespace Helios::Icons
 			{ "Scale",             &DrawScale,              0.93f },
 			{ "Play",              &DrawPlay,               0.93f },
 			{ "Stop",              &DrawStop,               0.93f },
+			{ "Live",              &DrawLive,               0.97f },
+			{ "Record",            &DrawRecord,             0.93f },
+			{ "PreviousFrame",     &DrawPreviousFrame,      0.93f },
+			{ "NextFrame",         &DrawNextFrame,          0.93f },
+			{ "Peak",              &DrawPeak,               0.93f },
+			{ "Valley",            &DrawValley,             0.93f },
 			{ "Menu",              &DrawMenu,               1.09f },
 			{ "Add",               &DrawAdd,                0.93f },
 			{ "Remove",            &DrawRemove,             0.93f },

@@ -46,6 +46,8 @@ namespace Helios
         void OnRenderPassBegin(uint32_t pass_slot) override;
         void SetPassTimestamps(const std::vector<GPUPassTimestamp>* pass_timestamps) override;
 
+        bool SupportsStageSplit() const override { return true; }
+
     private:
         /* 本帧绑定的全部通道序号（逐帧复用、Begin 时清空） */
         std::vector<uint32_t> m_PassSlots{};

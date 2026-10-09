@@ -269,8 +269,8 @@ namespace Helios
 
 		if (readContext.PrepareQueryResult())
 		{
-			std::function<void(ResultGPUTimerNode&, DeviceQueryNode*)> FillResultGPUTimeRecursively;
-			FillResultGPUTimeRecursively = [&FillResultGPUTimeRecursively, &readContext](ResultGPUTimerNode& timerNode, DeviceQueryNode* queryNode)
+			std::function<void(ResultGPUTimerNode&, DeviceQueryNode*, ResultGPUTimerNode*)> FillResultGPUTimeRecursively;
+			FillResultGPUTimeRecursively = [&FillResultGPUTimeRecursively, &readContext](ResultGPUTimerNode& timerNode, DeviceQueryNode* queryNode, ResultGPUTimerNode* recordNode)
 				{
 					timerNode.Label = queryNode->Label;
 					timerNode.QueryIndex = queryNode->NodeIndex;
@@ -278,24 +278,46 @@ namespace Helios
 					/* 无样本的节点保留上次的平滑值、只标记"无数据"（UI 以占位显示）：
 					 * 归零会让它在恢复采样后要从零重新爬升 */
 					timerNode.HasData = queryNode->HasValidSamples;
+					timerNode.HasStageSplit = queryNode->SupportsStageSplit();
 					if (queryNode->HasValidSamples)
 					{
 						timerNode.GPUTime = timerNode.GPUTime * 0.9 + (queryNode->ResultTimeEnd - queryNode->ResultTimeBegin) *0.1;
 						timerNode.GPUTimeVertex = timerNode.GPUTimeVertex * 0.9 + queryNode->ResultVertexUs * 0.1;
 						timerNode.GPUTimeFragment = timerNode.GPUTimeFragment * 0.9 + queryNode->ResultFragmentUs * 0.1;
 					}
+
+					/* 录制树（可选）：写入当帧原始值 —— 逐帧回放要看每帧真值，不做平滑 */
+					if (recordNode != nullptr)
+					{
+						recordNode->Label = queryNode->Label;
+						recordNode->QueryIndex = queryNode->NodeIndex;
+						recordNode->HasData = queryNode->HasValidSamples;
+						recordNode->HasStageSplit = queryNode->SupportsStageSplit();
+						if (queryNode->HasValidSamples)
+						{
+							recordNode->GPUTime = queryNode->ResultTimeEnd - queryNode->ResultTimeBegin;
+							recordNode->GPUTimeVertex = queryNode->ResultVertexUs;
+							recordNode->GPUTimeFragment = queryNode->ResultFragmentUs;
+						}
+					}
+
 					const size_t childCount = queryNode->ChildrenNodeIndices.size();
 					timerNode.Children.resize(childCount);
+					if (recordNode != nullptr)
+						recordNode->Children.resize(childCount);
 					for (size_t i = 0; i < childCount; ++i)
 					{
 						auto& childTimerNode = timerNode.Children[i];
 						auto* childQueryNode = readContext.m_QueryNodes[queryNode->ChildrenNodeIndices[i]];
-						FillResultGPUTimeRecursively(childTimerNode, childQueryNode);
+						FillResultGPUTimeRecursively(childTimerNode, childQueryNode,
+							recordNode != nullptr ? &recordNode->Children[i] : nullptr);
 					}
 				};
 
 			auto* rootQueryNode = readContext.m_QueryNodes[readContext.m_RootNodeIndex];
-			FillResultGPUTimeRecursively(root_node, rootQueryNode);
+			/* 录制：与显示同一次遍历，另填一棵逐帧原始值树（未在录制时为空指针） */
+			ResultGPUTimerNode* record_root = m_Recorder.BeginFrame(readContext.m_FrameIndex);
+			FillResultGPUTimeRecursively(root_node, rootQueryNode, record_root);
 
 			/* 当一帧数据准备完成时，再切换Context，否则下一帧继续尝试，避免出现刚读完就被刷进新的Query */
 			m_WriteContextId = (m_WriteContextId + 1) % MAX_CONTEXTS;

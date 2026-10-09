@@ -26,6 +26,11 @@ namespace Helios
 		 * 通道采样模型下的节点从这里取值；仅此类后端实现。 */
 		virtual void SetPassTimestamps(const std::vector<GPUPassTimestamp>* /*pass_timestamps*/) {}
 
+		/* 阶段细分能力：节点耗时能否拆出顶点 / 片元（通道采样模型 Metal 为真；
+		 * 桌面 OpenGL 只有整段时间戳查询、无分阶段采样点，恒为假）。结果树按此
+		 * 决定是否展示 v/f 细分。 */
+		virtual bool SupportsStageSplit() const { return false; }
+
 		std::string Label{ "Unnamed QueryNode" };
 		uint32_t NodeIndex{ 0 };
 		uint32_t ParentNodeIndex{ INVALID_QUERY_NODE_INDEX };

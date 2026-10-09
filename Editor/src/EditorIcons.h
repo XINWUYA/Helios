@@ -21,6 +21,12 @@ namespace Helios
 			Translate, Rotate, Scale,
 			/* 运行 */
 			Play, Stop,
+			/* GPU 计时面板的两种观测方式：实时（活性脉冲）/ 录制（REC 圆点） */
+			Live, Record,
+			/* GPU 计时面板录制回放的帧导航（性能分析图标族，按设计稿
+			 * game-engine-icons-final-v13-performance）：上一帧 / 下一帧
+			 * （胶片格 + 方向箭头）、峰值（peak）/ 谷值（valley）折线图 */
+			PreviousFrame, NextFrame, Peak, Valley,
 			/* 通用 */
 			Menu, Add, Remove, Return, Filter, Search, Visible, Hidden,
 			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
