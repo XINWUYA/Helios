@@ -9,6 +9,7 @@
 #include <vector>
 #include "CameraPreview.h"
 #include "Command/AssetFileOps.h"
+#include "EditorIcons.h"
 #include "Helios/Command/CommandStack.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Entity.h"
@@ -69,8 +70,8 @@ namespace Helios
 		 * 祖先不能丢 —— 命中的子节点得有地方挂，否则树会散成一堆根节点。 */
 		using FilterSet = std::unordered_set<entt::entity>;
 
-		/* 类型筛选（底栏左端下拉）：与资源浏览器是同一套交互；All = 不按类型筛。
-		 * 实体的"类型"取它在树里那枚图标所属的类（见 EntityCategory）——
+		/* 类型筛选（顶栏右端的图标按钮 + 单选菜单）：与资源浏览器是同一套交互；
+		 * All = 不按类型筛。实体的"类型"取它在树里那枚图标所属的类（见 EntityCategory）——
 		 * 图标与筛选项永远是同一个问题的同一个答案。 */
 		enum class TypeFilter : uint8_t
 		{
@@ -117,17 +118,21 @@ namespace Helios
 		void StopCameraPreview();
 		/* 组件自定义编辑的合并窗口封口（每帧调用；与 DrawEditableField 同一套事务规则） */
 		void ServiceComponentEditTransaction();
-		/* 顶栏：左端「新建实体」，右端搜索框（贴右端）。
-		 * 版式与资源浏览器的顶栏同一套：控件贴上边、上下各留 1px、放不下时把搜索框压窄。
-		 * （类型筛选不在这一栏：它搬到了底栏左端，见 ShowHierarchyFooter。） */
+		/* 顶栏：左端搜索框，右端「类型筛选 + 新建实体」两枚图标按钮（跟资源浏览器同一套版式）。
+		 * 放不下就压窄搜索框、右端不参与退让。筛选是纯图标按钮，点击弹类型单选菜单，生效时高亮。 */
 		void ShowHierarchyTopBar();
 		/* 底栏：实体计数贴行右端（自绘分隔线 + 垂直居中，跟资源浏览器的统计数同一套）。计数含为
 		 * 挂住命中项留下的祖先 —— 就是屏幕上真能数出来的行数。 */
-		void ShowHierarchyFooter(const ImVec2& theme_padding, int shown_count, int total_count);
+		void ShowHierarchyFooter(int shown_count, int total_count);
 		/* 顶栏「新建」按钮的下拉菜单（画在面板根作用域，条目来自实体预设注册表） */
 		void DrawNewEntityMenu();
+		/* 顶栏「筛选」按钮的下拉菜单（画在面板根作用域）：类型单选列表，
+		 * 行点击不收起弹层（连点切换档位，与工具栏的菜单同款） */
+		void DrawTypeFilterMenu();
 		/* 类型筛选下拉的显示名 */
 		static const char* TypeFilterName(TypeFilter filter);
+		/* 类型筛选菜单行的图标：与树里各类型用的图标同一套（All = 漏斗本体） */
+		static Icons::Id FilterIconOf(TypeFilter filter);
 		/* 实体归到哪一类：取它在树里那枚图标所属的类（图标与筛选项不会各说各话） */
 		static TypeFilter EntityCategory(const Entity& entity);
 		/* 面板是否处于"有筛选"状态（名字或类型任一生效）—— 收集与绘制两处共用同一判据 */
@@ -262,11 +267,15 @@ namespace Helios
 		char m_NewEntityFilter[64]{};
 		/* 层级面板的过滤词（空 = 不过滤） */
 		char m_EntityFilter[64]{};
-		/* 类型筛选（底栏左端的下拉） */
+		/* 类型筛选（顶栏右端的图标按钮 + 单选菜单） */
 		TypeFilter m_TypeFilter{ TypeFilter::All };
 		/* 顶栏「新建」菜单的弹层 ID：在面板根作用域上算一次，
 		 * 按钮（开）与菜单（画）两边按同一个 ID 对接 */
 		ImGuiID m_PopupNewEntity{ 0 };
+		/* 顶栏「筛选」菜单的弹层 ID（同上）与弹层锚点（按钮右下角，
+		 * 弹层锚在它正下方、右缘对齐——与工具栏的 Debug View / Gizmos 菜单同款锚法） */
+		ImGuiID m_PopupTypeFilter{ 0 };
+		ImVec2 m_PopupTypeFilterAnchor{ 0.0f, 0.0f };
 	};
 }
 

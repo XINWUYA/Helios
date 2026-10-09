@@ -589,10 +589,11 @@ namespace Helios
 			m_PopupNewFile = ImGui::GetID("##NewAssetFile");
 			m_PopupRename = ImGui::GetID("##RenameAsset");
 			m_PopupDelete = ImGui::GetID("##DeleteAssets");
+			m_PopupTypeFilter = ImGui::GetID("##AssetTypeFilterMenu");
 
 			/* 布局：顶栏（贴着面板上边）+ 左右两栏；路径栏在右栏的下边（见 ShowBrowserBody），
 			 * 所以这里不再为它预留面板级的高度。 */
-			ShowBrowserTopBar(pane_padding);
+			ShowBrowserTopBar();
 			ShowBrowserBody();
 
 			/* 文件操作弹层画在面板根：右键菜单与顶栏的「新建」按钮都在这里开弹层。
@@ -1362,14 +1363,82 @@ namespace Helios
 		OpenNewFilePopup(type.Extension, type.DefaultStem, current);
 	}
 
+	/* 顶栏「筛选」下拉：类型单选列表（All types + 各类型，图标跟内容区同一套映射）。点行
+	 * 不收起弹层，收起靠点外部 / Esc；弹层锚在按钮下方、右缘对齐，勾选列对齐在同一条基线。 */
+	void EditorResourceBrowser::DrawTypeFilterMenu()
+	{
+		PROFILE_FUNCTION();
+
+		ImGui::SetNextWindowPos(ImVec2(m_FilterMenuAnchor.x, m_FilterMenuAnchor.y + 4.0f),
+			ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
+
+		/* 最小宽度取最长行标题 + 图标与勾选列的固定组分（与工具栏两套菜单同一笔账） */
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float min_width = ImGui::CalcTextSize("Reflection Probes").x
+			+ style.FramePadding.x * 2.0f + style.ItemInnerSpacing.x * 2.0f
+			+ ImGui::GetFontSize() * 2.0f + 24.0f;
+		ImGui::SetNextWindowSizeConstraints(ImVec2(min_width, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+
+		/* BeginPopupEx 不会自动加 NoTitleBar（BeginPopup 才加）——漏了弹层顶上
+		 * 会多出一条空标题栏与折叠钮。 */
+		if (!ImGui::BeginPopupEx(m_PopupTypeFilter,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+				| ImGuiWindowFlags_NoTitleBar))
+			return;
+
+		/* 行距对齐工具栏菜单：Debug View / Gizmos 的弹层在自己 PushStyleVar(ItemSpacing, (2,0))
+		 * 的作用域里（行贴行）；面板这边是主题默认的 7px —— 不补这一档，行间会显得松。 */
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2.0f, 0.0f));
+
+		/* 复位行 + 各类型（顺序 = TypeFilter 枚举序，与显示名同一套） */
+		if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::Filter, TypeFilterName(TypeFilter::All),
+				m_TypeFilter == TypeFilter::All))
+			m_TypeFilter = TypeFilter::All;
+
+		ImGui::Separator();
+
+		for (int i = 1; i < static_cast<int>(TypeFilter::COUNT); ++i)
+		{
+			const auto filter = static_cast<TypeFilter>(i);
+			if (PanelChrome::MenuItemSelectWithIcon(FilterIconOf(filter), TypeFilterName(filter),
+					filter == m_TypeFilter))
+				m_TypeFilter = filter;
+		}
+
+		ImGui::PopStyleVar();
+
+		ImGui::EndPopup();
+	}
+
+	/* 类型筛选菜单行的图标：与内容区各类型的图标同一套（All = 漏斗本体）——
+	 * 菜单与内容区的"这一项长什么样"永远是同一个答案。 */
+	Icons::Id EditorResourceBrowser::FilterIconOf(TypeFilter filter)
+	{
+		switch (filter)
+		{
+		case TypeFilter::All:      return Icons::Id::Filter;
+		case TypeFilter::Folder:   return Icons::Id::Directory;
+		case TypeFilter::Image:    return Icons::Id::FileImage;
+		case TypeFilter::Scene:    return Icons::Id::FileScene;
+		case TypeFilter::MtlGraph: return Icons::Id::FileMtlGraph;
+		case TypeFilter::Shader:   return Icons::Id::FileShader;
+		case TypeFilter::Model:    return Icons::Id::FileModel;
+		case TypeFilter::Material: return Icons::Id::FileMaterial;
+		case TypeFilter::Probe:    return Icons::Id::FileProbe;
+		}
+
+		return Icons::Id::File;
+	}
+
 	void EditorResourceBrowser::DrawAssetOperationPopups(const ImVec2& theme_padding)
 	{
 		/* 弹层的内边距：面板把 WindowPadding.y 压成了 0（顶栏 / 底栏要贴面板的上下边），
-		 * 弹层要的却是主题那一档 —— 不补的话首末条目紧贴弹层的上下边（下拉框那边
-		 * 已经踩过一次，见 ShowBrowserTopBar）。四个弹层一起补，它们才是一套。 */
+		 * 弹层要的却是主题那一档 —— 不补的话首末条目紧贴弹层的上下边。
+		 * 五个弹层一起补，它们才是一套。 */
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, theme_padding);
 
 		DrawNewAssetMenu();
+		DrawTypeFilterMenu();
 		DrawNamePopup(m_PopupNewFolder, NamePopupMode::NewFolder);
 		DrawNamePopup(m_PopupNewFile, NamePopupMode::NewFile);
 		DrawNamePopup(m_PopupRename, NamePopupMode::Rename);
@@ -1700,15 +1769,14 @@ namespace Helios
 	/* 顶栏：左端搜索框，右端「后退 / 前进 / 筛选 / 新建」四枚图标按钮（新建贴最右，依次
 	 * 向左）。放不下就压窄搜索框（下限 80；固定阈值总会在某个宽度上算错、控件重叠）；右端
 	 * 四枚不参与退让。筛选是纯图标按钮，点击弹类型单选菜单，生效时高亮。 */
-	void EditorResourceBrowser::ShowBrowserTopBar(const ImVec2& theme_padding)
+	void EditorResourceBrowser::ShowBrowserTopBar()
 	{
 		PROFILE_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 
 		/* 顶栏就画在面板的客户端顶边上（面板本身不带上下内边距，见 OnImGuiRenderer），
-		 * 横向按内容区左端对齐。左上角不再画面板图标（目录名在底栏、面板名在窗口标题里，
-		 * 那枚文件夹图标只是重复），改成「新建 + 回到上次路径 / 重进路径」三个按钮。 */
+		 * 横向按内容区左端对齐。左端是搜索框（贴左端）。 */
 		PanelChrome::HeaderRow row = PanelChrome::BeginHeaderRow(Icons::Id::None);
 
 		/* 控件上下各留 1px：栏高因此比控件高 2px。留白的用处是"贴边画"的两个毛病 ——
@@ -1720,25 +1788,24 @@ namespace Helios
 		const float control_y = row.Min.y + kBarInset;
 		const float gap = style.ItemInnerSpacing.x;
 
-	/* 顶栏：左端搜索框，右端「后退 / 前进 / 筛选 / 新建」四枚图标按钮（新建贴最右，依次
-	 * 向左）。放不下就压窄搜索框（下限 80；固定阈值总会在某个宽度上算错、控件重叠）；右端
-	 * 四枚不参与退让。筛选是纯图标按钮，点击弹类型单选菜单，生效时高亮。 */
-		const float action_size = control_height;
-		const float action_step = action_size + gap;          /* 按钮的步长（含它们之间的间隙） */
-		const float left_cluster = action_size * 3.0f + gap * 2.0f;
-
-		/* 新建图标是「新建 / 添加」入口统一的那枚加号（与层级面板、属性面板同一枚）：
+		/* ---- 右端：四枚图标按钮（从右往左：新建、筛选、前进、后退）----
+		 * 新建图标是「新建 / 添加」入口统一的那枚加号（与层级面板、属性面板同一枚）：
 		 * 同一个"新建"动作到哪儿都是同一张脸。 */
-		ImGui::SetCursorScreenPos(ImVec2(row.Min.x, control_y));
+		const float action_size = control_height;
+		const float new_x = row.Right - action_size;
+		const float filter_x = new_x - gap - action_size;
+		const float forward_x = filter_x - gap - action_size;
+		const float back_x = forward_x - gap - action_size;
+
+		ImGui::SetCursorScreenPos(ImVec2(new_x, control_y));
 		if (Icons::IconButton(Icons::Id::NewAsset, ImVec2(action_size, action_size), false,
 			"New asset  (folder / scene / material graph / file)"))
 		{
 			ImGui::OpenPopup(m_PopupNewMenu);
 		}
 
-		/* 两枚导航按钮各自的目标 = 历史里沿那个方向还进得去的一项（见 FindHistoryStep）：
-		 * 按钮的可用态与 tooltip 都看它。tooltip 说清"这一步会去哪儿"：“Back to Scenes/Props”；
-		 * 根目录的相对路径为空，用它的目录名 —— 与路径栏里对它的称呼一致。 */
+		/* 两枚导航按钮的目标 = 历史里沿那个方向还进得去的一项（按钮可用状态和 tooltip 都看它；
+		 * 根目录就用目录名）。走的是浏览位置历史，跟编辑历史无关；没有历史项时置灰。 */
 		SharedPtr<FileNode> back_target;
 		SharedPtr<FileNode> forward_target;
 		const bool can_back = (FindHistoryStep(-1, back_target) >= 0);
@@ -1755,127 +1822,50 @@ namespace Helios
 		const std::string forward_tip = can_forward
 			? navigation_tooltip("Forward", forward_target) : std::string("Forward");
 
-		ImGui::SetCursorScreenPos(ImVec2(row.Min.x + action_step, control_y));
+		ImGui::SetCursorScreenPos(ImVec2(back_x, control_y));
 		ImGui::BeginDisabled(!can_back);
 		if (Icons::IconButton(Icons::Id::Back, ImVec2(action_size, action_size), false, back_tip.c_str()))
 			NavigateHistory(-1);
 		ImGui::EndDisabled();
 
-		ImGui::SetCursorScreenPos(ImVec2(row.Min.x + action_step * 2.0f, control_y));
+		ImGui::SetCursorScreenPos(ImVec2(forward_x, control_y));
 		ImGui::BeginDisabled(!can_forward);
 		if (Icons::IconButton(Icons::Id::Forward, ImVec2(action_size, action_size), false, forward_tip.c_str()))
 			NavigateHistory(1);
 		ImGui::EndDisabled();
 
-		/* ---- 尺寸 ----
-		 * 类型筛选的宽度按 BeginCombo 自己的账算：文字从「控件左端 + FramePadding.x」起、
-		 * 到「控件右端 − 箭头区(GetFrameHeight)」为止，前面还要给前置图标留一档 ——
-		 * 少算哪一笔，最长的类型名就会被箭头区裁掉一截（"Mtl Graphs" 是最长的那个）。 */
-		const float arrow_width = control_height;
-		const float type_width = ImGui::CalcTextSize("Mtl Graphs").x + arrow_width
-			+ style.FramePadding.x + Icons::LeadingIconSpace() + gap;
+		/* 类型筛选（纯图标按钮 + 单选菜单）：与文本过滤一起决定内容区显示什么
+		 * （计数用的是同一条判据）。只影响右栏 —— 左栏是导航，把要进去的目录
+		 * 藏掉就没法用了。 */
+		const bool filter_active = (m_TypeFilter != TypeFilter::All);
+		const std::string filter_tip = filter_active
+			? std::string("Filter by asset type: ") + TypeFilterName(m_TypeFilter)
+			: std::string("Filter by asset type");
+
+		ImGui::SetCursorScreenPos(ImVec2(filter_x, control_y));
+		const bool filter_popup_open = ImGui::IsPopupOpen(m_PopupTypeFilter, ImGuiPopupFlags_None);
+		if (Icons::IconButton(Icons::Id::Filter, ImVec2(action_size, action_size),
+				filter_active, filter_tip.c_str()) && !filter_popup_open)
+		{
+			ImGui::OpenPopup(m_PopupTypeFilter);
+		}
+
+		/* 弹层锚点 = 按钮右下角（按钮矩形只在这一刻可取）：弹层锚在它正下方、
+		 * 右缘对齐 —— 与工具栏的 Debug View / Gizmos 菜单同款锚法。 */
+		m_FilterMenuAnchor = ImGui::GetItemRectMax();
+
 		/* ---- 左端：搜索框（贴左端）----
 		 * 搜索框不撑满：够用就好，宽度多出来的部分留给中间那一段留白，
 		 * 也不至于窄到看不清输入的内容；放不下时跟着可用宽度缩，下限 80。 */
 		const float search_preferred = 220.0f;
 		const float search_min = 80.0f;
 
-		/* 右端那组能用的宽度：从左边那组之后算起（中间隔一格） */
-		const float group_room = row.Right - (row.Min.x + left_cluster + gap);
+		/* 能用的宽度：到右端那组按钮之前算起（中间隔一格） */
+		const float right_group = action_size * 4.0f + gap * 3.0f;
+		const float group_room = row.Right - right_group - gap - row.Min.x;
+		const float search_width = ImMin(search_preferred, ImMax(group_room, search_min));
 
-		bool show_type = true;
-		float search_width = search_preferred;
-
-		for (int step = 0; step < 3; ++step)
-		{
-			show_type = (step < 2);
-			search_width = (step == 0) ? search_preferred : search_min;
-
-			const float needed = search_width + (show_type ? gap + type_width : 0.0f);
-			if (needed <= group_room)
-				break;
-		}
-
-		/* 两件都靠右端：类型筛选贴最右，搜索紧挨在它左边 —— 留白全留在中间那一段，
-		 * "找东西"这一组因此是贴着右边缘的。筛选被舍掉时（面板太窄）搜索自己贴到右端。 */
-		const float type_x = show_type ? (row.Right - type_width) : row.Right;
-		const float search_x = (show_type ? type_x - gap : row.Right) - search_width;
-
-		/* 类型筛选：与文本过滤一起决定内容区显示什么（计数用的是同一条判据）。
-		 * 只影响右栏 —— 左栏是导航，把要进去的目录藏掉就没法用了。 */
-		if (show_type)
-		{
-			const ImVec2 frame_min(type_x, control_y);
-			const ImVec2 frame_max(type_x + type_width, control_y + control_height);
-
-			/* 顶栏所在窗口的绘制列表：现在就取。弹层打开后"当前窗口"会切到弹层，
-			 * 那时 GetWindowDrawList() 拿到的是弹层的列表（前缀图标会画进去、被裁掉 = 图标凭空消失），
-			 * 所以下面自己画的东西一律用这一份。 */
-			ImDrawList* const row_draw = ImGui::GetWindowDrawList();
-
-			ImGui::SetCursorScreenPos(frame_min);
-			ImGui::SetNextItemWidth(type_width);
-
-			/* 预览（图标 + 名字 + 下箭头）自己画，所以给 BeginCombo 传空预览、不要它自带的箭头：
-			 * 它的预览文字钉在 FramePadding 上，要给前置图标让位就得把 FramePadding 撑大，
-			 * 而弹层的横向内边距正是取自 FramePadding（BeginComboPopup 把
-			 * WindowPadding.x 取成当时的 FramePadding.x）—— 撑大它会让弹层条目又挤又偏。
-			 * 自己画则两件事互不干扰：控件里怎么摆随我们，弹层拿到的还是主题那一档。
-			 * PushStyleVar(WindowPadding) 是给弹层补回上下内边距用的（见函数头注释）。 */
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, theme_padding);
-			const bool type_open = ImGui::BeginCombo("##AssetTypeFilter", "", ImGuiComboFlags_NoArrowButton);
-
-			if (type_open)
-			{
-				for (int i = 0; i < static_cast<int>(TypeFilter::COUNT); ++i)
-				{
-					const auto filter = static_cast<TypeFilter>(i);
-					const bool selected = (filter == m_TypeFilter);
-
-					/* 悬停选中条目时 ImGui 画的也是 HeaderHovered —— 推"更亮的选中色"顶住 */
-					if (selected)
-						ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorTheme::RowHoverSelected);
-
-					if (ImGui::Selectable(TypeFilterName(filter), selected))
-						m_TypeFilter = filter;
-
-					if (selected)
-					{
-						ImGui::PopStyleColor();
-						ImGui::SetItemDefaultFocus();
-					}
-				}
-
-				ImGui::EndCombo();
-			}
-
-			ImGui::PopStyleVar();
-
-			/* 预览画在弹层关掉之后：这时当前窗口已经回到面板，装饰才落在面板的绘制列表上
-			 * （也就压在弹层下面，不会糊到弹层上）。 */
-			const float icon_room = style.FramePadding.x + Icons::LeadingIconSpace();
-			const float arrow_size = ImGui::GetFontSize() * 0.55f;   /* 与卡片折叠箭头同一档 */
-			const ImVec2 arrow_center(frame_max.x - style.FramePadding.x - arrow_size * 0.5f,
-				(frame_min.y + frame_max.y) * 0.5f);
-
-			Icons::DrawLeadingIcon(Icons::Id::Filter, frame_min, frame_max);
-			PanelChrome::DrawDisclosureArrow(row_draw, arrow_center, arrow_size, true,
-				ImGui::GetColorU32(EditorTheme::Token::TextDim));
-
-			/* 名字：与图标同一条基线（行内居中），并裁到箭头区之前 —— 类型名将来变长也不会压到箭头上 */
-			row_draw->PushClipRect(ImVec2(frame_min.x + icon_room, frame_min.y),
-				ImVec2(arrow_center.x - arrow_size, frame_max.y), true);
-			row_draw->AddText(
-				ImVec2(frame_min.x + icon_room, (frame_min.y + frame_max.y - ImGui::GetFontSize()) * 0.5f),
-				ImGui::GetColorU32(EditorTheme::Token::Text), TypeFilterName(m_TypeFilter));
-			row_draw->PopClipRect();
-
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Filter by asset type");
-		}
-
-		/* ---- 搜索框：紧挨类型筛选的左边（面板太窄、筛选被舍掉时它自己贴右端） ---- */
-		ImGui::SetCursorScreenPos(ImVec2(search_x, control_y));
+		ImGui::SetCursorScreenPos(ImVec2(row.Min.x, control_y));
 		ImGui::SetNextItemWidth(search_width);
 		Icons::BeginSearchInput();
 		ImGui::InputTextWithHint("##ResourceFilter", "Search...", m_Filter, sizeof(m_Filter));

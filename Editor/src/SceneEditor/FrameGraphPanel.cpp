@@ -2,7 +2,6 @@
 #include "FrameGraphPanel.h"
 #include "EditorIcons.h"
 #include "Helios/ImGui/EditorTheme.h"
-#include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
@@ -409,10 +408,7 @@ namespace Helios
 
 			m_CaptureRequested = !ImGui::GetCurrentWindow()->SkipItems && m_CaptureEnabled && active_graph != nullptr;
 
-			/* 头部：图标 + 标题 */
-			const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(Icons::Id::FrameGraph);
-			PanelChrome::DrawHeaderTitle(header, "Frame Graph");
-			PanelChrome::EndHeaderRow(header);
+			/* 面板标题由页签承担（"Frame Graph"），面板内不重复标题行 */
 
 			if (active_graph != nullptr)
 			{

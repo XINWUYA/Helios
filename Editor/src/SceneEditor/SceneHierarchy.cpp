@@ -506,6 +506,7 @@ namespace Helios
 			/* 弹层 ID 在面板根作用域上算一次：按钮（开）与菜单（画）的作用域必须一致，
 			 * 两边才按同一个 ID 对接。 */
 			m_PopupNewEntity = ImGui::GetID("##NewEntityMenu");
+			m_PopupTypeFilter = ImGui::GetID("##TypeFilterMenu");
 
 			ShowHierarchyTopBar();
 
@@ -568,13 +569,14 @@ namespace Helios
 			if (!drop_inside_panel)
 				ApplyDropOutsidePanel();
 
-			ShowHierarchyFooter(pane_padding, shown_count, total_count);
+			ShowHierarchyFooter(shown_count, total_count);
 
-			/* 顶栏「新建」的下拉菜单画在面板根作用域（按钮也是在这一层开的它），
-			 * 并把主题的窗口内边距补回去（面板为贴上下边压成了 0 —— 不补的话
-			 * 首末条目紧贴弹层背景的上下边）。 */
+			/* 顶栏两枚按钮的下拉菜单（「新建」/「筛选」）都画在面板根作用域
+			 * （按钮也是在这一层开的它们），并把主题的窗口内边距补回去
+			 * （面板为贴上下边压成了 0 —— 不补的话首末条目紧贴弹层背景的上下边）。 */
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, pane_padding);
 			DrawNewEntityMenu();
+			DrawTypeFilterMenu();
 			ImGui::PopStyleVar();
 		}
 		ImGui::End();
@@ -642,7 +644,27 @@ namespace Helios
 
 		/* ---- 右端：筛选 + 新建（两枚图标按钮，筛选在左、新建贴最右）----
 		 * 新建图标复用资源浏览器的「新建资源」：图案一样，靠 tooltip 和菜单内容区分。 */
-		ImGui::SetCursorScreenPos(ImVec2(row.Min.x, control_y));
+		const float new_entity_x = row.Right - control_height;
+		const float filter_x = new_entity_x - gap - control_height;
+
+		const bool filter_active = (m_TypeFilter != TypeFilter::All);
+		const std::string filter_tip = filter_active
+			? std::string("Filter by entity type: ") + TypeFilterName(m_TypeFilter)
+			: std::string("Filter by entity type");
+
+		ImGui::SetCursorScreenPos(ImVec2(filter_x, control_y));
+		const bool filter_popup_open = ImGui::IsPopupOpen(m_PopupTypeFilter, ImGuiPopupFlags_None);
+		if (Icons::IconButton(Icons::Id::Filter, ImVec2(control_height, control_height),
+				filter_active, filter_tip.c_str()) && !filter_popup_open)
+		{
+			ImGui::OpenPopup(m_PopupTypeFilter);
+		}
+
+		/* 弹层锚点 = 按钮右下角（按钮矩形只在这一刻可取）：弹层锚在它正下方、
+		 * 右缘对齐 —— 与工具栏的 Debug View / Gizmos 菜单同款锚法。 */
+		m_PopupTypeFilterAnchor = ImGui::GetItemRectMax();
+
+		ImGui::SetCursorScreenPos(ImVec2(new_entity_x, control_y));
 		if (Icons::IconButton(Icons::Id::NewAsset, ImVec2(control_height, control_height), false,
 			"New entity  (empty / 3D / sprite / camera / reflection probe / light)"))
 		{
@@ -655,12 +677,12 @@ namespace Helios
 		const float search_preferred = 220.0f;
 		const float search_min = 80.0f;
 
-		/* 能用的宽度：从左端那枚按钮之后算起（中间隔一格） */
-		const float group_room = row.Right - (row.Min.x + control_height + gap);
+		/* 能用的宽度：到右端那组按钮之前算起（中间隔一格） */
+		const float right_group = control_height * 2.0f + gap;
+		const float group_room = row.Right - right_group - gap - row.Min.x;
 		const float search_width = ImMin(search_preferred, ImMax(group_room, search_min));
-		const float search_x = row.Right - search_width;
 
-		ImGui::SetCursorScreenPos(ImVec2(search_x, control_y));
+		ImGui::SetCursorScreenPos(ImVec2(row.Min.x, control_y));
 		ImGui::SetNextItemWidth(search_width);
 		Icons::BeginSearchInput();
 		ImGui::InputTextWithHint("##HierarchyFilter", "Search...",
@@ -672,11 +694,9 @@ namespace Helios
 
 	/* 底栏：实体计数贴行右端（上面一条自绘分隔线、文本垂直居中、上下各留 1px，跟顶栏同一
 	 * 笔账）。计数含"为挂住命中项而留下的祖先"—— 它就是屏幕上真能数出来的行数。 */
-	void SceneHierarchy::ShowHierarchyFooter(const ImVec2& theme_padding, int shown_count, int total_count)
+	void SceneHierarchy::ShowHierarchyFooter(int shown_count, int total_count)
 	{
 		PROFILE_FUNCTION();
-
-		const ImGuiStyle& style = ImGui::GetStyle();
 
 		char count_text[48] = {};
 		if (shown_count != total_count)
@@ -702,97 +722,12 @@ namespace Helios
 
 		const PanelChrome::HeaderRow row = PanelChrome::BeginHeaderRow(Icons::Id::None);
 		const float control_height = ImGui::GetFrameHeight();
-		const float control_y = footer_top + kBarInset;
-		const float gap = style.ItemInnerSpacing.x;
-
-		/* ---- 左端：类型筛选 ----
-		 * 宽度按 BeginCombo 自己的账算（与资源浏览器同一笔）：文字从「控件左端 + FramePadding.x」起、
-		 * 到「控件右端 − 箭头区(GetFrameHeight)」为止，前面还要给前置图标留一档 ——
-		 * 少算哪一笔，最长的那类名（Reflection Probes）就会被箭头区裁掉一截。 */
-		float type_name_width = 0.0f;
-		for (int i = 0; i < static_cast<int>(TypeFilter::COUNT); ++i)
-		{
-			type_name_width = ImMax(type_name_width,
-				ImGui::CalcTextSize(TypeFilterName(static_cast<TypeFilter>(i))).x);
-		}
-
-		const float arrow_width = control_height;
-		const float type_width = type_name_width + arrow_width
-			+ style.FramePadding.x + Icons::LeadingIconSpace() + gap;
 		const float count_width = ImGui::CalcTextSize(count_text).x;
 
-		/* 退让：放不下时舍类型筛选、计数保留 —— 计数是这一栏的本职；
-		 * 筛选在窄面板里还有搜索框兜着（按名字过滤照样能用）。 */
-		const float band_span = row.Right - row.Min.x;
-		const bool show_type = (type_width + gap + count_width) <= band_span;
-
-		if (show_type)
-		{
-			const ImVec2 frame_min(row.Min.x, control_y);
-			const ImVec2 frame_max(row.Min.x + type_width, control_y + control_height);
-
-			/* 面板的绘制列表：现在就取 —— 弹层打开后"当前窗口"会切到弹层，
-			 * 那时 GetWindowDrawList() 拿到的是弹层的列表（自绘的前缀图标会被裁掉），
-			 * 下面自己画的东西一律用这一份。 */
-			ImDrawList* const row_draw = ImGui::GetWindowDrawList();
-
-			ImGui::SetCursorScreenPos(frame_min);
-			ImGui::SetNextItemWidth(type_width);
-
-			/* 预览（图标 + 名字 + 下箭头）自己画，所以给 BeginCombo 传空预览、不要它自带的箭头：
-			 * 它的预览文字钉在 FramePadding 上，要给前置图标让位就得把 FramePadding 撑大，
-			 * 而弹层的横向内边距正是取自 FramePadding（BeginComboPopup 把
-			 * WindowPadding.x 取成当时的 FramePadding.x）—— 撑大它会让弹层条目又挤又偏。
-			 * PushStyleVar(WindowPadding) 是给弹层补回上下内边距用的（见函数头注释）。 */
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, theme_padding);
-			const bool type_open = ImGui::BeginCombo("##EntityTypeFilter", "", ImGuiComboFlags_NoArrowButton);
-
-			if (type_open)
-			{
-				for (int i = 0; i < static_cast<int>(TypeFilter::COUNT); ++i)
-				{
-					const auto filter = static_cast<TypeFilter>(i);
-					const bool selected = (filter == m_TypeFilter);
-
-					if (ImGui::Selectable(TypeFilterName(filter), selected))
-						m_TypeFilter = filter;
-
-					if (selected)
-						ImGui::SetItemDefaultFocus();
-				}
-
-				ImGui::EndCombo();
-			}
-
-			ImGui::PopStyleVar();
-
-			/* 预览画在弹层关掉之后：这时当前窗口已经回到面板，装饰才落在面板的绘制列表上
-			 * （也就压在弹层下面，不会糊到弹层上）。 */
-			const float icon_room = style.FramePadding.x + Icons::LeadingIconSpace();
-			const float arrow_size = ImGui::GetFontSize() * 0.55f;   /* 与卡片折叠箭头同一档 */
-			const ImVec2 arrow_center(frame_max.x - style.FramePadding.x - arrow_size * 0.5f,
-				(frame_min.y + frame_max.y) * 0.5f);
-
-			Icons::DrawLeadingIcon(Icons::Id::Filter, frame_min, frame_max);
-			PanelChrome::DrawDisclosureArrow(row_draw, arrow_center, arrow_size, true,
-				ImGui::GetColorU32(EditorTheme::Token::TextDim));
-
-			/* 名字：与图标同一条基线（行内居中），并裁到箭头区之前 —— 类型名将来变长也不会压到箭头上 */
-			row_draw->PushClipRect(ImVec2(frame_min.x + icon_room, frame_min.y),
-				ImVec2(arrow_center.x - arrow_size, frame_max.y), true);
-			row_draw->AddText(
-				ImVec2(frame_min.x + icon_room, (frame_min.y + frame_max.y - ImGui::GetFontSize()) * 0.5f),
-				ImGui::GetColorU32(EditorTheme::Token::Text), TypeFilterName(m_TypeFilter));
-			row_draw->PopClipRect();
-
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Filter by entity type");
-		}
-
-		/* ---- 右端：计数贴最右端 ----
+		/* ---- 计数贴最右端 ----
 		 * 文本自己算居中的 y（Text 把字形框顶放在光标处，"贴着行顶画"会偏高半个内边距）；
 		 * 顺带清掉"基线偏移"（同一行前面的控件会把后面的文字整体下移，居中值就被顶掉了）。 */
-		const float text_y = control_y + (control_height - ImGui::GetFontSize()) * 0.5f;
+		const float text_y = row.Min.y + kBarInset + (control_height - ImGui::GetFontSize()) * 0.5f;
 		ImGui::SetCursorScreenPos(ImVec2(row.Right - count_width, text_y));
 		window->DC.CurrLineTextBaseOffset = 0.0f;
 		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
@@ -875,6 +810,71 @@ namespace Helios
 		}
 
 		ImGui::EndPopup();
+	}
+
+	/* 顶栏「筛选」下拉：类型单选列表（All types + 六类，图标跟树里同一套映射）。点行不
+	 * 收起弹层（方便连点切换、留在原地），收起靠点外部 / Esc；弹层锚在按钮正下方、右缘对齐。 */
+	void SceneHierarchy::DrawTypeFilterMenu()
+	{
+		PROFILE_FUNCTION();
+
+		ImGui::SetNextWindowPos(ImVec2(m_PopupTypeFilterAnchor.x, m_PopupTypeFilterAnchor.y + 4.0f),
+			ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
+
+		/* 最小宽度取最长行标题 + 图标与勾选列的固定组分（与工具栏两套菜单同一笔账） */
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float min_width = ImGui::CalcTextSize("Reflection Probes").x
+			+ style.FramePadding.x * 2.0f + style.ItemInnerSpacing.x * 2.0f
+			+ ImGui::GetFontSize() * 2.0f + 24.0f;
+		ImGui::SetNextWindowSizeConstraints(ImVec2(min_width, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+
+		/* BeginPopupEx 不会自动加 NoTitleBar（BeginPopup 才加）——漏了弹层顶上
+		 * 会多出一条空标题栏与折叠钮。 */
+		if (!ImGui::BeginPopupEx(m_PopupTypeFilter,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings
+				| ImGuiWindowFlags_NoTitleBar))
+			return;
+
+		/* 行距对齐工具栏菜单：Debug View / Gizmos 的弹层在自己 PushStyleVar(ItemSpacing, (2,0))
+		 * 的作用域里（行贴行）；面板这边是主题默认的 7px —— 不补这一档，行间会显得松。 */
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2.0f, 0.0f));
+
+		/* 复位行 + 各类型（顺序 = TypeFilter 枚举序，与显示名同一套） */
+		if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::Filter, TypeFilterName(TypeFilter::All),
+				m_TypeFilter == TypeFilter::All))
+			m_TypeFilter = TypeFilter::All;
+
+		ImGui::Separator();
+
+		for (int i = 1; i < static_cast<int>(TypeFilter::COUNT); ++i)
+		{
+			const auto filter = static_cast<TypeFilter>(i);
+			if (PanelChrome::MenuItemSelectWithIcon(FilterIconOf(filter), TypeFilterName(filter),
+					filter == m_TypeFilter))
+				m_TypeFilter = filter;
+		}
+
+		ImGui::PopStyleVar();
+
+		ImGui::EndPopup();
+	}
+
+	/* 类型筛选菜单行的图标：与树里各类型用的图标同一套（All = 漏斗本体）——
+	 * 菜单与树的"这一项长什么样"永远是同一个答案。 */
+	Icons::Id SceneHierarchy::FilterIconOf(TypeFilter filter)
+	{
+		switch (filter)
+		{
+		case TypeFilter::All:             return Icons::Id::Filter;
+		case TypeFilter::Camera:          return Icons::Id::Camera;
+		case TypeFilter::Light:           return Icons::Id::Light;
+		case TypeFilter::Model:           return Icons::Id::Model;
+		case TypeFilter::Sprite:          return Icons::Id::Sprite;
+		case TypeFilter::ReflectionProbe: return Icons::Id::ReflectionProbe;
+		case TypeFilter::Other:           return Icons::Id::Entity;
+		}
+
+		return Icons::Id::Filter;
 	}
 
 	/* 类型筛选下拉的显示名（与资源浏览器同一套措辞：复数名词、"All types" 放最前） */

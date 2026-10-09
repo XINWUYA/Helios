@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <ctime>
 #include "EditorIcons.h"
-#include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Helios/Core/Logger.h"
 #include "Helios/ImGui/EditorTheme.h"
@@ -163,18 +162,7 @@ namespace Helios
 		SyncEntries();
 		RebuildVisibleEntries();
 
-		/* 头部：图标 + 标题；右端动作 = 清空（缓冲与显示缓存一起清） */
-		const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(Icons::Id::Log);
-		PanelChrome::DrawHeaderTitle(header, "Log");
-		PanelChrome::PlaceHeaderAction(header, header.Height);
-		if (Icons::IconButton(Icons::Id::Remove, ImVec2(header.Height, header.Height), false, "Clear Log"))
-		{
-			LogBuffer::Instance().Clear();
-			m_Entries.clear();
-			m_VisibleEntries.clear();
-		}
-		PanelChrome::EndHeaderRow(header);
-
+		/* 面板标题由页签承担（"Log"）；面板内不重复标题行，清空动作在工具行右端（见 ShowToolbar） */
 		ShowToolbar();
 		ShowEntries();
 
@@ -268,20 +256,21 @@ namespace Helios
 		ImGui::SameLine(0.0f, kChipGap);
 		level_chip("Error", spdlog::level::err, EditorTheme::Token::Danger, true);
 
-		/* 右端：搜索框 + 跟随开关 + 计数（贴行右缘；空间不足时压缩搜索框） */
+		/* 右端：搜索框 + 跟随开关 + 计数 + 清空（贴行右缘；空间不足时压缩搜索框） */
 		char count_text[48];
 		std::snprintf(count_text, sizeof(count_text), "%u / %u",
 			GetVisibleCount(), GetEntryCount());
 		const float count_width = ImGui::CalcTextSize(count_text).x;
 		const float follow_width = style.FramePadding.x * 2.0f + 3.0f * 2.0f + kChipGap
 			+ ImGui::CalcTextSize("Follow").x;
+		const float clear_width = ImGui::GetFrameHeight(); /* 清空按钮：行高见方 */
 
 		const float left_end = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
 		const float content_max = ImGui::GetContentRegionMax().x;
 		const float search_width = std::clamp(
-			content_max - left_end - style.ItemSpacing.x * 3.0f - follow_width - count_width,
+			content_max - left_end - style.ItemSpacing.x * 4.0f - follow_width - count_width - clear_width,
 			90.0f, 170.0f);
-		const float right_width = search_width + style.ItemSpacing.x * 2.0f + follow_width + count_width;
+		const float right_width = search_width + style.ItemSpacing.x * 3.0f + follow_width + count_width + clear_width;
 		const float right_start = std::max(left_end + style.ItemSpacing.x, content_max - right_width);
 		ImGui::SameLine(right_start);
 
@@ -298,6 +287,15 @@ namespace Helios
 		ImGui::SameLine();
 		ImGui::AlignTextToFramePadding();
 		ImGui::TextColored(EditorTheme::Token::TextDim, "%s", count_text);
+
+		/* 清空：缓冲与显示缓存一起清 */
+		ImGui::SameLine();
+		if (Icons::IconButton(Icons::Id::Remove, ImVec2(clear_width, clear_width), false, "Clear Log"))
+		{
+			LogBuffer::Instance().Clear();
+			m_Entries.clear();
+			m_VisibleEntries.clear();
+		}
 
 		ImGui::Dummy(ImVec2(0.0f, 2.0f));
 	}

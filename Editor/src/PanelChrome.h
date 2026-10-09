@@ -654,6 +654,9 @@ namespace Helios::PanelChrome
 		card.HeaderHeight = ImGui::GetFrameHeight();
 		card.Pad = CardPad();
 
+		/* 卡的身份 = 标题：折叠键 / 卡头命中区 / 动作按钮都挂在这一层作用域；
+		 * 这一层只包卡头，卡身内容的 ID 不受影响。 */
+		ImGui::PushID(title);
 		bool* open = ImGui::GetStateStorage()->GetBoolRef(ImGui::GetID("##CardOpen"), default_open);
 
 		draw_list->ChannelsSplit(2);
@@ -676,6 +679,7 @@ namespace Helios::PanelChrome
 				ImVec2(action_width, card.HeaderHeight), false, action_tooltip);
 			action_hovered = ImGui::IsItemHovered();
 		}
+		ImGui::PopID();
 
 		/* 箭头 + 图标 + 标题自绘：不参与 ImGui 布局，整行命中区才不会被装饰元素切开 */
 		const float text_height = ImGui::GetFontSize();

@@ -137,10 +137,10 @@ namespace Helios
 		/* 目录树（左栏）：只列文件夹（文件是右栏的事） */
 		void DrawFolderNode(const SharedPtr<FileNode>& node);
 
-	/* 资源浏览器：顶部一行（搜索 + 四枚图标：回退 / 重进 / 筛选 / 新建）+ 左右两栏（目录树 |
-	 * 内容区）+ 右栏底部路径栏（面包屑 + 缩放滑条 + 统计数）。文件操作（新建 / 重命名 / 删除）
-	 * 做成 ICommand 进编辑历史，所以 Ctrl+Z / Ctrl+Y 对文件操作同样有效。 */
-		void ShowBrowserTopBar(const ImVec2& theme_padding);
+		/* 顶部一行：左端搜索框；右端四枚图标按钮（自右向左：新建、筛选、前进、后退）。当前目录名
+		 * 不在这显示（路径栏说得更清楚）。筛选是纯图标按钮（跟 Debug View / Gizmos 同款），
+		 * 点击弹类型单选菜单，生效时高亮。 */
+		void ShowBrowserTopBar();
 		/* 底部栏：当前路径面包屑（每级可点）+ 选中的项（右端是滑动条与统计数） */
 		void ShowBrowserFooter();
 		/* 内容区（右栏）：缩略图网格 / 详细列表两种模式。
@@ -169,6 +169,8 @@ namespace Helios
 
 		/* 按类型筛选下拉的显示名 */
 		static const char* TypeFilterName(TypeFilter filter);
+		/* 类型筛选菜单行的图标：与内容区各类型的图标同一套（All = 漏斗本体） */
+		static Icons::Id FilterIconOf(TypeFilter filter);
 		/* 该项的类型是否通过筛选 */
 		static bool MatchesTypeFilter(TypeFilter filter, FileType type);
 		/* 内容区里这一项要不要显示：类型筛选 + 文本过滤。
@@ -228,6 +230,9 @@ namespace Helios
 		void DrawAssetOperationPopups(const ImVec2& theme_padding);
 		/* 顶栏「新建」按钮的下拉菜单：文件夹 + 几种可建的资源文件（见 .cpp 里的表） */
 		void DrawNewAssetMenu();
+		/* 顶栏「筛选」按钮的下拉菜单（画在面板根作用域）：类型单选列表，
+		 * 行点击不收起弹层（连点切换档位，与工具栏的菜单同款） */
+		void DrawTypeFilterMenu();
 
 		/* 打开弹层：路径都是相对 Assets 的 */
 		void OpenNewFolderPopup(const std::string& parent_path);
@@ -293,6 +298,10 @@ namespace Helios
 		ImGuiID m_PopupNewFile{ 0 };
 		ImGuiID m_PopupRename{ 0 };
 		ImGuiID m_PopupDelete{ 0 };
+		ImGuiID m_PopupTypeFilter{ 0 };
+		/* 「筛选」菜单的弹层锚点（按钮右下角，弹层锚在它正下方、右缘对齐——
+		 * 与工具栏的 Debug View / Gizmos 菜单同款锚法） */
+		ImVec2 m_FilterMenuAnchor{ 0.0f, 0.0f };
 
 		/* ---- 内容区就地改名的编辑态与慢双击候选 ---- */
 

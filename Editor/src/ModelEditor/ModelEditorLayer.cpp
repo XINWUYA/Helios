@@ -203,11 +203,7 @@ namespace Helios
 
 		ImGui::Begin(Panel::kModelHelper);
 		{
-			/* 面板头部给出上下文：当前加载的是哪个文件 */
-			const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(Icons::Id::Model);
-			PanelChrome::DrawHeaderTitle(header,
-				has_model ? ExtractFilename(m_pModelInfo->m_Path) : std::string("No model"));
-			PanelChrome::EndHeaderRow(header);
+			/* 面板标题由页签承担（"Model Helper"）；当前文件由 Base Info 卡的 Path 给出 */
 
 			if (has_model)
 			{
