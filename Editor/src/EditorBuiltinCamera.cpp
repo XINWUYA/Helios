@@ -30,6 +30,7 @@ namespace Helios
 
 		/* 编辑器视口缺省走延迟管线（可在 View 菜单切前向 / 延迟） */
 		SetRenderPipeline(RenderPipeline::Deferred);
+		SetDebugName("EditorCamera");
 
 		UpdateCameraDirections();
 

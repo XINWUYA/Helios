@@ -146,14 +146,13 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 作用域由后端 PushDebugGroup 一并驱动（组名即作用域名） */
 		Renderer::GetRenderAPI()->PushDebugGroup("ImGuiPass");
-		RenderQueryProfiler::Instance().BeginGPUScope("ImGuiPass");
 
 		/* 生成DrawData,并提交渲染 */
 		ImGui::Render();
 		RenderPlatformWindows();
 
-		RenderQueryProfiler::Instance().EndGPUScope();
 		Renderer::GetRenderAPI()->PopDebugGroup();
 	}
 

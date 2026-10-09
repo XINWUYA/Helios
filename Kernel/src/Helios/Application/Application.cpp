@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "Application.h"
 #include <GLFW/glfw3.h>
+#include "Helios/Core/FrameTimeProfiler.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 #include "Helios/Renderer/Renderer.h"
@@ -49,6 +50,8 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		FrameTimeProfiler& frame_profiler = FrameTimeProfiler::Instance();
+
 		while (m_IsRunning)
 		{
 			PROFILE_SCOPE("Running Loops");
@@ -65,38 +68,56 @@ namespace Helios
 
 			if (!m_IsMinimized)
 			{
+				frame_profiler.BeginFrame();
+
 				/* 帧开始时准备本帧的默认渲染目标（显式交换链后端在此取得 drawable，
-				 * 直接绘制到默认帧缓冲的后端为空实现），调用方无需区分平台。 */
+				 * 直接绘制到默认帧缓冲的后端为空实现），调用方无需区分平台。
+				 * 不计入 CPU 阶段：垂直同步的等待主要发生在这里。 */
 				if (auto render_api = Renderer::GetRenderAPI())
 				{
 					render_api->PrepareNextFrame();
 				}
 
-				/* 帧级渲染准备：GPU 计时器的帧边界。
-				 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
-				Renderer::Update();
-
-				/* 先更新逻辑层和渲染层 */
 				{
+					const ScopedFrameStage update_stage(FrameTimeProfiler::Stage::Update);
+
+					/* 帧级渲染准备：GPU 计时器的帧边界。
+					 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
+					Renderer::Update();
+
+					/* 先更新逻辑层和渲染层 */
 					PROFILE_SCOPE("Update Layers");
 
 					for (const auto& layer : m_LayerStack)
 						layer->OnUpdate(delta_time);
 				}
 
-				/* 后更新UI */
-				m_pImGuiLayer->Begin();
 				{
-					PROFILE_SCOPE("Update ImGui Layers");
+					const ScopedFrameStage ui_stage(FrameTimeProfiler::Stage::UI);
 
-					for (const auto& layer : m_LayerStack)
-						layer->OnImGuiRender();
+					/* 后更新UI */
+					m_pImGuiLayer->Begin();
+					{
+						PROFILE_SCOPE("Update ImGui Layers");
+
+						for (const auto& layer : m_LayerStack)
+							layer->OnImGuiRender();
+					}
+					m_pImGuiLayer->End();
 				}
-				m_pImGuiLayer->End();
 			}
 
-			// SwapBuffer，显示帧画面到屏幕
-			m_pWindow->OnUpdate();
+			{
+				const ScopedFrameStage present_stage(FrameTimeProfiler::Stage::Present);
+
+				// SwapBuffer，显示帧画面到屏幕
+				m_pWindow->OnUpdate();
+			}
+
+			/* 结算本帧：GPU 总耗时来自计时器根节点（计时未启用 / 本帧无数据时无效） */
+			const ResultGPUTimerNode& gpu_timer_root = Renderer::GetGPUTimerRoot();
+			frame_profiler.EndFrame(gpu_timer_root.HasData,
+				static_cast<float>(gpu_timer_root.GPUTime * 0.001)); /* us → ms */
 		}
 	}
 

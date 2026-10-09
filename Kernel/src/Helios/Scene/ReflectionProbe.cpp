@@ -660,7 +660,6 @@ namespace Helios
 
         const std::string label = GetDebugName() + "_BakeEnvCubemap";
         Renderer::GetRenderAPI()->PushDebugGroup(label.c_str());
-        RenderQueryProfiler::Instance().BeginGPUScope(label.c_str());
 
         const uint32_t size = m_BakeConfig.EnvSize;
         if (!m_BakeResult.EnvColorCubemap || m_BakeResult.EnvColorCubemap->GetWidth() != size || m_BakeResult.EnvColorCubemap->GetHeight() != size)
@@ -696,7 +695,6 @@ namespace Helios
             capture_fb->Unbind();
 
             Renderer::GetRenderAPI()->PopDebugGroup();
-            RenderQueryProfiler::Instance().EndGPUScope();
             return;
         }
 
@@ -766,7 +764,6 @@ namespace Helios
         }
 
         Renderer::GetRenderAPI()->PopDebugGroup();
-        RenderQueryProfiler::Instance().EndGPUScope();
     }
 
     void ReflectionProbe::BakeIrradianceMap()
@@ -775,7 +772,6 @@ namespace Helios
 
         const std::string label = GetDebugName() + "_BakeIrradianceMap";
         Renderer::GetRenderAPI()->PushDebugGroup(label.c_str());
-        RenderQueryProfiler::Instance().BeginGPUScope(label.c_str());
 
         const uint32_t size = m_BakeConfig.IrradianceSize;
         if (!m_BakeResult.IrradianceMap || m_BakeResult.IrradianceMap->GetWidth() != size || m_BakeResult.IrradianceMap->GetHeight() != size)
@@ -813,7 +809,6 @@ namespace Helios
         fb->Unbind();
 
         Renderer::GetRenderAPI()->PopDebugGroup();
-        RenderQueryProfiler::Instance().EndGPUScope();
     }
 
     void ReflectionProbe::BakePrefilterMap()
@@ -822,7 +817,6 @@ namespace Helios
 
         const std::string label = GetDebugName() + "_BakePrefilterMap";
         Renderer::GetRenderAPI()->PushDebugGroup(label.c_str());
-        RenderQueryProfiler::Instance().BeginGPUScope(label.c_str());
 
         const uint32_t size = m_BakeConfig.PrefilterSize;
         const uint32_t mip_levels = m_BakeConfig.PrefilterMipLevels > 0
@@ -873,7 +867,6 @@ namespace Helios
         fb->Unbind();
 
         Renderer::GetRenderAPI()->PopDebugGroup();
-        RenderQueryProfiler::Instance().EndGPUScope();
     }
 
     void ReflectionProbeManager::RegisterProbe(const SharedPtr<ReflectionProbe>& probe)

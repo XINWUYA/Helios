@@ -2,6 +2,7 @@
 #include "OpenGLRenderAPI.h"
 #include "OpenGLCommon.h"
 #include <Helios/VirtualDevice/DeviceTexture.h>
+#include <Helios/Renderer/RenderQuery.h>
 #include <glad/glad.h>
 
 namespace Helios
@@ -236,9 +237,14 @@ namespace Helios
 		return m_DefaultTargetSnapshot;
 	}
 
+	/* Debug 组同时驱动 GPU 耗时作用域：组名是抓帧分组与统计面板共用的唯一标签源。
+	 * 作用域无条件配对，不依赖 KHR_debug 是否可用（作用域树与抓帧组解耦）。 */
 	void OpenGLRenderAPI::PushDebugGroup(const char* name)
 	{
 		PROFILE_FUNCTION();
+
+		if (name)
+			RenderQueryProfiler::Instance().BeginGPUScope(name);
 
 		if (m_SupportedExtensions.KHR_debug)
 			glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, name);
@@ -247,6 +253,8 @@ namespace Helios
 	void OpenGLRenderAPI::PopDebugGroup()
 	{
 		PROFILE_FUNCTION();
+
+		RenderQueryProfiler::Instance().EndGPUScope();
 
 		if (m_SupportedExtensions.KHR_debug)
 			glPopDebugGroup();

@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <functional>
 #include "FrameGraphPanel.h"
+#include "RenderStatsPanel.h"
 #include "SceneHierarchy.h"
 #include "EditorBuiltinCamera.h"
 #include "EditorCommon.h"
@@ -113,8 +114,6 @@ namespace Helios
 		void ShowSceneViewportUI();
 		/* 显示渲染统计信息 */
 		void ShowStatisticInfoUI();
-		/* GPU 计时卡片（开关 + 逐层耗时表） */
-		void ShowGPUTimingsCard();
 		/* 选中Entity时显示操作Gizmo */
 		void ShowOperationGizmoUI();
 		/* 视口右上角的视图指示器：六轴盘，点击切视角 / 拖拽转视角 */
@@ -170,5 +169,7 @@ namespace Helios
 		bool m_IsFrameGraphVisible{ true };
 		/* 本帧可视化可选的相机（渲染图与相机同生命周期，指针跨帧稳定） */
 		std::vector<FrameGraphPanel::CameraEntry> m_CameraEntries;
+		/* 渲染统计面板（每帧 CPU / GPU 耗时；绘制逻辑在面板自身） */
+		RenderStatsPanel m_RenderStatsPanel;
 	};
 }

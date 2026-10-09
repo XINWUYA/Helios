@@ -51,6 +51,9 @@ namespace Helios
 			ResultTimeBegin = static_cast<double>(QueryTimeBegin) * 1e-3; /* us */
 			ResultTimeEnd= static_cast<double>(QueryTimeEnd) * 1e-3; /* us */
 
+			/* GL 的时间戳查询与渲染通道无关（glQueryCounter 随处可用），
+			 * 解析出结果即等于有效样本（与 Metal 的通道采样相对照） */
+			HasValidSamples = true;
 			return true;
 		}
 		CHECK_GL_ERROR;

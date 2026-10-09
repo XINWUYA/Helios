@@ -263,6 +263,11 @@ namespace Helios
 			auto& camera_component = camera_entities.get<CameraComponent>(entity);
 			camera_component.m_Camera->OnUpdate(delta_time);
 
+			/* 相机调试名与实体名同步（GPU 统计树按相机分组展示用），与反射探针同模式 */
+			if (const auto* name_component = m_Registry.try_get<NameComponent>(entity);
+				name_component && !name_component->m_Name.empty())
+				camera_component.m_Camera->SetDebugName(name_component->m_Name);
+
 			auto* render_view = camera_component.m_Camera->GetRenderView();
 			render_view->SetOwnerScene(shared_from_this());
 			m_RenderViews.emplace_back(render_view);

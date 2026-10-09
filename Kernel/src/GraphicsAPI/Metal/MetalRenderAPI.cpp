@@ -6,6 +6,7 @@
 #include "MetalTexture.h"
 #include "MetalVertexArray.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
+#include "Helios/Renderer/RenderQuery.h"
 
 namespace Helios
 {
@@ -505,6 +506,7 @@ namespace Helios
         if (m_CurrentRenderEncoder)
         {
             m_CurrentRenderEncoder->endEncoding();
+            RenderQueryProfiler::Instance().OnRenderPassEnd();
             m_CurrentRenderEncoder = nullptr;
             MetalRuntime::SetEncoder(nullptr);
             m_ActiveRenderPassDescriptor = nullptr;
@@ -571,6 +573,7 @@ namespace Helios
         if (m_CurrentRenderEncoder)
         {
             m_CurrentRenderEncoder->endEncoding();
+            RenderQueryProfiler::Instance().OnRenderPassEnd();
             m_CurrentRenderEncoder = nullptr;
             MetalRuntime::SetEncoder(nullptr);
             m_ActiveRenderPassDescriptor = nullptr;
@@ -625,6 +628,7 @@ namespace Helios
         if (m_CurrentRenderEncoder)
         {
             m_CurrentRenderEncoder->endEncoding();
+            RenderQueryProfiler::Instance().OnRenderPassEnd();
             m_CurrentRenderEncoder = nullptr;
             MetalRuntime::SetEncoder(nullptr);
             m_ActiveRenderPassDescriptor = nullptr;
@@ -811,8 +815,14 @@ namespace Helios
         EndRenderPass();
     }
 
+    /* Debug 组同时驱动 GPU 耗时作用域：组名是抓帧分组与统计面板共用的唯一标签源
+     * （Xcode 的编码器分组 / 面板的作用域树同名同层级）。作用域无条件配对，
+     * 不依赖编码器是否已创建 —— 调用点（如阴影层）常先 push 组、再 Bind 开通道。 */
     void MetalRenderAPI::PushDebugGroup(const char* name)
     {
+        if (name)
+            RenderQueryProfiler::Instance().BeginGPUScope(name);
+
         if (m_CurrentRenderEncoder && name)
         {
             m_CurrentRenderEncoder->pushDebugGroup(NS::String::string(name, NS::UTF8StringEncoding));
@@ -821,6 +831,8 @@ namespace Helios
 
     void MetalRenderAPI::PopDebugGroup()
     {
+        RenderQueryProfiler::Instance().EndGPUScope();
+
         if (m_CurrentRenderEncoder)
         {
             m_CurrentRenderEncoder->popDebugGroup();
@@ -849,6 +861,7 @@ namespace Helios
         if (m_CurrentRenderEncoder)
         {
             m_CurrentRenderEncoder->endEncoding();
+            RenderQueryProfiler::Instance().OnRenderPassEnd();
             m_CurrentRenderEncoder = nullptr;
             m_ActiveRenderPassDescriptor = nullptr;
             m_ActivePipelineState = nullptr;
@@ -869,6 +882,11 @@ namespace Helios
         /* 默认渲染目标的清除色在进入 Pass 时刷新，保证本帧设置的清除色立即生效 */
         if (renderPassDescriptor == m_RenderPassDescriptor)
             ApplyDefaultClearColor();
+
+        /* GPU 计时（通道采样）：把本通道的一对时间戳采样下标挂到通道描述符上。
+         * 必须在创建编码器之前完成（附件在创建时被读取）；无论是否在计时都调用
+         * —— 描述符跨帧复用，残留的旧附件由查询缓冲负责清理。 */
+        RenderQueryProfiler::Instance().OnRenderPassBegin(renderPassDescriptor);
 
         /* 创建渲染命令编码器 */
         m_ActiveRenderPassDescriptor = renderPassDescriptor;
@@ -910,6 +928,7 @@ namespace Helios
         if (m_CurrentRenderEncoder)
         {
             m_CurrentRenderEncoder->endEncoding();
+            RenderQueryProfiler::Instance().OnRenderPassEnd();
             m_CurrentRenderEncoder = nullptr;
             MetalRuntime::SetEncoder(nullptr);
         }

@@ -153,7 +153,13 @@ namespace Helios
 		s_RenderData.ViewUniformData.ViewPos = view->GetCullingCamera()->GetPosition();
 		s_RenderData.pViewUniformBuffer->SetData(&s_RenderData.ViewUniformData, sizeof(ViewUniformData));
 
+		/* 每个相机一个 GPU 作用域：多视图（场景相机 + 编辑器相机等）的 Pass
+		 * 在统计树里按相机分组，而不是全部平铺在帧根下 */
+		const Camera* view_camera = view->GetCullingCamera();
+		const std::string view_label = view_camera ? view_camera->GetDebugName() : std::string("View");
+		RenderQueryProfiler::Instance().BeginGPUScope(view_label.c_str());
 		view->Execute();
+		RenderQueryProfiler::Instance().EndGPUScope();
 	}
 
 	void Renderer::SetViewUniforms(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& view_pos)
