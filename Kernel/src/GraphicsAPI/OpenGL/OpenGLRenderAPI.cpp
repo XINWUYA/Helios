@@ -185,6 +185,57 @@ namespace Helios
 			texture->GenerateMipmap();
 	}
 
+	SharedPtr<DeviceTexture> OpenGLRenderAPI::AcquireDefaultTargetSnapshot(bool& top_down)
+	{
+		PROFILE_FUNCTION();
+
+		/* 默认目标的尺寸 / 区域 = 当前 GL 视口：渲染到默认目标的 Pass 已把视口
+		 * 设成它的目标区域（标准情形即整窗）。没有任何 Pass 设过视口时取当前值，
+		 * 尺寸为 0 则视为无可用目标、静默跳过。 */
+		GLint viewport[4] = { 0, 0, 0, 0 };
+		glGetIntegerv(GL_VIEWPORT, viewport);
+		if (viewport[2] <= 0 || viewport[3] <= 0)
+			return nullptr;
+
+		const uint32_t width = static_cast<uint32_t>(viewport[2]);
+		const uint32_t height = static_cast<uint32_t>(viewport[3]);
+
+		/* 预览纹理跨帧复用；尺寸变化（窗口缩放）时重建 */
+		if (m_DefaultTargetSnapshot == nullptr
+			|| m_DefaultTargetSnapshot->GetTextureDesc().Width != width
+			|| m_DefaultTargetSnapshot->GetTextureDesc().Height != height)
+		{
+			TextureDesc desc;
+			desc.Width = width;
+			desc.Height = height;
+			desc.MipLevels = 1;
+			desc.Samples = 1;
+			desc.Format = TextureFormat::RGBA8;
+			desc.SamplerType = SamplerType::Sampler2D;
+			desc.Usage = TextureUsage::Sampleable;
+			m_DefaultTargetSnapshot = DeviceTexture::Create("DefaultTargetSnapshot", desc);
+		}
+		if (m_DefaultTargetSnapshot == nullptr)
+			return nullptr;
+
+		/* 回读默认帧缓冲（画上去的是 BACK）当时刻的内容 —— 命令立即执行，
+		 * 此刻拿到的正是"本 Pass 刚画完"的当刻内容；行 0 = 屏幕底行
+		 * （glReadPixels 口径），与引擎离屏纹理同为底行在前 → top_down = false */
+		std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+		glReadBuffer(GL_BACK);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		glReadPixels(viewport[0], viewport[1], static_cast<GLsizei>(width),
+			static_cast<GLsizei>(height), GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+		PixelDesc pixel_desc;
+		pixel_desc.Format = PixelFormat::RGBA;
+		pixel_desc.Type = PixelType::UnsignedByte;
+		m_DefaultTargetSnapshot->SetData(pixels.data(), pixel_desc);
+
+		top_down = false;
+		return m_DefaultTargetSnapshot;
+	}
+
 	void OpenGLRenderAPI::PushDebugGroup(const char* name)
 	{
 		PROFILE_FUNCTION();

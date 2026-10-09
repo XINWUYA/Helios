@@ -36,6 +36,9 @@ namespace Helios
         /* 创建UI着色器 - 需要在VertexBuffer设置好布局后创建 */
         CreateUIShader();
 
+        /* 创建深度变体着色器（与 UI 着色器共用顶点布局） */
+        CreateDepthShader();
+
         /* 创建字体纹理 */
         CreateFontTexture();
 
@@ -51,6 +54,7 @@ namespace Helios
         m_VertexBuffer.reset();
         m_IndexBuffer.reset();
         m_UIShader.reset();
+        m_UIDepthShader.reset();
         m_FontTexture.reset();
         m_UIUniformBuffer.reset();
     }
@@ -170,6 +174,8 @@ namespace Helios
         /* 遍历所有DrawList和DrawCmd，分批次渲染 */
         int local_index_offset = 0;
         ImTextureID last_texture_id = nullptr;
+        /* 当前登记的着色器：默认 UI 变体，绘制深度纹理时切到深度变体（见纹理绑定处） */
+        DeviceShader* bound_shader = m_UIShader.get();
 
         for (int n = 0; n < draw_data->CmdListsCount; n++)
         {
@@ -227,6 +233,21 @@ namespace Helios
                         if (texture)
                         {
                             texture->Bind(0);
+                        }
+
+                        /* 深度纹理（阴影图 / GBuffer 深度等预览）必须按 depth2d 采样
+                         * （深度格式不能绑到 texture2d<float>，见 ImGuiUIDepth.glsl 与
+                         * ShaderCompiler 的 @depth-texture 标注）：按纹理格式切着色器 */
+                        const bool is_depth = texture != nullptr
+                            && IsDepthFormat(texture->GetTextureDesc().Format);
+                        DeviceShader* wanted = (is_depth && m_UIDepthShader)
+                            ? m_UIDepthShader.get() : m_UIShader.get();
+                        if (wanted != nullptr && wanted != bound_shader)
+                        {
+                            wanted->Bind();
+                            if (wanted == m_UIDepthShader.get())
+                                wanted->SetInt("u_DepthTexture", 0);
+                            bound_shader = wanted;
                         }
 
                         last_texture_id = pcmd->TextureId;
@@ -330,6 +351,19 @@ namespace Helios
         }
 
         CORE_LOG_INFO("ImGui UI shader created from embedded resource");
+    }
+
+    void ImGuiRenderer::CreateDepthShader()
+    {
+        /* 深度变体：同一顶点布局，片元按 depth2d<float>（Metal）/ 标准深度采样
+         * （OpenGL）读取深度并输出灰度，供 Frame Graph 页显示深度附件预览 */
+        m_UIDepthShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ImGuiUIDepth.glsl"));
+        if (m_UIDepthShader && m_VertexArray)
+        {
+            m_UIDepthShader->BindVertexArray(m_VertexArray);
+        }
+
+        CORE_LOG_INFO("ImGui depth preview shader created");
     }
 
     void ImGuiRenderer::EnsureBuffersCapacity(int vertex_count, int index_count)

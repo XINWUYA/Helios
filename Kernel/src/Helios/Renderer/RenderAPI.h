@@ -48,6 +48,16 @@ namespace Helios
 		 * 命令提交后 GPU 是异步执行的。回读本身就同步的后端不用实现。 */
 		virtual void WaitForGPU() {}
 
+		/* 把源纹理 mip 0 / layer 0 的整幅内容拷贝到目标纹理（逐 Pass 抓取中间渲染结果
+		 * 用：FrameGraphCapture 在每个 Pass 执行完当刻调用它留快照）。两端要求尺寸与
+		 * 像素格式一致；不支持的后端保持默认空实现。 */
+		virtual void CopyTexture(const SharedPtr<DeviceTexture>& /*src*/, const SharedPtr<DeviceTexture>& /*dst*/) {}
+
+		/* 默认目标（窗口画布）的快照：拷进一张随目标尺寸自动重建的可采样纹理 —— 给没有附件的 Pass
+		 * （比如前向 ScenePass）在 FrameGraph 抓取里留个"窗口快照"；headless 返回 nullptr。top_down
+		 * 由后端上报行序（Metal true / GL false），采样方据此决定要不要翻 V。 */
+		virtual SharedPtr<DeviceTexture> AcquireDefaultTargetSnapshot(bool& /*top_down*/) { return nullptr; }
+
 		/* GroupMarker */
 		virtual void PushDebugGroup(const char* name) = 0;
 		virtual void PopDebugGroup() = 0;

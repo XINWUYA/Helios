@@ -75,8 +75,12 @@ namespace Helios
         /* 创建Metal图层 */
         m_MetalLayer = CA::MetalLayer::layer();
         m_MetalLayer->setDevice(m_Device);
-        m_MetalLayer->setPixelFormat(MTL::PixelFormatBGRA8Unorm);
-        m_MetalLayer->setFramebufferOnly(true);
+        /* 像素格式 RGBA8（引擎纹理的常规格式）：默认目标快照把 drawable blit 到一张
+         * 可采样的 RGBA8 预览纹理（FrameGraph 抓取），blit 要求源 / 目标格式一致 */
+        m_MetalLayer->setPixelFormat(MTL::PixelFormatRGBA8Unorm);
+        /* 允许把 drawable 纹理用作 blit 源（默认目标快照需要读它；默认的
+         * framebufferOnly=true 只允许把它当渲染目标） */
+        m_MetalLayer->setFramebufferOnly(false);
 
         /* 获取NSWindow并设置Metal图层 - 使用Objective-C运行时 */
         id cocoaWindow = (id)glfwGetCocoaWindow(window);

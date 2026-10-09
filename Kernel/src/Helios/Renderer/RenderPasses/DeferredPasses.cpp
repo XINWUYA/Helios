@@ -1,15 +1,18 @@
 #include "Pch.h"
 #include "DeferredPasses.h"
+#include "DebugViewPasses.h"
 #include <Helios/Application/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Scene/Camera.h>
+#include <Helios/Scene/Light.h>
 #include <Helios/Scene/Material.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/ReflectionProbe.h>
 #include <Helios/Scene/Scene.h>
 #include <Helios/Scene/SceneCommon.h>
+#include <Helios/Scene/ShadowMap.h>
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
 
@@ -21,6 +24,63 @@ namespace Helios
 		 * 预算约束（DeferredShaders/Lighting.glsl 里每个探针占一组固定绑定点）。
 		 * 场景内探针多于上限时取离相机最近的若干个（见 CollectClosestBakedProbes）。 */
 		constexpr size_t kMaxDeferredIBLProbes = 3;
+
+		/* 光照阶段认识的调试档位（Lighting 类）：只对它们下发档位号，
+		 * 其余档位（Surface / Analysis 类）统一下发 0 = 正常着色。 */
+		int LightingDebugViewValue(DebugViewMode mode)
+		{
+			switch (mode)
+			{
+			case DebugViewMode::Diffuse:
+			case DebugViewMode::Specular:
+			case DebugViewMode::Shadow:
+			case DebugViewMode::Indirect:
+				return static_cast<int>(mode);
+			case DebugViewMode::None:
+			case DebugViewMode::Albedo:
+			case DebugViewMode::Normal:
+			case DebugViewMode::Roughness:
+			case DebugViewMode::Metallic:
+			case DebugViewMode::SpecularColor:
+			case DebugViewMode::AmbientOcclusion:
+			case DebugViewMode::Emission:
+			case DebugViewMode::Ambient:
+			case DebugViewMode::Overdraw:
+			case DebugViewMode::Mipmap:
+				return 0;
+			}
+			return 0;
+		}
+
+		/* Shadow 档的合成光源：首个携带阴影数据的光源（判定与 FillLightUniformBuffer
+		 * 的级联 / 点光匹配一致 —— 只有它采样了阴影）；没有带阴影的光源时退化为
+		 * 首个光源 —— 输出全白（"无阴影数据"读作全受光，而不是全黑）。 */
+		size_t FindShadowDebugLightIndex(RenderView& render_view)
+		{
+			const auto& lights = render_view.GetValidLights();
+			if (lights.empty())
+				return 0;
+
+			const auto& shadow_maps = render_view.GetShadowMapManager();
+			if (shadow_maps != nullptr)
+			{
+				for (size_t light_index = 0; light_index < lights.size(); ++light_index)
+				{
+					const auto& light = lights[light_index];
+					if (light->GetLightType() == LightType::Directional)
+					{
+						const auto& cascade_maps = shadow_maps->GetCascadeShadowMaps();
+						if (!cascade_maps.empty() && cascade_maps[0]->GetLight().get() == light.get())
+							return light_index;
+					}
+					else if (shadow_maps->GetPunctualShadowData(light.get()).Valid)
+					{
+						return light_index;
+					}
+				}
+			}
+			return 0;
+		}
 
 		/* G-Buffer 采样点缺省时补的默认贴图：法线图按名字认；乘法类（Albedo / Roughness / Ambient）
 		 * 用白，其余用黑。注意：Ambient 不能用黑 —— 缺贴图的材质走 "albedo × 0.3" 回退环境项，
@@ -220,7 +280,7 @@ namespace Helios
 
 			/* Lighting Pass：全屏逐光源加法合成，输出即视图最终颜色（天空与叠加层都写进它本身）。
 			 * 返回光照结果句柄（视图输出）。 */
-			FrameGraphResourceHandle AddLightingPass(RenderView& render_view)
+			FrameGraphResourceHandleTyped<FrameGraphTexture> AddLightingPass(RenderView& render_view)
 			{
 				PROFILE_FUNCTION();
 
@@ -302,6 +362,15 @@ namespace Helios
 							}
 
 							const auto& lights = render_view.GetValidLights();
+
+							/* 调试视图（光照分量档位）：只对 Lighting 类档位下发；Shadow 档先解析
+							 * "首个携带阴影数据的光源"（合成者），每笔光照都完整重设两个调试
+							 * uniform（裸 uniform 是 per-program 状态，漏设会残留上一笔取值） */
+							const int debug_view_value = LightingDebugViewValue(render_view.GetDebugViewMode());
+							size_t shadow_debug_light = 0;
+							if (debug_view_value == static_cast<int>(DebugViewMode::Shadow))
+								shadow_debug_light = FindShadowDebugLightIndex(render_view);
+
 							for (size_t light_index = 0; light_index < lights.size(); ++light_index)
 							{
 								const auto& light = lights[light_index];
@@ -331,6 +400,10 @@ namespace Helios
 								/* 环境光 / 自发光与光源无关，只由第一笔光照合成（多光源逐笔加法叠加） */
 								material->SetParameters(ParamType::Int, "u_ComposeAmbientEmission",
 									light_index == 0 ? 1 : 0);
+								/* 调试视图：u_DebugShadowCompose 只在 Shadow 档被着色器读取 */
+								material->SetParameters(ParamType::Int, "u_DebugView", debug_view_value);
+								material->SetParameters(ParamType::Int, "u_DebugShadowCompose",
+									light_index == shadow_debug_light ? 1 : 0);
 
 								/* 探针 IBL 的参数和贴图每笔光照都完整设一遍（裸 uniform 是 per-program 状态，漏设就残留
 								 * 上一笔）；采样槽位不管有没有效都必须有绑定（缺绑定会被 Metal 校验断言），无效槽位用中性兜底。 */
@@ -440,6 +513,9 @@ namespace Helios
 
 			AddGBufferPass(*render_view);
 			const auto lighting_output = AddLightingPass(*render_view);
+			/* 调试视图（合成 / Overdraw / 几何重绘档位）：光照之后、天空之前 ——
+			 * 先落笔、天空最后负责背景像素；Lighting 类档位在光照阶段内分流，此处空操作 */
+			DebugView::AddDebugViewPasses(*render_view, { lighting_output, true });
 			AddSkyPass(*render_view);
 
 			/* 延迟视图的输出 = 光照结果（天空与叠加层都画进它本身） */

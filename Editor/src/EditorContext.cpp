@@ -129,6 +129,19 @@ namespace Helios
 			layer->SetRenderPipeline(pipeline);
 	}
 
+	/* 调试视图与渲染管线同一条通道；面板未就绪时读回缺省 None */
+	DebugViewMode EditorContext::GetDebugViewMode()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr ? layer->GetDebugViewMode() : DebugViewMode::None;
+	}
+
+	void EditorContext::SetDebugViewMode(DebugViewMode mode)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->SetDebugViewMode(mode);
+	}
+
 	bool EditorContext::IsSceneEditorActive()
 	{
 		const auto* layer = GetSceneLayer();
@@ -175,6 +188,18 @@ namespace Helios
 	{
 		if (auto* layer = GetModelLayer())
 			layer->SetViewportVisible(visible);
+	}
+
+	bool EditorContext::IsFrameGraphVisible()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->IsFrameGraphVisible();
+	}
+
+	void EditorContext::SetFrameGraphVisible(bool visible)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->SetFrameGraphVisible(visible);
 	}
 
 	void EditorContext::ImportModel()

@@ -126,6 +126,10 @@ float RangeAttenuation(float distance, float range)
 	return t * t;
 }
 
+/* 调试分流（Diffuse / Specular / Shadow / Indirect）在 DebugShaders/DebugLighting.glsl；
+ * 须放在本文件的函数定义之后（它调用 SelectIBLProbe / EvaluateProbeIBL） */
+#include "../DebugShaders/DebugLighting.glsl"
+
 void main()
 {
 	SGBufferData gbuffer;
@@ -181,11 +185,21 @@ void main()
 	/* 模型关闭「接受阴影」时阴影因子归零（延迟管线只能随 G-Buffer 拿到该标记） */
 	shadow *= gbuffer.ReceiveShadow;
 
+	/* 调试分流（Diffuse / Specular / Shadow / Indirect）：与正常着色共用同一条
+	 * 最终颜色（lighting_result）—— 命中即写出并返回（alpha 统一补 1），未命中
+	 * 在同一变量里继续合成（分量拆分见 ../DebugShaders/DebugLighting.glsl） */
+	vec3 lighting_result;
+	if (DebugLightingCompose(gbuffer, world_pos, n, v, l, attenuation, shadow, lighting_result))
+	{
+		OutFragColor = vec4(lighting_result, 1.0f);
+		return;
+	}
+
 	vec3 direct = max(vec3(0.0f), BRDF(l, v, n, gbuffer.Metallic, gbuffer.Roughness, gbuffer.Albedo));
 	direct *= u_ColorIntensity.rgb * u_ColorIntensity.a * attenuation;
 	direct *= (1.0f - shadow * 0.8f);
 
-	vec3 lighting_result = direct;
+	lighting_result = direct;
 
 	/* 环境项 + 自发光只由第一笔光照合成（见 u_ComposeAmbientEmission 注释） */
 	if (u_ComposeAmbientEmission > 0)

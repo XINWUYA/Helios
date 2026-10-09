@@ -161,6 +161,91 @@ namespace Helios
 			text += ")";
 			return text;
 		}
+
+		/* ---- 调试视图（Debug View）：档位表 = 分类、标签与图形的单一来源 ----
+		 * View 菜单子菜单与工具栏弹层共用；表内顺序即菜单顺序；分区名做段头。 */
+		struct DebugViewMenuItem
+		{
+			DebugViewMode Mode;
+			Icons::Id Icon;
+			const char* Label;
+		};
+
+		constexpr DebugViewMenuItem kDebugViewSurfaceItems[] = {
+			{ DebugViewMode::Albedo, Icons::Id::Albedo, "Albedo" },
+			{ DebugViewMode::Normal, Icons::Id::Normal, "Normal" },
+			{ DebugViewMode::Roughness, Icons::Id::Roughness, "Roughness" },
+			{ DebugViewMode::Metallic, Icons::Id::Metallic, "Metallic" },
+			{ DebugViewMode::SpecularColor, Icons::Id::SpecularColor, "Specular Color" },
+			{ DebugViewMode::AmbientOcclusion, Icons::Id::AmbientOcclusion, "Ambient Occlusion" },
+			{ DebugViewMode::Emission, Icons::Id::Emission, "Emission" },
+			{ DebugViewMode::Ambient, Icons::Id::Ambient, "Ambient" },
+		};
+
+		constexpr DebugViewMenuItem kDebugViewLightingItems[] = {
+			{ DebugViewMode::Diffuse, Icons::Id::Diffuse, "Diffuse" },
+			{ DebugViewMode::Specular, Icons::Id::Specular, "Specular" },
+			{ DebugViewMode::Shadow, Icons::Id::Shadow, "Shadow" },
+			{ DebugViewMode::Indirect, Icons::Id::Indirect, "Indirect" },
+		};
+
+		constexpr DebugViewMenuItem kDebugViewAnalysisItems[] = {
+			{ DebugViewMode::Overdraw, Icons::Id::Overdraw, "Overdraw" },
+			{ DebugViewMode::Mipmap, Icons::Id::Mipmap, "Mipmap" },
+		};
+
+		/* 单个分类：分区头 + 若干单选行（选中即高亮、弹层留在原地——连点切换不重开）；
+		 * enabled 用于"当前管线不支持"的置灰（如前向下的光照分量档位） */
+		void DrawDebugViewCategory(EditorContext& context, const char* title,
+			const DebugViewMenuItem* items, int count, bool enabled)
+		{
+			PanelChrome::MenuSectionHeader(title);
+
+			const DebugViewMode current = context.GetDebugViewMode();
+			for (int i = 0; i < count; ++i)
+			{
+				const DebugViewMenuItem& item = items[i];
+				if (PanelChrome::MenuItemSelectWithIcon(item.Icon, item.Label, current == item.Mode, enabled))
+					context.SetDebugViewMode(item.Mode);
+			}
+		}
+
+		/* 调试视图档位（View 菜单和工具栏弹层共用）：Shaded 复位行 + 三个分类段（Surface /
+		 * Lighting / Analysis），档位行 = 图形 + 标签 + 选中勾；点击不收起弹层。光照分量只有延迟
+		 * 管线能拆、前向下的就置灰。 */
+		void DrawDebugViewMenuItems(EditorContext& context)
+		{
+			if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::DebugView, "Shaded",
+				context.GetDebugViewMode() == DebugViewMode::None))
+			{
+				context.SetDebugViewMode(DebugViewMode::None);
+			}
+
+			const bool lighting_supported = (context.GetRenderPipeline() == RenderPipeline::Deferred);
+			DrawDebugViewCategory(context, "SURFACE", kDebugViewSurfaceItems, IM_ARRAYSIZE(kDebugViewSurfaceItems), true);
+			DrawDebugViewCategory(context, "LIGHTING", kDebugViewLightingItems, IM_ARRAYSIZE(kDebugViewLightingItems), lighting_supported);
+			DrawDebugViewCategory(context, "ANALYSIS", kDebugViewAnalysisItems, IM_ARRAYSIZE(kDebugViewAnalysisItems), true);
+		}
+
+		/* 当前档位的显示名（工具栏 tooltip 用；Shaded / 未知档返回空） */
+		const char* DebugViewModeLabel(DebugViewMode mode)
+		{
+			const auto find_in = [mode](const DebugViewMenuItem* items, int count) -> const char*
+			{
+				for (int i = 0; i < count; ++i)
+				{
+					if (items[i].Mode == mode)
+						return items[i].Label;
+				}
+				return nullptr;
+			};
+
+			if (const char* surface = find_in(kDebugViewSurfaceItems, IM_ARRAYSIZE(kDebugViewSurfaceItems)))
+				return surface;
+			if (const char* lighting = find_in(kDebugViewLightingItems, IM_ARRAYSIZE(kDebugViewLightingItems)))
+				return lighting;
+			return find_in(kDebugViewAnalysisItems, IM_ARRAYSIZE(kDebugViewAnalysisItems));
+		}
 	}
 
 	/* 默认布局：左（层级树 / 资产浏览器）· 中（视口）· 右（属性 / 统计）。只在 ini 里没有这个
@@ -316,6 +401,10 @@ namespace Helios
 					if (ImGui::MenuItem("Model Viewport", nullptr, &model_viewport_visible))
 						m_Context.SetModelViewportVisible(model_viewport_visible);
 
+					bool frame_graph_visible = m_Context.IsFrameGraphVisible();
+					if (ImGui::MenuItem("Frame Graph", nullptr, &frame_graph_visible))
+						m_Context.SetFrameGraphVisible(frame_graph_visible);
+
 					ImGui::Separator();
 
 					/* 渲染管线（编辑器场景视口）：前向 / 延迟 二选一 —— 相机每帧按选择重建渲染图 */
@@ -324,6 +413,13 @@ namespace Helios
 						m_Context.SetRenderPipeline(RenderPipeline::Forward);
 					if (ImGui::MenuItem("Deferred Pipeline", nullptr, render_pipeline == RenderPipeline::Deferred))
 						m_Context.SetRenderPipeline(RenderPipeline::Deferred);
+
+					/* 调试视图（编辑器场景视口）：与工具栏 Debug View 按钮共用同一份档位表 */
+					if (ImGui::BeginMenu("Debug View"))
+					{
+						DrawDebugViewMenuItems(m_Context);
+						ImGui::EndMenu();
+					}
 
 					ImGui::Separator();
 
@@ -478,11 +574,42 @@ namespace Helios
 				m_Context.SetPlayMode(running ? PlayMode::Edit : PlayMode::Runtime);
 			}
 
-			/* ---- 视图辅助（贴最右侧）：Gizmos 显隐菜单 ----
-			 * 状态读写全局 ViewportGizmoOptions（绘制侧同一数据源）。 */
+			/* ---- 视图辅助（贴最右侧，成一小组）：Debug View + Gizmos 显隐 ----
+			 * Debug View 在左：弹层切换成像通道档位（高亮 = 有调试档位生效）；
+			 * Gizmos 在最右：弹层显隐视图辅助（状态读写全局 ViewportGizmoOptions）。 */
 			const float toolbar_right = ImGui::GetContentRegionMax().x - kButtonSize;
+			const float utility_group_x = toolbar_right - kButtonSize - ImGui::GetStyle().ItemSpacing.x;
 			const float play_right = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
-			ImGui::SameLine(std::max(play_right + kGroupGap, toolbar_right));
+			ImGui::SameLine(std::max(play_right + kGroupGap, utility_group_x));
+
+			const char* debug_view_label = DebugViewModeLabel(m_Context.GetDebugViewMode());
+			const std::string debug_view_tip =
+				std::string("Debug View") + (debug_view_label != nullptr ? std::string(": ") + debug_view_label : std::string());
+			const bool debug_menu_open = ImGui::IsPopupOpen("##DebugViewMenu");
+			if (Icons::IconButton(Icons::Id::DebugView, button_size, debug_view_label != nullptr, debug_view_tip.c_str())
+				&& !debug_menu_open)
+			{
+				ImGui::OpenPopup("##DebugViewMenu");
+			}
+
+			/* 弹层锚在按钮正下方、右缘对齐（与 Gizmos 菜单同款锚法）；最小宽度取最长行
+			 * 标签 + 图标与勾选列的固定组分 —— 各行勾选列与分区头细线从首帧起就对位 */
+			const ImVec2 debug_menu_button_max = ImGui::GetItemRectMax();
+			const float debug_menu_min_width = ImGui::CalcTextSize("Ambient Occlusion").x
+				+ ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f
+				+ ImGui::GetFontSize() * 2.0f + 24.0f;
+
+			ImGui::SetNextWindowPos(ImVec2(debug_menu_button_max.x, debug_menu_button_max.y + 4.0f),
+				ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
+			ImGui::SetNextWindowSizeConstraints(ImVec2(debug_menu_min_width, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+			if (ImGui::BeginPopup("##DebugViewMenu"))
+			{
+				DrawDebugViewMenuItems(m_Context);
+				ImGui::EndPopup();
+			}
+
+			/* Gizmos 紧随调试按钮、保持贴最右（弹层锚法不变） */
+			ImGui::SameLine();
 
 			const bool gizmo_menu_open = ImGui::IsPopupOpen("##GizmoMenu");
 			if (Icons::IconButton(Icons::Id::Gizmos, button_size, gizmo_menu_open, "Gizmos") && !gizmo_menu_open)

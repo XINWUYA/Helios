@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <functional>
+#include "FrameGraphPanel.h"
 #include "SceneHierarchy.h"
 #include "EditorBuiltinCamera.h"
 #include "EditorCommon.h"
@@ -54,12 +55,21 @@ namespace Helios
 		void SetViewportVisible(bool visible) { m_IsViewportVisible = visible; }
 		[[nodiscard]] bool IsViewportVisible() const { return m_IsViewportVisible; }
 
+		/* 渲染图可视化页（Frame Graph）窗口显隐（与视口同一套模式：窗口关闭按钮 / View 菜单） */
+		void SetFrameGraphVisible(bool visible) { m_IsFrameGraphVisible = visible; }
+		[[nodiscard]] bool IsFrameGraphVisible() const { return m_IsFrameGraphVisible; }
+
 		void SetGizmoType(int type) { m_GizmoType = type; }
 		void SetPlayMode(PlayMode mode) { m_PlayMode = mode; }
 
 		/* 渲染管线（场景视口）：前向 / 延迟 —— 状态在编辑器相机的视图上（相机转发） */
 		void SetRenderPipeline(RenderPipeline pipeline) { m_pEditorCamera->SetRenderPipeline(pipeline); }
 		[[nodiscard]] RenderPipeline GetRenderPipeline() const { return m_pEditorCamera->GetRenderPipeline(); }
+
+		/* 调试视图（场景视口）：Surface / Lighting / Analysis 分类见 DebugViewMode ——
+		 * 状态同样在相机视图上（相机转发） */
+		void SetDebugViewMode(DebugViewMode mode) { m_pEditorCamera->SetDebugViewMode(mode); }
+		[[nodiscard]] DebugViewMode GetDebugViewMode() const { return m_pEditorCamera->GetDebugViewMode(); }
 
 		/* 资源定位通道（跨面板能力）：层级面板画材质卡的贴图，点击要定位到资源浏览器。
 		 * 面板不查 Layer —— 由装配层（EditorApp）接线后直接转发给层级面板。 */
@@ -81,6 +91,13 @@ namespace Helios
 		void MarkSceneSaved();
 		/* 更新视口 */
 		void UpdateViewport();
+		/* 场景相机（游戏相机）渲染到窗口默认目标：视口区域 = 窗口画布（物理像素）。
+		 * 引擎样例由宿主设置这一尺寸；不设则区域恒为 {0,0,0,0}、ScenePass
+		 * 以 0×0 视口空跑（FrameGraph 页"空车道"的根因之一） */
+		void UpdateSceneCameraViewports();
+		/* 收集本帧可视化可选的相机（编辑器相机在前、场景相机随后）：
+		 * OnUpdate（抓取目标落位）与 OnImGuiRender（面板列表）共用同一份 */
+		void CollectCameraEntries();
 		/* 响应键盘 */
 		bool OnKeyPressed(class KeyPressedEvent* event);
 		/* 响应鼠标 */
@@ -147,5 +164,11 @@ namespace Helios
 		bool m_IsActivated{ true };
 		/* 场景视口窗口是否显示 */
 		bool m_IsViewportVisible{ true };
+		/* 渲染图可视化页：依赖图 + 各 Pass 的中间渲染结果（抓取开关由面板自持） */
+		FrameGraphPanel m_FrameGraphPanel;
+		/* 渲染图可视化页窗口是否显示 */
+		bool m_IsFrameGraphVisible{ true };
+		/* 本帧可视化可选的相机（渲染图与相机同生命周期，指针跨帧稳定） */
+		std::vector<FrameGraphPanel::CameraEntry> m_CameraEntries;
 	};
 }

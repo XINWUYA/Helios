@@ -3,7 +3,9 @@
 #include "FrameGraphResourceCache.h"
 #include "RenderPassNode.h"
 #include "RenderResourceNode.h"
+#include "Helios/Renderer/Renderer.h"
 #include "Helios/VirtualDevice/DeviceFrameBuffer.h"
+#include "Helios/VirtualDevice/DeviceTexture.h"
 
 namespace Helios
 {
@@ -166,9 +168,13 @@ namespace Helios
 		/* 帧入口：推进跨帧缓存的帧号并做淘汰 —— 即使本帧没有 Pass 也要发生，
 		 * 否则空图期间缓存永不收缩 */
 		m_ResourceCache.BeginFrame();
+		m_Capture.BeginFrame();
 
 		if (m_RenderPassNodes.empty())
+		{
+			m_Capture.EndFrame();
 			return;
+		}
 
 		/* 仅执行有效的RenderPassNodes */
 		auto iter_current = m_RenderPassNodes.begin();
@@ -184,6 +190,11 @@ namespace Helios
 			FrameGraphResources resources(*this, *current_node);
 			current_node->Execute(resources);
 
+			/* 抓取本 Pass 的附件（颜色 + 深度；中间渲染结果快照）：必须在销毁步骤
+			 * 之前 —— 附件可能正是本节点的"最后一次使用"；叠加型 Pass 的后续修改
+			 * 不会回溯影响这里留的快照（见 FrameGraphCapture） */
+			CapturePassOutputs(*current_node);
+
 			/* 及时销毁不再使用的资源, 最后Target Pass的资源暂不释放，因为ImGui需要用到，todo:只有输出不用释放，输入应正常释放 */
 			if (!current_node->IsTarget)
 			{
@@ -193,6 +204,8 @@ namespace Helios
 			/* 下一个 */
 			++iter_current;
 		}
+
+		m_Capture.EndFrame();
 	}
 
 	/* 获取（或跨帧复用）一个 Pass 的 FrameBuffer */
@@ -215,6 +228,63 @@ namespace Helios
 		std::ofstream file_out(path.c_str());
 		file_out << str;
 		file_out.close();
+	}
+
+	/* 抓取一个 Pass 的附件（颜色在前、深度在后）：把附件句柄解析成 (资源名, 纹理) 交给抓取设施。
+	 * 调用点在 Pass 执行后、资源销毁前（这时附件内容 = 该阶段刚结束的状态）；多组 RenderPassData
+	 * 按序全部收集。 */
+	void FrameGraph::CapturePassOutputs(RenderPassNode& pass_node)
+	{
+		if (!m_Capture.IsEnabled())
+			return;
+
+		std::vector<std::pair<std::string, SharedPtr<DeviceTexture>>> outputs;
+
+		for (uint32_t pass_data_index = 0;; ++pass_data_index)
+		{
+			const SharedPtr<RenderPassData> render_pass_data = pass_node.GetRenderPassData(pass_data_index);
+			if (render_pass_data == nullptr)
+				break;
+
+			for (uint32_t i = 0; i < MAX_COLOR_ATTACHMENT_NUM; ++i)
+			{
+				const FrameGraphResourceHandle& handle = render_pass_data->ValidAttachments[i];
+				if (!handle.IsInitialized())
+					continue;
+
+				const auto resource = DynamicPtrCast<Resource<FrameGraphTexture>>(GetResource(handle));
+				if (resource == nullptr || resource->GetResource().Texture == nullptr)
+					continue;
+
+				outputs.emplace_back(resource->GetName(), resource->GetResource().Texture);
+			}
+
+			const FrameGraphResourceHandle& depth_handle =
+				render_pass_data->ValidAttachments[FrameGraphPassInfo::DEPTH_ATTACHMENT_IDX];
+			if (depth_handle.IsInitialized())
+			{
+				const auto resource = DynamicPtrCast<Resource<FrameGraphTexture>>(GetResource(depth_handle));
+				if (resource != nullptr && resource->GetResource().Texture != nullptr)
+					outputs.emplace_back(resource->GetName(), resource->GetResource().Texture);
+			}
+		}
+
+		/* 无附件的 Pass = 渲染到默认目标（前向 ScenePass 等）：把窗口画布快照作为它的
+		 * 一路输出（"DefaultTarget"）—— 纹理由 RenderAPI 持有、跨帧复用；headless /
+		 * 无窗口时拿到 nullptr，静默跳过（面板里该车道保持只有标题） */
+		if (outputs.empty())
+		{
+			const SharedPtr<RenderAPI>& render_api = Renderer::GetRenderAPI();
+			if (render_api != nullptr)
+			{
+				bool top_down = false;
+				if (SharedPtr<DeviceTexture> snapshot = render_api->AcquireDefaultTargetSnapshot(top_down))
+					m_Capture.CaptureSnapshot(pass_node.GetDebugName(), "DefaultTarget", snapshot, top_down);
+			}
+			return;
+		}
+
+		m_Capture.CapturePass(pass_node.GetDebugName(), outputs);
 	}
 
 	/* 剔除掉无效的RenderPassNode */

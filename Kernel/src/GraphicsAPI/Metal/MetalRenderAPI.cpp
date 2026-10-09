@@ -529,12 +529,126 @@ namespace Helios
         blit->endEncoding();
     }
 
+    SharedPtr<DeviceTexture> MetalRenderAPI::AcquireDefaultTargetSnapshot(bool& top_down)
+    {
+        PROFILE_FUNCTION();
+
+        if (m_CurrentDrawable == nullptr || m_CurrentDrawable->texture() == nullptr)
+            return nullptr;
+        MTL::Texture* target = m_CurrentDrawable->texture();
+
+        const uint32_t width = static_cast<uint32_t>(target->width());
+        const uint32_t height = static_cast<uint32_t>(target->height());
+        if (width == 0 || height == 0)
+            return nullptr;
+
+        /* 预览纹理跨帧复用；drawable 尺寸变化（窗口缩放）时重建。
+         * 格式与图层一致（RGBA8，见 MetalWindow 的 setPixelFormat）——
+         * blit 要求源 / 目标像素格式相同 */
+        if (m_DefaultTargetSnapshot == nullptr
+            || m_DefaultTargetSnapshot->GetTextureDesc().Width != width
+            || m_DefaultTargetSnapshot->GetTextureDesc().Height != height)
+        {
+            TextureDesc desc;
+            desc.Width = width;
+            desc.Height = height;
+            desc.MipLevels = 1;
+            desc.Samples = 1;
+            desc.Format = TextureFormat::RGBA8;
+            desc.SamplerType = SamplerType::Sampler2D;
+            desc.Usage = TextureUsage::Sampleable;
+            m_DefaultTargetSnapshot = DeviceTexture::Create("DefaultTargetSnapshot", desc);
+        }
+        if (m_DefaultTargetSnapshot == nullptr)
+            return nullptr;
+
+        auto metal_dst = std::dynamic_pointer_cast<MetalTexture>(m_DefaultTargetSnapshot);
+        if (!metal_dst || !metal_dst->GetMetalTexture())
+            return nullptr;
+
+        /* 与 CopyTexture 同一模式：先收束可能还在开启的渲染通道，再在当前帧的
+         * 命令缓冲区上插入 blit —— 拷到的是"本 Pass 刚画完"的当刻内容 */
+        if (m_CurrentRenderEncoder)
+        {
+            m_CurrentRenderEncoder->endEncoding();
+            m_CurrentRenderEncoder = nullptr;
+            MetalRuntime::SetEncoder(nullptr);
+            m_ActiveRenderPassDescriptor = nullptr;
+            m_ActivePipelineState = nullptr;
+            m_RasterStateEncoder = nullptr;
+        }
+
+        if (!m_CurrentCommandBuffer)
+        {
+            CORE_LOG_ERROR("MetalRenderAPI::AcquireDefaultTargetSnapshot: no active command buffer");
+            return nullptr;
+        }
+
+        MTL::BlitCommandEncoder* blit = m_CurrentCommandBuffer->blitCommandEncoder();
+        if (!blit)
+        {
+            CORE_LOG_ERROR("MetalRenderAPI::AcquireDefaultTargetSnapshot: failed to create blit encoder");
+            return nullptr;
+        }
+
+        blit->copyFromTexture(target, 0, 0, MTL::Origin(0, 0, 0), MTL::Size(width, height, 1),
+            metal_dst->GetMetalTexture(), 0, 0, MTL::Origin(0, 0, 0));
+        blit->endEncoding();
+
+        top_down = true; /* drawable 行序：顶行在前（与离屏纹理的底行在前相反） */
+        return m_DefaultTargetSnapshot;
+    }
+
     void MetalRenderAPI::WaitForGPU()
     {
         PROFILE_FUNCTION();
 
         if (m_LastSubmittedCommandBuffer)
             m_LastSubmittedCommandBuffer->waitUntilCompleted();
+    }
+
+    void MetalRenderAPI::CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst)
+    {
+        PROFILE_FUNCTION();
+
+        auto metal_src = std::dynamic_pointer_cast<MetalTexture>(src);
+        auto metal_dst = std::dynamic_pointer_cast<MetalTexture>(dst);
+        if (!metal_src || !metal_dst || !metal_src->GetMetalTexture() || !metal_dst->GetMetalTexture())
+            return;
+
+        MTL::Texture* src_texture = metal_src->GetMetalTexture();
+        MTL::Texture* dst_texture = metal_dst->GetMetalTexture();
+
+        /* 与 GenerateMipmap 同一模式：Metal 同一时刻只允许一个命令编码器，
+         * 先收束可能还在开启的渲染通道，再在当前帧的命令缓冲区上插入 blit ——
+         * 拷贝与前后 Pass 保持录制顺序，读到的正是"当刻"内容。 */
+        if (m_CurrentRenderEncoder)
+        {
+            m_CurrentRenderEncoder->endEncoding();
+            m_CurrentRenderEncoder = nullptr;
+            MetalRuntime::SetEncoder(nullptr);
+            m_ActiveRenderPassDescriptor = nullptr;
+            m_ActivePipelineState = nullptr;
+            m_RasterStateEncoder = nullptr;
+        }
+
+        if (!m_CurrentCommandBuffer)
+        {
+            CORE_LOG_ERROR("MetalRenderAPI::CopyTexture: no active command buffer");
+            return;
+        }
+
+        MTL::BlitCommandEncoder* blit = m_CurrentCommandBuffer->blitCommandEncoder();
+        if (!blit)
+        {
+            CORE_LOG_ERROR("MetalRenderAPI::CopyTexture: failed to create blit encoder");
+            return;
+        }
+
+        blit->copyFromTexture(src_texture, 0, 0, MTL::Origin(0, 0, 0),
+            MTL::Size(src_texture->width(), src_texture->height(), 1),
+            dst_texture, 0, 0, MTL::Origin(0, 0, 0));
+        blit->endEncoding();
     }
 
     void MetalRenderAPI::Present()

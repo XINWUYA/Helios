@@ -62,4 +62,36 @@ vec3 BRDF(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 albedo)
 	return color;
 }
 
+// 漫反射 / 高光分量拆分（调试视图的 Diffuse / Specular 档）——
+// 口径与上方合成一致：两者相加即 BRDF 的返回值
+vec3 BRDFDiffuse(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 albedo)
+{
+	float dotNL = clamp(dot(N, L), 0.0, 1.0);
+	float dotNV = clamp(dot(N, V), 0.0, 1.0);
+
+	if (dotNL <= 0.0)
+		return vec3(0.0);
+
+	vec3 F = F_Schlick(dotNV, metallic, albedo);
+	vec3 kD = vec3(1.0) - F;
+	return kD * (1.0 - metallic) * albedo / PI * dotNL;
+}
+
+vec3 BRDFSpecular(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 albedo)
+{
+	vec3 H = normalize(V + L);
+	float dotNL = clamp(dot(N, L), 0.0, 1.0);
+	float dotNV = clamp(dot(N, V), 0.0, 1.0);
+	float dotNH = clamp(dot(N, H), 0.0, 1.0);
+
+	if (dotNL <= 0.0)
+		return vec3(0.0);
+
+	float rroughness = max(0.05, roughness);
+	float D = D_GGX(dotNH, roughness);
+	float G = G_SchlicksmithGGX(dotNL, dotNV, rroughness);
+	vec3 F = F_Schlick(dotNV, metallic, albedo);
+	return D * F * G / (4.0 * dotNL * dotNV) * dotNL;
+}
+
 #endif

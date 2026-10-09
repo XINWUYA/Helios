@@ -28,6 +28,11 @@ namespace Helios
 		 * （见 RenderAPI::GenerateMipmap 关于帧内时序的说明） */
 		void GenerateMipmap(const SharedPtr<DeviceTexture>& texture) override;
 
+		/* 默认目标（窗口画布）快照：glReadPixels 回读默认帧缓冲（GL_BACK）当前
+		 * 视口区域，上传到常驻预览纹理（随视口尺寸自动重建、跨帧复用）；
+		 * 行序 = glReadPixels 口径（底行在前，top_down = false，与离屏纹理一致） */
+		SharedPtr<DeviceTexture> AcquireDefaultTargetSnapshot(bool& top_down) override;
+
 		/* 压入DebugGroup，以便在RenderDoc抓帧时使用Pipeline结构组织DebugMarker */
 		void PushDebugGroup(const char* name) override;
 		void PopDebugGroup() override;
@@ -39,6 +44,10 @@ namespace Helios
 	private:
 		/* 获取OpenGL支持的扩展 */
 		void InitOpenGLExtensions();
+
+		/* 默认目标快照的常驻预览纹理（AcquireDefaultTargetSnapshot 用；随视口
+		 * 尺寸变化重建、跨帧复用） */
+		SharedPtr<DeviceTexture> m_DefaultTargetSnapshot;
 
 		/* 扩展支持标记 */
 		struct

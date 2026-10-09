@@ -33,6 +33,14 @@ namespace Helios
         /* 在当前帧的命令缓冲区上插入 blit 编码器生成 mipmap（见 RenderAPI 的说明） */
         void GenerateMipmap(const SharedPtr<DeviceTexture>& texture) override;
 
+        /* 在当前帧的命令缓冲区上插入 blit 编码器拷贝纹理（见 RenderAPI 的说明） */
+        void CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst) override;
+
+        /* 默认目标（窗口画布）快照（见 RenderAPI 的说明）：blit 当前 drawable 的
+         * 整幅内容到常驻预览纹理（随 drawable 尺寸自动重建、跨帧复用）；
+         * 行序 = drawable 行序（顶行在前，top_down = true） */
+        SharedPtr<DeviceTexture> AcquireDefaultTargetSnapshot(bool& top_down) override;
+
         /* 等待最近提交的命令缓冲区执行完成（见 RenderAPI 的说明） */
         void WaitForGPU() override;
 
@@ -120,6 +128,10 @@ namespace Helios
         MTL::RenderCommandEncoder* m_CurrentRenderEncoder{ nullptr };
         CA::MetalDrawable* m_CurrentDrawable{ nullptr };
 
+        /* 默认目标快照的常驻预览纹理（AcquireDefaultTargetSnapshot 用；随 drawable
+         * 尺寸变化重建、跨帧复用）。行序 = drawable 行序（顶行在前） */
+        SharedPtr<DeviceTexture> m_DefaultTargetSnapshot;
+
         /* 帧级 autorelease pool：Metal-CPP 的便捷工厂返回的是 autoreleased 对象、注册进主线程的隐式
          * pool；而引擎渲染循环不经过 AppKit 事件循环、隐式 pool 永远不排空，对象逐帧堆积、内存暴涨。
          * 做法：帧入口建池、Present 提交后排空。 */
@@ -134,8 +146,9 @@ namespace Helios
 
         glm::vec4 m_ClearColor{ 0.0f, 0.0f, 0.0f, 1.0f };
 
-        /* 默认渲染目标的颜色格式，由窗口层在设置图层时确定 */
-        MTL::PixelFormat m_DefaultColorFormat{ MTL::PixelFormatBGRA8Unorm };
+        /* 默认渲染目标的颜色格式，由窗口层在设置图层时确定（RGBA8 —— 与默认目标
+         * 快照的可采样预览同格式；blit 要求源 / 目标像素格式一致） */
+        MTL::PixelFormat m_DefaultColorFormat{ MTL::PixelFormatRGBA8Unorm };
 
         RenderRasterState m_CurrentRasterState{};
         MetalShader* m_BoundShader{ nullptr };

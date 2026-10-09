@@ -8,6 +8,8 @@
 #include "PanelRegistry.h"
 #include "Command/TransformCommand.h"
 #include "Helios/Application/Application.h"
+#include "Helios/Renderer/FrameGraph/FrameGraph.h"
+#include "Helios/Scene/Components.h"
 #include "ImGuizmo.h"
 
 namespace Helios
@@ -79,6 +81,11 @@ namespace Helios
 		/* 场景管理及属性窗口 */
 		m_SceneHierarchy.OnImGuiRender();
 
+		/* 渲染图可视化页（依赖图 + 各 Pass 的中间渲染结果）：
+		 * 窗口隐藏时由面板自身跳过提交（恢复入口在 View 菜单），但仍逐帧调用，
+		 * 抓取请求的置位 / 清零都在面板内部结算 */
+		m_FrameGraphPanel.OnImGuiRenderer(m_CameraEntries, m_IsFrameGraphVisible);
+
 		/* 主窗口，需要最后再画，以确保能够得到正确的窗口宽高 */
 		ShowSceneViewportUI();
 	}
@@ -112,6 +119,63 @@ namespace Helios
 				content_scale);
 			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
 			//m_pOrthographicCameraController->OnResize(static_cast<float>(m_ViewportRegion.Width()), static_cast<float>(m_ViewportRegion.Height()));
+		}
+	}
+
+	/* 场景相机渲染到窗口默认目标：视口区域 = 窗口画布（物理像素）。引擎样例由宿主设置（见
+	 * Samples::SetViewportRegion）；不设置就恒为 0×0（ScenePass 空跑）。逐帧写，窗口缩放 / 换场景
+	 * 都会自动跟上。 */
+	void SceneEditorLayer::UpdateSceneCameraViewports()
+	{
+		PROFILE_FUNCTION();
+
+		if (!m_pMainScene)
+			return;
+
+		const auto& window = Application::Instance()->GetWindow();
+		const uint32_t width = window.GetWidth();
+		const uint32_t height = window.GetHeight();
+		if (width == 0 || height == 0)
+			return; /* 最小化等异常尺寸：区域要求 > 0（SetViewportRegion 有断言） */
+
+		entt::registry& registry = m_pMainScene->GetRegistry();
+		const auto camera_view = registry.view<CameraComponent>();
+		for (auto entity : camera_view)
+		{
+			const auto& camera_component = camera_view.get<CameraComponent>(entity);
+			if (camera_component.m_Camera != nullptr)
+			{
+				camera_component.m_Camera->GetRenderView()->SetViewportRegion(
+					{ 0, 0, width, height });
+			}
+		}
+	}
+
+	/* 收集本帧可视化可选的相机：编辑器相机在前、场景相机（按实体名）随后。
+	 * 渲染图与相机同生命周期、指针跨帧稳定（面板选中匹配与抓取目标都按它）；
+	 * 场景相机的视图每帧由 Scene 收集执行、编辑器相机经外部相机登记 —— 两者都有渲染图。 */
+	void SceneEditorLayer::CollectCameraEntries()
+	{
+		m_CameraEntries.clear();
+		m_CameraEntries.push_back({ "Editor Camera", m_pEditorCamera->GetRenderView()->GetFrameGraph().get() });
+
+		if (!m_pMainScene)
+			return;
+
+		entt::registry& registry = m_pMainScene->GetRegistry();
+		const auto camera_view = registry.view<CameraComponent>();
+		for (auto entity : camera_view)
+		{
+			const auto& camera_component = camera_view.get<CameraComponent>(entity);
+			if (camera_component.m_Camera == nullptr)
+				continue;
+
+			std::string camera_name = "Camera";
+			if (const auto* name_component = registry.try_get<NameComponent>(entity))
+				camera_name = name_component->m_Name;
+
+			m_CameraEntries.push_back({ std::move(camera_name),
+				camera_component.m_Camera->GetRenderView()->GetFrameGraph().get() });
 		}
 	}
 
@@ -777,6 +841,10 @@ namespace Helios
 			return;
 
 		UpdateViewport();
+		UpdateSceneCameraViewports();
+
+		/* 相机列表与面板 UI 同源：即使本帧不渲染（视口为 0）也刷新，面板不读过期条目 */
+		CollectCameraEntries();
 
 		if (m_ViewportRegion.Width <= 0 || m_ViewportRegion.Height <= 0)
 			return;
@@ -802,6 +870,19 @@ namespace Helios
 				/* 运行模式下编辑器相机不响应输入，但编辑器视口仍要由它呈现 */
 				m_pMainScene->OnUpdate(delta_time);
 				break;
+			}
+
+			/* Frame Graph 面板的抓取目标（上一帧 UI 落下）：面板可见且开着 Capture 时，
+			 * 只给所选相机的渲染图打开抓取（其余一律关）—— 本帧渲染图的执行会抓取
+			 * 各 Pass 的中间渲染结果（面板关闭时抓取零开销） */
+			{
+				const bool capture_open = m_FrameGraphPanel.IsCaptureRequested();
+				const FrameGraph* capture_target = m_FrameGraphPanel.GetCaptureTarget();
+				for (const auto& camera_entry : m_CameraEntries)
+				{
+					if (camera_entry.Graph != nullptr)
+						camera_entry.Graph->GetCapture().SetEnabled(capture_open && camera_entry.Graph == capture_target);
+				}
 			}
 
 			/* 执行本帧收集到的渲染视图：场景视口的内容在这里产生 */

@@ -191,6 +191,23 @@ namespace Helios
 		Default = Sampleable | Uploadable
 	};
 
+	/* 是否为深度格式（含带深度分量的深度模板格式）。深度纹理只能按 depth2d 采样，
+	 * 与按浮点采样的普通纹理是两条路径（见 ShaderCompiler 的 @depth-texture 标注）。 */
+	[[nodiscard]] constexpr bool IsDepthFormat(TextureFormat format) noexcept
+	{
+		switch (format)
+		{
+		case TextureFormat::Depth16:
+		case TextureFormat::Depth24:
+		case TextureFormat::Depth32:
+		case TextureFormat::Depth24Stencil8:
+		case TextureFormat::Depth32F:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	/* 纹理采样方式 */
 	enum class SamplerType : uint8_t
 	{
@@ -331,6 +348,34 @@ namespace Helios
 	{
 		Forward = 0,
 		Deferred = 1
+	};
+
+	/* 调试视图模式：把视图的成像通道换成对应的调试读数（状态挂在 RenderView 上）。Surface =
+	 * 材质 / G-Buffer 通道；Lighting = 光照分量（仅延迟）；Analysis = 逐片元统计（Overdraw / Mipmap）。
+	 * 序号跟调试着色器常量一一对应，不能单独调。 */
+	enum class DebugViewMode : uint8_t
+	{
+		None = 0,
+
+		/* Surface：材质 / G-Buffer 通道 */
+		Albedo = 1,
+		Normal = 2,
+		Roughness = 3,
+		Metallic = 4,
+		SpecularColor = 5,
+		AmbientOcclusion = 6,
+		Emission = 7,
+		Ambient = 8,
+
+		/* Lighting：光照阶段分量（延迟管线） */
+		Diffuse = 9,
+		Specular = 10,
+		Shadow = 11,
+		Indirect = 12,
+
+		/* Analysis：逐片元统计 */
+		Overdraw = 13,
+		Mipmap = 14,
 	};
 
 	/* 视口区域信息 */

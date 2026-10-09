@@ -214,6 +214,21 @@ namespace Helios::PanelChrome
 		return clicked;
 	}
 
+	/* 行尾勾选标记：行右缘固定列里的一枚矢量对勾（两笔画，Accent 色）——
+	 * 切换行（MenuItemToggleWithIcon）与单选行（MenuItemSelectWithIcon）共用，
+	 * 两处的"勾选列"逐像素一致；未勾选的行也保留同一列，位置不随状态跳。 */
+	inline void DrawMenuRowCheck(ImDrawList* draw_list, const ImVec2& row_max, float center_y, float icon_size)
+	{
+		const float check_center_x = row_max.x - ImGui::GetStyle().FramePadding.x - icon_size * 0.5f;
+		const float thickness = ImMax(1.5f, icon_size * 0.105f);
+		const ImU32 check_color = ImGui::GetColorU32(EditorTheme::Token::Accent);
+		const ImVec2 stroke_a(check_center_x - icon_size * 0.30f, center_y + icon_size * 0.03f);
+		const ImVec2 stroke_b(check_center_x - icon_size * 0.08f, center_y + icon_size * 0.24f);
+		const ImVec2 stroke_c(check_center_x + icon_size * 0.27f, center_y - icon_size * 0.26f);
+		draw_list->AddLine(stroke_a, stroke_b, check_color, thickness);
+		draw_list->AddLine(stroke_b, stroke_c, check_color, thickness);
+	}
+
 	/* 带图标和勾选的切换菜单行（Gizmos 显隐那一类）：整行命中 / 悬停高亮跟 MenuItemWithIcon 一样；
 	 * 行右固定画一枚 Accent 色对勾，点击翻转 *value、不收起弹层。行高取控件档，行宽铺满弹层
 	 * （SpanAvailWidth），各行的勾选列对齐在一条竖线上。 */
@@ -254,16 +269,7 @@ namespace Helios::PanelChrome
 		/* 勾选标记：矢量对勾（两笔画）——勾选的画在行右缘的固定列里，
 		 * 未勾选也保留同一列（位置不随状态跳） */
 		if (value != nullptr && *value)
-		{
-			const float check_center_x = max.x - style.FramePadding.x - icon_size * 0.5f;
-			const float thickness = ImMax(1.5f, icon_size * 0.105f);
-			const ImU32 check_color = ImGui::GetColorU32(EditorTheme::Token::Accent);
-			const ImVec2 stroke_a(check_center_x - icon_size * 0.30f, center_y + icon_size * 0.03f);
-			const ImVec2 stroke_b(check_center_x - icon_size * 0.08f, center_y + icon_size * 0.24f);
-			const ImVec2 stroke_c(check_center_x + icon_size * 0.27f, center_y - icon_size * 0.26f);
-			draw_list->AddLine(stroke_a, stroke_b, check_color, thickness);
-			draw_list->AddLine(stroke_b, stroke_c, check_color, thickness);
-		}
+			DrawMenuRowCheck(draw_list, max, center_y, icon_size);
 
 		if (clicked && value != nullptr)
 			*value = !*value;
@@ -344,6 +350,80 @@ namespace Helios::PanelChrome
 		}
 
 		return clicked;
+	}
+
+	/* 带图标的单选菜单行（"一组里选一个"的弹层条目）：外观跟 MenuItemToggleWithIcon 一样；
+	 * 选中态由调用方传进来（本行不翻转值），点击不收起弹层。enabled = false 时整行禁用，
+	 * 图标 / 文字 / 对勾跟着 BeginDisabled 一起变淡。 */
+	inline bool MenuItemSelectWithIcon(Icons::Id icon, const char* label, bool selected, bool enabled = true)
+	{
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float icon_size = ImGui::GetFontSize();
+		const float icon_gap = style.ItemInnerSpacing.x;
+
+		/* 与 MenuItemToggleWithIcon 同一笔账，尾部再加一个图标宽的勾选格 */
+		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
+		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x
+			+ icon_gap + icon_size;
+
+		if (!enabled)
+			ImGui::BeginDisabled();
+
+		ImGui::PushID(label);
+		const bool clicked = ImGui::Selectable("##row", false,
+			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover
+				| ImGuiSelectableFlags_DontClosePopups | ImGuiSelectableFlags_SpanAvailWidth,
+			ImVec2(width, ImGui::GetFrameHeight()));
+		ImGui::PopID();
+
+		const ImVec2 min = ImGui::GetItemRectMin();
+		const ImVec2 max = ImGui::GetItemRectMax();
+		const float center_y = (min.y + max.y) * 0.5f;
+
+		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+
+		/* 图标与文字都画在 Selectable 之后：悬停底色已经落好，不会被盖住 */
+		Icons::Draw(draw_list, icon,
+			ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
+			icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
+
+		draw_list->AddText(
+			ImVec2(min.x + style.FramePadding.x + icon_size + icon_gap,
+				center_y - ImGui::GetFontSize() * 0.5f),
+			ImGui::GetColorU32(EditorTheme::Token::Text), label);
+
+		if (selected)
+			DrawMenuRowCheck(draw_list, max, center_y, icon_size);
+
+		if (!enabled)
+			ImGui::EndDisabled();
+
+		return clicked;
+	}
+
+	/* 菜单分区头（弹层里的分组标题）：不可点的小标题 —— 小一号大写字母 + 右侧一条细线。
+	 * 行宽取内容区右缘（auto-resize 弹层从第二帧起就稳定了）。 */
+	inline void MenuSectionHeader(const char* label)
+	{
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const ImVec2 min = ImGui::GetCursorScreenPos();
+		const float width = ImGui::GetContentRegionAvail().x;
+		const float height = ImGui::GetTextLineHeight() + style.FramePadding.y + style.ItemSpacing.y;
+		ImGui::Dummy(ImVec2(width, height));
+
+		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+		ImFont* const font = ImGui::GetFont();
+		const float font_size = ImGui::GetFontSize() * 0.85f;
+		const ImVec2 text_size = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, label);
+
+		draw_list->AddText(font, font_size,
+			ImVec2(min.x, min.y + (height - text_size.y) * 0.5f),
+			ImGui::GetColorU32(EditorTheme::Token::TextDim), label);
+
+		const float line_y = min.y + height * 0.5f;
+		const float line_x = min.x + text_size.x + style.ItemInnerSpacing.x * 2.0f;
+		draw_list->AddLine(ImVec2(line_x, line_y), ImVec2(min.x + width, line_y),
+			ImGui::GetColorU32(EditorTheme::Token::Separator), 1.0f);
 	}
 
 	/* 带图标的子菜单行（「新建」下拉里的分组行）：外观 = 菜单行 + 右缘一个右向箭头；

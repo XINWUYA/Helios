@@ -222,7 +222,7 @@ namespace Helios
         /* 缓存键包含“翻译规则版本”：翻译结果由 glslang 的编译规则、spirv-cross 的
          * MSL 版本以及 MetalBinding 的绑定槽位约定共同决定，这些配置变化时源码哈希不变，
          * 旧缓存会被继续复用。因此让版本号参与哈希，修改翻译规则时请同时递增它。 */
-        static constexpr const char* kTranslatorVersion = "helios-shader-translator-v4";
+        static constexpr const char* kTranslatorVersion = "helios-shader-translator-v5";
 
         const std::string key = std::string(kTranslatorVersion) + '\n' + source;
         const uint64_t hash = XXH64(key.c_str(), key.length(), 0);
@@ -273,8 +273,10 @@ namespace Helios
         if (target == ShaderTarget::Metal)
         {
             std::vector<uint32_t> spirv;
-            if (!CompileGLSLToSPIRV(source, stage, spirv, error_msg))
+            std::string processed_source;
+            if (!CompileGLSLToSPIRV(source, stage, spirv, processed_source, error_msg))
                 return false;
+            ApplyDepthTextureAnnotations(processed_source, CollectDepthTextureAnnotations(source), spirv);
             if (!SPIRVToTarget(spirv, source, stage, target, output, error_msg))
                 return false;
             PrependSourceInfo(output, name, stage, target);
@@ -292,8 +294,10 @@ namespace Helios
         if (target == ShaderTarget::Vulkan)
         {
             std::vector<uint32_t> spirv;
-            if (!CompileGLSLToSPIRV(source, stage, spirv, error_msg))
+            std::string processed_source;
+            if (!CompileGLSLToSPIRV(source, stage, spirv, processed_source, error_msg))
                 return false;
+            ApplyDepthTextureAnnotations(processed_source, CollectDepthTextureAnnotations(source), spirv);
             output.assign(reinterpret_cast<const char*>(spirv.data()), spirv.size() * sizeof(uint32_t));
             /* Vulkan 输出为二进制 SPIR-V，不写入文本注释 */
             return true;
@@ -315,7 +319,7 @@ namespace Helios
     }
 
     bool ShaderCompiler::CompileGLSLToSPIRV(const std::string& glsl_source, ShaderStage stage,
-        std::vector<uint32_t>& spirv, std::string& error_msg)
+        std::vector<uint32_t>& spirv, std::string& processed_source, std::string& error_msg)
     {
         PROFILE_FUNCTION();
 
@@ -325,7 +329,7 @@ namespace Helios
         std::call_once(s_InitFlag, []() { glslang::InitializeProcess(); });
 
         /* glslang 编译为 SPIR-V 需要 #version 450 core，并需要 sampler 有 layout(binding=X) */
-        std::string processed_source = glsl_source;
+        processed_source = glsl_source;
         {
             static const std::regex version_regex("#version\\s+410\\s+core");
             processed_source = std::regex_replace(processed_source, version_regex, "#version 450 core");
@@ -419,6 +423,137 @@ namespace Helios
 
         GlslangToSpv(*program.getIntermediate(esh_stage), spirv);
         return true;
+    }
+
+    std::vector<std::string> ShaderCompiler::CollectDepthTextureAnnotations(const std::string& source)
+    {
+        /* `// @depth-texture <采样器名>`：深度纹理采样标注（约定见头文件） */
+        static const std::regex annotation_regex(R"(@depth-texture\s+([A-Za-z_]\w*))");
+
+        std::vector<std::string> names;
+        for (std::sregex_iterator it(source.begin(), source.end(), annotation_regex), end; it != end; ++it)
+            names.push_back((*it)[1].str());
+        return names;
+    }
+
+    void ShaderCompiler::ApplyDepthTextureAnnotations(const std::string& processed_source,
+        const std::vector<std::string>& annotations, std::vector<uint32_t>& spirv)
+    {
+        if (annotations.empty())
+            return;
+
+        /* 预处理后源码中所有采样器都带显式 binding：建立 名字 -> binding 映射 */
+        static const std::regex sampler_regex(R"(layout\s*\(([^)]*)\)\s*uniform\s+sampler\w+\s+([A-Za-z_]\w*))");
+        static const std::regex binding_regex(R"(binding\s*=\s*(\d+))");
+
+        std::unordered_map<std::string, uint32_t> sampler_bindings;
+        for (std::sregex_iterator it(processed_source.begin(), processed_source.end(), sampler_regex), end; it != end; ++it)
+        {
+            const std::string qualifiers = it->str(1);
+            std::smatch binding_match;
+            if (std::regex_search(qualifiers, binding_match, binding_regex))
+                sampler_bindings[it->str(2)] = static_cast<uint32_t>(std::stoul(binding_match[1].str()));
+        }
+
+        for (const std::string& name : annotations)
+        {
+            const auto iter = sampler_bindings.find(name);
+            if (iter == sampler_bindings.end())
+            {
+                CORE_LOG_ERROR("ShaderCompiler: @depth-texture '{}' has no matching sampler declaration", name);
+                continue;
+            }
+
+            if (!MarkImageAsDepth(spirv, iter->second))
+                CORE_LOG_ERROR("ShaderCompiler: @depth-texture '{}' (binding {}) image not found in SPIR-V",
+                    name, iter->second);
+        }
+    }
+
+    bool ShaderCompiler::MarkImageAsDepth(std::vector<uint32_t>& spirv, uint32_t binding)
+    {
+        /* SPIR-V 指令 = [opcode | wordCount][操作数...]，模块头占前 5 个字 */
+        constexpr uint32_t OpTypeImage = 25;
+        constexpr uint32_t OpTypeSampledImage = 27;
+        constexpr uint32_t OpTypePointer = 32;
+        constexpr uint32_t OpVariable = 59;
+        constexpr uint32_t OpDecorate = 71;
+        constexpr uint32_t DecorationBinding = 33;
+
+        const auto find_by_result_id = [&spirv](uint32_t opcode, uint32_t result_id) -> const uint32_t*
+        {
+            for (size_t i = 5; i < spirv.size();)
+            {
+                const uint32_t instruction = spirv[i];
+                const uint32_t word_count = instruction >> 16;
+                if ((instruction & 0xFFFFu) == opcode && word_count >= 2 && spirv[i + 1] == result_id)
+                    return &spirv[i];
+                i += word_count;
+            }
+            return nullptr;
+        };
+
+        /* 1) binding 命中的变量 id（组合采样器拆成 image + sampler 两个变量，都会命中） */
+        std::vector<uint32_t> variables;
+        for (size_t i = 5; i < spirv.size();)
+        {
+            const uint32_t instruction = spirv[i];
+            const uint32_t word_count = instruction >> 16;
+            if ((instruction & 0xFFFFu) == OpDecorate && word_count >= 4
+                && spirv[i + 2] == DecorationBinding && spirv[i + 3] == binding)
+                variables.push_back(spirv[i + 1]);
+            i += word_count;
+        }
+
+        /* 2) 变量 -> OpTypePointer -> (OpTypeSampledImage) -> OpTypeImage 的结果 id。
+         * OpVariable 的变量 id 在 word2（word1 是结果类型），需专用遍历。 */
+        std::vector<uint32_t> image_type_ids;
+        for (size_t i = 5; i < spirv.size();)
+        {
+            const uint32_t instruction = spirv[i];
+            const uint32_t word_count = instruction >> 16;
+            if ((instruction & 0xFFFFu) == OpVariable && word_count >= 4)
+            {
+                const uint32_t ptr_type = spirv[i + 1];
+                const uint32_t variable_id = spirv[i + 2];
+                bool hit = false;
+                for (const uint32_t variable : variables)
+                    hit = hit || variable == variable_id;
+                if (hit)
+                {
+                    const uint32_t* pointer = find_by_result_id(OpTypePointer, ptr_type);
+                    if (pointer == nullptr)
+                        continue;
+
+                    uint32_t image_type_id = pointer[3];
+                    if (const uint32_t* sampled_image = find_by_result_id(OpTypeSampledImage, image_type_id))
+                        image_type_id = sampled_image[2];
+                    image_type_ids.push_back(image_type_id);
+                }
+            }
+            i += word_count;
+        }
+
+        /* 3) 把这些图像的 Depth 操作数置 1（OpTypeImage: [result, sampledType, Dim, Depth, ...]） */
+        bool patched = false;
+        for (size_t i = 5; i < spirv.size();)
+        {
+            const uint32_t instruction = spirv[i];
+            const uint32_t word_count = instruction >> 16;
+            if ((instruction & 0xFFFFu) == OpTypeImage && word_count >= 9)
+            {
+                for (const uint32_t image_type_id : image_type_ids)
+                {
+                    if (spirv[i + 1] == image_type_id)
+                    {
+                        spirv[i + 4] = 1;
+                        patched = true;
+                    }
+                }
+            }
+            i += word_count;
+        }
+        return patched;
     }
 
     bool ShaderCompiler::SPIRVToTarget(const std::vector<uint32_t>& spirv, const std::string& glsl_source,

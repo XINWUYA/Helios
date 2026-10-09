@@ -46,6 +46,8 @@ namespace Helios
         void CreateFontTexture();
         /* 创建UI着色器 */
         void CreateUIShader();
+        /* 创建深度变体着色器（深度纹理预览：阴影图 / GBuffer 深度按 depth2d 采样） */
+        void CreateDepthShader();
         /* 创建缓冲区 */
         void EnsureBuffersCapacity(int vertex_count, int index_count);
         /* 渲染单个DrawList */
@@ -64,6 +66,8 @@ namespace Helios
 
         /* UI着色器 */
         SharedPtr<DeviceShader> m_UIShader{ nullptr };
+        /* 深度变体着色器：深度格式纹理（深度附件预览）按 depth2d 采样、灰度输出 */
+        SharedPtr<DeviceShader> m_UIDepthShader{ nullptr };
 
         /* 顶点和索引缓冲区 */
         SharedPtr<DeviceVertexBuffer> m_VertexBuffer{ nullptr };

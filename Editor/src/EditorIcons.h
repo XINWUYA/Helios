@@ -30,10 +30,20 @@ namespace Helios
 			Transform, Tag,
 			/* 面板/分组：统计类面板用 */
 			Stats,
+			/* 面板/分组：渲染图可视化页（Frame Graph）用 */
+			FrameGraph,
+			/* 面板工具动作：适配视图（把整张图收进视野） */
+			FitView,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
 			Directory, File, FileImage, FileScene, FileMtlGraph, FileShader, FileModel, FileMaterial, FileProbe,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */
 			Gizmos, Grid, WorldAxis,
+			/* 调试视图（工具栏按钮 + 弹层档位） */
+			DebugView,
+			/* 调试视图弹层的档位图形（分区各成族：Surface = 圆角方块、Lighting = 圆盘、
+			 * Analysis = 叠层方块）—— 与 DebugView 卡片同族的小图形 */
+			Albedo, Normal, Roughness, Metallic, SpecularColor, AmbientOcclusion, Emission, Ambient,
+			Diffuse, Specular, Shadow, Indirect, Overdraw, Mipmap,
 			COUNT
 		};
 

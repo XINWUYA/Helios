@@ -44,6 +44,7 @@ namespace Helios::Icons
 		constexpr ImU32 kViolet = IM_COL32(108, 104, 217, 255);
 		constexpr ImU32 kMint = IM_COL32(39, 173, 145, 255);
 		constexpr ImU32 kRed = IM_COL32(213, 92, 85, 255);	/* 与调色板 #d55c55 同值 */
+		constexpr ImU32 kGray = IM_COL32(170, 178, 193, 255);	/* 与调色板 #aab2c1 同值（深浅两画布通用） */
 
 		/* 归一化坐标 -> 屏幕坐标。
 		 * 约定：图标在 [0,1]² 内作图，(0,0) 为左上、(1,1) 为右下；
@@ -837,6 +838,58 @@ namespace Helios::Icons
 			dl->AddRectFilled(c.At(0.64f, 0.46f), c.At(0.82f, 0.88f), color, radius);
 		}
 
+		void DrawFrameGraph(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const float radius = c.Len(0.055f);
+
+			/* 依赖图：左节点汇入右侧上下两个节点 —— 三个节点框 + 两条汇聚线 */
+			const ImVec2 left_min = c.At(0.05f, 0.36f);
+			const ImVec2 left_max = c.At(0.44f, 0.64f);
+			const ImVec2 top_min = c.At(0.56f, 0.14f);
+			const ImVec2 top_max = c.At(0.95f, 0.44f);
+			const ImVec2 bottom_min = c.At(0.56f, 0.56f);
+			const ImVec2 bottom_max = c.At(0.95f, 0.86f);
+
+			dl->AddRectFilled(left_min, left_max, PaletteColor(color, kViolet, 0.20f), radius);
+			dl->AddRect(left_min, left_max, color, radius, 0, t);
+			dl->AddRect(top_min, top_max, color, radius, 0, t);
+			dl->AddRect(bottom_min, bottom_max, color, radius, 0, t);
+
+			dl->AddLine(c.At(0.44f, 0.50f), c.At(0.50f, 0.50f), color, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.56f, 0.29f), color, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.56f, 0.71f), color, t);
+		}
+
+		/* 适配视图（Fit）：四角取景框 + 内容块 —— "把整张图收进这方视野"。
+		 * 与 Gizmos 同族（四角框语言），中心从轴点换成内容块
+		 * （软紫圆角块 + 薄荷芯点 = 被收进来的"图"）。 */
+		void DrawFitView(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 mint = PaletteColor(color, kMint);
+
+			/* 四角取景框 */
+			dl->AddLine(c.At(0.125f, 0.344f), c.At(0.125f, 0.125f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.125f, 0.125f), c.At(0.344f, 0.125f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.656f, 0.125f), c.At(0.875f, 0.125f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.875f, 0.125f), c.At(0.875f, 0.344f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.875f, 0.656f), c.At(0.875f, 0.875f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.875f, 0.875f), c.At(0.656f, 0.875f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.344f, 0.875f), c.At(0.125f, 0.875f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.125f, 0.875f), c.At(0.125f, 0.656f), violet, t * 1.1f);
+
+			/* 内容块：软底 + 墨色描边收口，中心一枚薄荷芯 */
+			const ImVec2 block_min = c.At(0.359f, 0.359f);
+			const ImVec2 block_max = c.At(0.641f, 0.641f);
+			dl->AddRectFilled(block_min, block_max, PaletteColor(color, kViolet, 0.30f), c.Len(0.056f));
+			dl->AddRect(block_min, block_max, color, c.Len(0.056f), 0, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.053f), mint);
+		}
+
 		/* ---- 内容（资源浏览器）----
 		 * 文件夹管"在哪"、文件图标管"是什么"；双色调：外形描边 + 主体低透明度同色（缩略图网格
 		 * 放到 100px 也不显单薄）。 */
@@ -1073,6 +1126,252 @@ namespace Helios::Icons
 			dl->AddCircleFilled(origin, c.Len(0.028f), mint);
 		}
 
+		/* 调试视图：四色测试卡（2×2 色块，对角同色分实 / 淡两档）——
+		 * "把成像拆成通道读数看一眼"。先铺四格再描外框，接缝与外缘由描边盖住。 */
+		void DrawDebugView(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			const ImVec2 outer_min = c.At(0.14f, 0.18f);
+			const ImVec2 outer_max = c.At(0.86f, 0.82f);
+			const ImVec2 mid = c.At(0.50f, 0.50f);
+
+			dl->AddRectFilled(outer_min, mid, PaletteColor(color, kViolet));
+			dl->AddRectFilled(ImVec2(mid.x, outer_min.y), ImVec2(outer_max.x, mid.y), PaletteColor(color, kMint));
+			dl->AddRectFilled(ImVec2(outer_min.x, mid.y), ImVec2(mid.x, outer_max.y), PaletteColor(color, kMint, 0.30f));
+			dl->AddRectFilled(mid, outer_max, PaletteColor(color, kViolet, 0.30f));
+
+			/* 外框用墨色：与紫色块分离、禁用 / 悬停随 UI 状态色走（同文档卡系列） */
+			dl->AddRect(outer_min, outer_max, color, c.Len(0.06f), 0, t * 1.1f);
+		}
+
+		/* ---- 调试档位（弹层图标族）----
+		 * 三个分区各一套图形语言：Surface = 圆角方块（通道读数）、Lighting = 圆盘（受光）、
+		 * Analysis = 叠层方块（逐片元统计）。方块族共用底座 / 描边两步，内部图形画在两者之间。 */
+
+		void ChannelTileBase(ImDrawList* dl, const Canvas& c, ImU32 color)
+		{
+			dl->AddRectFilled(c.At(0.14f, 0.14f), c.At(0.86f, 0.86f), Soften(color, 0.16f), c.Len(0.10f));
+		}
+
+		void ChannelTileOutline(ImDrawList* dl, const Canvas& c, float thickness, ImU32 color)
+		{
+			dl->AddRect(c.At(0.14f, 0.14f), c.At(0.86f, 0.86f), color, c.Len(0.10f), 0, thickness);
+		}
+
+		/* Albedo：对角双色块（基色读数） */
+		void DrawAlbedo(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+
+			ChannelTileBase(dl, c, color);
+
+			const float kUpperLeft[3][2] = { { 0.14f, 0.14f }, { 0.86f, 0.14f }, { 0.14f, 0.86f } };
+			const float kLowerRight[3][2] = { { 0.86f, 0.14f }, { 0.86f, 0.86f }, { 0.14f, 0.86f } };
+			FillPoly(dl, c, kUpperLeft, PaletteColor(color, kViolet));
+			FillPoly(dl, c, kLowerRight, PaletteColor(color, kGray));
+
+			ChannelTileOutline(dl, c, StrokeWidth(size), color);
+		}
+
+		/* Normal：曲面上的法线方向（基点 + 斜向箭头） */
+		void DrawNormal(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			ChannelTileBase(dl, c, color);
+
+			const ImU32 violet = PaletteColor(color, kViolet);
+			dl->AddLine(c.At(0.40f, 0.64f), c.At(0.62f, 0.42f), violet, t * 1.15f);
+			dl->AddLine(c.At(0.62f, 0.42f), c.At(0.44f, 0.42f), violet, t * 1.15f);
+			dl->AddLine(c.At(0.62f, 0.42f), c.At(0.62f, 0.60f), violet, t * 1.15f);
+			dl->AddCircleFilled(c.At(0.34f, 0.70f), c.Len(0.075f), PaletteColor(color, kGray));
+
+			ChannelTileOutline(dl, c, t, color);
+		}
+
+		/* Roughness：三段明度台阶（粗糙度读数） */
+		void DrawRoughness(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+
+			ChannelTileBase(dl, c, color);
+
+			dl->AddRectFilled(c.At(0.28f, 0.26f), c.At(0.72f, 0.37f), PaletteColor(color, kViolet), c.Len(0.05f));
+			dl->AddRectFilled(c.At(0.28f, 0.445f), c.At(0.72f, 0.555f), PaletteColor(color, kGray), c.Len(0.05f));
+			dl->AddRectFilled(c.At(0.28f, 0.63f), c.At(0.72f, 0.74f), color, c.Len(0.05f));
+
+			ChannelTileOutline(dl, c, StrokeWidth(size), color);
+		}
+
+		/* Metallic：金属球（灰球 + 高光点） */
+		void DrawMetallic(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+
+			ChannelTileBase(dl, c, color);
+
+			dl->AddCircleFilled(c.At(0.56f, 0.50f), c.Len(0.25f), PaletteColor(color, kGray));
+			dl->AddCircleFilled(c.At(0.43f, 0.37f), c.Len(0.085f), PaletteColor(color, kMint));
+
+			ChannelTileOutline(dl, c, StrokeWidth(size), color);
+		}
+
+		/* Specular Color：高光星芒（十字细菱形） */
+		void DrawSpecularColor(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+
+			ChannelTileBase(dl, c, color);
+
+			const float kDiamondVertical[4][2] = { { 0.50f, 0.22f }, { 0.62f, 0.50f }, { 0.50f, 0.78f }, { 0.38f, 0.50f } };
+			const float kDiamondHorizontal[4][2] = { { 0.22f, 0.50f }, { 0.50f, 0.38f }, { 0.78f, 0.50f }, { 0.50f, 0.62f } };
+			FillPoly(dl, c, kDiamondVertical, PaletteColor(color, kViolet));
+			FillPoly(dl, c, kDiamondHorizontal, PaletteColor(color, kViolet));
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.055f), PaletteColor(color, kMint));
+
+			ChannelTileOutline(dl, c, StrokeWidth(size), color);
+		}
+
+		/* Ambient Occlusion：内角压暗（对角两级渐变） */
+		void DrawAmbientOcclusion(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+
+			ChannelTileBase(dl, c, color);
+
+			const float kUpperLeft[3][2] = { { 0.14f, 0.14f }, { 0.46f, 0.14f }, { 0.14f, 0.46f } };
+			const float kLowerRight[3][2] = { { 0.86f, 0.86f }, { 0.54f, 0.86f }, { 0.86f, 0.54f } };
+			FillPoly(dl, c, kUpperLeft, PaletteColor(color, kGray));
+			FillPoly(dl, c, kLowerRight, PaletteColor(color, kGray));
+
+			ChannelTileOutline(dl, c, StrokeWidth(size), color);
+		}
+
+		/* Emission：自发光核 + 光晕环 */
+		void DrawEmission(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			ChannelTileBase(dl, c, color);
+
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.15f), PaletteColor(color, kMint));
+			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.27f), PaletteColor(color, kViolet), 0, t * 0.9f);
+
+			ChannelTileOutline(dl, c, t, color);
+		}
+
+		/* Ambient：环境穹顶（半球面 + 基线） */
+		void DrawAmbient(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			ChannelTileBase(dl, c, color);
+
+			/* 先画整圆、再把下半盖回底色 —— 半球只用一次填充 */
+			dl->AddCircleFilled(c.At(0.50f, 0.62f), c.Len(0.24f), PaletteColor(color, kGray));
+			dl->AddRectFilled(c.At(0.14f, 0.62f), c.At(0.86f, 0.86f), Soften(color, 0.16f));
+			dl->AddLine(c.At(0.22f, 0.62f), c.At(0.78f, 0.62f), color, t);
+
+			ChannelTileOutline(dl, c, t, color);
+		}
+
+		/* Diffuse：左半受光的球（漫反射项） */
+		void DrawDiffuse(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			const float radius = c.Len(0.30f);
+			dl->AddCircleFilled(center, radius, PaletteColor(color, kGray));
+			dl->PathArcTo(center, radius, kPi * 0.5f, kPi * 1.5f, 24);	/* 下方 → 左 → 上方 = 左半 */
+			dl->PathFillConvex(PaletteColor(color, kViolet));
+			dl->AddCircle(center, radius, color, 0, t);
+		}
+
+		/* Specular（光照项）：哑面球 + 尖锐高光点 */
+		void DrawSpecular(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddCircleFilled(center, c.Len(0.30f), PaletteColor(color, kGray));
+			dl->AddCircleFilled(c.At(0.40f, 0.36f), c.Len(0.085f), PaletteColor(color, kMint));
+			dl->AddCircle(center, c.Len(0.30f), color, 0, t);
+		}
+
+		/* Shadow：物体 + 地面投影（扁椭圆） */
+		void DrawShadow(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 地面投影：自采点的扁椭圆（ImDrawList 各版本椭圆填充 API 不一，避开版本耦合） */
+			constexpr int kSteps = 24;
+			ImVec2 shadow[kSteps];
+			const ImVec2 shadow_center = c.At(0.50f, 0.74f);
+			for (int i = 0; i < kSteps; ++i)
+			{
+				const float angle = 2.0f * kPi * static_cast<float>(i) / static_cast<float>(kSteps);
+				shadow[i] = ImVec2(shadow_center.x + std::cos(angle) * c.Len(0.30f),
+					shadow_center.y + std::sin(angle) * c.Len(0.07f));
+			}
+			dl->AddConvexPolyFilled(shadow, kSteps, PaletteColor(color, kGray));
+
+			dl->AddCircleFilled(c.At(0.50f, 0.36f), c.Len(0.17f), Soften(color, 0.16f));
+			dl->AddCircle(c.At(0.50f, 0.36f), c.Len(0.17f), color, 0, t);
+		}
+
+		/* Indirect：自下而上的环境反弹（下半受光的球） */
+		void DrawIndirect(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			const float radius = c.Len(0.30f);
+			dl->AddCircleFilled(center, radius, PaletteColor(color, kGray));
+			dl->PathArcTo(center, radius, 0.0f, kPi, 24);	/* 右 → 下 → 左 = 下半 */
+			dl->PathFillConvex(PaletteColor(color, kViolet));
+			dl->AddCircle(center, radius, color, 0, t);
+		}
+
+		/* Overdraw：两层半透明方块的叠加计数 */
+		void DrawOverdraw(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			const ImVec2 first_min = c.At(0.18f, 0.18f);
+			const ImVec2 first_max = c.At(0.62f, 0.62f);
+			const ImVec2 second_min = c.At(0.38f, 0.38f);
+			const ImVec2 second_max = c.At(0.82f, 0.82f);
+
+			dl->AddRectFilled(first_min, first_max, PaletteColor(color, kGray), c.Len(0.05f));
+			dl->AddRectFilled(second_min, second_max, PaletteColor(color, kViolet), c.Len(0.05f));
+			/* 叠加区：半透明墨色 —— 深浅两画布下都是"再覆盖一层"的观感 */
+			dl->AddRectFilled(second_min, first_max, Soften(color, 0.38f), c.Len(0.03f));
+
+			dl->AddRect(first_min, first_max, color, c.Len(0.05f), 0, t);
+			dl->AddRect(second_min, second_max, color, c.Len(0.05f), 0, t);
+		}
+
+		/* Mipmap：由外到内的层级方框（层级热力的形状语言） */
+		void DrawMipmap(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddRectFilled(c.At(0.16f, 0.16f), c.At(0.84f, 0.84f), Soften(color, 0.16f), c.Len(0.09f));
+			dl->AddRectFilled(c.At(0.30f, 0.30f), c.At(0.70f, 0.70f), PaletteColor(color, kGray), c.Len(0.05f));
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.065f), color);
+
+			ChannelTileOutline(dl, c, t, color);
+		}
+
 		enum class SvgInk : uint8_t
 		{
 			None,
@@ -1125,9 +1424,11 @@ namespace Helios::Icons
 			"translate", "rotate", "scale",
 			"play", "stop", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
 			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
-			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats",
+			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "fit-view",
 			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
-			"file-material", "file-probe", "gizmos", "grid", "world-axis",
+			"file-material", "file-probe", "gizmos", "grid", "world-axis", "debug-view",
+			"albedo", "normal", "roughness", "metallic", "specular-color", "ambient-occlusion", "emission", "ambient",
+			"diffuse", "specular", "shadow", "indirect", "overdraw", "mipmap",
 		};
 		static_assert(IM_ARRAYSIZE(kSvgSymbolIds) == static_cast<size_t>(Id::COUNT),
 			"SVG symbol map must remain aligned with Icons::Id");
@@ -1832,6 +2133,8 @@ namespace Helios::Icons
 			{ "Transform",         &DrawTransform,          0.81f },
 			{ "Tag",               &DrawTag,                0.93f },
 			{ "Stats",             &DrawStats,              0.93f },
+			{ "FrameGraph",        &DrawFrameGraph,         0.93f },
+			{ "FitView",           &DrawFitView,            0.90f },
 			{ "Directory",         &DrawDirectory,          0.86f },
 			{ "File",              &DrawFile,               0.86f },
 			{ "FileImage",         &DrawFileImage,          0.86f },
@@ -1844,6 +2147,21 @@ namespace Helios::Icons
 			{ "Gizmos",            &DrawGizmos,             0.90f },
 			{ "Grid",              &DrawGrid,               0.90f },
 			{ "WorldAxis",         &DrawWorldAxis,          0.90f },
+			{ "DebugView",         &DrawDebugView,          0.93f },
+			{ "Albedo",            &DrawAlbedo,             0.93f },
+			{ "Normal",            &DrawNormal,             0.93f },
+			{ "Roughness",         &DrawRoughness,          0.93f },
+			{ "Metallic",          &DrawMetallic,           0.93f },
+			{ "SpecularColor",     &DrawSpecularColor,      0.93f },
+			{ "AmbientOcclusion",  &DrawAmbientOcclusion,   0.93f },
+			{ "Emission",          &DrawEmission,           0.93f },
+			{ "Ambient",           &DrawAmbient,            0.93f },
+			{ "Diffuse",           &DrawDiffuse,            1.0f },
+			{ "Specular",          &DrawSpecular,           1.0f },
+			{ "Shadow",            &DrawShadow,             0.97f },
+			{ "Indirect",          &DrawIndirect,           1.0f },
+			{ "Overdraw",          &DrawOverdraw,           0.97f },
+			{ "Mipmap",            &DrawMipmap,             0.93f },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),

@@ -2,6 +2,7 @@
 #include "Blackboard.h"
 #include "FrameGraphPass.h"
 #include "DependencyGraph.h"
+#include "FrameGraphCapture.h"
 #include "FrameGraphResourceHandle.h"
 #include "FrameGraphResources.h"
 #include "FrameGraphResourceCache.h"
@@ -99,12 +100,18 @@ namespace Helios
 		/* 诊断：跨帧资源缓存的创建 / 复用统计 */
 		[[nodiscard]] const FrameGraphResourceCache::Stats& GetResourceCacheStats() const { return m_ResourceCache.GetStats(); }
 
+		/* 逐 Pass 抓取设施（中间渲染结果快照，供可视化面板；默认禁用、零开销） */
+		[[nodiscard]] FrameGraphCapture& GetCapture() { return m_Capture; }
+
 		/* 导出依赖图 http://dreampuf.github.io/GraphvizOnline/ */
 		void ExportGraphviz(const std::string& path);
 
 	private:
 		/* 剔除掉无效的RenderPassNode */
 		void CullRenderPassNodes();
+
+		/* 抓取一个 Pass 的颜色附件（在其执行完、资源销毁之前调用；见 FrameGraphCapture） */
+		void CapturePassOutputs(RenderPassNode& pass_node);
 
 		/* 添加资源到m_ResourcesMap */
 		FrameGraphResourceHandle AddResourceInternal(const SharedPtr<IResource>& resource);
@@ -137,6 +144,8 @@ namespace Helios
 		/* 跨帧资源缓存：Reset 只清渲染图结构，缓存里的 GPU 资源按 (名称, 描述) 跨帧复用
 		 * （双缓存轮转：相邻帧各用一份副本，见 FrameGraphResourceCache） */
 		FrameGraphResourceCache m_ResourceCache;
+		/* 逐 Pass 抓取设施（中间渲染结果快照）：启用时在每个 Pass 执行后拷贝其颜色附件 */
+		FrameGraphCapture m_Capture;
 	};
 
 	/* FrameGraph Builder类

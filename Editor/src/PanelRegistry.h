@@ -17,6 +17,8 @@ namespace Helios
 		inline constexpr const char* kStatInfo        = "Stat Info";
 		/* 资源浏览器：目录树 + 目录内容合成一个面板（原先 File List / Resource Browser 是两个页签） */
 		inline constexpr const char* kResourceBrowser = "Resource Browser";
+		/* 渲染图可视化页：依赖图 + 各 Pass 的中间渲染结果 */
+		inline constexpr const char* kFrameGraph      = "Frame Graph";
 
 		/* 默认停靠的语义槽位，与 BuildDefaultLayout 里的 DockNode 划分一一对应 */
 		enum class DockSlot : uint8_t
@@ -40,6 +42,7 @@ namespace Helios
 			{ kResourceBrowser, DockSlot::LeftBottom  },
 			{ kScene,           DockSlot::Center      },
 			{ kModel,           DockSlot::Center      },
+			{ kFrameGraph,      DockSlot::Center      },
 			{ kProperties,      DockSlot::RightTop    },
 			{ kModelHelper,     DockSlot::RightTop    },
 			{ kStatInfo,        DockSlot::RightBottom },

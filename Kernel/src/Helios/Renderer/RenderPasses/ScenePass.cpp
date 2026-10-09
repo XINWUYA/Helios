@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "ScenePass.h"
+#include "DebugViewPasses.h"
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
@@ -171,6 +172,10 @@ namespace Helios
 			frame_graph->GetBlackboard()["ScenePassOutput"] = scene_pass->GetData().Output;
 			frame_graph->GetBlackboard()["ScenePassDepth"] = scene_pass->GetData().Depth;
 			render_view->SetRenderTargetHandle(scene_pass->GetData().Output);
+
+			/* 调试视图（几何重绘 / Overdraw 档位）：场景之后、叠加层之前 ——
+			 * 前向没有独立天空 Pass，几何调试的背景即清屏色（延迟由天空收尾） */
+			DebugView::AddDebugViewPasses(*render_view, { scene_pass->GetData().Output, false });
 		}
 	}
 }

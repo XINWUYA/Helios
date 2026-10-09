@@ -51,6 +51,11 @@ namespace Helios
 		[[nodiscard]] RenderPipeline GetRenderPipeline();
 		void SetRenderPipeline(RenderPipeline pipeline);
 
+		/* ---- 调试视图（编辑器场景视口）：Surface / Lighting / Analysis 分类见
+		 * DebugViewMode。同样落相机视图，这里只做通道转发。 ---- */
+		[[nodiscard]] DebugViewMode GetDebugViewMode();
+		void SetDebugViewMode(DebugViewMode mode);
+
 		/* ---- 面板显隐：整层启用 ---- */
 		[[nodiscard]] bool IsSceneEditorActive();
 		void SetSceneEditorActive(bool active);
@@ -62,6 +67,10 @@ namespace Helios
 		void SetSceneViewportVisible(bool visible);
 		[[nodiscard]] bool IsModelViewportVisible();
 		void SetModelViewportVisible(bool visible);
+
+		/* ---- 渲染图可视化页（Frame Graph）窗口显隐 ---- */
+		[[nodiscard]] bool IsFrameGraphVisible();
+		void SetFrameGraphVisible(bool visible);
 
 		/* 模型导入（ModelEditor 面板） */
 		void ImportModel();

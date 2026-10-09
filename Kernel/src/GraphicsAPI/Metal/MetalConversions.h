@@ -108,20 +108,7 @@ namespace Helios
         }
     }
 
-    /* 是否为深度格式（含深度模板组合格式） */
-    [[nodiscard]] inline bool IsDepthFormat(TextureFormat format)
-    {
-        switch (NormalizeTextureFormat(format))
-        {
-        case TextureFormat::Depth16:
-        case TextureFormat::Depth32:
-        case TextureFormat::Depth32F:
-        case TextureFormat::Depth24Stencil8:
-            return true;
-        default:
-            return false;
-        }
-    }
+    /* 是否为深度格式见 RenderCommon.h 的 IsDepthFormat（平台无关，单一来源） */
 
     /* 是否为模板格式 */
     [[nodiscard]] inline bool IsStencilFormat(TextureFormat format)

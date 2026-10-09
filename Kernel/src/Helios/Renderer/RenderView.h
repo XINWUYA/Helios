@@ -62,6 +62,12 @@ namespace Helios
 		void SetRenderPipeline(RenderPipeline pipeline) { m_RenderPipeline = pipeline; }
 		[[nodiscard]] RenderPipeline GetRenderPipeline() const { return m_RenderPipeline; }
 
+		/* 调试视图模式（Surface / Lighting / Analysis 分类见 DebugViewMode）：
+		 * 与渲染管线同级 —— 每个视图单独一份，缺省 None = 正常着色；
+		 * 相机上有同名转发（Camera::SetDebugViewMode）。 */
+		void SetDebugViewMode(DebugViewMode mode) { m_DebugViewMode = mode; }
+		[[nodiscard]] DebugViewMode GetDebugViewMode() const { return m_DebugViewMode; }
+
 		/* 设置视口区域 */
 		void SetViewportRegion(const ViewportRegion& region);
 		[[nodiscard]] const ViewportRegion& GetViewportRegion() const { return m_ViewportRegion; }
@@ -123,6 +129,8 @@ namespace Helios
 		bool m_IsEnableCulling{ true };
 		/* 渲染管线（前向 / 延迟） */
 		RenderPipeline m_RenderPipeline{ RenderPipeline::Forward };
+		/* 调试视图模式（Surface / Lighting / Analysis 分类） */
+		DebugViewMode m_DebugViewMode{ DebugViewMode::None };
 		/* 相机 */
 		Camera* m_pOwnerCamera{ nullptr };
 		/* 所属的Scene */
