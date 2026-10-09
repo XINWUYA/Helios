@@ -36,12 +36,12 @@
             <Model ModelPath="BuiltinPlane" CastShadow="true" ReceiveShadow="true">
                 <MaterialOverride Slot="Default" Instance="true" Source="Materials/Ground.mtl" ShaderPath="Shaders/ForwardShaders/BuiltinLit.glsl">
                     <Parameters>
-                        <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.120000 4.000000 0.000000 0.000000"/>
                         <ParamInfo Type="0" Name="u_AlbedoTexture">
                             <Texture Path="Textures/Grass2.png" Slot="0">
-                                <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0"/>
+                                <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0" IsHdr="false"/>
                             </Texture>
                         </ParamInfo>
+                        <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.120000 4.000000 0.000000 0.000000"/>
                     </Parameters>
                     <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
                 </MaterialOverride>
@@ -54,7 +54,7 @@
                     <Parameters>
                         <ParamInfo Type="0" Name="u_SkyTex">
                             <Texture Path="Textures/drakensberg_solitary_mountain_4k.hdr" Slot="0">
-                                <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0"/>
+                                <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0" IsHdr="true"/>
                             </Texture>
                         </ParamInfo>
                     </Parameters>
@@ -66,6 +66,10 @@
             <Transform Position="3.824024 1.004549 0.876802" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Visibility Visible="false"/>
             <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_3.probe" Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
+        </Entity>
+        <Entity ID="10" Name="Reflection Probe">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <ReflectionProbe SkyBoxPath="Textures/drakensberg_solitary_mountain_4k.hdr" BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe.probe" Realtime="false" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="true" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
     </Entities>
 </Scene>
