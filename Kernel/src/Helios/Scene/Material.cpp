@@ -57,6 +57,23 @@ namespace Helios
 		return m_pShader != nullptr && m_pShader->GetUniformBinding("u_IrradianceMap") >= 0;
 	}
 
+	bool Material::SupportsDirectLighting() const
+	{
+		PROFILE_FUNCTION();
+
+		if (m_pShader == nullptr)
+			return false;
+
+		/* 判据 = 声明了直接光照契约的 u_ComposeAmbientEmission（Unlit 类不声明）。反射表为空 =
+		 * 后端拿不到裸 uniform 的声明（GL 的 SPIR-V 反射路径），就退回 IBL 契约近似判断 —— 完整
+		 * 光照的着色器都会声明 IBL 采样器。 */
+		const auto& reflection = m_pShader->GetReflectionData();
+		if (!reflection.MaterialParams.empty())
+			return reflection.FindMaterialParam("u_ComposeAmbientEmission") != nullptr;
+
+		return SupportsIBL();
+	}
+
 	void Material::SetParameters(ParamType type, const std::string& name, const std::any& param)
 	{
 		PROFILE_FUNCTION();

@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <any>
+#include <optional>
 #include <vector>
 #include "Helios/Renderer/RenderCommon.h"
 
@@ -25,11 +26,14 @@ namespace Helios
 	};
 
 	/* 单次绘制的覆盖参数（per-draw）。
-	 * 由渲染通道随提交通道应用：只写当前绑定的 Shader 与纹理，不落材质对象 ——
-	 * 用于 IBL 这类"每次绘制不同"的绑定（探针选择），避免污染共享材质。 */
+	 * 由渲染通道随提交通道应用：只写当前绑定的 Shader 与光栅状态、不落材质对象 ——
+	 * 用于 IBL 探针选择、逐光源加法笔这类"每次绘制不同"的绑定，避免污染共享材质。 */
 	struct DrawParams
 	{
 		std::vector<MaterialParamInfo> Overrides;
+		/* 光栅状态覆盖（如逐光源加法笔的"加法混合 + Equal 深度比较"）。
+		 * 设置时整份替代材质自身的光栅状态（不是逐字段合并）；未设置用材质自身的。 */
+		std::optional<RenderRasterState> RasterStateOverride{};
 	};
 
 	/*
@@ -57,6 +61,10 @@ namespace Helios
 		/* 是否支持反射探针的 IBL 着色（着色器声明了 IBL 契约的采样器，
 		 * 见 builtin/IBL.glsl）。渲染通道据此决定是否发 per-draw 的探针绑定。 */
 		[[nodiscard]] bool SupportsIBL() const;
+		/* 是否参与逐光源的直接光照合成（着色器声明了光照契约的控制 uniform，
+		 * 见 builtin/DirectLight.glsl）。前向渲染通道据此决定一个对象是否走
+		 * "逐光源一笔"循环（天空盒 / Unlit 类材质单笔原样提交）。 */
+		[[nodiscard]] bool SupportsDirectLighting() const;
 		/* 设置参数 */
 		void SetParameters(ParamType type, const std::string& name, const std::any& param);
 		[[nodiscard]] const ParameterMap& GetAllParameters() const { return m_Parameters; }

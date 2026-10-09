@@ -60,11 +60,34 @@ float CalculateShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 view_pos, v
 	return SampleShadowPCF(shadowMap, shadow_uv, float(cascade_id), current_depth);
 }
 
+/* 点光 / 聚光阴影的 z 空间深度偏移：ShadowBias 是世界单位，但比较发生在投影后的 z 空间
+ * （z(d) = nf(d+f)/((f-n)d)，斜率 nf/((f-n)d²)）—— 直接把世界单位加上去数量级对不上。偏移 = 世界
+ * 偏移 × z 斜率 + 斜率自适应项（防掠射面 acne；纹素尺寸按 d/size 估）。 */
+float PunctualShadowZOffset(sampler2DArray shadowMap, vec3 light_to_frag, vec3 n)
+{
+	const float near_plane = u_PunctualLightParams.w;
+	const float far_plane = u_PunctualShadowParams.z;
+	const float distance = length(light_to_frag);
+	const float distance_sq = max(distance * distance, 1e-6f);
+
+	/* 常数项：世界偏移按 d 处的透视 z 斜率折算 */
+	const float constant_z = u_ShadowBias * near_plane * far_plane
+		/ max((far_plane - near_plane) * distance_sq, 1e-6f);
+
+	/* 斜率自适应项：1.5 ×（单纹素世界尺寸）× tanθ × |dz/dd| */
+	const float ndl = clamp(dot(normalize(n), light_to_frag / max(distance, 1e-5f)), 0.0f, 1.0f);
+	const float slope_tan = sqrt(max(1.0f - ndl * ndl, 0.0f)) / max(ndl, 1e-3f);
+	const float slope_z = 3.0f * near_plane * far_plane * slope_tan
+		/ max((far_plane - near_plane) * distance * float(textureSize(shadowMap, 0).x), 1e-6f);
+
+	return constant_z + slope_z;
+}
+
 /* 点光立方体阴影（前向 / 延迟共用）。依赖 LightUniformBuffer 里的 u_PunctualShadowMat /
  * u_PunctualShadowParams / u_ShadowBias（逐光源填充）；面选择跟 CPU 端
  * GetPunctualLightViewMatrix 的顺序一致（+X, -X, +Y, -Y, +Z, -Z）。
  * 返回阴影因子：0 受光，1 被遮挡。 */
-float CalculatePointShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 light_pos)
+float CalculatePointShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 n, vec3 light_pos)
 {
 	vec3 light_to_frag = world_pos - light_pos;
 
@@ -96,7 +119,7 @@ float CalculatePointShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 light_
 	if (current_depth > 1.0f || current_depth < 0.0f)
 		return 0.0f;
 
-	current_depth += u_ShadowBias;
+	current_depth += PunctualShadowZOffset(shadowMap, light_to_frag, n);
 
 	return SampleShadowPCF(shadowMap, shadow_uv, u_PunctualShadowParams.x + float(face), current_depth);
 }
@@ -104,7 +127,7 @@ float CalculatePointShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 light_
 /* 聚光单面阴影（前向 / 延迟共用）。投影视锥就是光锥（按外锥角构造透视矩阵），uv 来自该
  * 光源单一的视图投影矩阵；光锥外 / 光源背后的片元光照本来就为 0，采样越界没影响。
  * 返回阴影因子：0 受光，1 被遮挡。 */
-float CalculateSpotShadow(sampler2DArray shadowMap, vec3 world_pos)
+float CalculateSpotShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 n)
 {
 	vec4 light_space_pos = u_PunctualShadowMat[0] * vec4(world_pos, 1.0f);
 	light_space_pos /= light_space_pos.w;
@@ -115,7 +138,7 @@ float CalculateSpotShadow(sampler2DArray shadowMap, vec3 world_pos)
 	if (current_depth > 1.0f || current_depth < 0.0f)
 		return 0.0f;
 
-	current_depth += u_ShadowBias;
+	current_depth += PunctualShadowZOffset(shadowMap, world_pos - u_LightPos, n);
 
 	return SampleShadowPCF(shadowMap, shadow_uv, u_PunctualShadowParams.x, current_depth);
 }

@@ -4,10 +4,12 @@
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
+#include <Helios/Scene/Light.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/Material.h>
 #include <Helios/Scene/ReflectionProbe.h>
 #include <Helios/Scene/Scene.h>
+#include <Helios/Scene/ShadowMap.h>
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
 #include <Helios/VirtualDevice/DeviceShader.h>
 
@@ -17,11 +19,32 @@ namespace Helios
 	{
 		namespace
 		{
-			/* 前向绘制的公共体：可见对象逐一提交（含按对象选最近探针的 IBL per-draw 覆盖）。
-			 * 调用方负责绑定好目标、设置视口并挂好阴影纹理。 */
+			/* 逐光源加法笔的光栅状态：在材质状态上只改混合和深度 —— 加法混合（One / One / Add）、
+			 * 深度比较 Equal（只在第 0 笔画过的像素上叠加；引擎约定"关深度写 = 连深度测试一起关"，
+			 * 所以保持深度写开启、用 Equal 限定）。 */
+			RenderRasterState MakeAdditiveRasterState(const RenderRasterState& base)
+			{
+				RenderRasterState state = base;
+				state.EnableBlend = true;
+				state.BlendEquationRGB = BlendEquation::Add;
+				state.BlendEquationA = BlendEquation::Add;
+				state.BlendFuncSrcRGB = BlendFunc::One;
+				state.BlendFuncSrcA = BlendFunc::One;
+				state.BlendFuncDstRGB = BlendFunc::One;
+				state.BlendFuncDstA = BlendFunc::One;
+				state.DepthCompareFunc = CompareFunc::Equal;
+				return state;
+			}
+
+			/* 前向绘制公共体：可见对象逐一提交，光照按"逐光源一笔"合成 —— 第 0 笔完整着色（直接光 +
+			 * 环境 / 自发光，用材质自身的光栅状态）；其余笔加法混合 + Equal 比较，只输出该光源的直接光。
+			 * 天空盒和 Unlit 单笔原样提交；调用方自己负责绑目标、视口和阴影纹理。 */
 			void SubmitForwardObjects(RenderView& render_view, const SharedPtr<Scene>& scene)
 			{
 				const auto probe_manager = scene->GetReflectionProbeManager();
+				const auto& lights = render_view.GetValidLights();
+				const ShadowMapManager* shadow_maps = render_view.GetShadowMapManager().get();
+
 				for (const auto& mesh_object : render_view.GetVisibleMeshObjects())
 				{
 					Renderer::FillObjectUniformBuffer(mesh_object);
@@ -47,8 +70,31 @@ namespace Helios
 							chosen != nullptr ? chosen->GetPrefilterMap() : nullptr,
 							brdf_lut);
 					}
-					Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive(),
-						per_draw.Overrides.empty() ? nullptr : &per_draw);
+
+					const auto& mesh_primitive = mesh_object.MeshSegment->GetMeshPrimitive();
+
+					/* 天空盒与不参与光照合成的材质：单笔原样提交 */
+					if (material->IsSkyBox() || !material->SupportsDirectLighting())
+					{
+						Renderer::Submit(material, mesh_primitive,
+							per_draw.Overrides.empty() ? nullptr : &per_draw);
+						continue;
+					}
+
+					for (size_t light_index = 0; light_index < lights.size(); ++light_index)
+					{
+						Renderer::FillLightUniformBuffer(lights[light_index], shadow_maps);
+
+						/* 合成开关只对第 0 笔打开；其余笔加覆盖、用后即还（下笔重设） */
+						per_draw.Overrides.emplace_back(ParamType::Int, "u_ComposeAmbientEmission",
+							light_index == 0 ? 1 : 0);
+						if (light_index > 0)
+							per_draw.RasterStateOverride = MakeAdditiveRasterState(material->GetRasterState());
+
+						Renderer::Submit(material, mesh_primitive, &per_draw);
+
+						per_draw.Overrides.pop_back();
+					}
 				}
 			}
 		}

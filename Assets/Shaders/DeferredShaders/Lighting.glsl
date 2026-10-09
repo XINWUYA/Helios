@@ -26,6 +26,7 @@ void main()
 #include "../builtin/Math.glsl"
 #include "../builtin/BRDF.glsl"
 #include "../builtin/ShadowUtils.glsl"
+#include "../builtin/DirectLight.glsl"
 
 struct SVextex2Frag
 {
@@ -54,11 +55,6 @@ uniform int u_ProbeCount = 0;
 uniform vec3 u_ProbePosition0 = vec3(0.0f);
 uniform vec3 u_ProbePosition1 = vec3(0.0f);
 uniform vec3 u_ProbePosition2 = vec3(0.0f);
-
-/* 第一笔光照才合成环境光 / 自发光：
- * 光照按"每光源一笔全屏加法"叠加，ambient + emission 与光源无关，
- * 多光源场景里只能由其中一笔（约定为第一笔）负责，否则会随光源数重复叠加。 */
-layout(location = 0) uniform int u_ComposeAmbientEmission = 0;
 
 /* 逐像素选择最近的探针（只在本帧参与集合内比较） */
 int SelectIBLProbe(vec3 world_pos)
@@ -117,15 +113,6 @@ vec3 EvaluateProbeIBL(int probe, vec3 N, vec3 V, float roughness, float metallic
 	return kd * irradiance * albedo + specular;
 }
 
-/* 平滑范围衰减：距离在 [0, range] 内按 (1 - d/range)^2 衰减，到 range 处归零。
- * 不用物理逆平方 —— 引擎的强度没有单位体系，逆平方在 d→0 时数值发散，
- * 会使贴近光源的表面过曝；"范围窗"形状观感稳定，且与阴影远平面同源。 */
-float RangeAttenuation(float distance, float range)
-{
-	float t = clamp(1.0f - distance / max(range, 1e-4f), 0.0f, 1.0f);
-	return t * t;
-}
-
 /* 调试分流（Diffuse / Specular / Shadow / Indirect）在 DebugShaders/DebugLighting.glsl；
  * 须放在本文件的函数定义之后（它调用 SelectIBLProbe / EvaluateProbeIBL） */
 #include "../DebugShaders/DebugLighting.glsl"
@@ -139,48 +126,12 @@ void main()
 	vec3 n = normalize(gbuffer.WorldNormal);
 	vec3 v = normalize(u_ViewPos - world_pos);
 
-	/* 按光源类型求"指向光源"的向量 l、衰减 attenuation 与阴影因子 shadow */
+	/* 直接光评估（前向 / 延迟共用）：按本笔光源的类型求"指向光源"的向量、
+	 * 衰减与阴影因子 */
 	vec3 l;
-	float attenuation = 1.0f;
-	float shadow = 0.0f;
-
-	if (u_LightType == 0u)
-	{
-		/* 方向光：u_LightDir 为传播方向；仅当该光源负责级联阴影时才采样
-		 * （CascadeCount = 0 表示无级联数据，矩阵是单位阵，采样会得到错误遮挡）。 */
-		l = -normalize(u_LightDir);
-		if (u_CascadeCount > 0u)
-		{
-			vec3 view_pos = (u_ViewMat * vec4(world_pos, 1.0f)).xyz;
-			shadow = CalculateShadow(u_ShadowMap, world_pos, view_pos, n, l);
-		}
-	}
-	else if (u_LightType == 1u)
-	{
-		/* 点光：位置 + 范围衰减 */
-		vec3 to_light = u_LightPos - world_pos;
-		float distance = length(to_light);
-		l = to_light / max(distance, 1e-5f);
-		attenuation = RangeAttenuation(distance, u_PunctualLightParams.x);
-
-		if (u_PunctualShadowParams.y > 0.5f)
-			shadow = CalculatePointShadow(u_ShadowMap, world_pos, u_LightPos);
-	}
-	else
-	{
-		/* 聚光（含未实现类型的兜底，按聚光语义处理）：点光衰减 × 锥角衰减 */
-		vec3 to_light = u_LightPos - world_pos;
-		float distance = length(to_light);
-		l = to_light / max(distance, 1e-5f);
-		attenuation = RangeAttenuation(distance, u_PunctualLightParams.x);
-
-		/* 锥角衰减：轴向（cd=1）满强度，外锥（cd=cosOuter）外归零，内锥到外锥间平滑过渡 */
-		float cd = dot(-l, normalize(u_LightDir));
-		attenuation *= smoothstep(u_PunctualLightParams.z, u_PunctualLightParams.y, cd);
-
-		if (u_PunctualShadowParams.y > 0.5f)
-			shadow = CalculateSpotShadow(u_ShadowMap, world_pos);
-	}
+	float attenuation;
+	float shadow;
+	EvaluateDirectLight(u_ShadowMap, world_pos, n, l, attenuation, shadow);
 
 	/* 模型关闭「接受阴影」时阴影因子归零（延迟管线只能随 G-Buffer 拿到该标记） */
 	shadow *= gbuffer.ReceiveShadow;
@@ -201,7 +152,8 @@ void main()
 
 	lighting_result = direct;
 
-	/* 环境项 + 自发光只由第一笔光照合成（见 u_ComposeAmbientEmission 注释） */
+	/* 环境项 + 自发光只由负责合成的那一笔光照累加
+	 * （见 builtin/DirectLight.glsl 的 u_ComposeAmbientEmission 注释） */
 	if (u_ComposeAmbientEmission > 0)
 	{
 		/* 有反射探针（渲染通道绑定了本帧参与选择的探针子集）时，

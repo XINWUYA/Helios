@@ -207,7 +207,9 @@ namespace Helios
 	mesh_primitive.VertexArray->Bind();
 
 
-		m_pRenderAPI->ApplyRasterState(material->GetRasterState());
+		m_pRenderAPI->ApplyRasterState((per_draw != nullptr && per_draw->RasterStateOverride.has_value())
+			? per_draw->RasterStateOverride.value()
+			: material->GetRasterState());
 
 		if (mesh_primitive.VertexArray->GetIndexBuffer())
 			m_pRenderAPI->DrawIndexed(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray, index_count);
@@ -318,6 +320,9 @@ namespace Helios
 			{
 				const auto* punctual_light = AsPunctualLight(light.get());
 				data.PunctualLightParams.x = punctual_light->GetRange();
+				/* w：阴影投影近平面 —— 采样端把世界单位的阴影偏移折算到 z 空间用
+				 * （见 ShadowUtils.glsl 的 CalculatePointShadow / CalculateSpotShadow） */
+				data.PunctualLightParams.w = kPunctualShadowNearPlane;
 
 				if (light->GetLightType() == LightType::Spot)
 				{

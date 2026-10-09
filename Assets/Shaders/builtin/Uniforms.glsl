@@ -48,7 +48,8 @@ layout(std140, binding = 3) uniform LightUniformBuffer
 	mat4 u_PunctualShadowMat[MAX_PUNCTUAL_SHADOW_FACE];
 	/* x: 阴影面在纹理数组中的起始层；y: 是否投影（0/1）；z: 阴影远平面（= 光源范围）；w: 保留 */
 	vec4 u_PunctualShadowParams;
-	/* x: 光照范围；y: cos(内锥半角)；z: cos(外锥半角)；w: 保留 */
+	/* x: 光照范围；y: cos(内锥半角)；z: cos(外锥半角)；w: 阴影投影近平面（世界单位，
+	 * 采样端把世界单位的阴影偏移折算到 z 空间用） */
 	vec4 u_PunctualLightParams;
 };
 

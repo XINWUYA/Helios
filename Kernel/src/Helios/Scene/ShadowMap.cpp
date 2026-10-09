@@ -23,10 +23,6 @@ namespace Helios
 	{
 		constexpr uint32_t kFallbackCascadeCount = 4;
 
-		/* 点光/聚光阴影投影的近平面：取足够小的值以容纳贴着光源的几何；
-		 * 深度用 Depth32F + Reversed-Z（近处精度高），小近平面不产生可见失真。 */
-		constexpr float kPunctualShadowNear = 0.05f;
-
 		/* 点光立方体各面视锥的半角（90° 全角） */
 		constexpr float kPointLightFaceFov = 90.0f;
 	}
@@ -436,7 +432,7 @@ namespace Helios
 				continue;
 
 			/* 远平面 = 光源范围（与光照衰减同一份数据），超出范围的遮挡物不产生阴影 */
-			const float far_plane = std::max(light->GetRange(), kPunctualShadowNear + 0.01f);
+			const float far_plane = std::max(light->GetRange(), kPunctualShadowNearPlane + 0.01f);
 
 			glm::mat4 light_view_mat;
 			float fov_degrees = kPointLightFaceFov;
@@ -455,7 +451,7 @@ namespace Helios
 			}
 
 			const glm::mat4 light_proj_mat = MakeReversedZProjection(
-				glm::perspective(glm::radians(fov_degrees), 1.0f, kPunctualShadowNear, far_plane));
+				glm::perspective(glm::radians(fov_degrees), 1.0f, kPunctualShadowNearPlane, far_plane));
 			shadow_map->SetLightViewProjectionMat(light_proj_mat * light_view_mat);
 		}
 	}

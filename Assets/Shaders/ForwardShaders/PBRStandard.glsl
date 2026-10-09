@@ -46,6 +46,7 @@ void main()
 #include "../builtin/IBL.glsl"
 #include "../builtin/MaterialCommon.glsl"
 #include "../builtin/ShadowUtils.glsl"
+#include "../builtin/DirectLight.glsl"
 
 struct SVextex2Frag
 {
@@ -128,29 +129,32 @@ void main()
 	vec3 N = normalize(mtl.Normal);
 	vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);
 
-	/* 方向光：u_LightDir 指向光源传播方向，取反得到指向光源的向量 */
-	vec3 L = -normalize(u_LightDir);
-
-	vec3 view_pos = (u_ViewMat * vec4(vert2frag.WorldPosition, 1.0f)).xyz;
-	float shadow = CalculateShadow(u_ShadowMap, vert2frag.WorldPosition, view_pos, N, L);
+	/* 直接光：按本笔光源的类型（方向光 / 点光 / 聚光）求光向、衰减与阴影 */
+	vec3 L;
+	float attenuation;
+	float shadow;
+	EvaluateDirectLight(u_ShadowMap, vert2frag.WorldPosition, N, L, attenuation, shadow);
 	/* 模型关闭「接受阴影」时阴影因子归零 */
 	shadow *= u_ReceiveShadow;
 
 	/* 直接光照 */
 	vec3 direct = max(vec3(0.0f), BRDF(L, V, N, mtl.Metallic, mtl.Roughness, mtl.Albedo));
-	direct *= u_ColorIntensity.rgb * u_ColorIntensity.a;
+	direct *= u_ColorIntensity.rgb * u_ColorIntensity.a * attenuation;
 	direct *= (1.0f - shadow * 0.8f);
 
-	/* 间接光：反射探针的 IBL（u_UseIBL = 1 时由渲染通道按"离物体最近的已烘焙
-	 * 探针"逐绘制绑定环境贴图）；无探针时退回平面环境项 */
-	vec3 ambient;
-	if (u_UseIBL != 0)
-		ambient = max(vec3(0.0f), EvaluateIBL(N, V, mtl.Roughness, mtl.Metallic, mtl.Albedo));
-	else
-		ambient = max(vec3(0.0f), mtl.Ambient * mtl.Albedo * mtl.AO * 0.3f);
-	vec3 emission = mtl.Emission;
+	/* 间接光：反射探针 IBL（u_UseIBL = 1 时逐绘制绑定环境贴图）；没有探针就退回平面环境项。
+	 * 环境项和自发光只在合成的那一笔里累加 —— 其余笔只叠直接光。 */
+	vec3 color = direct;
+	if (u_ComposeAmbientEmission > 0)
+	{
+		vec3 ambient;
+		if (u_UseIBL != 0)
+			ambient = max(vec3(0.0f), EvaluateIBL(N, V, mtl.Roughness, mtl.Metallic, mtl.Albedo));
+		else
+			ambient = max(vec3(0.0f), mtl.Ambient * mtl.Albedo * mtl.AO * 0.3f);
 
-	vec3 color = direct + ambient + emission;
+		color += ambient + mtl.Emission;
+	}
 
 	OutFragColor = vec4(color, 1.0f);
 	ObjectId = u_ObjectId;

@@ -13,6 +13,11 @@ namespace Helios
 	class DeviceShader;
 	class Camera;
 
+	/* 点光 / 聚光阴影投影的近平面（世界单位）：取足够小的值，容得下贴着光源的几何；深度用
+	 * Depth32F + Reversed-Z，近平面小也不会有可见失真。渲染端和采样端（z 空间偏移折算）都以它
+	 * 为唯一来源（经 u_PunctualLightParams.w 下发）。 */
+	inline constexpr float kPunctualShadowNearPlane = 0.05f;
+
 	/* 每个光源对应一个ShadowMap */
 	class ShadowMap
 	{
