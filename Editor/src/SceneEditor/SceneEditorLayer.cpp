@@ -46,9 +46,12 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* 相机先于场景销毁：按登记契约摘除 */
+		/* 相机先于场景销毁：按登记契约摘除（编辑器相机；属性面板的预览相机随
+		 * SetOwnerScene(nullptr) 一并摘除） */
 		if (m_pMainScene)
 			m_pMainScene->RemoveExternalCamera(m_pEditorCamera.get());
+
+		m_SceneHierarchy.SetOwnerScene(nullptr);
 
 		ILayer::OnDetached();
 	}

@@ -4,6 +4,7 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "Helios/Application/Application.h"
 #include "Helios/Application/AssetManager.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/Utils.h"
@@ -426,6 +427,10 @@ namespace Helios
 
 	void SceneHierarchy::SetOwnerScene(const SharedPtr<Scene>& scene)
 	{
+		/* 预览相机登记随场景迁移：先从旧场景摘除（相机生命周期由本面板保证）；
+		 * 新场景上若仍需要预览，下一帧的预览卡会重新登记 */
+		StopCameraPreview();
+
 		m_pOwnerScene = scene;
 		m_SelectedEntity = {};
 
@@ -1300,6 +1305,10 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 相机预览是"逐帧挣取"的：本帧真的画出了预览卡（可见且展开）才置位，
+		 * 帧末结算 —— 换选中、切资源视图、收起卡片都会让预览自然停掉（见 DrawCameraPreviewCard） */
+		m_CameraPreviewWanted = false;
+
 		ImGui::Begin(Panel::kProperties);
 		{
 			/* 句柄非空 ≠ 实体存在（见 Entity::operator bool 的约定）：选中项可能来自
@@ -1323,6 +1332,10 @@ namespace Helios
 			}
 		}
 		ImGui::End();
+
+		/* 本帧没人要预览：停掉预览相机（不再进场景的渲染视图收集） */
+		if (m_IsCameraPreviewActive && !m_CameraPreviewWanted)
+			StopCameraPreview();
 	}
 
 	/* 面板头部：可见性开关（眼睛）+ 实体图标 + 实体名（就地可编辑）+ 右侧「添加组件」。
@@ -2661,6 +2674,106 @@ namespace Helios
 		}
 	}
 
+	/* ==================== 相机预览卡（Camera 组件的附加卡）====================
+	 * 「选中相机 → 看见它拍什么」：画面由工具预览相机渲染（CameraPreview，外部相机登记），
+	 * 本卡只管版式和生命周期。同级平铺（卡片背景走通道、不能嵌套）。 */
+
+	void SceneHierarchy::DrawCameraPreviewCard(Entity entity, CameraComponent& component)
+	{
+		PROFILE_FUNCTION();
+
+		const SharedPtr<Camera>& camera = component.m_Camera;
+		if (camera == nullptr || m_pOwnerScene == nullptr)
+			return;
+
+		ImGui::PushID("##CameraPreview");
+		const PanelChrome::Card card = PanelChrome::BeginCard("Camera Preview", Icons::Id::Camera);
+
+		if (card.Open)
+		{
+			/* 画面尺寸：按相机宽高比铺满卡内容宽，高度封顶（过高的画面挤掉下面的组件卡） */
+			constexpr float kMaxImageHeight = 200.0f;
+
+			const float aspect = camera->GetAspectRatio();
+			const float avail_width = ImGui::GetContentRegionAvail().x;
+			float image_width = avail_width;
+			float image_height = (aspect > 0.0f) ? avail_width / aspect : avail_width;
+			if (aspect > 0.0f && image_height > kMaxImageHeight)
+			{
+				image_height = kMaxImageHeight;
+				image_width = image_height * aspect;
+			}
+
+			/* 渲染尺寸按物理像素（Retina 上不糊，与场景视口同一笔账）；
+			 * 无应用上下文（检查程序）按 1 倍。 */
+			float content_scale = 1.0f;
+			if (Application* app = Application::Instance())
+				content_scale = app->GetWindow().GetContentScale();
+			const glm::uvec2 render_size = ClampRenderSize(image_width, image_height, content_scale);
+
+			/* 窗口收起 / 停靠标签页被挡住（SkipItems）时不要画面：
+			 * 预览不该在看不见的地方空转（本帧不置请求，帧末结算即停） */
+			if (!ImGui::GetCurrentWindow()->SkipItems)
+			{
+				m_CameraPreviewWanted = true;
+				SyncCameraPreview(entity, camera, render_size);
+			}
+
+			/* 本帧渲染的输出（场景渲染在 OnUpdate 里，先于 UI 帧；属性面板画的就是它）。
+			 * UV 不翻转：视图纹理的行序与场景视口一致（见 SceneEditorLayer 的视口贴图）。 */
+			const SharedPtr<DeviceTexture> texture = (m_pCameraPreview != nullptr)
+				? m_pCameraPreview->GetRenderView()->GetRenderTarget() : nullptr;
+			if (texture != nullptr)
+			{
+				ImGui::Image((ImTextureID)texture.get(), ImVec2(image_width, image_height),
+					ImVec2(0, 1), ImVec2(1, 0));
+			}
+			else
+			{
+				/* 还没有画面（首帧 / 无图形上下文）：占位说明，同帧起画面就绪 */
+				ImGuiExt::DrawCommonTextUI("Preview", "starting...");
+			}
+		}
+
+		PanelChrome::EndCard(card);
+		ImGui::PopID();
+	}
+
+	void SceneHierarchy::SyncCameraPreview(Entity entity, const SharedPtr<Camera>& camera,
+		const glm::uvec2& render_size)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_pOwnerScene == nullptr || camera == nullptr)
+			return;
+
+		if (m_pCameraPreview == nullptr)
+			m_pCameraPreview = CreateUniquePtr<CameraPreview>();
+
+		/* 首次请求：登记为外部相机（此后每帧随场景相机一起被收集渲染） */
+		if (!m_IsCameraPreviewActive)
+		{
+			m_pOwnerScene->AddExternalCamera(m_pCameraPreview.get());
+			m_IsCameraPreviewActive = true;
+		}
+
+		m_pCameraPreview->SyncFrom(*camera, m_pOwnerScene->GetWorldTransform(entity),
+			render_size.x, render_size.y);
+	}
+
+	void SceneHierarchy::StopCameraPreview()
+	{
+		PROFILE_FUNCTION();
+
+		if (!m_IsCameraPreviewActive)
+			return;
+
+		if (m_pOwnerScene != nullptr && m_pCameraPreview != nullptr)
+			m_pOwnerScene->RemoveExternalCamera(m_pCameraPreview.get());
+
+		m_IsCameraPreviewActive = false;
+	}
+
 	/* ==================== 材质资产编辑卡（.mtl 的资源详情）====================
 	 * 资源浏览器选中 .mtl 时画在详情卡后面（每条目一张）。编辑只落编辑缓冲，点了 Apply 才
 	 * 序列化回文件 —— 没保存的改动不影响场景（Model 槽位读的是加载时那份）。 */
@@ -3032,10 +3145,12 @@ namespace Helios
 			ImGui::PushID(static_cast<int>(desc.Type.hash_code()));
 			DrawComponentBlock(desc, m_SelectedEntity, component);
 
-			/* Model 的材质卡：每槽一张，排在组件卡之后同级平铺
-			 * （卡片背景走绘制通道、通道不可嵌套 —— 详情卡画不进组件卡里）。 */
+			/* Model 的材质卡 / Camera 的预览卡：各自排在组件卡之后同级平铺
+			 * （卡片背景走绘制通道、通道不可嵌套 —— 附加卡画不进组件卡里）。 */
 			if (desc.Type == std::type_index(typeid(ModelComponent)))
 				DrawModelMaterialCards(m_SelectedEntity, *static_cast<ModelComponent*>(component));
+			else if (desc.Type == std::type_index(typeid(CameraComponent)))
+				DrawCameraPreviewCard(m_SelectedEntity, *static_cast<CameraComponent*>(component));
 			ImGui::PopID();
 		}
 	}
