@@ -38,6 +38,9 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 还原上次关闭时的停靠前台页签：须在任何窗口提交之前（节点回写读当前焦点窗口） */
+		m_LayoutRestore.Update();
+
 		/* 菜单（含 DockSpace 宿主） */
 		ShowMenuUI();
 		/* 资源管理窗口 */

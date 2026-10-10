@@ -5,6 +5,7 @@
 #include "EditorContext.h"
 #include "EditorResourceBrowser.h"
 #include "LogPanel.h"
+#include "PanelLayoutRestore.h"
 
 namespace Helios
 {
@@ -56,6 +57,8 @@ namespace Helios
 		LogPanel m_LogPanel;
 		/* 日志窗口是否显示（View 菜单 / 窗口右上角关闭按钮同源） */
 		bool m_IsLogVisible{ true };
+		/* 上次关闭时的停靠前台页签恢复（等启动首帧的聚焦级联过去后逐帧应用） */
+		PanelLayoutRestore m_LayoutRestore;
 		/* 用户请求重置布局（View → Reset Layout），下一帧生效 */
 		bool m_ResetLayoutRequested{ false };
 		/* 实时样式编辑器（Options 菜单 / 工具栏选项开关） */
