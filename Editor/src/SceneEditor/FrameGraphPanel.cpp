@@ -128,12 +128,15 @@ namespace Helios
 			ImGui::TextUnformatted(clipped.c_str());
 		}
 
-		/* 快照纹理的采样 UV：离屏纹理按引擎约定底行在前 → V 翻转显示（(0,1)/(1,0)）；
-		 * 默认目标快照（TopDown）顶行在前 → 不翻转（(0,0)/(1,1)） */
-		void SnapshotImageUVs(const FrameGraphCapture::Output& output, ImVec2& uv0, ImVec2& uv1)
+		/* 快照纹理的采样 UV：默认朝向 = 输出行序（TopDown，顶行在前不翻）；工具行"反转"
+		 * 开关与行序做异或（两者相同才翻）—— 真值表：顶行在前且未反转 → 不翻转
+		 * （(0,0)/(1,1)），其余组合 V 翻转（(0,1)/(1,0)） */
+		void SnapshotImageUVs(const FrameGraphCapture::Output& output, bool flip_vertical,
+			ImVec2& uv0, ImVec2& uv1)
 		{
-			uv0 = output.TopDown ? ImVec2(0.0f, 0.0f) : ImVec2(0.0f, 1.0f);
-			uv1 = output.TopDown ? ImVec2(1.0f, 1.0f) : ImVec2(1.0f, 0.0f);
+			const bool flip = (flip_vertical == output.TopDown);
+			uv0 = flip ? ImVec2(0.0f, 1.0f) : ImVec2(0.0f, 0.0f);
+			uv1 = flip ? ImVec2(1.0f, 0.0f) : ImVec2(1.0f, 1.0f);
 		}
 
 		/* 精确坐标的线段（PathLineTo + PathStroke）。别用 AddLine：它给端点各加 (0.5, 0.5) 的对齐偏移
@@ -421,7 +424,7 @@ namespace Helios
 
 				/* 切换芯片：自绘的圆角开关（左端状态圆点 + 文字）—— 激活 = 强调色
 				 * 淡底 + 实心强调色圆点，未激活 = 控件底色 + 暗色圆点 */
-				const auto toggle_chip = [&](const char* label, bool* value)
+				const auto toggle_chip = [&](const char* label, bool* value, const char* tooltip = nullptr)
 				{
 					const ImVec2 label_size = ImGui::CalcTextSize(label);
 					const float dot_radius = 3.0f;
@@ -455,6 +458,9 @@ namespace Helios
 						ImGui::GetColorU32(active ? EditorTheme::Token::Text : EditorTheme::Token::TextDim),
 						label);
 
+					if (tooltip != nullptr && chip_hovered)
+						ImGui::SetTooltip("%s", tooltip);
+
 					if (clicked)
 						*value = !*value;
 				};
@@ -484,6 +490,42 @@ namespace Helios
 					if (tooltip != nullptr && chip_hovered)
 						ImGui::SetTooltip("%s", tooltip);
 					return clicked;
+				};
+
+				/* 图标切换芯片：切换类开关但内容只有图标（预览垂直翻转）—— 外观
+				 * 与切换芯片同族（同高 / 圆角 / 1px 描边，"激活 = 强调色淡底 +
+				 * 强调色描边"），悬停提示交代含义。 */
+				const auto toggle_icon_chip = [&](Icons::Id icon_id, bool* value, const char* tooltip)
+				{
+					const float width = toolbar_height;
+					const ImVec2 pos = ImGui::GetCursorScreenPos();
+					ImGui::PushID(static_cast<int>(icon_id));
+					const bool clicked = ImGui::InvisibleButton("##toggle_icon", ImVec2(width, toolbar_height));
+					const bool chip_hovered = ImGui::IsItemHovered();
+					ImGui::PopID();
+					const bool active = *value;
+
+					ImDrawList* chip_draw_list = ImGui::GetWindowDrawList();
+					chip_draw_list->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + toolbar_height),
+						ImGui::GetColorU32(active
+							? EditorTheme::WithAlpha(EditorTheme::Token::Accent, chip_hovered ? 0.26f : 0.17f)
+							: (chip_hovered ? EditorTheme::Token::Neutral5 : EditorTheme::Token::Neutral4)),
+						toolbar_style.FrameRounding);
+					chip_draw_list->AddRect(pos, ImVec2(pos.x + width, pos.y + toolbar_height),
+						ImGui::GetColorU32(active
+							? EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.65f)
+							: EditorTheme::Token::Border),
+						toolbar_style.FrameRounding, 0, 1.0f);
+					Icons::Draw(chip_draw_list, icon_id,
+						ImVec2(pos.x + width * 0.5f, pos.y + toolbar_height * 0.5f),
+						toolbar_height * 0.64f,
+						ImGui::GetColorU32(chip_hovered ? EditorTheme::Token::Text
+							: EditorTheme::Token::TextLabel));
+
+					if (tooltip != nullptr && chip_hovered)
+						ImGui::SetTooltip("%s", tooltip);
+					if (clicked)
+						*value = !*value;
 				};
 
 				/* 组间分隔：一条 1px 细竖线（上下各留 3px） */
@@ -547,10 +589,12 @@ namespace Helios
 
 				group_divider();
 
-				/* 组 2：抓取开关 / 剔除显示 / 适配视图 */
+				/* 组 2：抓取开关 / 剔除显示 / 预览垂直翻转（独立图标开关）/ 适配视图 */
 				toggle_chip("Capture", &m_CaptureEnabled);
 				ImGui::SameLine(0.0f, 6.0f);
 				toggle_chip("Show Culled", &m_ShowCulled);
+				ImGui::SameLine(0.0f, 6.0f);
+				toggle_icon_chip(Icons::Id::FlipVertical, &m_PreviewFlip, "Flip previews vertically");
 				ImGui::SameLine(0.0f, 6.0f);
 				if (action_icon_chip(Icons::Id::FitView, "Fit to view"))
 					RequestFit();
@@ -568,17 +612,34 @@ namespace Helios
 						++resource_count;
 				}
 
-				/* 右端：搜索框（放大镜前置）+ 图规模统计，二者作为一个块贴行右缘 */
+				/* 右端：搜索框（放大镜前置）+ 图规模统计，二者作为一个块贴行右缘。
+				 * 空间紧时统计换紧凑写法（"2 pass · 1 res"）—— 优先保住整行不被裁 */
 				const std::string stats_text = std::to_string(pass_count) + (pass_count == 1 ? " pass \xc2\xb7 " : " passes \xc2\xb7 ")
 					+ std::to_string(resource_count) + (resource_count == 1 ? " resource" : " resources")
 					+ (m_CaptureEnabled ? "" : " \xc2\xb7 capture paused");
-				const float stats_width = ImGui::CalcTextSize(stats_text.c_str()).x;
 				const float left_end = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
 				const float content_max = ImGui::GetContentRegionMax().x;
-				/* 搜索框宽度自适应：优先 170，行内空间不足时压缩到 90（统计不被挤出面板） */
-				const float search_width = std::clamp(
-					content_max - left_end - toolbar_style.ItemSpacing.x * 2.0f - stats_width,
-					90.0f, 170.0f);
+				const float search_floor = 72.0f;
+
+				float stats_width = ImGui::CalcTextSize(stats_text.c_str()).x;
+				std::string stats_shown = stats_text;
+				float raw_search = content_max - left_end - toolbar_style.ItemSpacing.x * 2.0f - stats_width;
+				if (raw_search < search_floor)
+				{
+					stats_shown = std::to_string(pass_count) + " pass \xc2\xb7 "
+						+ std::to_string(resource_count) + " res"
+						+ (m_CaptureEnabled ? "" : " \xc2\xb7 paused");
+					const float compact_width = ImGui::CalcTextSize(stats_shown.c_str()).x;
+					if (compact_width < stats_width)
+					{
+						stats_width = compact_width;
+						raw_search = content_max - left_end - toolbar_style.ItemSpacing.x * 2.0f - stats_width;
+					}
+				}
+
+				/* 搜索框宽度自适应：优先 170，行内空间不足时压缩到 72（刚够提示语开头）；
+				 * 比这更挤的窗口才轮到裁切 */
+				const float search_width = std::clamp(raw_search, search_floor, 170.0f);
 				const float right_width = search_width + toolbar_style.ItemSpacing.x + stats_width;
 				const float right_start = std::max(left_end + toolbar_style.ItemSpacing.x,
 					content_max - right_width);
@@ -593,7 +654,7 @@ namespace Helios
 
 				ImGui::SameLine();
 				ImGui::AlignTextToFramePadding();
-				ImGui::TextColored(EditorTheme::Token::TextDim, "%s", stats_text.c_str());
+				ImGui::TextColored(EditorTheme::Token::TextDim, "%s", stats_shown.c_str());
 
 				ImGui::Dummy(ImVec2(0.0f, 2.0f));
 
@@ -641,8 +702,9 @@ namespace Helios
 		std::snprintf(m_SearchBuffer, sizeof(m_SearchBuffer), "%s", filter.c_str());
 	}
 
-	/* 依赖图画布：Pass 行布局 —— 每个 Pass 一行（行头 = 整行背景区域，名字独占首行；输出资源卡
-	 * 叠在区域内，缩略图 = 执行完当刻的快照）。Pass 和输出之间不画线（包含即语义）；资源只保留
+	/* 依赖图画布：Pass 行布局 —— 每个 Pass 一行、行序 = 注册序（= 执行序，与 GPU 计时面板一致；
+	 * 行头 = 整行背景区域，名字独占首行；输出资源卡叠在区域内，缩略图 = 执行完当刻的快照）。
+	 * Pass 和输出之间不画线（包含即语义）；资源只保留
 	 * 跨 Pass 的连线：相邻行直连、其余绕左侧总线。同名资源副本跨行列对齐（虚线关联）。 */
 	void FrameGraphPanel::DrawGraphCanvas(FrameGraph& frame_graph, float canvas_height)
 	{
@@ -785,7 +847,11 @@ namespace Helios
 				outputs_of[producer].push_back(resource_name);
 		}
 
-		/* ---- 行序：Pass 间拓扑深度（经资源的产出 / 消费链松弛；同深度保持图内顺序） ---- */
+		/* ---- 行序：注册序 = 执行序（图的执行按注册序跑 —— `m_RenderPassNodes` 剔除时只做
+		 * 稳定分区、保持注册序；AddPass 即注册，故 `GetNodes()` 里 Pass 的相对顺序就是执行
+		 * 顺序，与 GPU 计时面板一致）。不做拓扑深度重排：深度松弛经"产出 / 消费"链传播，
+		 * 看不见就地写入的叠加链（升采样回叠 / 天空叠进光照结果 —— 写走输入绑定、不算产出），
+		 * 会把 Composite、AxisPass 这类"链尾"排进 Bloom 链中间。剔除节点留在自己的注册槽位。 ---- */
 		std::vector<std::pair<std::string, bool>> visible_passes; /* (名字, 是否生效) */
 		for (const auto& node : graph.GetNodes())
 		{
@@ -793,43 +859,6 @@ namespace Helios
 			if (ref.IsPass && (m_ShowCulled || ref.IsValid))
 				visible_passes.emplace_back(ref.Name, ref.IsValid);
 		}
-
-		std::unordered_map<std::string, int> pass_depth;
-		for (const auto& [pass_name, pass_valid] : visible_passes)
-			pass_depth[pass_name] = 0;
-		for (size_t iteration = 0; iteration < visible_passes.size(); ++iteration)
-		{
-			bool changed = false;
-			for (const auto& [resource_name, producers] : producers_of)
-			{
-				const auto consumers_iter = consumers_of.find(resource_name);
-				if (consumers_iter == consumers_of.end())
-					continue;
-
-				for (const std::string& producer : producers)
-				{
-					const auto producer_depth = pass_depth.find(producer);
-					if (producer_depth == pass_depth.end())
-						continue;
-
-					for (const std::string& consumer : consumers_iter->second)
-					{
-						const auto consumer_depth = pass_depth.find(consumer);
-						if (consumer_depth != pass_depth.end()
-							&& consumer_depth->second < producer_depth->second + 1)
-						{
-							consumer_depth->second = producer_depth->second + 1;
-							changed = true;
-						}
-					}
-				}
-			}
-			if (!changed)
-				break;
-		}
-		std::stable_sort(visible_passes.begin(), visible_passes.end(),
-			[&](const auto& left, const auto& right)
-			{ return pass_depth[left.first] < pass_depth[right.first]; });
 
 		/* ---- 建卡：Pass 背景区域（行头与背景合并）+ 区域内的资源卡 ---- */
 		for (const auto& [pass_name, pass_valid] : visible_passes)
@@ -901,25 +930,65 @@ namespace Helios
 			lanes.push_back(std::move(lane));
 		}
 
-		/* ---- 行布局（图空间）：资源列对齐 —— 同名资源共享同一列（列按资源名首次出现分配、列宽取
-		 * 最宽的副本），副本跨行严格对齐；标题带不占纵列，资源列从区域左内沿起排；背景区域统一宽度。 */
-		std::vector<std::string> resource_columns;          /* 列序 → 资源名 */
-		std::unordered_map<std::string, size_t> column_of;  /* 资源名 → 列号 */
+		/* ---- 行布局（图空间）：资源列 —— 同名资源共享同一列（副本跨行严格对齐、虚线竖直）；
+		 * 其余名字每行从最左起排，取最左可用列 —— 不同名字可共用一列，只要各自出现的行区间
+		 * 不重叠（同行不叠卡；同名副本跨行的虚线也不会横穿别家的卡）。逐层展开的数组后排层
+		 * 因此不会把后面行的资源挤到数组末尾之后。列宽取该列最宽的卡；标题带不占纵列，
+		 * 资源列从区域左内沿起排；背景区域统一宽度。 */
+		std::unordered_map<std::string, std::pair<size_t, size_t>> lane_span_of; /* 名字 → 出现行区间 */
+		std::vector<std::string> resource_names;                                 /* 首现顺序 */
 		for (const LaneView& lane : lanes)
 		{
 			for (const size_t index : lane.ResourceIndices)
 			{
 				const std::string& name = nodes[index].Name;
-				if (column_of.find(name) == column_of.end())
+				const size_t lane_index = nodes[index].LaneIndex;
+				const auto iter = lane_span_of.find(name);
+				if (iter == lane_span_of.end())
 				{
-					column_of[name] = resource_columns.size();
-					resource_columns.push_back(name);
+					lane_span_of[name] = std::make_pair(lane_index, lane_index);
+					resource_names.push_back(name);
+				}
+				else
+				{
+					iter->second.first = std::min(iter->second.first, lane_index);
+					iter->second.second = std::max(iter->second.second, lane_index);
 				}
 			}
 		}
 
-		std::vector<float> column_width(resource_columns.size(), 0.0f);
-		std::vector<float> column_center(resource_columns.size(), 0.0f);
+		std::vector<std::vector<std::string>> column_names; /* 列 → 已占用的名字（复用冲突检查） */
+		std::unordered_map<std::string, size_t> column_of;  /* 资源名 → 列号 */
+		for (const std::string& name : resource_names)
+		{
+			const std::pair<size_t, size_t>& span = lane_span_of[name];
+			size_t target_column = column_names.size(); /* 兜底：没有可用列就新开一列 */
+			for (size_t column = 0; column < column_names.size(); ++column)
+			{
+				bool clash = false;
+				for (const std::string& other : column_names[column])
+				{
+					const std::pair<size_t, size_t>& other_span = lane_span_of[other];
+					if (span.first <= other_span.second && other_span.first <= span.second)
+					{
+						clash = true;
+						break;
+					}
+				}
+				if (!clash)
+				{
+					target_column = column;
+					break;
+				}
+			}
+			if (target_column == column_names.size())
+				column_names.emplace_back();
+			column_names[target_column].push_back(name);
+			column_of[name] = target_column;
+		}
+
+		std::vector<float> column_width(column_names.size(), 0.0f);
+		std::vector<float> column_center(column_names.size(), 0.0f);
 		for (const LaneView& lane : lanes)
 		{
 			for (const size_t index : lane.ResourceIndices)
@@ -931,7 +1000,7 @@ namespace Helios
 		{
 			/* 第一列左缘 = 区域左内边（x = 0）：标题带之下就是资源内容行 */
 			float x_cursor = 0.0f;
-			for (size_t column = 0; column < resource_columns.size(); ++column)
+			for (size_t column = 0; column < column_names.size(); ++column)
 			{
 				column_center[column] = x_cursor + column_width[column] * 0.5f;
 				x_cursor += column_width[column] + kNodeGap;
@@ -1734,9 +1803,16 @@ namespace Helios
 					image_bottom - image_height);
 				node.ImageScreenMax = ImVec2(node.ImageScreenMin.x + image_half_w * 2.0f, image_bottom);
 
-				/* 默认目标快照顶行在前（不翻转 V）；离屏纹理底行在前（翻转） */
+				/* 显示朝向 = 输出行序（见 SnapshotImageUVs）+ 工具行"反转"开关 */
 				ImVec2 image_uv0, image_uv1;
-				SnapshotImageUVs(*node.Image, image_uv0, image_uv1);
+				SnapshotImageUVs(*node.Image, m_PreviewFlip, image_uv0, image_uv1);
+
+				/* 诊断：预览纹理为空 / 未加载时留痕 —— 这种帧的图会退化为字体图集
+				 * 显示（画面上表现为"图闪成一片字形"），遇到即是有力证据 */
+				if (node.Image->Preview == nullptr || !node.Image->Preview->IsLoaded())
+					EDITOR_LOG_ERROR("FrameGraphPanel: invalid preview texture ({}, ptr={}) - image falls back to font atlas",
+						node.Image->Name, static_cast<const void*>(node.Image->Preview.get()));
+
 				draw_list->AddImage((ImTextureID)node.Image->Preview.get(),
 					node.ImageScreenMin, node.ImageScreenMax, image_uv0, image_uv1,
 					ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, node_display_dim)));
@@ -1864,7 +1940,7 @@ namespace Helios
 
 				ImGui::BeginTooltip();
 				ImVec2 hover_uv0, hover_uv1;
-				SnapshotImageUVs(output, hover_uv0, hover_uv1);
+				SnapshotImageUVs(output, m_PreviewFlip, hover_uv0, hover_uv1);
 				ImGui::Image((ImTextureID)output.Preview.get(), FitBox(kHoverImageBox, aspect),
 					hover_uv0, hover_uv1);
 				ImGui::TextUnformatted(output.Name.c_str());
@@ -1914,7 +1990,7 @@ namespace Helios
 							ImGui::PushID(static_cast<int>(i));
 							ImGui::BeginGroup();
 							ImVec2 cell_uv0, cell_uv1;
-							SnapshotImageUVs(output, cell_uv0, cell_uv1);
+							SnapshotImageUVs(output, m_PreviewFlip, cell_uv0, cell_uv1);
 							ImGui::Image((ImTextureID)output.Preview.get(), image_size, cell_uv0, cell_uv1);
 							DrawClippedCaption(output.Name, kCellWidth);
 							ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);

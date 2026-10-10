@@ -40,8 +40,8 @@ namespace Helios
 			FrameGraph,
 			/* 面板/分组：日志窗口用 */
 			Log,
-			/* 面板工具动作：适配视图（把整张图收进视野） */
-			FitView,
+			/* 面板工具动作：适配视图（把整张图收进视野）/ 预览垂直翻转（Frame Graph 的镜像开关） */
+			FitView, FlipVertical,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
 			Directory, File, FileImage, FileScene, FileMtlGraph, FileShader, FileModel, FileMaterial, FileProbe,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */

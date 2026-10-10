@@ -176,6 +176,10 @@ namespace Helios
         ImTextureID last_texture_id = nullptr;
         /* 当前登记的着色器：默认 UI 变体，绘制深度纹理时切到深度变体（见纹理绑定处） */
         DeviceShader* bound_shader = m_UIShader.get();
+        /* 诊断（临时）：本帧"FrameGraph 资源节点图"（预览 RT，名字前缀 FrameGraphCapture/）
+         * 的实际绑定记录——缩放闪烁复现时据此从日志区分"图绑的是预览 RT 还是字体图集" */
+        int frame_graph_image_binds = 0;
+        std::string frame_graph_image_names;
 
         for (int n = 0; n < draw_data->CmdListsCount; n++)
         {
@@ -232,6 +236,23 @@ namespace Helios
 
                         if (texture)
                         {
+                            /* 诊断：纹理未成功创建（加载失败/对象失效）时绑定会静默失败，
+                             * 纹理槽残留上一条命令的绑定（常是字体图集）——这种帧的图会
+                             * 显示成字体合图；遇到即是有力证据 */
+                            if (!texture->IsLoaded())
+                                CORE_LOG_ERROR("ImGuiRenderer: binding an unloaded texture ({}); slot keeps previous texture",
+                                    texture->GetDebugName());
+                            /* 诊断：资源节点的图（预览 RT）绑定时登记实际绑定的 RT 名 */
+                            if (texture->GetDebugName().compare(0, 18, "FrameGraphCapture/") == 0)
+                            {
+                                ++frame_graph_image_binds;
+                                if (frame_graph_image_names.size() < 160)
+                                {
+                                    if (!frame_graph_image_names.empty())
+                                        frame_graph_image_names += " ";
+                                    frame_graph_image_names += texture->GetDebugName();
+                                }
+                            }
                             texture->Bind(0);
                         }
 
@@ -272,6 +293,16 @@ namespace Helios
 
                 local_index_offset += pcmd->ElemCount;
             }
+        }
+
+        /* 诊断（临时）：计数只在与上一帧不同时输出——稳态静默，闪烁（预览 RT 与
+         * 字体图集来回切）时逐切换留痕。0 次 = 本帧没绑任何预览 RT（面板未显示 / 无图） */
+        if (frame_graph_image_binds != m_DebugLastFrameGraphBinds)
+        {
+            m_DebugLastFrameGraphBinds = frame_graph_image_binds;
+            CORE_LOG_INFO("ImGui capture binds: {} [{}]",
+                frame_graph_image_binds,
+                frame_graph_image_names.empty() ? "-" : frame_graph_image_names);
         }
 
         m_VertexArray->Unbind();

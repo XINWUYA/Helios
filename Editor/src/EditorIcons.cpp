@@ -1023,6 +1023,37 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.053f), mint);
 		}
 
+		/* 预览垂直翻转（Frame Graph 工具行的镜像开关）：水平镜像轴（虚线）上下两块
+		 * 互为镜像的三角块 —— 上块紫调（当前朝向）、下块藏青调（翻转后的朝向），
+		 * 轴上中心一枚薄荷轴点。 */
+		void DrawFlipVertical(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 镜像轴：虚线（"3 3"节奏 —— 小尺寸下短划不糊成点噪；中心一格留空给轴点，
+			 * 与 light-point 的外圈虚线同族） */
+			constexpr float dash_on = 3.0f / 32.0f;
+			constexpr float dash_cycle = 3.0f / 32.0f * 2.0f;
+			for (float x = 5.0f / 32.0f; x < 26.0f / 32.0f; x += dash_cycle)
+				dl->AddLine(c.At(x, 0.5f), c.At(x + dash_on, 0.5f), PaletteColor(color, kViolet), t);
+
+			static constexpr float kTop[3][2] = {
+				{ 9.0f / 32.0f, 5.0f / 32.0f }, { 23.0f / 32.0f, 5.0f / 32.0f }, { 9.0f / 32.0f, 14.5f / 32.0f }
+			};
+			FillPoly(dl, c, kTop, PaletteColor(color, kViolet, 0.22f));
+			StrokePolyline(dl, c, kTop, t, PaletteColor(color, kViolet), true);
+
+			static constexpr float kBottom[3][2] = {
+				{ 9.0f / 32.0f, 27.0f / 32.0f }, { 23.0f / 32.0f, 27.0f / 32.0f }, { 9.0f / 32.0f, 17.5f / 32.0f }
+			};
+			FillPoly(dl, c, kBottom, PaletteColor(color, kMint, 0.20f));
+			StrokePolyline(dl, c, kBottom, t, color, true);
+
+			/* 轴点：镜像中心（薄荷芯，落在留空的半格上） */
+			dl->AddCircleFilled(c.At(0.5f, 0.5f), c.Len(0.05f), PaletteColor(color, kMint));
+		}
+
 		/* ---- 内容（资源浏览器）----
 		 * 文件夹管"在哪"、文件图标管"是什么"；双色调：外形描边 + 主体低透明度同色（缩略图网格
 		 * 放到 100px 也不显单薄）。 */
@@ -1557,7 +1588,7 @@ namespace Helios::Icons
 			"translate", "rotate", "scale",
 			"play", "stop", "live", "record", "previous-frame", "next-frame", "peak", "valley", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
 			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
-			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "log", "fit-view",
+			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "log", "fit-view", "flip-vertical",
 			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
 			"file-material", "file-probe", "gizmos", "grid", "world-axis", "debug-view",
 			"albedo", "normal", "roughness", "metallic", "specular-color", "ambient-occlusion", "emission", "ambient",
@@ -2276,6 +2307,7 @@ namespace Helios::Icons
 			{ "FrameGraph",        &DrawFrameGraph,         0.93f },
 			{ "Log",               &DrawLog,                0.93f },
 			{ "FitView",           &DrawFitView,            0.90f },
+			{ "FlipVertical",      &DrawFlipVertical,       0.97f },
 			{ "Directory",         &DrawDirectory,          0.86f },
 			{ "File",              &DrawFile,               0.86f },
 			{ "FileImage",         &DrawFileImage,          0.86f },

@@ -87,5 +87,9 @@ namespace Helios
 
         /* 投影矩阵 */
         glm::mat4 m_ProjectionMatrix{ 1.0f };
+
+        /* 诊断（临时）：上一帧的"帧图绑定"计数；只在与本帧不同时打日志（稳态静默）。
+         * 0 = 起始假设"无图"，首帧无图不打；见 RenderDrawData 末尾 */
+        int m_DebugLastFrameGraphBinds{ 0 };
     };
 }
