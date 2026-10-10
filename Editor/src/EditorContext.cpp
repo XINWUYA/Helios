@@ -40,6 +40,12 @@ namespace Helios
 			layer->ImportScene();
 	}
 
+	void EditorContext::OpenScene(const std::string& path)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->OpenScene(path);
+	}
+
 	void EditorContext::SaveScene()
 	{
 		if (auto* layer = GetSceneLayer())

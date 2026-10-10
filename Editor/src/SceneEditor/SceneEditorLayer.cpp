@@ -292,13 +292,7 @@ namespace Helios
 		/* 场景文件 */
 		if (extension == ".scn")
 		{
-			const std::string scene_path = PathToUtf8(path);
-			EDITOR_LOG_DEBUG("Import scene file: {}.", scene_path);
-
-			SharedPtr<Scene> new_scene = CreateSharedPtr<Scene>();
-			if (new_scene->Deserializer(scene_path))
-				SetActiveScene(new_scene, scene_path);
-
+			OpenScene(PathToUtf8(path));
 			return;
 		}
 
@@ -379,6 +373,20 @@ namespace Helios
 		SetActiveScene(CreateSharedPtr<Scene>(), std::string());
 	}
 
+	/* 打开场景文件：加载进一个新场景，成功才切换（失败不动当前场景）。
+	 * 对话框 / 拖入 / 资源浏览器双击三条入口共用这一处，行为保持一致。 */
+	void SceneEditorLayer::OpenScene(const std::string& path)
+	{
+		PROFILE_FUNCTION();
+
+		SharedPtr<Scene> scene = CreateSharedPtr<Scene>();
+		if (!scene->Deserializer(path))
+			return;
+
+		EDITOR_LOG_INFO("Open scene: {}.", path);
+		SetActiveScene(scene, path);
+	}
+
 	void SceneEditorLayer::ImportScene()
 	{
 		PROFILE_FUNCTION();
@@ -387,8 +395,7 @@ namespace Helios
 		if (file_path.empty())
 			return;
 
-		m_pMainScene->Deserializer(file_path);
-		SetActiveScene(m_pMainScene, file_path);
+		OpenScene(file_path);
 	}
 
 	void SceneEditorLayer::SaveScene()

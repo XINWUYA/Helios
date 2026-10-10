@@ -26,6 +26,9 @@ namespace Helios
 		void NewScene();
 		/* 导入场景：通过弹窗找到指定场景文件并打开 */
 		void ImportScene();
+		/* 打开场景文件：加载进一个新场景，成功才切换 ——
+		 * 导入对话框 / 拖入 / 资源浏览器双击三条入口共用这一处。 */
+		void OpenScene(const std::string& path);
 		/* 保存场景 */
 		void SaveScene();
 		/* 保存场景到指定路径 */

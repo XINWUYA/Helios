@@ -2329,8 +2329,9 @@ namespace Helios
 							m_PressSkipsSlowClick = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 						}
 
-						/* 快速双击的第二击：文件夹 = 进去，文件 = 就地改名。注意：带修饰键的双击不算"打开" ——
-						 * Ctrl / Shift 连点同一个文件夹是在加选 / 移出，两次落在同一格被判成双击会意外进目录（选择被清空）。 */
+						/* 快速双击的第二击：文件夹 = 进去，场景文件 = 打开，其余文件 = 就地改名。
+						 * 注意：带修饰键的双击不算"打开" —— Ctrl / Shift 连点同一个文件夹是在加选 / 移出，
+						 * 两次落在同一格被判成双击会意外进目录（选择被清空）。 */
 						if (!ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper
 							&& ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 						{
@@ -2338,6 +2339,12 @@ namespace Helios
 							{
 								ClearRenameCandidate();
 								SetCurrentNode(child_node);
+							}
+							else if (child_node->Type == FileType::Scene && m_SceneOpenSink.Open)
+							{
+								/* 双击是"用"：打开场景；.scn 的改名留给慢双击 / 右键菜单 */
+								ClearRenameCandidate();
+								m_SceneOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
 							}
 							else
 							{
@@ -2552,7 +2559,7 @@ namespace Helios
 					m_PressSkipsSlowClick = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 				}
 
-				/* 快速双击的第二击：文件夹 = 进去、文件 = 就地改名（见网格里那段说明）；
+				/* 快速双击的第二击：文件夹 = 进去、场景文件 = 打开、其余文件 = 就地改名（见网格里那段说明）；
 				 * 带修饰键的双击是加选 / 移出，不是"打开" */
 				if (!ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper
 					&& ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
@@ -2561,6 +2568,12 @@ namespace Helios
 					{
 						ClearRenameCandidate();
 						SetCurrentNode(child_node);
+					}
+					else if (child_node->Type == FileType::Scene && m_SceneOpenSink.Open)
+					{
+						/* 双击是"用"：打开场景；.scn 的改名留给慢双击 / 右键菜单 */
+						ClearRenameCandidate();
+						m_SceneOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
 					}
 					else
 					{

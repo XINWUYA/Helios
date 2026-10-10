@@ -20,6 +20,8 @@ namespace Helios
 		/* ---- 场景文档操作：菜单 / 快捷键 / 工具栏共用同一实现 ---- */
 		void NewScene();
 		void ImportScene();
+		/* 打开指定场景文件（资源浏览器双击 .scn）；path 为绝对路径 */
+		void OpenScene(const std::string& path);
 		void SaveScene();
 		void SaveSceneAs();
 

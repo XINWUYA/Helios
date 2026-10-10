@@ -25,6 +25,12 @@ namespace Helios
 		EditorResourceBrowser::HistorySink history;
 		history.Execute = [this](UniquePtr<ICommand> command) { m_Context.Execute(std::move(command)); };
 		m_ResourceBrowser.SetHistorySink(std::move(history));
+
+		/* 双击资源浏览器里的 .scn → 打开场景：同样经 EditorContext 转达（面板不认识场景层）。
+		 * 路径按绝对路径给 —— 与导入对话框 / 拖入同一口径。 */
+		EditorResourceBrowser::SceneOpenSink scene_open;
+		scene_open.Open = [this](const std::string& path) { m_Context.OpenScene(path); };
+		m_ResourceBrowser.SetSceneOpenSink(std::move(scene_open));
 	}
 
 	void MainEditorLayer::OnDetached()

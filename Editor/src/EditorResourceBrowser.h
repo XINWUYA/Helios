@@ -44,6 +44,15 @@ namespace Helios
 
 		void SetAssetSelectionSink(AssetSelectionSink sink) { m_AssetSelectionSink = std::move(sink); }
 
+		/* 打开场景的通道（跨面板能力，由主壳层注入）：双击内容区的 .scn 时把绝对路径交出去。
+		 * 面板不认识场景层，打开动作由外壳转达（没有注入时双击 .scn 不做任何事）。 */
+		struct SceneOpenSink
+		{
+			std::function<void(const std::string&)> Open;
+		};
+
+		void SetSceneOpenSink(SceneOpenSink sink) { m_SceneOpenSink = std::move(sink); }
+
 		/* 在浏览器里定位一个资源（跨面板能力：属性面板点贴图 → 跳到这里）：
 		 * 切到它所在目录并选中它。路径按相对 Assets 的口径给；
 		 * 找不到（外部新增、轮询未到）就记为待选中并触发一次重建。 */
@@ -334,6 +343,8 @@ namespace Helios
 
 		/* 选中项 → 属性面板（见 AssetSelectionSink，由主壳层注入） */
 		AssetSelectionSink m_AssetSelectionSink;
+		/* 双击 .scn → 场景层（见 SceneOpenSink，由主壳层注入） */
+		SceneOpenSink m_SceneOpenSink;
 		/* 本帧有"选择动作"（点选 / 清空）—— 同一项被再次点选也要重新通知一次，
 		 * 否则"点资源 → 点实体 → 再点同一资源"的第三次点击不会把属性面板切回来。
 		 * 切目录的静默清空把它也一并吞掉（那次清空不通知面板，见 ApplyCurrentNode）。 */
