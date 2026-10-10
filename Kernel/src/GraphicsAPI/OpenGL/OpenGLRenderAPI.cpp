@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "OpenGLRenderAPI.h"
 #include "OpenGLCommon.h"
+#include "OpenGLTexture.h"
 #include <Helios/VirtualDevice/DeviceTexture.h>
 #include <Helios/Renderer/RenderQuery.h>
 #include <glad/glad.h>
@@ -235,6 +236,90 @@ namespace Helios
 
 		top_down = false;
 		return m_DefaultTargetSnapshot;
+	}
+
+	/* 把源纹理 mip 0 的第 src_layer 层拷到目标纹理（逐 Pass 抓取 Attachment → 常驻预览）。
+	 * 走"临时 FBO + glBlitFramebuffer"：不做 4.3+ 的 glCopyImageSubData 依赖（同一份代码
+	 * 要在 4.1 上下文上可用，理由与 ClearAttachment 的 __APPLE__ 分支相同）。源挂读 FBO
+	 * （2D 数组用 glFramebufferTextureLayer 指定层）、目标挂画 FBO，同尺寸同格式直拷；
+	 * 深度格式按 GL_DEPTH_BUFFER_BIT 走（规范要求 NEAREST），且两个 FBO 的读写缓冲都置
+	 * NONE（"只有深度附件"的 FBO 在部分驱动上要这样才判定完整）。本函数在 Pass 中间被
+	 * 调用，调用点的 FBO 绑定先保存、结束后还原 —— 不能把别人的绑定改掉。 */
+	void OpenGLRenderAPI::CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst,
+		uint32_t src_layer)
+	{
+		PROFILE_FUNCTION();
+
+		const auto open_gl_src = std::dynamic_pointer_cast<OpenGLTexture>(src);
+		const auto open_gl_dst = std::dynamic_pointer_cast<OpenGLTexture>(dst);
+		if (!open_gl_src || !open_gl_dst || open_gl_src->GetTextureID() == 0 || open_gl_dst->GetTextureID() == 0)
+			return;
+
+		const TextureDesc& src_desc = src->GetTextureDesc();
+		if (src_layer >= std::max(1u, src_desc.Depth))
+		{
+			CORE_LOG_ERROR("OpenGLRenderAPI::CopyTexture: layer {} out of range ({})",
+				src_layer, src_desc.Depth);
+			return;
+		}
+
+		const bool is_depth = IsDepthFormat(src_desc.Format);
+		const GLenum attachment = is_depth ? GL_DEPTH_ATTACHMENT : GL_COLOR_ATTACHMENT0;
+		const GLbitfield blit_mask = is_depth ? GL_DEPTH_BUFFER_BIT : GL_COLOR_BUFFER_BIT;
+
+		GLint previous_read_fbo = 0;
+		GLint previous_draw_fbo = 0;
+		glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous_read_fbo);
+		glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previous_draw_fbo);
+
+		GLuint read_fbo = 0;
+		GLuint draw_fbo = 0;
+		glGenFramebuffers(1, &read_fbo);
+		glGenFramebuffers(1, &draw_fbo);
+
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fbo);
+		if (src_desc.SamplerType == SamplerType::Sampler2DArray)
+			glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, attachment,
+				open_gl_src->GetTextureID(), 0, static_cast<GLint>(src_layer));
+		else
+			glFramebufferTexture2D(GL_READ_FRAMEBUFFER, attachment,
+				GL_TEXTURE_2D, open_gl_src->GetTextureID(), 0);
+
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_fbo);
+		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, attachment,
+			GL_TEXTURE_2D, open_gl_dst->GetTextureID(), 0);
+
+		if (is_depth)
+		{
+			glReadBuffer(GL_NONE);
+			glDrawBuffer(GL_NONE);
+		}
+		else
+		{
+			glReadBuffer(GL_COLOR_ATTACHMENT0);
+			glDrawBuffer(GL_COLOR_ATTACHMENT0);
+		}
+
+		const GLenum read_status = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
+		const GLenum draw_status = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
+		if (read_status == GL_FRAMEBUFFER_COMPLETE && draw_status == GL_FRAMEBUFFER_COMPLETE)
+		{
+			glBlitFramebuffer(0, 0, static_cast<GLint>(src_desc.Width), static_cast<GLint>(src_desc.Height),
+				0, 0, static_cast<GLint>(src_desc.Width), static_cast<GLint>(src_desc.Height),
+				blit_mask, GL_NEAREST);
+		}
+		else
+		{
+			CORE_LOG_ERROR("OpenGLRenderAPI::CopyTexture: framebuffer incomplete (read 0x{:X}, draw 0x{:X})",
+				read_status, draw_status);
+		}
+
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(previous_read_fbo));
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(previous_draw_fbo));
+		glDeleteFramebuffers(1, &read_fbo);
+		glDeleteFramebuffers(1, &draw_fbo);
+
+		CHECK_GL_ERROR;
 	}
 
 	/* Debug 组同时驱动 GPU 耗时作用域：组名是抓帧分组与统计面板共用的唯一标签源。

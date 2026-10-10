@@ -75,6 +75,16 @@ namespace Helios
 		};
 		[[nodiscard]] const std::vector<IconRect>& GetLastIconRects() const { return m_LastIconRects; }
 
+		/* 上一帧规划的跨行依赖连线（自检 / 自动化验证用）：源 = 引出连线的资源卡
+		 * （SourcePass = 写出该副本的行），目标 = 消费该副本的 Pass */
+		struct EdgeLink
+		{
+			std::string ResourceName;  /* 源卡名（同名副本链里的具体一份） */
+			std::string SourcePass;    /* 源卡所属 Pass（写出该副本的行） */
+			std::string TargetPass;    /* 消费该副本的 Pass */
+		};
+		[[nodiscard]] const std::vector<EdgeLink>& GetLastEdgeLinks() const { return m_LastEdgeLinks; }
+
 			/* 当前选中的 Pass 名（聚焦的是 Pass 背景区域时 = 该名字；否则空。
 		 * 聚焦卡的描边用强调色标记） */
 		[[nodiscard]] const std::string& GetSelectedPassName() const { return m_SelectedPassName; }
@@ -123,5 +133,6 @@ namespace Helios
 		std::vector<OutputRect> m_LastOutputRects{};
 		std::vector<LaneRect> m_LastLaneRects{};
 		std::vector<IconRect> m_LastIconRects{};
+		std::vector<EdgeLink> m_LastEdgeLinks{};
 	};
 }

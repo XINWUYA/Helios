@@ -34,12 +34,16 @@ namespace Helios
         void GenerateMipmap(const SharedPtr<DeviceTexture>& texture) override;
 
         /* 在当前帧的命令缓冲区上插入 blit 编码器拷贝纹理（见 RenderAPI 的说明） */
-        void CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst) override;
+        void CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst,
+            uint32_t src_layer) override;
 
         /* 默认目标（窗口画布）快照（见 RenderAPI 的说明）：blit 当前 drawable 的
          * 整幅内容到常驻预览纹理（随 drawable 尺寸自动重建、跨帧复用）；
          * 行序 = drawable 行序（顶行在前，top_down = true） */
         SharedPtr<DeviceTexture> AcquireDefaultTargetSnapshot(bool& top_down) override;
+
+        /* 离屏渲染目标行序：Metal 渲染行 0 = 顶行（见 RenderAPI 的说明） */
+        [[nodiscard]] bool IsRenderTargetTopDown() const override { return true; }
 
         /* 等待最近提交的命令缓冲区执行完成（见 RenderAPI 的说明） */
         void WaitForGPU() override;

@@ -31,8 +31,22 @@ layout(location = 0) out vec4 FragColor;
  * 生成 depth2d<float>；只取 .r 手动复制成灰度，Metal / OpenGL 两端输出一致。 */
 layout(binding = 0) uniform sampler2D u_DepthTexture;
 
+/* 显示范围（写过像素的 [min, max]，抓取端按层刷新写入预览纹理；见 FrameGraphCapture）。
+ * max <= min（空层 / 常量层 / 未登记）时回退提亮曲线。 */
+uniform float u_DepthMin;
+uniform float u_DepthMax;
+
 void main()
 {
     float depth = texture(u_DepthTexture, v_TexCoord).r;
-    FragColor = v_Color * vec4(depth, depth, depth, 1.0);
+    /* 逐层归一化把该层内容的值域拉满：点光 / 聚光的透视反 Z 深度值域极小（近 0.05 / 远 =
+     * 灯光 Range 时典型内容只有 1e-4 ~ 0.05），线性或固定提亮都拉不开对比；归一化后近处亮、
+     * 远处渐暗、清屏 0 保持黑 —— 观感对齐 Xcode 抓帧的深度显示。无有效范围时沿用 ^1/4 提亮
+     * （正交级联 / 未抓取登记的深度纹理）。 */
+    float display;
+    if (u_DepthMax > u_DepthMin)
+        display = clamp((depth - u_DepthMin) / (u_DepthMax - u_DepthMin), 0.0, 1.0);
+    else
+        display = pow(clamp(depth, 0.0, 1.0), 0.25);
+    FragColor = v_Color * vec4(display, display, display, 1.0);
 }

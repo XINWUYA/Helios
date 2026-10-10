@@ -250,6 +250,14 @@ namespace Helios
                             bound_shader = wanted;
                         }
 
+                        /* 深度纹理的显示范围（FrameGraphCapture 刷新写入；无效范围时着色器回退
+                         * 提亮曲线）—— 纹理换一档就要重设，与采样器同理 */
+                        if (is_depth && m_UIDepthShader != nullptr)
+                        {
+                            m_UIDepthShader->SetFloat("u_DepthMin", texture->GetDisplayRangeMin());
+                            m_UIDepthShader->SetFloat("u_DepthMax", texture->GetDisplayRangeMax());
+                        }
+
                         last_texture_id = pcmd->TextureId;
                     }
 

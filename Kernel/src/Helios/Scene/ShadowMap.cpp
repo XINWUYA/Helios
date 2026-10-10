@@ -25,6 +25,9 @@ namespace Helios
 
 		/* 点光立方体各面视锥的半角（90° 全角） */
 		constexpr float kPointLightFaceFov = 90.0f;
+
+		/* 阴影图数组的 FrameGraph 资源名：纹理创建与抓取逐层注册共用（避免两处各自漂移） */
+		constexpr const char* kShadowMapTextureName = "ShadowMap";
 	}
 
 	ShadowMap::ShadowMap(const SharedPtr<Light>& light, uint16_t shadow_idx, uint8_t face_idx)
@@ -579,6 +582,18 @@ namespace Helios
 		frame_graph.GetBlackboard()["NoShadowMapHandle"] = pass->GetData().Texture;
 	}
 
+	/* 阴影图数组各层的显示名（下标 = 数组层号）：级联在前、点光/聚光在后 —— 与
+	 * PrepareRequiredTexture 的层分配同序，给 ShadowPass 的 Debug 组和抓取逐层条目共用 */
+	std::vector<std::string> ShadowMapManager::GetShadowLayerNames() const
+	{
+		std::vector<std::string> layer_names(m_CascadeShadowMaps.size() + m_PunctualShadowMaps.size());
+		for (const auto& shadow_map : m_CascadeShadowMaps)
+			layer_names[shadow_map->GetLayer()] = "Cascade " + std::to_string(shadow_map->GetLayer());
+		for (const auto& shadow_map : m_PunctualShadowMaps)
+			layer_names[shadow_map->GetLayer()] = "Punctual " + std::to_string(shadow_map->GetLayer());
+		return layer_names;
+	}
+
 	/* 将ShadowPass注入到FrameGraph */
 	void ShadowMapManager::AddShadowPass(FrameGraph& frame_graph, const SharedPtr<Scene>& scene, RenderView* render_view)
 	{
@@ -592,6 +607,11 @@ namespace Helios
 
 		if (m_CascadeShadowMaps.empty() && m_PunctualShadowMaps.empty())
 			return;
+
+		/* 各层显示名（Debug 组 / 抓取逐层条目共用的单一来源）：把数组按层注册给抓取设施，
+		 * Frame Graph 页据此把阴影图按层展示（Cascade N / Punctual N） */
+		const std::vector<std::string> layer_names = GetShadowLayerNames();
+		frame_graph.GetCapture().SetLayerNames(kShadowMapTextureName, layer_names);
 
 		/* ========== Pass: Shadow Pass ========== */
 		struct ShadowPassData
@@ -610,7 +630,7 @@ namespace Helios
 				shadow_tex_desc.MipLevels = m_RequiredTextureDesc.MipLevels;
 				shadow_tex_desc.TextureFormat = m_RequiredTextureDesc.Format;
 				shadow_tex_desc.SamplerType = SamplerType::Sampler2DArray;
-				data.ShadowMapHandle = builder.CreateTexture("ShadowMap", shadow_tex_desc);
+				data.ShadowMapHandle = builder.CreateTexture(kShadowMapTextureName, shadow_tex_desc);
 				builder.BindOutputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::DepthAttachment | FrameGraphTexture::Usage::Sampleable);
 
 				FrameGraphPassInfo::Descriptor pass_desc;
@@ -618,7 +638,7 @@ namespace Helios
 				pass_desc.ViewportRegion = { 0, 0, m_RequiredTextureDesc.Size, m_RequiredTextureDesc.Size };
 				builder.CreateRenderPass("ShadowPassRenderTarget", pass_desc);
 			},
-			[this, render_view](const FrameGraphResources& resources, const ShadowPassData& data)
+			[this, render_view, layer_names](const FrameGraphResources& resources, const ShadowPassData& data)
 			{
 				const auto render_pass_info = resources.GetPassRenderTarget();
 				render_view->EmplacePassFrameBuffer("ShadowPass", render_pass_info);
@@ -682,8 +702,7 @@ namespace Helios
 					for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
 					{
 						const uint8_t cascade_id = cascade_shadow_map->GetLayer();
-						std::string label = "Cascade " + std::to_string(cascade_id);
-						render_api->PushDebugGroup(label.c_str());
+						render_api->PushDebugGroup(layer_names[cascade_id].c_str());
 
 						auto shadow_material = make_caster_material();
 						shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
@@ -699,8 +718,7 @@ namespace Helios
 				for (const auto& punctual_shadow_map : m_PunctualShadowMaps)
 				{
 					const uint8_t layer = punctual_shadow_map->GetLayer();
-					std::string label = "Punctual " + std::to_string(layer);
-					render_api->PushDebugGroup(label.c_str());
+					render_api->PushDebugGroup(layer_names[layer].c_str());
 
 					auto shadow_material = make_caster_material();
 					shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", -1);
