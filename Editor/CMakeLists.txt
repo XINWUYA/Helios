@@ -61,6 +61,8 @@ target_compile_definitions(Editor
         $<$<CONFIG:Debug>:HELIOS_DEBUG>
         $<$<CONFIG:Release>:HELIOS_RELEASE>
         $<$<CONFIG:Shipping>:HELIOS_SHIPPING>
+        # 编辑器构建默认开启耗时追踪（Profiler.h 的 HELIOS_PROFILE；Sample 不定义=关闭）
+        HELIOS_PROFILE=1
 )
 
 # Output directory

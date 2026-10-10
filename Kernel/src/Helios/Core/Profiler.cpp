@@ -53,7 +53,8 @@ namespace Helios
 		json << "\"name\":\"" << result.Name << "\",";
 		json << "\"ph\":\"X\",";
 		json << "\"pid\":0,";
-		json << "\"tid\":" << result.ThreadId << ",";
+		/* tid 用哈希：libc++ 直接打印 thread::id 是十六进制（0x…），追踪文件就不是合法 JSON 了 */
+		json << "\"tid\":" << std::hash<std::thread::id>{}(result.ThreadId) << ",";
 		json << "\"ts\":" << result.StartTime.count();
 		json << "}";
 

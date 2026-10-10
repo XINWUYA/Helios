@@ -99,7 +99,11 @@ namespace Helios
 // See the profiler result in: edge://tracing/
 // More suggested: https://ui.perfetto.dev/
 // Just Drag the json file in.
-#define Helios_PROFILE 0
+/* HELIOS_PROFILE：编辑器构建默认开启（Editor/CMakeLists.txt 里定义 =1，跑编辑器写追踪文件）；
+ * Sample 等其他目标不定义，默认关闭。 */
+#ifndef HELIOS_PROFILE
+	#define HELIOS_PROFILE 0
+#endif
 
 // Resolve which function signature macro will be used. Note that this only
 // is resolved when the (pre)compiler starts, so the syntax highlighting
@@ -128,14 +132,15 @@ namespace Helios
 	#define PROFILE_SCOPE_ARGS(fmt, ...) PROFILE_SCOPE_ARGS_LINE(fmt, __LINE__, __VA_ARGS__)
 	#define PROFILE_FUNCTION() ZoneScoped
 
-#elif Helios_PROFILE
+#elif HELIOS_PROFILE
 	// 开启一个耗时分析
 	#define PROFILER_BEGIN_SESSION(name, filepath) ::Helios::TimeCostProfiler::Instance().BeginSession(name, filepath)
 	// 关闭一个耗时分析
 	#define PROFILER_END_SESSION() ::Helios::TimeCostProfiler::Instance().EndSession()
-	// 分析当前指令段耗时
+	// 分析当前指令段耗时（写追踪文件；面板采集一并接上，开追踪时 CPU Timings 不掉数据）
 	#define PROFILE_SCOPE_LINE(name, line) constexpr auto fixed_name_##line = ::Helios::ProfilerUtils::CleanupOutputString(name, "__cdecl "); /*去掉前缀*/\
-											::Helios::ProfilerTimer timer_##line(fixed_name_##line.Data)
+											::Helios::ProfilerTimer timer_##line(fixed_name_##line.Data);\
+											const ::Helios::ScopedCPUTimerScope helios_cpu_profiler_scope_##line(name)
 	#define PROFILE_SCOPE(name) PROFILE_SCOPE_LINE(name, __LINE__)
 	// 分析当前函数耗时
 	#define PROFILE_FUNCTION() PROFILE_SCOPE(FUNC_SIG)
