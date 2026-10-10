@@ -498,7 +498,7 @@ namespace Helios
 					const bool has_source = !iter->second.SourceAssetPath.empty();
 					display = (has_source
 						? PathToUtf8(PathFromUtf8(iter->second.SourceAssetPath).filename())
-						: std::string("(material instance)")) + "   [实例]";
+						: std::string("(material instance)")) + "   [Instance]";
 					tooltip_path = has_source
 						? RELATIVE_PATH(iter->second.SourceAssetPath)
 						: std::string("(material instance)");

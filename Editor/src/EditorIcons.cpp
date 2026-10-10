@@ -2338,7 +2338,7 @@ namespace Helios::Icons
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),
-			"Icons 元数据表与 Id 枚举数量不一致，请同步新增项");
+			"Icons metadata table out of sync with the Id enum; add the new entries");
 	}
 
 	const IconDesc& Get(Id id)

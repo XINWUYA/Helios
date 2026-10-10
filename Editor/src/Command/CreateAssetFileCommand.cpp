@@ -17,14 +17,14 @@ namespace Helios
 		{
 			/* 已经有一个同名文件了（界面那边用 MakeUniquePath 避让过，这里是兜底）：
 			 * 不覆盖别人的东西 —— 与"重命名到已存在的名字就拒绝"是同一条原则。 */
-			CORE_LOG_WARN("新建资源文件时目标已存在，保持原样：{0}", PathToUtf8(m_File));
+			CORE_LOG_WARN("Create asset file: target exists, left as is: {0}", PathToUtf8(m_File));
 			return;
 		}
 
 		std::string write_error;
 		if (!WriteFile(write_error))
 		{
-			CORE_LOG_ERROR("新建资源文件失败：{0}（{1}）", PathToUtf8(m_File), write_error);
+			CORE_LOG_ERROR("Create asset file failed: {0} ({1})", PathToUtf8(m_File), write_error);
 			return;
 		}
 
@@ -43,20 +43,20 @@ namespace Helios
 		std::string current;
 		if (!ReadFile(m_File, current))
 		{
-			CORE_LOG_WARN("撤销新建资源文件时读不回来，保持原样：{0}", PathToUtf8(m_File));
+			CORE_LOG_WARN("Undo create asset file: cannot read back, left as is: {0}", PathToUtf8(m_File));
 			return;
 		}
 
 		if (current != m_Content)
 		{
-			CORE_LOG_WARN("撤销新建资源文件时内容已被改动，保持原样：{0}", PathToUtf8(m_File));
+			CORE_LOG_WARN("Undo create asset file: content modified, left as is: {0}", PathToUtf8(m_File));
 			return;
 		}
 
 		std::filesystem::remove(m_File, error);
 		if (error)
 		{
-			CORE_LOG_ERROR("撤销新建资源文件失败：{0}（{1}）", PathToUtf8(m_File), error.message());
+			CORE_LOG_ERROR("Undo create asset file failed: {0} ({1})", PathToUtf8(m_File), error.message());
 			return;
 		}
 
@@ -75,7 +75,7 @@ namespace Helios
 			std::filesystem::create_directories(parent, error);
 			if (error)
 			{
-				out_error = "建不了目录 " + PathToUtf8(parent) + "：" + error.message();
+				out_error = "Cannot create folder " + PathToUtf8(parent) + ": " + error.message();
 				return false;
 			}
 		}
@@ -85,14 +85,14 @@ namespace Helios
 		std::unique_ptr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(m_File, "wb"), &std::fclose);
 		if (!handle)
 		{
-			out_error = "打不开文件：";
+			out_error = "Cannot open file: ";
 			out_error += std::strerror(errno);
 			return false;
 		}
 
 		if (!m_Content.empty() && std::fwrite(m_Content.data(), 1, m_Content.size(), handle.get()) != m_Content.size())
 		{
-			out_error = "写入不完整：";
+			out_error = "Incomplete write: ";
 			out_error += std::strerror(errno);
 			return false;
 		}
