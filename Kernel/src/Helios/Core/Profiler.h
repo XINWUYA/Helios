@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <mutex>
 #include <fstream>
+#include "Helios/Core/CPUTimerProfiler.h"
 #if TRACY_ENABLE
 #include "tracy/Tracy.hpp"
 #include "client/TracyScoped.hpp"
@@ -100,6 +101,27 @@ namespace Helios
 // Just Drag the json file in.
 #define Helios_PROFILE 0
 
+// Resolve which function signature macro will be used. Note that this only
+// is resolved when the (pre)compiler starts, so the syntax highlighting
+// could mark the wrong one in your editor!
+#if defined(__GNUC__) || (defined(__MWERKS__) && (__MWERKS__ >= 0x3000)) || (defined(__ICC) && (__ICC >= 600)) || defined(__ghs__)
+	#define FUNC_SIG __PRETTY_FUNCTION__
+#elif defined(__DMC__) && (__DMC__ >= 0x810)
+	#define FUNC_SIG __PRETTY_FUNCTION__
+#elif (defined(__FUNCSIG__) || (_MSC_VER))
+	#define FUNC_SIG __FUNCSIG__
+#elif (defined(__INTEL_COMPILER) && (__INTEL_COMPILER >= 600)) || (defined(__IBMCPP__) && (__IBMCPP__ >= 500))
+	#define FUNC_SIG __FUNCTION__
+#elif defined(__BORLANDC__) && (__BORLANDC__ >= 0x550)
+	#define FUNC_SIG __FUNC__
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
+	#define FUNC_SIG __func__
+#elif defined(__cplusplus) && (__cplusplus >= 201103)
+	#define FUNC_SIG __func__
+#else
+	#define FUNC_SIG "FUNC_SIG unknown!"
+#endif
+
 #if TRACY_ENABLE
 	#define PROFILE_SCOPE(name) ZoneScopedN(name)
 	#define PROFILE_SCOPE_ARGS_LINE(fmt, line, ...)  char label_##line[100]; snprintf(label_##line, 100, fmt, __VA_ARGS__); const char* label_##line##_const = label_##line; PROFILE_SCOPE(label_##line##_const);
@@ -107,27 +129,6 @@ namespace Helios
 	#define PROFILE_FUNCTION() ZoneScoped
 
 #elif Helios_PROFILE
-	// Resolve which function signature macro will be used. Note that this only
-	// is resolved when the (pre)compiler starts, so the syntax highlighting
-	// could mark the wrong one in your editor!
-	#if defined(__GNUC__) || (defined(__MWERKS__) && (__MWERKS__ >= 0x3000)) || (defined(__ICC) && (__ICC >= 600)) || defined(__ghs__)
-		#define FUNC_SIG __PRETTY_FUNCTION__
-	#elif defined(__DMC__) && (__DMC__ >= 0x810)
-		#define FUNC_SIG __PRETTY_FUNCTION__
-	#elif (defined(__FUNCSIG__) || (_MSC_VER))
-		#define FUNC_SIG __FUNCSIG__
-	#elif (defined(__INTEL_COMPILER) && (__INTEL_COMPILER >= 600)) || (defined(__IBMCPP__) && (__IBMCPP__ >= 500))
-		#define FUNC_SIG __FUNCTION__
-	#elif defined(__BORLANDC__) && (__BORLANDC__ >= 0x550)
-		#define FUNC_SIG __FUNC__
-	#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
-		#define FUNC_SIG __func__
-	#elif defined(__cplusplus) && (__cplusplus >= 201103)
-		#define FUNC_SIG __func__
-	#else
-		#define FUNC_SIG "FUNC_SIG unknown!"
-	#endif
-
 	// 开启一个耗时分析
 	#define PROFILER_BEGIN_SESSION(name, filepath) ::Helios::TimeCostProfiler::Instance().BeginSession(name, filepath)
 	// 关闭一个耗时分析
@@ -139,8 +140,11 @@ namespace Helios
 	// 分析当前函数耗时
 	#define PROFILE_FUNCTION() PROFILE_SCOPE(FUNC_SIG)
 #else
+	/* 默认路径：接引擎内 CPU 函数级采集（CPUTimerProfiler → 性能面板 CPU Timings）。
+	 * 作用域展开为对象声明，须处于语句上下文 —— 仓内插桩点均满足（带分号）。 */
 	#define PROFILER_BEGIN_SESSION(name, filepath)
 	#define PROFILER_END_SESSION()
-	#define PROFILE_SCOPE(name)
-	#define PROFILE_FUNCTION()
+	#define PROFILE_SCOPE_LINE(name, line) const ::Helios::ScopedCPUTimerScope helios_cpu_profiler_scope_##line(name)
+	#define PROFILE_SCOPE(name) PROFILE_SCOPE_LINE(name, __LINE__)
+	#define PROFILE_FUNCTION() PROFILE_SCOPE(FUNC_SIG)
 #endif

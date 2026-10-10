@@ -25,6 +25,7 @@ namespace Helios
 
 	private:
 		void ShowFrameStatsCard();
+		void ShowCPUTimingsCard();
 		void ShowGPUTimingsCard();
 		/* 帧耗时曲线：三线（Frame / CPU / GPU）+ 悬停读值；需要至少两帧历史才画线 */
 		void ShowFrameTimeGraph(float height);
@@ -34,9 +35,15 @@ namespace Helios
 		/* GPU 录制的逐帧回放：帧间曲线 + 选帧滑条 + 概要行；
 		 * 有录制内容且不在录制中时显示，改动 m_ReplayFrame（-1 = 未选中） */
 		void ShowGPUTimerRecordingUI();
+		/* CPU 版工具栏 / 回放（对偶 GPU；本期不含导出，列 = 根总耗时） */
+		void ShowCPUTimerToolbar();
+		void ShowCPUTimerRecordingUI();
 
 		/* 回放选中的录制帧（-1 = 未选中，落到实时树） */
 		int m_ReplayFrame{ -1 };
+
+		/* 计时树里选中的行（节点 id；-1 = 未选中）—— 选中 / 悬停都高亮整行 */
+		int m_SelectedNode{ -1 };
 
 		/* GPU Timings 卡的观测方式：false = 实时树 / true = 录制视图（录制 + 逐帧回放） */
 		bool m_RecordView{ false };
@@ -44,5 +51,12 @@ namespace Helios
 		float m_TabSlide{ 0.0f };
 		/* 上一帧是否在录制中（用于"录制刚结束 → 停在最后一帧"） */
 		bool m_WasRecording{ false };
+
+		/* CPU Timings 卡状态（与 GPU 卡各自独立） */
+		int m_CpuReplayFrame{ -1 };
+		int m_CpuSelectedNode{ -1 };
+		bool m_CpuRecordView{ false };
+		float m_CpuTabSlide{ 0.0f };
+		bool m_CpuWasRecording{ false };
 	};
 }

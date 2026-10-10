@@ -12,6 +12,7 @@
 #include "PanelRegistry.h"
 #include "Helios/Application/FileDialog.h"
 #include "Helios/Common/PathUtils.h"
+#include "Helios/Core/CPUTimerProfiler.h"
 #include "Helios/Core/FrameTimeProfiler.h"
 #include "Helios/Core/Logger.h"
 #include "Helios/ImGui/EditorTheme.h"
@@ -207,6 +208,65 @@ namespace Helios
 
 			return value_changed;
 		}
+
+		/* 「计时树」的一行（CPU / GPU 卡共用）：整行一个 Selectable 管命中 / 悬停 / 选中（连
+		 * 数值列一起），树节点叠回行首照旧画箭头与折叠。底色两边都不自绘 —— 整行行底统一
+		 * 走 TableSetBgColor 的行背景通道（行高自动结算、列怎么分都盖满）。返回行状态。 */
+		struct TimingRowState
+		{
+			bool Open = false;
+			bool Clicked = false;
+		};
+
+		TimingRowState TimingTreeRow(const void* tree_id, const char* label, bool has_children,
+			bool default_open, bool selected)
+		{
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			const ImVec2 row_min = ImGui::GetCursorScreenPos();
+
+			/* Selectable 只为拿"整行"的命中与悬停，底色全推透明（行底由下面自选颜色画） */
+			ImGui::PushStyleColor(ImGuiCol_Header, EditorTheme::Token::Clear);
+			ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorTheme::Token::Clear);
+			ImGui::PushStyleColor(ImGuiCol_HeaderActive, EditorTheme::Token::Clear);
+			ImGui::PushID(tree_id);
+			const bool row_pressed = ImGui::Selectable("##row", selected,
+				ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap);
+			const bool row_hovered = ImGui::IsItemHovered();
+			ImGui::PopID();
+
+			/* 叠回行首再画树节点：表格的行缩进就在行首坐标里，位置与直接提交它一致 */
+			ImGui::SetCursorScreenPos(row_min);
+
+			ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanFullWidth;
+			if (default_open)
+				flags |= ImGuiTreeNodeFlags_DefaultOpen;
+			if (!has_children)
+				flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
+			else
+				flags |= ImGuiTreeNodeFlags_OpenOnArrow;
+
+			const bool is_opened = ImGui::TreeNodeEx(tree_id, flags, "%s", label);
+			const bool tree_clicked = ImGui::IsItemClicked();
+			const bool tree_hovered = ImGui::IsItemHovered();
+
+			ImGui::PopStyleColor(3);
+
+			/* 行底：选中 = 强调色 40%；悬停 = 白 12%；选中被悬停仍保住紫底（RowHoverSelected，
+			 * 与层级 / 资源面板同一笔账）。两件套的悬停状态可能互让，取并集再画。 */
+			const bool hovered = row_hovered || tree_hovered;
+			if (selected || hovered)
+			{
+				const ImU32 row_bg = selected
+					? (hovered ? ImGui::GetColorU32(EditorTheme::RowHoverSelected)
+						: ImGui::GetColorU32(ImGuiCol_Header))
+					: ImGui::GetColorU32(ImGuiCol_HeaderHovered);
+				ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, row_bg);
+			}
+
+			return { is_opened, row_pressed || tree_clicked };
+		}
 	}
 
 	void RenderStatsPanel::OnImGuiRender()
@@ -218,6 +278,7 @@ namespace Helios
 			/* 面板标题由页签承担（图标 + "Stat Info"），面板内不再重复一行 */
 
 			ShowFrameStatsCard();
+			ShowCPUTimingsCard();
 			ShowGPUTimingsCard();
 		}
 		ImGui::End();
@@ -398,6 +459,353 @@ namespace Helios
 		legend_item("GPU", kGpuLineColor, false);
 	}
 
+	/* CPU 计时卡：开关 + 函数级耗时表（聚合结果树；对偶 GPU Timings 卡。
+	 * 数据源 = CPUTimerProfiler：帧内按「父 + 标签」聚合，Total/Self 单位微秒） */
+	void RenderStatsPanel::ShowCPUTimingsCard()
+	{
+		PROFILE_FUNCTION();
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("CPU Timings", Icons::Id::Stats);
+
+		if (card.Open)
+		{
+			bool timer_enabled = CPUTimerProfiler::Instance().IsEnabled();
+			if (ImGuiExt::DrawCheckboxUI("CPU Timer", timer_enabled))
+			{
+				CPUTimerProfiler::Instance().SetEnabled(timer_enabled);
+				/* 计时关闭：收回录制（已录内容保留，重开后可继续回放） */
+				if (!timer_enabled)
+					CPUTimerProfiler::Instance().GetRecorder().Stop();
+			}
+
+			CPUTimerRecorder& recorder = CPUTimerProfiler::Instance().GetRecorder();
+
+			if (timer_enabled)
+			{
+				const int switched = SlidingTabPair("##CPUViewTabs", "Live", Icons::Id::Live,
+					"Record", Icons::Id::Record, m_CpuRecordView, m_CpuTabSlide);
+				if (switched == 0)
+					m_CpuRecordView = false;
+				else if (switched == 1 && !m_CpuRecordView)
+				{
+					m_CpuRecordView = true;
+					if (!recorder.IsRecording() && recorder.GetFrameCount() > 0)
+						m_CpuReplayFrame = static_cast<int>(recorder.GetFrameCount()) - 1;
+				}
+			}
+
+			/* 录制工具栏：录制视图常显；实时视图只在录制进行中显示 */
+			if (timer_enabled && (m_CpuRecordView || recorder.IsRecording()))
+				ShowCPUTimerToolbar();
+
+			/* 录制进度：帧数 + 细进度条（红 = 录制中） */
+			if (timer_enabled && recorder.IsRecording())
+			{
+				const uint32_t count_now = recorder.GetFrameCount();
+				ImGui::TextDisabled("Recording %u / %u", count_now, CPUTimerRecorder::MAX_FRAMES);
+
+				const float progress = static_cast<float>(count_now)
+					/ static_cast<float>(CPUTimerRecorder::MAX_FRAMES);
+				const ImVec2 bar_min = ImGui::GetCursorScreenPos();
+				const float bar_width = ImGui::GetContentRegionAvail().x;
+				constexpr float kBarHeight = 3.0f;
+				ImDrawList* draw_list = ImGui::GetWindowDrawList();
+				draw_list->AddRectFilled(bar_min, ImVec2(bar_min.x + bar_width, bar_min.y + kBarHeight),
+					ImGui::GetColorU32(EditorTheme::Token::Neutral4), kBarHeight * 0.5f);
+				draw_list->AddRectFilled(bar_min, ImVec2(bar_min.x + bar_width * progress, bar_min.y + kBarHeight),
+					ImGui::GetColorU32(EditorTheme::Token::Danger), kBarHeight * 0.5f);
+				ImGui::Dummy(ImVec2(bar_width, kBarHeight));
+			}
+
+			/* 工具栏可能清了内容 / 开了新录制：取最新帧数再归位选中帧 */
+			const uint32_t recorded_count = recorder.GetFrameCount();
+			if (m_CpuReplayFrame >= static_cast<int>(recorded_count))
+				m_CpuReplayFrame = -1;
+
+			/* 录制刚结束（手动 / 录满 / 计时关闭）且在看录制视图：停在最后一帧 */
+			if (m_CpuRecordView && m_CpuWasRecording && !recorder.IsRecording() && recorded_count > 0)
+				m_CpuReplayFrame = static_cast<int>(recorded_count) - 1;
+			m_CpuWasRecording = recorder.IsRecording();
+
+			if (m_CpuRecordView && !recorder.IsRecording() && recorded_count > 0 && m_CpuReplayFrame < 0)
+				m_CpuReplayFrame = static_cast<int>(recorded_count) - 1;
+
+			const bool replaying = timer_enabled && m_CpuRecordView && !recorder.IsRecording()
+				&& recorded_count > 0 && m_CpuReplayFrame >= 0;
+			if (replaying)
+				ShowCPUTimerRecordingUI();
+
+			/* 显示根：录制视图 = 选中录制帧；其余 = 实时树（EMA） */
+			const ResultCPUTimerNode* display_root = nullptr;
+			if (replaying)
+				display_root = &recorder.GetFrame(static_cast<uint32_t>(m_CpuReplayFrame));
+			else if (!m_CpuRecordView)
+				display_root = &CPUTimerProfiler::Instance().GetRealtimeRoot();
+
+			if (!timer_enabled)
+			{
+				ImGuiExt::DrawCommonTextUI("Timers", "Off");
+			}
+			else if (m_CpuRecordView && !replaying)
+			{
+				ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
+				if (recorder.IsRecording())
+					ImGui::TextWrapped("Frame timings will appear here when recording finishes.");
+				else
+					ImGui::TextWrapped("Press Record to capture up to %u frames of per-function CPU timings. "
+						"Recording stops when full, or press Stop at any time. When finished, browse "
+						"frames above and inspect each frame's timings here.", CPUTimerRecorder::MAX_FRAMES);
+				ImGui::PopStyleColor();
+			}
+			else if (display_root == nullptr || display_root->Label.empty())
+			{
+				ImGuiExt::DrawCommonTextUI("Timers", "No data");
+			}
+			else
+			{
+				/* 行 id 用遍历序号（结构稳定时跨帧一致 —— 折叠状态可保持） */
+				uint32_t node_id = 0;
+				std::function<void(const ResultCPUTimerNode&, uint32_t)> show_node_recursively;
+				show_node_recursively = [&show_node_recursively, &node_id, this](
+					const ResultCPUTimerNode& timer_node, uint32_t depth)
+					{
+						if (timer_node.Label.empty())
+							return;
+
+						const uint32_t this_id = node_id++;
+						const bool has_children = !timer_node.Children.empty();
+
+						/* 只展开浅层，深层手动；点行任意一处（含箭头那一下）都选中这行 */
+						const TimingRowState row = TimingTreeRow(
+							reinterpret_cast<void*>(static_cast<intptr_t>(this_id)),
+							timer_node.Label.c_str(), has_children, depth < 2,
+							m_CpuSelectedNode == static_cast<int>(this_id));
+						if (row.Clicked)
+							m_CpuSelectedNode = static_cast<int>(this_id);
+
+						ImGui::TableNextColumn();
+						if (timer_node.HasData)
+							ImGui::Text("%.2f", timer_node.TotalUs);
+						else
+							ImGui::TextDisabled("%s", kNoDataText);
+
+						ImGui::TableNextColumn();
+						if (timer_node.HasData)
+							ImGui::Text("%.2f", timer_node.SelfUs);
+						else
+							ImGui::TextDisabled("%s", kNoDataText);
+
+						/* 悬停显示补充分量：调用次数 + 首末区间（热力图 / 火焰图的同源数据） */
+						if (timer_node.HasData && ImGui::IsItemHovered())
+						{
+							ImGui::BeginTooltip();
+							ImGui::Text("%u calls/frame", timer_node.CallCount);
+							ImGui::Text("span  %.1f - %.1f us", timer_node.BeginUs, timer_node.EndUs);
+							ImGui::EndTooltip();
+						}
+
+						if (row.Open && has_children)
+						{
+							for (const auto& child : timer_node.Children)
+								show_node_recursively(child, depth + 1);
+
+							ImGui::TreePop();
+						}
+					};
+
+				const ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg
+					| ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_NoBordersInBody
+					| ImGuiTableFlags_SizingFixedFit;
+
+				if (ImGui::BeginTable("CPUTimings", 3, table_flags))
+				{
+					ImGui::TableSetupColumn("Scope", ImGuiTableColumnFlags_WidthStretch);
+					ImGui::TableSetupColumn("total us", ImGuiTableColumnFlags_WidthFixed,
+						ImGui::CalcTextSize("00000.00").x);
+					ImGui::TableSetupColumn("self us", ImGuiTableColumnFlags_WidthFixed,
+						ImGui::CalcTextSize("00000.00").x);
+
+					ImGui::TableHeadersRow();
+					show_node_recursively(*display_root, 0);
+					ImGui::EndTable();
+				}
+			}
+		}
+
+		PanelChrome::EndCard(card);
+	}
+
+	/* CPU 录制工具栏：录制 / 停止、逐帧导航、峰值 / 谷值、清空 —— 一行等大图标按钮
+	 * （宽度均分内容区；无内容 / 录制中时回放按钮置灰）。导出留待下一轮。 */
+	void RenderStatsPanel::ShowCPUTimerToolbar()
+	{
+		PROFILE_FUNCTION();
+
+		CPUTimerRecorder& recorder = CPUTimerProfiler::Instance().GetRecorder();
+		const uint32_t count = recorder.GetFrameCount();
+		const bool recording = recorder.IsRecording();
+		const int last_index = static_cast<int>(count) - 1;
+
+		const float button_gap = ImGui::GetStyle().ItemSpacing.x;
+		const float button_width = (ImGui::GetContentRegionAvail().x - button_gap * 5.0f) / 6.0f;
+		const ImVec2 button_size(button_width, ImGui::GetFrameHeight() * 1.5f);
+
+		/* 录制 / 停止（同一按钮位，按状态换图标与提示） */
+		if (recording)
+		{
+			if (Icons::IconButton(Icons::Id::Stop, button_size, false, "Stop recording (keep captured frames)"))
+				recorder.Stop();
+		}
+		else if (Icons::IconButton(Icons::Id::Record, button_size, false, "Start recording (per-frame raw values)"))
+		{
+			recorder.Start();
+			m_CpuReplayFrame = -1; /* 新录制从空内容开始 */
+		}
+
+		/* 回放按钮：无内容 / 录制中不可用 */
+		ImGui::BeginDisabled(recording || count == 0);
+		ImGui::SameLine(0.0f, button_gap);
+		if (Icons::IconButton(Icons::Id::PreviousFrame, button_size, false, "Previous frame"))
+			m_CpuReplayFrame = m_CpuReplayFrame >= 0 ? ImMax(m_CpuReplayFrame - 1, 0) : last_index;
+		ImGui::SameLine(0.0f, button_gap);
+		if (Icons::IconButton(Icons::Id::NextFrame, button_size, false, "Next frame"))
+			m_CpuReplayFrame = m_CpuReplayFrame >= 0 ? ImMin(m_CpuReplayFrame + 1, last_index) : last_index;
+		ImGui::SameLine(0.0f, button_gap);
+		if (Icons::IconButton(Icons::Id::Peak, button_size, false, "Peak frame"))
+		{
+			int best = 0;
+			for (int index = 1; index <= last_index; ++index)
+				if (recorder.GetFrame(static_cast<uint32_t>(index)).TotalUs
+					> recorder.GetFrame(static_cast<uint32_t>(best)).TotalUs)
+					best = index;
+			m_CpuReplayFrame = best;
+		}
+		ImGui::SameLine(0.0f, button_gap);
+		if (Icons::IconButton(Icons::Id::Valley, button_size, false, "Valley frame"))
+		{
+			int best = 0;
+			for (int index = 1; index <= last_index; ++index)
+				if (recorder.GetFrame(static_cast<uint32_t>(index)).TotalUs
+					< recorder.GetFrame(static_cast<uint32_t>(best)).TotalUs)
+					best = index;
+			m_CpuReplayFrame = best;
+		}
+		ImGui::SameLine(0.0f, button_gap);
+		if (Icons::IconButton(Icons::Id::Remove, button_size, false, "Clear recording"))
+		{
+			recorder.Clear();
+			m_CpuReplayFrame = -1;
+		}
+		ImGui::EndDisabled();
+	}
+
+	/* CPU 录制的逐帧回放：帧间总耗时曲线（点击/拖动选帧 + 上限刻度）→ 选帧滑条 →
+	 * 概要行；录制树里是逐帧原始值（无平滑）。与 GPU 版同一套交互，仅数据源不同。 */
+	void RenderStatsPanel::ShowCPUTimerRecordingUI()
+	{
+		PROFILE_FUNCTION();
+
+		const CPUTimerRecorder& recorder = CPUTimerProfiler::Instance().GetRecorder();
+		const uint32_t count = recorder.GetFrameCount();
+		if (count == 0)
+			return;
+		const int last_index = static_cast<int>(count) - 1;
+		const ImGuiStyle& style = ImGui::GetStyle();
+
+		/* ---- 帧间总耗时曲线：一眼看出尖峰分布；点击/拖动选帧 ---- */
+		const float width = ImGui::GetContentRegionAvail().x;
+		constexpr float kGraphHeight = 60.0f;
+		const ImVec2 graph_min = ImGui::GetCursorScreenPos();
+		const ImVec2 graph_max(graph_min.x + width, graph_min.y + kGraphHeight);
+
+		ImGui::InvisibleButton("##CPURecordingGraph", ImVec2(width, kGraphHeight));
+		const bool graph_hovered = ImGui::IsItemHovered();
+
+		ImDrawList* draw_list = ImGui::GetWindowDrawList();
+		draw_list->AddRectFilled(graph_min, graph_max, ImGui::GetColorU32(EditorTheme::Token::Neutral1), 3.0f);
+		draw_list->AddRect(graph_min, graph_max, ImGui::GetColorU32(EditorTheme::Token::Border), 3.0f);
+
+		constexpr float kPadX = 4.0f;
+		constexpr float kPadY = 3.0f;
+		const ImVec2 plot_min(graph_min.x + kPadX, graph_min.y + kPadY);
+		const ImVec2 plot_max(graph_max.x - kPadX, graph_max.y - kPadY);
+		const float plot_width = ImMax(plot_max.x - plot_min.x, 1.0f);
+		const float plot_height = ImMax(plot_max.y - plot_min.y, 1.0f);
+
+		float value_max = 0.0f;
+		for (uint32_t index = 0; index < count; ++index)
+			value_max = ImMax(value_max, static_cast<float>(recorder.GetFrame(index).TotalUs));
+		value_max = ImMax(value_max * 1.15f, 1.0f);
+
+		const auto column_x = [&](uint32_t index)
+			{
+				return count >= 2
+					? plot_min.x + static_cast<float>(index) / static_cast<float>(count - 1) * plot_width
+					: plot_min.x + plot_width * 0.5f;
+			};
+		const auto value_y = [&](double value)
+			{ return plot_max.y - ImMin(static_cast<float>(value), value_max) / value_max * plot_height; };
+		const auto index_at_mouse = [&]()
+			{
+				const float position = (ImGui::GetIO().MousePos.x - plot_min.x) / plot_width;
+				return static_cast<int>(ImClamp(
+					position * static_cast<float>(last_index), 0.0f, static_cast<float>(last_index)));
+			};
+
+		DrawBrokenSeries(draw_list, count,
+			[](uint32_t) { return true; },
+			[&](uint32_t index) { return ImVec2(column_x(index), value_y(recorder.GetFrame(index).TotalUs)); },
+			ImGui::GetColorU32(kCpuLineColor), 1.2f);
+
+		/* 上限刻度：左上角小字 */
+		char scale_text[32];
+		snprintf(scale_text, sizeof(scale_text), "%.0f us", value_max);
+		draw_list->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 0.85f,
+			ImVec2(plot_min.x + 3.0f, plot_min.y),
+			ImGui::GetColorU32(EditorTheme::Token::TextDim), scale_text);
+
+		/* 选中帧游标 */
+		if (m_CpuReplayFrame >= 0)
+		{
+			const float cursor_x = column_x(static_cast<uint32_t>(m_CpuReplayFrame));
+			draw_list->AddLine(ImVec2(cursor_x, plot_min.y), ImVec2(cursor_x, plot_max.y),
+				ImGui::GetColorU32(EditorTheme::Token::Accent), 1.0f);
+		}
+
+		/* 点击 / 拖动 = 选帧（按列就近取整） */
+		if (ImGui::IsItemActive())
+			m_CpuReplayFrame = index_at_mouse();
+		else if (graph_hovered)
+		{
+			const int index = index_at_mouse();
+			ImGui::BeginTooltip();
+			ImGui::Text("Frame #%u", recorder.GetFrameId(static_cast<uint32_t>(index)));
+			ImGui::Text("%.0f us", recorder.GetFrame(static_cast<uint32_t>(index)).TotalUs);
+			ImGui::EndTooltip();
+		}
+
+		/* ---- 选帧滑条：图表下方 ---- */
+		if (last_index > 0)
+		{
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+				ImVec2(style.ItemSpacing.x, style.ItemSpacing.y * 0.5f));
+			int frame_value = m_CpuReplayFrame >= 0 ? m_CpuReplayFrame : last_index;
+			if (FrameSlider("##CPURecordingFrame", frame_value, 0, last_index))
+				m_CpuReplayFrame = frame_value;
+			ImGui::PopStyleVar();
+		}
+
+		/* ---- 概要：帧数 + 峰值帧 ---- */
+		int peak_index = 0;
+		for (uint32_t index = 1; index < count; ++index)
+			if (recorder.GetFrame(index).TotalUs
+				> recorder.GetFrame(static_cast<uint32_t>(peak_index)).TotalUs)
+				peak_index = static_cast<int>(index);
+		ImGui::TextDisabled("%u frames   peak %.0f us @ #%u", count,
+			recorder.GetFrame(static_cast<uint32_t>(peak_index)).TotalUs,
+			recorder.GetFrameId(static_cast<uint32_t>(peak_index)));
+	}
+
 	/* GPU 计时卡：开关 + 逐层耗时表（结果树；无数据节点以占位显示） */
 	void RenderStatsPanel::ShowGPUTimingsCard()
 	{
@@ -512,27 +920,25 @@ namespace Helios
 			else
 			{
 				std::function<void(const ResultGPUTimerNode&)> show_node_recursively;
-				show_node_recursively = [&show_node_recursively](const ResultGPUTimerNode& timer_node)
+				show_node_recursively = [&show_node_recursively, this](const ResultGPUTimerNode& timer_node)
 					{
 						if (timer_node.Label.empty())
 							return;
-
-						ImGui::TableNextRow();
-						ImGui::TableNextColumn();
 
 						char label[64] = {};
 						snprintf(label, sizeof(label), "(%d) %s", timer_node.QueryIndex, timer_node.Label.c_str());
 						label[sizeof(label) - 1] = 0;
 
 						const bool has_children = !timer_node.Children.empty();
-						ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_DefaultOpen;
-						if (!has_children)
-							flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_Bullet;
-						else
-							flags |= ImGuiTreeNodeFlags_OpenOnArrow;
 
-						const bool is_opened = ImGui::TreeNodeEx(
-							reinterpret_cast<void*>(static_cast<intptr_t>(timer_node.QueryIndex)), flags, "%s", label);
+						/* 浅层默认展开；点行任意一处（含箭头那一下）都选中这行
+						 *（无效 QueryIndex 转 int 恰是 -1 = 未选中哨兵，天然对得上） */
+						const TimingRowState row = TimingTreeRow(
+							reinterpret_cast<void*>(static_cast<intptr_t>(timer_node.QueryIndex)),
+							label, has_children, true,
+							m_SelectedNode == static_cast<int>(timer_node.QueryIndex));
+						if (row.Clicked)
+							m_SelectedNode = static_cast<int>(timer_node.QueryIndex);
 
 						ImGui::TableNextColumn();
 						if (timer_node.HasData)
@@ -551,7 +957,7 @@ namespace Helios
 							ImGui::EndTooltip();
 						}
 
-						if (is_opened && has_children)
+						if (row.Open && has_children)
 						{
 							for (const auto& child : timer_node.Children)
 								show_node_recursively(child);
