@@ -62,6 +62,10 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* ImGui 正收键盘（输入框激活等）时快捷键让位（键进编辑框，不进命令） */
+		if (ImGui::GetIO().WantCaptureKeyboard)
+			return true;
+
 		if (event->GetRepeatCount() > 0)
 			return false;
 
