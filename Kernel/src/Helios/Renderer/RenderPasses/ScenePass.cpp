@@ -2,6 +2,7 @@
 #include "ScenePass.h"
 #include "DebugViewPasses.h"
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
+#include <Helios/Renderer/PostProcess/PostProcessPasses.h>
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Scene/Light.h>
@@ -104,6 +105,90 @@ namespace Helios
 			FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle; /* 阴影贴图 */
 		};
 
+		struct ScenePassTextureData
+		{
+			FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle;
+			FrameGraphResourceHandleTyped<FrameGraphTexture> Output;   /* rgb: 最终颜色 */
+			FrameGraphResourceHandleTyped<FrameGraphTexture> ObjectId; /* 实体 ID（清 -1，供按像素拾取） */
+			FrameGraphResourceHandleTyped<FrameGraphTexture> Depth;    /* 供叠加层做深度比较 */
+		};
+
+		namespace
+		{
+			/* 场景 → 视图纹理的公共体（颜色 + ObjectId + 深度三附件；颜色 / 深度落 Blackboard）：
+			 * 编辑器视口的前向纹理路径与"默认目标 + 后处理"的旁路共用；调用方负责空指针守卫。 */
+			FrameGraphResourceHandleTyped<FrameGraphTexture> AddScenePassToTextureCore(RenderView* render_view)
+			{
+				auto& frame_graph = render_view->GetFrameGraph();
+				auto scene = render_view->GetOwnerScene();
+
+				const auto& viewport_region = render_view->GetViewportRegion();
+
+				FrameGraphTexture::Descriptor color_desc;
+				color_desc.Width = viewport_region.Width;
+				color_desc.Height = viewport_region.Height;
+				color_desc.TextureFormat = TextureFormat::RGBA8;
+
+				FrameGraphTexture::Descriptor object_id_desc;
+				object_id_desc.Width = viewport_region.Width;
+				object_id_desc.Height = viewport_region.Height;
+				object_id_desc.TextureFormat = TextureFormat::R32I;
+
+				FrameGraphTexture::Descriptor depth_desc;
+				depth_desc.Width = viewport_region.Width;
+				depth_desc.Height = viewport_region.Height;
+				depth_desc.TextureFormat = TextureFormat::Depth32;
+
+				auto scene_pass = frame_graph->AddPass<ScenePassTextureData>("ScenePass",
+					[&](FrameGraphBuilder& builder, ScenePassTextureData& data)
+					{
+						data.ShadowMapHandle = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ShadowMapHandle");
+						data.Output = builder.CreateTexture("ScenePassOutput", color_desc);
+						data.ObjectId = builder.CreateTexture("ScenePassObjectId", object_id_desc);
+						data.Depth = builder.CreateTexture("ScenePassDepth", depth_desc);
+
+						builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
+						builder.BindOutputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
+						builder.BindOutputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
+						builder.BindOutputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
+
+						FrameGraphPassInfo::Descriptor pass_desc;
+						pass_desc.Attachments.ColorAttachments(0) = data.Output;
+						pass_desc.Attachments.ColorAttachments(1) = data.ObjectId;
+						pass_desc.Attachments.DepthAttachment() = data.Depth;
+						/* ObjectId 清成 -1（空像素不可拾取；与延迟 GBuffer 同款约定） */
+						pass_desc.ColorClearValues.resize(2);
+						pass_desc.ColorClearValues[1] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
+						pass_desc.ViewportRegion = viewport_region;
+						builder.CreateRenderPass("ScenePassRenderTarget", pass_desc);
+
+						/* 输出纹理留给视图显示与拾取回读：不能被图裁剪剔除 */
+						builder.AsSideEffect();
+					},
+					[render_view, scene](const FrameGraphResources& resources, const ScenePassTextureData& data)
+					{
+						const auto render_pass_info = resources.GetPassRenderTarget();
+						render_view->EmplacePassFrameBuffer("ScenePass", render_pass_info);
+
+						render_pass_info->Bind();
+						{
+							ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
+							Renderer::GetRenderAPI()->Clear();
+
+							SubmitForwardObjects(*render_view, scene);
+						}
+						render_pass_info->Unbind();
+						Renderer::GetRenderAPI()->Flush();
+					}
+					);
+
+				frame_graph->GetBlackboard()["ScenePassOutput"] = scene_pass->GetData().Output;
+				frame_graph->GetBlackboard()["ScenePassDepth"] = scene_pass->GetData().Depth;
+
+				return scene_pass->GetData().Output;
+			}
+		}
+
 		void AddScenePass(RenderView* render_view)
 		{
 			if (!render_view) return;
@@ -113,6 +198,17 @@ namespace Helios
 
             auto scene = render_view->GetOwnerScene();
             if (!scene) return;
+
+			/* 视图开着后处理（场景里有生效的「后处理对象」）：旁路到纹理 —— 场景 → 视图纹理 →
+			 * 后处理链 → 呈现 Pass 全屏画回默认目标；否则照旧直渲（"关闭 = 零改动"基线）。
+			 * 调试视图非 None 时 HasEnabledEffects 恒假（与纹理路径的"调试视图直通"同一语义）。 */
+			if (PostProcess::HasEnabledEffects(*render_view))
+			{
+				const auto scene_color = AddScenePassToTextureCore(render_view);
+				const auto final_color = PostProcess::AddPostProcessPasses(*render_view, scene_color);
+				PostProcess::AddPresentToDefaultTarget(*render_view, final_color);
+				return;
+			}
 
 			frame_graph->AddPass<ScenePassData>("ScenePass",
 				[&](FrameGraphBuilder& builder, ScenePassData& data)
@@ -137,91 +233,21 @@ namespace Helios
 			);
 		}
 
-		struct ScenePassTextureData
-		{
-			FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle;
-			FrameGraphResourceHandleTyped<FrameGraphTexture> Output;   /* rgb: 最终颜色 */
-			FrameGraphResourceHandleTyped<FrameGraphTexture> ObjectId; /* 实体 ID（清 -1，供按像素拾取） */
-			FrameGraphResourceHandleTyped<FrameGraphTexture> Depth;    /* 供叠加层做深度比较 */
-		};
-
 		void AddScenePassToTexture(RenderView* render_view)
 		{
 			if (!render_view) return;
+			if (!render_view->GetFrameGraph()) return;
+			if (!render_view->GetOwnerScene()) return;
 
-			auto& frame_graph = render_view->GetFrameGraph();
-			if (!frame_graph) return;
-
-            auto scene = render_view->GetOwnerScene();
-            if (!scene) return;
-
-			const auto& viewport_region = render_view->GetViewportRegion();
-
-			FrameGraphTexture::Descriptor color_desc;
-			color_desc.Width = viewport_region.Width;
-			color_desc.Height = viewport_region.Height;
-			color_desc.TextureFormat = TextureFormat::RGBA8;
-
-			FrameGraphTexture::Descriptor object_id_desc;
-			object_id_desc.Width = viewport_region.Width;
-			object_id_desc.Height = viewport_region.Height;
-			object_id_desc.TextureFormat = TextureFormat::R32I;
-
-			FrameGraphTexture::Descriptor depth_desc;
-			depth_desc.Width = viewport_region.Width;
-			depth_desc.Height = viewport_region.Height;
-			depth_desc.TextureFormat = TextureFormat::Depth32;
-
-			auto scene_pass = frame_graph->AddPass<ScenePassTextureData>("ScenePass",
-				[&](FrameGraphBuilder& builder, ScenePassTextureData& data)
-				{
-					data.ShadowMapHandle = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ShadowMapHandle");
-					data.Output = builder.CreateTexture("ScenePassOutput", color_desc);
-					data.ObjectId = builder.CreateTexture("ScenePassObjectId", object_id_desc);
-					data.Depth = builder.CreateTexture("ScenePassDepth", depth_desc);
-
-					builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
-					builder.BindOutputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
-					builder.BindOutputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
-					builder.BindOutputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
-
-					FrameGraphPassInfo::Descriptor pass_desc;
-					pass_desc.Attachments.ColorAttachments(0) = data.Output;
-					pass_desc.Attachments.ColorAttachments(1) = data.ObjectId;
-					pass_desc.Attachments.DepthAttachment() = data.Depth;
-					/* ObjectId 清成 -1（空像素不可拾取；与延迟 GBuffer 同款约定） */
-					pass_desc.ColorClearValues.resize(2);
-					pass_desc.ColorClearValues[1] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
-					pass_desc.ViewportRegion = viewport_region;
-					builder.CreateRenderPass("ScenePassRenderTarget", pass_desc);
-
-					/* 输出纹理留给视图显示与拾取回读：不能被图裁剪剔除 */
-					builder.AsSideEffect();
-				},
-				[render_view, scene](const FrameGraphResources& resources, const ScenePassTextureData& data)
-				{
-					const auto render_pass_info = resources.GetPassRenderTarget();
-					render_view->EmplacePassFrameBuffer("ScenePass", render_pass_info);
-
-					render_pass_info->Bind();
-					{
-						ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
-						Renderer::GetRenderAPI()->Clear();
-
-						SubmitForwardObjects(*render_view, scene);
-					}
-					render_pass_info->Unbind();
-					Renderer::GetRenderAPI()->Flush();
-				}
-				);
-
-			frame_graph->GetBlackboard()["ScenePassOutput"] = scene_pass->GetData().Output;
-			frame_graph->GetBlackboard()["ScenePassDepth"] = scene_pass->GetData().Depth;
-			render_view->SetRenderTargetHandle(scene_pass->GetData().Output);
+			const auto scene_color = AddScenePassToTextureCore(render_view);
 
 			/* 调试视图（几何重绘 / Overdraw 档位）：场景之后、叠加层之前 ——
 			 * 前向没有独立天空 Pass，几何调试的背景即清屏色（延迟由天空收尾） */
-			DebugView::AddDebugViewPasses(*render_view, { scene_pass->GetData().Output, false });
+			DebugView::AddDebugViewPasses(*render_view, { scene_color, false });
+
+			/* 后处理链（效果注册表驱动）：无效果 / 未启用 = 恒直通 */
+			const auto final_output = PostProcess::AddPostProcessPasses(*render_view, scene_color);
+			render_view->SetRenderTargetHandle(final_output);
 		}
 	}
 }

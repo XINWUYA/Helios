@@ -3,6 +3,7 @@
 #include "DebugViewPasses.h"
 #include <Helios/Application/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
+#include <Helios/Renderer/PostProcess/PostProcessPasses.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Scene/Camera.h>
@@ -518,8 +519,9 @@ namespace Helios
 			DebugView::AddDebugViewPasses(*render_view, { lighting_output, true });
 			AddSkyPass(*render_view);
 
-			/* 延迟视图的输出 = 光照结果（天空与叠加层都画进它本身） */
-			render_view->SetRenderTargetHandle(lighting_output);
+			/* 后处理链（效果注册表驱动）：天空之后、输出之前；无效果 / 未启用 = 恒直通 */
+			const auto final_output = PostProcess::AddPostProcessPasses(*render_view, lighting_output);
+			render_view->SetRenderTargetHandle(final_output);
 		}
 	}
 }

@@ -233,6 +233,17 @@ namespace Helios
 		void OnRemoved(const Scene& scene, Entity& entity) override;
 	};
 
+	/* 后处理对象（场景级总开关）：挂在实体上表示「这是后处理配置对象」——
+	 * 各效果的设置组件（BloomComponent 等）挂在同一实体上，由 Scene 每帧解析分发；
+	 * 总开关关闭 = 整个对象不参与解析（效果设置原样保留，与实体隐藏同源）。 */
+	struct PostProcessComponent : ComponentBase
+	{
+		bool m_Enabled{ true };
+
+		PostProcessComponent() = default;
+		PostProcessComponent(const PostProcessComponent&) = default;
+	};
+
 	/* 场景中需要接入on_construct/on_destroy信号分发的全部组件类型 */
 	using SceneComponentList = std::tuple<
 		NameComponent,
