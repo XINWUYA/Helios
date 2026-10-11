@@ -1,4 +1,4 @@
-#include "Pch.h"
+﻿#include "Pch.h"
 #include "Command/AssetFileOps.h"
 #include <cctype>
 
@@ -14,7 +14,7 @@ namespace Helios
 			const std::filesystem::path relative = std::filesystem::relative(target, g_AssetsPath, error);
 
 			std::string name;
-			if (!error && !relative.empty() && relative.native().rfind("..", 0) != 0)
+			if (!error && !relative.empty() && relative.native().rfind(std::filesystem::path("..").native(), 0) != 0)
 				name = PathToUtf8(relative);
 			else
 				name = PathToUtf8(target.filename());
@@ -101,7 +101,7 @@ namespace Helios
 		std::error_code error;
 		const std::filesystem::path relative = std::filesystem::relative(path, g_AssetsPath, error);
 
-		if (!error && !relative.empty() && relative.native().rfind("..", 0) != 0)
+		if (!error && !relative.empty() && relative.native().rfind(std::filesystem::path("..").native(), 0) != 0)
 			return PathToUtf8(relative);
 
 		return PathToUtf8(path);

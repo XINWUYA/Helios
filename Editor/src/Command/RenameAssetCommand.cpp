@@ -1,4 +1,4 @@
-#include "Pch.h"
+﻿#include "Pch.h"
 #include "Command/RenameAssetCommand.h"
 
 namespace Helios
