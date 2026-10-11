@@ -1,6 +1,6 @@
 #include "Pch.h"
 #include "DebugViewPasses.h"
-#include <Helios/Application/AssetManager.h>
+#include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderView.h>
@@ -99,7 +99,7 @@ namespace Helios
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
 
-				const auto shader = ShaderAssetManager::Instance().GetOrLoad(
+				const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/DebugShaders/DebugOverdraw.glsl"));
 
 				struct OverdrawPassData
@@ -170,7 +170,7 @@ namespace Helios
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
 
-				const auto shader = ShaderAssetManager::Instance().GetOrLoad(
+				const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/DebugShaders/DebugView.glsl"));
 
 				struct CompositePassData
@@ -256,7 +256,7 @@ namespace Helios
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
 
-				const auto shader = ShaderAssetManager::Instance().GetOrLoad(
+				const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/DebugShaders/DebugMaterial.glsl"));
 
 				struct DebugMaterialPassData

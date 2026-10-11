@@ -31,7 +31,7 @@
 
 #include "Helios/Application/Application.h"
 #include "Helios/Application/FileDialog.h"
-#include "Helios/Application/AssetManager.h"
+#include "Helios/Core/AssetManager.h"
 
 #include "Helios/ImGui/ImGuiLayer.h"
 #include "Helios/ImGui/ImGuiExtensions.h"

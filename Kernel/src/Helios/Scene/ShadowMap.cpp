@@ -9,7 +9,7 @@
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Scene/Material.h>
-#include <Helios/Application/AssetManager.h>
+#include <Helios/Core/AssetManager.h>
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
 #include <Helios/Scene/Camera.h>
 #include "Mesh.h"
@@ -119,7 +119,7 @@ namespace Helios
 	void ShadowMapManager::PrepareForShadowMaps(const SharedPtr<Scene>& scene, const Camera* camera)
 	{
 		if (!m_ShadowCasterShader)
-			m_ShadowCasterShader = ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/Shadow.glsl"));
+			m_ShadowCasterShader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Shadow.glsl"));
 
 		PrepareRequiredTexture();
 

@@ -2,7 +2,7 @@
 
 #include "ImGuiExtensions.h"
 #include <imgui_internal.h>
-#include "Helios/Application/AssetManager.h"
+#include "Helios/Core/AssetManager.h"
 #include "Helios/Common/Math.h"
 #include "Helios/ImGui/AxisGlyph.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
@@ -572,7 +572,7 @@ namespace Helios::ImGuiExt
 		/* 缩略图与文件名分两行：值列通常只有一二百像素，并排会把路径挤成一条竖线 */
 		const float value_x = ImGui::GetCursorPosX();
 
-		const auto& show_texture = texture ? texture : TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Default.png"));
+		const auto& show_texture = texture ? texture : AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Default.png"));
 
 		/* Image：ImTextureID 统一存放 DeviceTexture 指针，
 		 * 由渲染后端自行解析为硬件句柄（避免 32 位 GetTextureID 截断指针）。 */
@@ -590,7 +590,7 @@ namespace Helios::ImGuiExt
 					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
 				{
 					const std::filesystem::path texture_path = g_AssetsPath / relative_path;
-					const auto new_texture = TextureAssetManager::Instance().GetOrCreateTexture(
+					const auto new_texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(
 						PathToUtf8(texture_path));
 					if (new_texture->IsLoaded())
 						texture = new_texture;

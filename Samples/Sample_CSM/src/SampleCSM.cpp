@@ -29,7 +29,7 @@ void SampleCSM::OnAttached()
 		raster_state.DepthCompareFunc = CompareFunc::GreaterEqual;
 		raster_state.CullMode = CullMode::Cull_None;
 
-		const auto shader = ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
+		const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
 		const auto material = Material::Create(shader);
 		material->SetParameters(ParamType::Texture, "u_SkyTex", sky_texture);
 		material->SetRasterState(raster_state);
@@ -45,9 +45,9 @@ void SampleCSM::OnAttached()
 		auto entity = m_pScene->CreateEntity("Plane");
 		auto& model_component = entity.AddComponent<ModelComponent>();
 
-		const auto shader = ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/ForwardShaders/BuiltinLit.glsl"));
+		const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/ForwardShaders/BuiltinLit.glsl"));
 		auto material = Material::Create(shader);
-		auto texture = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Grass2.png"));
+		auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Grass2.png"));
 		material->SetTexture("u_AlbedoTexture", texture);
 		material->SetParameters(ParamType::Vec4, "u_AlbedoTilingOffset", glm::vec4(4, 4, 0, 0));
 		model_component.m_Model = Model::Create(BuiltinModelType::Plane, material);

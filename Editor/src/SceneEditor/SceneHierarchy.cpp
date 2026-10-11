@@ -5,7 +5,7 @@
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Helios/Application/Application.h"
-#include "Helios/Application/AssetManager.h"
+#include "Helios/Core/AssetManager.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Scene/SceneCommon.h"
@@ -1563,11 +1563,11 @@ namespace Helios
 		for (const auto& [label, value] : m_AssetDetailRows)
 			ImGuiExt::DrawCommonTextUI(label, value);
 
-		/* 图片给一张更大的预览：与资源浏览器的缩略图共用 TextureAssetManager 的缓存
+		/* 图片给一张更大的预览：与资源浏览器的缩略图共用 AssetManager 的缓存
 		 * （同一张贴图不会加载两份；headless 下没有图形上下文时贴图为空，跳过即可）。 */
 		if (!entry.IsFolder && entry.Kind == AssetFileKind::Image)
 		{
-			const SharedPtr<DeviceTexture> preview = TextureAssetManager::Instance().GetOrCreateTexture(
+			const SharedPtr<DeviceTexture> preview = AssetManager::Instance().GetOrLoad<DeviceTexture>(
 				PathToUtf8(absolute_path));
 			if (preview != nullptr && preview->IsLoaded())
 			{
@@ -2288,7 +2288,7 @@ namespace Helios
 					ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
 
 					const auto& show_texture = texture ? texture
-						: TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/default.png"));
+						: AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/default.png"));
 
 					/* 缩略图与行高同高（frame 高含 1px 外框）：逐行对齐、不撑行 */
 					const float thumbnail = ImGui::GetFrameHeight() - 2.0f;
@@ -2303,7 +2303,7 @@ namespace Helios
 							if (payload->DataSize > 1 && TryPathFromUtf8Payload(
 								payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
 							{
-								const auto new_texture = TextureAssetManager::Instance().GetOrCreateTexture(
+								const auto new_texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(
 									PathToUtf8(g_AssetsPath / relative_path));
 								if (new_texture->IsLoaded())
 								{
@@ -2864,7 +2864,7 @@ namespace Helios
 
 			if (!picked.empty() && picked != current)
 			{
-				material.SetShader(ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH(picked)));
+				material.SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(picked)));
 				on_edit();
 			}
 		}
@@ -2947,7 +2947,7 @@ namespace Helios
 					{
 						m_AssetMaterialDirty = true;
 						if (hot_sync)
-							MaterialAssetManager::Instance().Refresh(asset_path, editable);
+							AssetManager::Instance().Refresh<Material>(asset_path, editable);
 					});
 
 					/* 「Apply」：保存修改并序列化到本地（整份文件的全部条目一起写出）；
@@ -3005,7 +3005,7 @@ namespace Helios
 
 		if (const MaterialEntry* first = m_AssetMaterialGroup->GetEntryByIndex(0);
 			first != nullptr && first->pMaterial != nullptr)
-			MaterialAssetManager::Instance().Refresh(path, first->pMaterial);
+			AssetManager::Instance().Refresh<Material>(path, first->pMaterial);
 	}
 
 	/* 层级里拖入 .mesh：给实体挂 / 换模型。

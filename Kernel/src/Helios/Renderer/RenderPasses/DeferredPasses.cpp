@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "DeferredPasses.h"
 #include "DebugViewPasses.h"
-#include <Helios/Application/AssetManager.h>
+#include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderView.h>
@@ -88,12 +88,12 @@ namespace Helios
 		SharedPtr<DeviceTexture> DefaultTextureForSampler(const std::string& sampler_name)
 		{
 			if (sampler_name.find("Normal") != std::string::npos)
-				return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/normal.png"));
+				return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/normal.png"));
 			if (sampler_name.find("Albedo") != std::string::npos
 				|| sampler_name.find("Roughness") != std::string::npos
 				|| sampler_name.find("Ambient") != std::string::npos)
-				return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/White.png"));
-			return TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Black.png"));
+				return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/White.png"));
+			return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Black.png"));
 		}
 
 		SharedPtr<Material> CreateGBufferMaterial(
@@ -166,7 +166,7 @@ namespace Helios
 				object_id_desc.TextureFormat = TextureFormat::R32I;
 
 				/* GBuffer Pass 使用 GBufferMaterial.glsl；普通材质在提交前转换为该 shader 对应的临时材质。 */
-				const auto gbuffer_shader = ShaderAssetManager::Instance().GetOrLoad(
+				const auto gbuffer_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl"));
 
 				struct GBufferPassData
@@ -388,7 +388,7 @@ namespace Helios
 								raster_state.BlendFuncSrcA = BlendFunc::One;
 								raster_state.BlendFuncDstRGB = BlendFunc::One;
 								raster_state.BlendFuncDstA = BlendFunc::One;
-								const auto shader = ShaderAssetManager::Instance().GetOrLoad(
+								const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 									ABSOLUTE_PATH("Shaders/DeferredShaders/Lighting.glsl"));
 								material->SetShader(shader);
 								material->SetTexture("u_GBufferTexture0", resources.Get(data.GBufferTexture0).Texture);

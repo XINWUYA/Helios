@@ -382,7 +382,7 @@ namespace Helios
 		if (!node.ThumbnailResolved)
 		{
 			node.ThumbnailResolved = true;
-			node.Thumbnail = TextureAssetManager::Instance().GetOrCreateTexture(
+			node.Thumbnail = AssetManager::Instance().GetOrLoad<DeviceTexture>(
 				PathToUtf8(g_AssetsPath / PathFromUtf8(node.FilePath)));
 
 			if (node.Thumbnail != nullptr && !node.Thumbnail->IsLoaded())

@@ -1,6 +1,6 @@
 #include "Pch.h"
 #include "ComponentRegistry.h"
-#include "Helios/Application/AssetManager.h"
+#include "Helios/Core/AssetManager.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/Entity.h"
 #include "Helios/Scene/SceneCommon.h"
@@ -386,7 +386,7 @@ namespace Helios
 			model_component.m_CastShadow = element->BoolAttribute("CastShadow", true);
 			model_component.m_ReceiveShadow = element->BoolAttribute("ReceiveShadow", true);
 
-			/* 槽绑定：引用形态走 MaterialAssetManager；实例形态读内嵌定义 */
+			/* 槽绑定：引用形态走 AssetManager；实例形态读内嵌定义 */
 			model_component.m_SlotOverrides.clear();
 			for (const tinyxml2::XMLElement* override_doc = element->FirstChildElement("MaterialOverride"); override_doc; override_doc = override_doc->NextSiblingElement("MaterialOverride"))
 			{
@@ -410,7 +410,7 @@ namespace Helios
 					const char* asset = override_doc->Attribute("Asset");
 					if (asset == nullptr || *asset == '\0')
 						continue;
-					auto material = MaterialAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH(asset));
+					auto material = AssetManager::Instance().GetOrLoad<Material>(ABSOLUTE_PATH(asset));
 					if (material == nullptr)
 					{
 						CORE_LOG_WARN("Failed to load override material '{}' for slot '{}'.", asset, slot_name);
@@ -551,7 +551,7 @@ namespace Helios
 						if (extension == ".mtl")
 						{
 							const std::string absolute_path = PathToUtf8(g_AssetsPath / relative_path);
-							auto material = MaterialAssetManager::Instance().GetOrLoad(absolute_path);
+							auto material = AssetManager::Instance().GetOrLoad<Material>(absolute_path);
 							if (material != nullptr)
 							{
 								MaterialSlotOverride slot_override;
@@ -573,7 +573,7 @@ namespace Helios
 					/* 从来源资产重新克隆（无来源 = 回默认） */
 					if (!iter->second.SourceAssetPath.empty())
 					{
-						auto source = MaterialAssetManager::Instance().GetOrLoad(iter->second.SourceAssetPath);
+						auto source = AssetManager::Instance().GetOrLoad<Material>(iter->second.SourceAssetPath);
 						if (source != nullptr)
 						{
 							auto& slot_override = component.m_SlotOverrides[slot->Name];

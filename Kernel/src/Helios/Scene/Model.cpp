@@ -2,7 +2,7 @@
 #include "Model.h"
 #include "Mesh.h"
 #include "SceneCommon.h"
-#include "Helios/Application/AssetManager.h"
+#include "Helios/Core/AssetManager.h"
 #include "Helios/Common/Math.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
@@ -520,7 +520,7 @@ namespace Helios
 			/* 默认绑定：资产引用优先解析；内嵌定义直接用；两者皆无 → 空（解析时兜底白模） */
 			if (!entry.AssetPath.empty())
 			{
-				slot.pDefault = MaterialAssetManager::Instance().GetOrLoad(entry.AssetPath);
+				slot.pDefault = AssetManager::Instance().GetOrLoad<Material>(entry.AssetPath);
 				if (slot.pDefault == nullptr)
 				{
 					CORE_LOG_WARN("Failed to load material asset '{}' for model '{}' slot '{}'.",

@@ -5,7 +5,7 @@
 #include <cmath>
 
 #include "Helios/Application/Application.h"
-#include "Helios/Application/AssetManager.h"
+#include "Helios/Core/AssetManager.h"
 #include "Helios/Common/Math.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Scene/Material.h"
@@ -521,7 +521,7 @@ namespace Helios
 		SharedPtr<Material> CreateGizmoMaterial(float fade_inner, float fade_outer, float grid_major)
 		{
 			auto material = CreateSharedPtr<Material>();
-			material->SetShader(ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/Axis.glsl")));
+			material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Axis.glsl")));
 
 			auto& raster_state = material->GetRasterState();
 			raster_state.CullMode = CullMode::Cull_None;

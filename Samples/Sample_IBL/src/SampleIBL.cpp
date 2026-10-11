@@ -35,7 +35,7 @@ void SampleIBLLayer::OnAttached()
 		raster_state.DepthCompareFunc = CompareFunc::GreaterEqual;
 		raster_state.CullMode = CullMode::Cull_Front;
 
-		const auto shader = ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
+		const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
 		auto material = Material::Create(shader);
 		material->SetParameters(ParamType::Texture, "u_SkyTex", m_pSkyTexture);
 		material->SetRasterState(raster_state);
@@ -58,7 +58,7 @@ void SampleIBLLayer::OnAttached()
 
 	/* 添加PBR球体 */
 	{
-		const auto shader = ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/ReflectionProbe/IBLLit.glsl"));
+		const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/ReflectionProbe/IBLLit.glsl"));
 		m_pPBRMaterial = Material::Create(shader);
 		m_pPBRMaterial->SetTexture("u_AlbedoTexture", DeviceTexture::White());
 		m_pPBRMaterial->SetTexture("u_RoughnessTexture", DeviceTexture::CreateWithSolidColor(glm::vec3(0.15f)));

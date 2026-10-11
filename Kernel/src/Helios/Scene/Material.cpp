@@ -3,7 +3,7 @@
 #include <tinyxml2.h>
 
 #include "SceneCommon.h"
-#include "Helios/Application/AssetManager.h"
+#include "Helios/Core/AssetManager.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include <cctype>
@@ -43,9 +43,9 @@ namespace Helios
 
 		/* 天空盒的识别以着色器为单一来源（样例场景的约定同源）：资产里的天空
 		 * 就是"网格 + SkyBox.glsl 材质"，由顶点着色器折叠成全屏天空。
-		 * ShaderAssetManager 按路径缓存，指针比较即可。 */
+		 * AssetManager 按路径缓存，指针比较即可。 */
 		static const SharedPtr<DeviceShader> s_skybox_shader =
-			ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
+			AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
 		return m_pShader != nullptr && m_pShader == s_skybox_shader;
 	}
 
@@ -173,7 +173,7 @@ namespace Helios
 		if (!m_pDefaultMaterial->GetShader())
 		{
 			/* 只能在获取时设置Shader，在静态编译期，OpenGL尚未初始化，无法正确创建ShaderProgram */
-			m_pDefaultMaterial->SetShader(ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl")));
+			m_pDefaultMaterial->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl")));
 		}
 
 		return m_pDefaultMaterial;
@@ -184,7 +184,7 @@ namespace Helios
 	{
 		if (!m_pErrorMaterial->GetShader())
 		{
-			m_pErrorMaterial->SetShader(ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/error.glsl")));
+			m_pErrorMaterial->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/error.glsl")));
 		}
 		return m_pErrorMaterial;
 	}
@@ -198,15 +198,15 @@ namespace Helios
 			 * （延迟 G-Buffer 写入）全贴图驱动，9 个采样点必须全有贴图 —— 白模就用内置默认贴图配满，
 			 * 零外部依赖，编辑器的延迟和前向路径都能用。 */
 			m_pBuiltinWhiteMaterial->SetShader(
-				ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl")));
+				AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl")));
 
 			auto& white = *m_pBuiltinWhiteMaterial;
-			const auto texture_white = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/White.png"));
-			const auto texture_black = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Black.png"));
+			const auto texture_white = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/White.png"));
+			const auto texture_black = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Black.png"));
 			/* u_NormalTexture 的缺省平面法线：normal.png 必须存 (128,128,255)——采样经 *2-1
 			 * 解码后为 (0,0,1)（切空间朝上、不加扰动）。该文件是所有"缺省补图"（本处、
 			 * DeferredPasses 的 DefaultTextureForSampler、新建材质模板）共用的单一来源。 */
-			const auto texture_normal = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/normal.png"));
+			const auto texture_normal = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/normal.png"));
 
 			white.SetTexture("u_AlbedoTexture", texture_white);
 			white.SetTexture("u_SpecularTexture", texture_black);
@@ -641,7 +641,7 @@ namespace Helios
 			const char* shader_path = material_element->Attribute("ShaderPath");
 			if (shader_path == nullptr || *shader_path == '\0')
 				return false;
-			material.SetShader(ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH(shader_path)));
+			material.SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(shader_path)));
 
 			/* Parameters */
 			if (const auto* params_root = material_element->FirstChildElement("Parameters"))
@@ -675,7 +675,7 @@ namespace Helios
 								load_config.IsHdr = IsHdrTexturePath(texture_path);
 							}
 
-							auto texture = TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(texture_path), load_config);
+							auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(texture_path), load_config);
 							material.SetTexture(param_name, texture);
 						}
 						break;

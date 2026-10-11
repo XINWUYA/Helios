@@ -102,7 +102,7 @@ namespace Helios
 
 		/* 用另一份材质的内容整体覆盖本材质的定义（Shader / 参数表 / 光栅化状态）。
 		 * 对象地址不变 —— 已持有它的槽位随之读到新内容
-		 * （材质资产保存后的缓存同步走这里，见 MaterialAssetManager::Refresh）。 */
+		 * （材质资产保存后的缓存同步走这里，见 AssetManager::Refresh<Material>）。 */
 		void CopyDefinitionFrom(const Material& source);
 
 		/* 只保留当前 Shader 声明的参数（反射是参数集合的单一来源）：

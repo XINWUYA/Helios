@@ -29,7 +29,7 @@ void SampleSkyBox::OnAttached()
 		raster_state.DepthCompareFunc = CompareFunc::GreaterEqual;
 		raster_state.CullMode = CullMode::Cull_Front;
 
-		auto shader = ShaderAssetManager::Instance().GetOrLoad(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
+		auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
 		auto material = Material::Create(shader);
 		material->SetParameters(ParamType::Texture, "u_SkyTex", sky_texture);
 		material->SetRasterState(raster_state);

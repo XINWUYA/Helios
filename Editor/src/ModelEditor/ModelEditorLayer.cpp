@@ -34,7 +34,7 @@ namespace Helios
 			{
 			case ParamType::Texture:
 				material->SetTexture(param_info.Name,
-					TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Default.png")));
+					AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Default.png")));
 				break;
 			case ParamType::Int:   material->SetParameters(ParamType::Int, param_info.Name, 0); break;
 			case ParamType::Float: material->SetParameters(ParamType::Float, param_info.Name, 0.0f); break;
@@ -326,7 +326,7 @@ namespace Helios
 				if (flip_changed || mips_changed)
 				{
 					material->SetTexture(param_info.Name,
-						TextureAssetManager::Instance().GetOrCreateTexture(texture->GetPath(), load_config));
+						AssetManager::Instance().GetOrLoad<DeviceTexture>(texture->GetPath(), load_config));
 				}
 			}
 			else
@@ -421,7 +421,7 @@ namespace Helios
 			/* 初始化材质 */
 			m_pMaterialGroup->ClearAllMaterials();
 			for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-				m_pMaterialGroup->EmplaceMaterial(Material::Create(ShaderAssetManager::Instance().GetOrLoad("Shaders/DeferredShaders/GBufferMaterial.glsl")));
+				m_pMaterialGroup->EmplaceMaterial(Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/DeferredShaders/GBufferMaterial.glsl")));
 
 			/* 更新场景模型信息 */
 			UpdateModel();
@@ -445,7 +445,7 @@ namespace Helios
 			/* 初始化材质 */
 			m_pMaterialGroup->ClearAllMaterials();
 			for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-				m_pMaterialGroup->EmplaceMaterial(Material::Create(ShaderAssetManager::Instance().GetOrLoad("Shaders/DeferredShaders/GBufferMaterial.glsl")));
+				m_pMaterialGroup->EmplaceMaterial(Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/DeferredShaders/GBufferMaterial.glsl")));
 
 			/* 更新场景模型信息 */
 			UpdateModel();
@@ -649,45 +649,45 @@ namespace Helios
 		{
 			/* Ambient */
 			if (!material_params.AmbientTexPath.empty())
-				material->SetTexture("Ambient", TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(material_params.AmbientTexPath), load_config));
+				material->SetTexture("Ambient", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.AmbientTexPath), load_config));
 			else
 				material->SetParameters(ParamType::Vec3, "Ambient", material_params.Ambient);
 
 			/* Diffuse/Albedo */
 			if (!material_params.DiffuseTexPath.empty())
-				material->SetTexture("Albedo", TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(material_params.DiffuseTexPath), load_config));
+				material->SetTexture("Albedo", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.DiffuseTexPath), load_config));
 			else
 				material->SetParameters(ParamType::Vec3, "Albedo", material_params.Diffuse);
 
 			/* Specular */
 			if (!material_params.SpecularTexPath.empty())
-				material->SetTexture("Specular", TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(material_params.SpecularTexPath), load_config));
+				material->SetTexture("Specular", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.SpecularTexPath), load_config));
 			else
 				material->SetParameters(ParamType::Vec3, "Specular", material_params.Specular);
 
 			/* Normal, todo: 处理Bump和Displacement */
 			if (!material_params.BumpTexPath.empty())
-				material->SetTexture("Normal", TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(material_params.BumpTexPath), load_config));
+				material->SetTexture("Normal", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.BumpTexPath), load_config));
 			else if (!material_params.DisplacementTexPath.empty())
-				material->SetTexture("Normal", TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(material_params.DisplacementTexPath), load_config));
+				material->SetTexture("Normal", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.DisplacementTexPath), load_config));
 			else
 				material->SetParameters(ParamType::Vec3, "Normal", glm::vec3(0.0f, 0.0f, 1.0f));
 
 			/* Roughness */
 			if (!material_params.RoughnessTexPath.empty())
-				material->SetTexture("Roughness", TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(material_params.RoughnessTexPath), load_config));
+				material->SetTexture("Roughness", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.RoughnessTexPath), load_config));
 			else
 				material->SetParameters(ParamType::Float, "Roughness", material_params.Roughness);
 
 			/* Metallic */
 			if (!material_params.MetallicTexPath.empty())
-				material->SetTexture("Metallic", TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(material_params.MetallicTexPath), load_config));
+				material->SetTexture("Metallic", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.MetallicTexPath), load_config));
 			else
 				material->SetParameters(ParamType::Float, "Metallic", material_params.Metallic);
 
 			/* Emission */
 			if (!material_params.EmissionTexPath.empty())
-				material->SetTexture("Emissive", TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH(material_params.EmissionTexPath), load_config));
+				material->SetTexture("Emissive", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.EmissionTexPath), load_config));
 			else
 				material->SetParameters(ParamType::Vec3, "Emissive", material_params.Emission);
 
