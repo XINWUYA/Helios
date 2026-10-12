@@ -4,8 +4,8 @@
 
 namespace Helios
 {
-	/* 编辑器统一图标系统（单一数据源）：全部是矢量 —— 由 ImDrawList 直接绘制，没有外部资源、
-	 * 跟分辨率无关；主描边跟着 UI 状态色走。UI 代码只引用 Icons::Id、不出现贴图路径字面量。 */
+	/* 编辑器统一图标系统：图标来自 EditorRes/icons 目录的 SVG 文件，文件名和枚举名相同，
+	 * 由 ImDrawList 直接绘制、跟分辨率无关；UI 代码只引用 Icons::Id，不写资源路径。 */
 	namespace Icons
 	{
 		enum class Id : uint16_t
@@ -68,10 +68,9 @@ namespace Helios
 		{
 			const char*  Name;      /* 语义名：用于调试与阅读 */
 			IconDrawFunc Draw;
-			float OpticalScale;     /* 最终 SVG 预览中的逐图光学尺寸 */
 		};
 
-		/* 元数据表：新增图标只在这里加一行（Id 与表项一一对应） */
+		/* 图标元数据表：与 Id 枚举一一对应，Draw 是加载失败时的回退画法 */
 		const IconDesc& Get(Id id);
 
 		/* 绘制图标本体（不进入交互；按钮请用 IconButton） */

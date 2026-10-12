@@ -1,13 +1,15 @@
 #include "Pch.h"
 #include "EditorIcons.h"
-#include "EditorIconsSvg.h"
 #include "Helios/ImGui/EditorTheme.h"
+#include "Helios/Scene/SceneCommon.h"
+#include <magic_enum.hpp>
 #include <tinyxml2.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -1684,21 +1686,6 @@ namespace Helios::Icons
 			std::vector<SvgShape> Shapes;
 		};
 
-		constexpr const char* kSvgSymbolIds[] = {
-			"", "new-scene", "open-scene", "save", "import", "export", "new-asset", "undo", "redo", "back", "forward",
-			"translate", "rotate", "scale",
-			"play", "stop", "live", "record", "previous-frame", "next-frame", "peak", "valley", "trace-text", "menu", "add", "remove", "return", "return-root", "filter", "search", "visible", "hidden", "scene",
-			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
-			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "log", "fit-view", "flip-vertical",
-			"maximize", "restore", "capture",
-			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
-			"file-material", "file-probe", "gizmos", "grid", "world-axis", "debug-view",
-			"albedo", "normal", "roughness", "metallic", "specular-color", "ambient-occlusion", "emission", "ambient",
-			"diffuse", "specular", "shadow", "indirect", "overdraw", "mipmap",
-		};
-		static_assert(IM_ARRAYSIZE(kSvgSymbolIds) == static_cast<size_t>(Id::COUNT),
-			"SVG symbol map must remain aligned with Icons::Id");
-
 		constexpr ImU32 SvgInkColor(SvgInk ink, uint8_t alpha, bool dark_canvas)
 		{
 			if (dark_canvas)
@@ -2104,33 +2091,55 @@ namespace Helios::Icons
 		}
 
 		std::array<SvgIcon, static_cast<size_t>(Id::COUNT)> s_SvgIcons;
+		std::array<float, static_cast<size_t>(Id::COUNT)> s_OpticalScales;
 		std::once_flag s_SvgIconsInit;
 
+		/* 按枚举名从 EditorRes/icons 目录逐个加载 SVG，光学尺寸读 SVG 根元素上的
+		 * data-optical-scale；加载不到的图标用回退画法兜底。 */
 		void InitializeSvgIcons()
 		{
-			tinyxml2::XMLDocument document;
-			if (document.Parse(Detail::kSvgSymbols) != tinyxml2::XML_SUCCESS || document.RootElement() == nullptr)
-				return;
-			const tinyxml2::XMLElement* defs = document.RootElement()->FirstChildElement("defs");
-			if (defs == nullptr)
-				return;
+			std::fill(s_OpticalScales.begin(), s_OpticalScales.end(), 1.0f);
 
+			const std::filesystem::path directory = ResolveAssetPath(PathFromUtf8("EditorRes/icons"));
+			if (!std::filesystem::is_directory(directory))
+			{
+				CORE_LOG_ERROR("Editor icons: directory not found: {}", PathToUtf8(directory));
+				return;
+			}
+
+			size_t loaded = 0;
+			size_t failed = 0;
 			for (size_t i = 1; i < static_cast<size_t>(Id::COUNT); ++i)
 			{
-				const tinyxml2::XMLElement* symbol = nullptr;
-				for (const tinyxml2::XMLElement* candidate = defs->FirstChildElement("symbol"); candidate != nullptr;
-					candidate = candidate->NextSiblingElement("symbol"))
+				const std::string file_name = std::string(magic_enum::enum_name(static_cast<Id>(i))) + ".svg";
+				const std::filesystem::path file = directory / PathFromUtf8(file_name);
+
+				if (!std::filesystem::exists(file))
 				{
-					const char* symbol_id = candidate->Attribute("id");
-					if (symbol_id != nullptr && std::strcmp(symbol_id, kSvgSymbolIds[i]) == 0)
-					{
-						symbol = candidate;
-						break;
-					}
+					CORE_LOG_WARN("Editor icon missing: {}", file_name);
+					++failed;
+					continue;
 				}
-				if (symbol != nullptr)
-					ParseSvgElement(symbol, SvgStyle{}, s_SvgIcons[i]);
+
+				tinyxml2::XMLDocument document;
+				if (document.LoadFile(PathToUtf8(file).c_str()) != tinyxml2::XML_SUCCESS || document.RootElement() == nullptr)
+				{
+					CORE_LOG_WARN("Editor icon parse failed: {}", file_name);
+					++failed;
+					continue;
+				}
+
+				const tinyxml2::XMLElement* root = document.RootElement();
+				if (const char* scale = root->Attribute("data-optical-scale"))
+					s_OpticalScales[i] = std::strtof(scale, nullptr);
+				ParseSvgElement(root, SvgStyle{}, s_SvgIcons[i]);
+				++loaded;
 			}
+
+			if (failed > 0)
+				CORE_LOG_WARN("Editor icons: {} loaded, {} missing or failed (EditorRes/icons)", loaded, failed);
+			else
+				CORE_LOG_INFO("Editor icons: {} loaded from EditorRes/icons", loaded);
 		}
 
 		bool IsSvgPointInsideTriangle(const ImVec2& p, const ImVec2& a, const ImVec2& b, const ImVec2& c)
@@ -2356,92 +2365,92 @@ namespace Helios::Icons
 
 		/* 元数据表：Id 与表项一一对应（顺序必须与 Id 枚举一致）*/
 		constexpr IconDesc s_Icons[] = {
-			{ "None",              nullptr,                 1.0f },
-			{ "NewScene",          &DrawNewScene,           0.86f },
-			{ "OpenScene",         &DrawOpenScene,          0.86f },
-			{ "Save",              &DrawSave,               0.97f },
-			{ "Import",            &DrawImport,             0.93f },
-			{ "Export",            &DrawExport,             0.93f },
-			{ "NewAsset",          &DrawNewAsset,           1.0f },
-			{ "Undo",              &DrawUndo,               0.96f },
-			{ "Redo",              &DrawRedo,               1.04f },
-			{ "Back",              &DrawBack,               0.97f },
-			{ "Forward",           &DrawForward,            0.97f },
-			{ "Translate",         &DrawTranslate,          0.92f },
-			{ "Rotate",            &DrawRotate,             1.09375f },
-			{ "Scale",             &DrawScale,              0.93f },
-			{ "Play",              &DrawPlay,               0.93f },
-			{ "Stop",              &DrawStop,               0.93f },
-			{ "Live",              &DrawLive,               0.97f },
-			{ "Record",            &DrawRecord,             0.93f },
-			{ "PreviousFrame",     &DrawPreviousFrame,      0.93f },
-			{ "NextFrame",         &DrawNextFrame,          0.93f },
-			{ "Peak",              &DrawPeak,               0.93f },
-			{ "Valley",            &DrawValley,             0.93f },
-			{ "TraceText",         &DrawTraceText,          0.93f },
-			{ "Menu",              &DrawMenu,               1.09f },
-			{ "Add",               &DrawAdd,                0.93f },
-			{ "Remove",            &DrawRemove,             0.93f },
-			{ "Return",            &DrawReturn,             0.91f },
-			{ "ReturnRoot",        &DrawReturnRoot,         0.93f },
-			{ "Filter",            &DrawFilter,             0.93f },
-			{ "Search",            &DrawSearch,             1.109375f },
-			{ "Visible",           &DrawVisible,            0.86f },
-			{ "Hidden",            &DrawHidden,             0.86f },
-			{ "Scene",             &DrawScene,              0.90f },
-			{ "Entity",            &DrawEntity,             0.93f },
-			{ "Model",             &DrawModel,              0.93f },
-			{ "Cube",              &DrawCubeShape,          0.93f },
-			{ "Sphere",            &DrawSphereShape,        0.93f },
-			{ "Plane",             &DrawPlaneShape,         0.93f },
-			{ "Shape3D",           &DrawShape3D,            0.93f },
-			{ "Camera",            &DrawCamera,             0.83f },
-			{ "Light",             &DrawLight,              0.86f },
-			{ "LightDirectional",  &DrawDirectionalLight,   0.83f },
-			{ "LightPoint",        &DrawPointLight,         0.76f },
-			{ "LightSpot",         &DrawSpotLight,          0.81f },
-			{ "ReflectionProbe",   &DrawReflectionProbe,    0.93f },
-			{ "Sprite",            &DrawSprite,             0.93f },
-			{ "Audio",             &DrawAudio,              0.90f },
-			{ "Particle",          &DrawParticle,           0.97f },
-			{ "Terrain",           &DrawTerrain,            0.86f },
-			{ "Transform",         &DrawTransform,          0.81f },
-			{ "Tag",               &DrawTag,                0.93f },
-			{ "Stats",             &DrawStats,              0.93f },
-			{ "FrameGraph",        &DrawFrameGraph,         0.93f },
-			{ "Log",               &DrawLog,                0.93f },
-			{ "FitView",           &DrawFitView,            0.90f },
-			{ "FlipVertical",      &DrawFlipVertical,       0.97f },
-			{ "Maximize",          &DrawMaximize,           0.93f },
-			{ "Restore",           &DrawRestore,            0.95f },
-			{ "Capture",           &DrawCapture,            0.95f },
-			{ "Directory",         &DrawDirectory,          0.86f },
-			{ "File",              &DrawFile,               0.86f },
-			{ "FileImage",         &DrawFileImage,          0.86f },
-			{ "FileScene",         &DrawScene,              0.86f },
-			{ "FileMtlGraph",      &DrawFileMtlGraph,       0.86f },
-			{ "FileShader",        &DrawFileShader,         0.86f },
-			{ "FileModel",         &DrawFileModel,          0.86f },
-			{ "FileMaterial",      &DrawFileMaterial,       0.86f },
-			{ "FileProbe",         &DrawFileProbe,          0.86f },
-			{ "Gizmos",            &DrawGizmos,             0.90f },
-			{ "Grid",              &DrawGrid,               0.90f },
-			{ "WorldAxis",         &DrawWorldAxis,          0.90f },
-			{ "DebugView",         &DrawDebugView,          0.93f },
-			{ "Albedo",            &DrawAlbedo,             0.93f },
-			{ "Normal",            &DrawNormal,             0.93f },
-			{ "Roughness",         &DrawRoughness,          0.93f },
-			{ "Metallic",          &DrawMetallic,           0.93f },
-			{ "SpecularColor",     &DrawSpecularColor,      0.93f },
-			{ "AmbientOcclusion",  &DrawAmbientOcclusion,   0.93f },
-			{ "Emission",          &DrawEmission,           0.93f },
-			{ "Ambient",           &DrawAmbient,            0.93f },
-			{ "Diffuse",           &DrawDiffuse,            1.0f },
-			{ "Specular",          &DrawSpecular,           1.0f },
-			{ "Shadow",            &DrawShadow,             0.97f },
-			{ "Indirect",          &DrawIndirect,           1.0f },
-			{ "Overdraw",          &DrawOverdraw,           0.97f },
-			{ "Mipmap",            &DrawMipmap,             0.93f },
+			{ "None",              nullptr },
+			{ "NewScene",          &DrawNewScene },
+			{ "OpenScene",         &DrawOpenScene },
+			{ "Save",              &DrawSave },
+			{ "Import",            &DrawImport },
+			{ "Export",            &DrawExport },
+			{ "NewAsset",          &DrawNewAsset },
+			{ "Undo",              &DrawUndo },
+			{ "Redo",              &DrawRedo },
+			{ "Back",              &DrawBack },
+			{ "Forward",           &DrawForward },
+			{ "Translate",         &DrawTranslate },
+			{ "Rotate",            &DrawRotate },
+			{ "Scale",             &DrawScale },
+			{ "Play",              &DrawPlay },
+			{ "Stop",              &DrawStop },
+			{ "Live",              &DrawLive },
+			{ "Record",            &DrawRecord },
+			{ "PreviousFrame",     &DrawPreviousFrame },
+			{ "NextFrame",         &DrawNextFrame },
+			{ "Peak",              &DrawPeak },
+			{ "Valley",            &DrawValley },
+			{ "TraceText",         &DrawTraceText },
+			{ "Menu",              &DrawMenu },
+			{ "Add",               &DrawAdd },
+			{ "Remove",            &DrawRemove },
+			{ "Return",            &DrawReturn },
+			{ "ReturnRoot",        &DrawReturnRoot },
+			{ "Filter",            &DrawFilter },
+			{ "Search",            &DrawSearch },
+			{ "Visible",           &DrawVisible },
+			{ "Hidden",            &DrawHidden },
+			{ "Scene",             &DrawScene },
+			{ "Entity",            &DrawEntity },
+			{ "Model",             &DrawModel },
+			{ "Cube",              &DrawCubeShape },
+			{ "Sphere",            &DrawSphereShape },
+			{ "Plane",             &DrawPlaneShape },
+			{ "Shape3D",           &DrawShape3D },
+			{ "Camera",            &DrawCamera },
+			{ "Light",             &DrawLight },
+			{ "LightDirectional",  &DrawDirectionalLight },
+			{ "LightPoint",        &DrawPointLight },
+			{ "LightSpot",         &DrawSpotLight },
+			{ "ReflectionProbe",   &DrawReflectionProbe },
+			{ "Sprite",            &DrawSprite },
+			{ "Audio",             &DrawAudio },
+			{ "Particle",          &DrawParticle },
+			{ "Terrain",           &DrawTerrain },
+			{ "Transform",         &DrawTransform },
+			{ "Tag",               &DrawTag },
+			{ "Stats",             &DrawStats },
+			{ "FrameGraph",        &DrawFrameGraph },
+			{ "Log",               &DrawLog },
+			{ "FitView",           &DrawFitView },
+			{ "FlipVertical",      &DrawFlipVertical },
+			{ "Maximize",          &DrawMaximize },
+			{ "Restore",           &DrawRestore },
+			{ "Capture",           &DrawCapture },
+			{ "Directory",         &DrawDirectory },
+			{ "File",              &DrawFile },
+			{ "FileImage",         &DrawFileImage },
+			{ "FileScene",         &DrawScene },
+			{ "FileMtlGraph",      &DrawFileMtlGraph },
+			{ "FileShader",        &DrawFileShader },
+			{ "FileModel",         &DrawFileModel },
+			{ "FileMaterial",      &DrawFileMaterial },
+			{ "FileProbe",         &DrawFileProbe },
+			{ "Gizmos",            &DrawGizmos },
+			{ "Grid",              &DrawGrid },
+			{ "WorldAxis",         &DrawWorldAxis },
+			{ "DebugView",         &DrawDebugView },
+			{ "Albedo",            &DrawAlbedo },
+			{ "Normal",            &DrawNormal },
+			{ "Roughness",         &DrawRoughness },
+			{ "Metallic",          &DrawMetallic },
+			{ "SpecularColor",     &DrawSpecularColor },
+			{ "AmbientOcclusion",  &DrawAmbientOcclusion },
+			{ "Emission",          &DrawEmission },
+			{ "Ambient",           &DrawAmbient },
+			{ "Diffuse",           &DrawDiffuse },
+			{ "Specular",          &DrawSpecular },
+			{ "Shadow",            &DrawShadow },
+			{ "Indirect",          &DrawIndirect },
+			{ "Overdraw",          &DrawOverdraw },
+			{ "Mipmap",            &DrawMipmap },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),
@@ -2464,7 +2473,7 @@ namespace Helios::Icons
 			return;
 
 		std::call_once(s_SvgIconsInit, InitializeSvgIcons);
-		const float optical_size = size * s_Icons[index].OpticalScale;
+		const float optical_size = size * s_OpticalScales[index];
 		if (s_SvgIcons[index].Shapes.empty())
 		{
 			if (s_Icons[index].Draw != nullptr)
