@@ -27,8 +27,10 @@ namespace Helios
 			 * game-engine-icons-final-v13-performance）：上一帧 / 下一帧
 			 * （胶片格 + 方向箭头）、峰值（peak）/ 谷值（valley）折线图 */
 			PreviousFrame, NextFrame, Peak, Valley,
+			/* CPU 录制选项：同时写追踪文本（chrome://tracing 时间线 JSON） */
+			TraceText,
 			/* 通用 */
-			Menu, Add, Remove, Return, Filter, Search, Visible, Hidden,
+			Menu, Add, Remove, Return, ReturnRoot, Filter, Search, Visible, Hidden,
 			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
 			Scene, Entity, Model, Cube, Sphere, Plane, Shape3D, Camera, Light, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Sprite,
 			Audio, Particle, Terrain,
@@ -42,6 +44,10 @@ namespace Helios
 			Log,
 			/* 面板工具动作：适配视图（把整张图收进视野）/ 预览垂直翻转（Frame Graph 的镜像开关） */
 			FitView, FlipVertical,
+			/* 弹窗窗口控制（CPU 图表弹窗的行尾按钮）：最大化铺满主视口 / 还原为浮动窗 */
+			Maximize, Restore,
+			/* 抓取当前帧（实时视图：冻结数据供分析） */
+			Capture,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
 			Directory, File, FileImage, FileScene, FileMtlGraph, FileShader, FileModel, FileMaterial, FileProbe,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */

@@ -438,6 +438,29 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.438f, 0.688f), c.Len(0.0875f), color);
 		}
 
+		/* 追踪文本（CPU 录制选项：录制时同步写 chrome://tracing 时间线 JSON）：
+		 * 文件页（文件族语言，折角软紫）+ 波形折线（性能族语言，薄荷） */
+		void DrawTraceText(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			static constexpr float kPage[5][2] = {
+				{ 0.25f, 0.125f }, { 0.594f, 0.125f }, { 0.75f, 0.281f }, { 0.75f, 0.875f }, { 0.25f, 0.875f }
+			};
+			dl->AddTriangleFilled(c.At(0.594f, 0.125f), c.At(0.75f, 0.281f), c.At(0.594f, 0.281f),
+				PaletteColor(color, kViolet, 0.18f));
+			StrokePolyline(dl, c, kPage, t, color, true);
+			dl->AddLine(c.At(0.594f, 0.125f), c.At(0.594f, 0.281f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.594f, 0.281f), c.At(0.75f, 0.281f), PaletteColor(color, kViolet), t);
+
+			static constexpr float kWave[7][2] = {
+				{ 0.344f, 0.688f }, { 0.419f, 0.688f }, { 0.475f, 0.469f }, { 0.556f, 0.797f },
+				{ 0.619f, 0.594f }, { 0.663f, 0.688f }, { 0.688f, 0.688f }
+			};
+			StrokePolyline(dl, c, kWave, t * 1.1f, PaletteColor(color, kMint), false);
+		}
+
 		/* ---- 通用 ---- */
 
 		void DrawMenu(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -478,18 +501,42 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 			const ImU32 violet = PaletteColor(color, kViolet);
 
-			/* 折返路径先向左、再下行，末端箭头明确指向左侧 */
-			dl->PathLineTo(c.At(0.86f, 0.28f));
-			dl->PathLineTo(c.At(0.40f, 0.28f));
-			dl->PathBezierCubicCurveTo(c.At(0.31f, 0.28f), c.At(0.30f, 0.35f), c.At(0.30f, 0.44f), 8);
-			dl->PathLineTo(c.At(0.30f, 0.72f));
+			/* 折返路径：顶栏（带左向箭头）绕右侧下行、沿底栏折回；与 SVG symbol 同一副坐标 */
+			dl->PathLineTo(c.At(22.0f / 32.0f, 7.0f / 32.0f));
+			dl->PathBezierQuadraticCurveTo(c.At(26.0f / 32.0f, 7.0f / 32.0f), c.At(26.0f / 32.0f, 11.0f / 32.0f), 8);
+			dl->PathLineTo(c.At(26.0f / 32.0f, 18.0f / 32.0f));
+			dl->PathBezierQuadraticCurveTo(c.At(26.0f / 32.0f, 23.0f / 32.0f), c.At(21.0f / 32.0f, 23.0f / 32.0f), 8);
+			dl->PathLineTo(c.At(6.0f / 32.0f, 23.0f / 32.0f));
 			dl->PathStroke(color, 0, t);
 
-			dl->PathLineTo(c.At(0.30f, 0.58f));
-			dl->PathLineTo(c.At(0.12f, 0.72f));
-			dl->PathLineTo(c.At(0.30f, 0.86f));
+			dl->PathLineTo(c.At(10.0f / 32.0f, 3.0f / 32.0f));
+			dl->PathLineTo(c.At(6.0f / 32.0f, 7.0f / 32.0f));
+			dl->PathLineTo(c.At(10.0f / 32.0f, 11.0f / 32.0f));
 			dl->PathStroke(violet, 0, t);
-			dl->AddLine(c.At(0.68f, 0.28f), c.At(0.86f, 0.28f), PaletteColor(color, kMint), t);
+
+			dl->AddLine(c.At(9.0f / 32.0f, 7.0f / 32.0f), c.At(22.0f / 32.0f, 7.0f / 32.0f),
+				PaletteColor(color, kMint), t);
+		}
+
+		/* 一键回根（Treemap 面包屑：跳过逐层返回、直接回根）：浏览器"主页"式房子 ——
+		 * 屋顶折线 + 房身（软紫底 + 描边）+ 门（薄荷），与 Return 的折返箭头明显区分 */
+		void DrawReturnRoot(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 房身 */
+			dl->AddRectFilled(c.At(0.24f, 0.46f), c.At(0.76f, 0.84f),
+				PaletteColor(color, kViolet, 0.16f), c.Len(0.05f));
+			dl->AddRect(c.At(0.24f, 0.46f), c.At(0.76f, 0.84f), color, c.Len(0.05f), 0, t);
+
+			/* 屋顶折线（左右屋檐探出房身） */
+			dl->AddLine(c.At(0.13f, 0.51f), c.At(0.50f, 0.16f), color, t);
+			dl->AddLine(c.At(0.50f, 0.16f), c.At(0.87f, 0.51f), color, t);
+
+			/* 门（薄荷） */
+			dl->AddRectFilled(c.At(0.43f, 0.62f), c.At(0.57f, 0.84f),
+				PaletteColor(color, kMint), c.Len(0.02f));
 		}
 
 		void DrawFilter(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -1054,6 +1101,60 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.5f, 0.5f), c.Len(0.05f), PaletteColor(color, kMint));
 		}
 
+		/* 弹窗最大化（CPU 图表弹窗的行尾按钮）：窗块（软紫底 + 标题条）+ 右上角向外撑的
+		 * 角标箭头 —— 语汇与 Scale 的四角箭头同族，这里只留右上向外、读作"撑到全窗"。 */
+		void DrawMaximize(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 mint = PaletteColor(color, kMint);
+
+			/* 窗块 */
+			dl->AddRectFilled(c.At(0.156f, 0.312f), c.At(0.688f, 0.750f), PaletteColor(color, kViolet, 0.16f), c.Len(0.056f));
+			dl->AddRect(c.At(0.156f, 0.312f), c.At(0.688f, 0.750f), color, c.Len(0.056f), 0, t);
+			dl->AddLine(c.At(0.156f, 0.453f), c.At(0.688f, 0.453f), PaletteColor(color, kViolet), t);
+
+			/* 右上角标箭头：顶点 + 左 / 下两条短边 + 指向窗内的对角线 */
+			dl->AddLine(c.At(0.8125f, 0.1875f), c.At(0.6250f, 0.1875f), mint, t * 1.1f);
+			dl->AddLine(c.At(0.8125f, 0.1875f), c.At(0.8125f, 0.3750f), mint, t * 1.1f);
+			dl->AddLine(c.At(0.8125f, 0.1875f), c.At(0.5938f, 0.4063f), mint, t * 1.1f);
+		}
+
+		/* 还原为浮动窗：前下后上两个错层窗块（经典"还原"语汇；后块灰调后退、
+		 * 前块软紫底 + 标题条 —— 与 Overdraw 的两块叠放同族但层级感相反）。 */
+		void DrawRestore(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddRectFilled(c.At(0.359f, 0.219f), c.At(0.828f, 0.594f), PaletteColor(color, kGray), c.Len(0.056f));
+			dl->AddRectFilled(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), PaletteColor(color, kViolet, 0.16f), c.Len(0.056f));
+			dl->AddRect(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), color, c.Len(0.056f), 0, t);
+			dl->AddLine(c.At(0.172f, 0.531f), c.At(0.641f, 0.531f), PaletteColor(color, kViolet), t);
+		}
+
+		/* 抓取当前帧（相机）：机身（软紫底 + 描边）+ 顶部取景凸起 + 镜头（紫环 + 薄荷芯） */
+		void DrawCapture(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 顶部取景凸起 */
+			dl->AddLine(c.At(0.3438f, 0.2813f), c.At(0.4063f, 0.1875f), color, t);
+			dl->AddLine(c.At(0.4063f, 0.1875f), c.At(0.5938f, 0.1875f), color, t);
+			dl->AddLine(c.At(0.5938f, 0.1875f), c.At(0.6563f, 0.2813f), color, t);
+
+			/* 机身 */
+			dl->AddRectFilled(c.At(0.1563f, 0.2813f), c.At(0.8438f, 0.7500f),
+				PaletteColor(color, kViolet, 0.16f), c.Len(0.069f));
+			dl->AddRect(c.At(0.1563f, 0.2813f), c.At(0.8438f, 0.7500f), color, c.Len(0.069f), 0, t);
+
+			/* 镜头：紫环 + 薄荷芯 */
+			dl->AddCircleFilled(c.At(0.5f, 0.5156f), c.Len(0.1313f), PaletteColor(color, kViolet, 0.22f));
+			dl->AddCircle(c.At(0.5f, 0.5156f), c.Len(0.1313f), PaletteColor(color, kViolet), t);
+			dl->AddCircleFilled(c.At(0.5f, 0.5156f), c.Len(0.0438f), PaletteColor(color, kMint));
+		}
+
 		/* ---- 内容（资源浏览器）----
 		 * 文件夹管"在哪"、文件图标管"是什么"；双色调：外形描边 + 主体低透明度同色（缩略图网格
 		 * 放到 100px 也不显单薄）。 */
@@ -1586,9 +1687,10 @@ namespace Helios::Icons
 		constexpr const char* kSvgSymbolIds[] = {
 			"", "new-scene", "open-scene", "save", "import", "export", "new-asset", "undo", "redo", "back", "forward",
 			"translate", "rotate", "scale",
-			"play", "stop", "live", "record", "previous-frame", "next-frame", "peak", "valley", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
+			"play", "stop", "live", "record", "previous-frame", "next-frame", "peak", "valley", "trace-text", "menu", "add", "remove", "return", "return-root", "filter", "search", "visible", "hidden", "scene",
 			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
 			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "log", "fit-view", "flip-vertical",
+			"maximize", "restore", "capture",
 			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
 			"file-material", "file-probe", "gizmos", "grid", "world-axis", "debug-view",
 			"albedo", "normal", "roughness", "metallic", "specular-color", "ambient-occlusion", "emission", "ambient",
@@ -2276,10 +2378,12 @@ namespace Helios::Icons
 			{ "NextFrame",         &DrawNextFrame,          0.93f },
 			{ "Peak",              &DrawPeak,               0.93f },
 			{ "Valley",            &DrawValley,             0.93f },
+			{ "TraceText",         &DrawTraceText,          0.93f },
 			{ "Menu",              &DrawMenu,               1.09f },
 			{ "Add",               &DrawAdd,                0.93f },
 			{ "Remove",            &DrawRemove,             0.93f },
 			{ "Return",            &DrawReturn,             0.91f },
+			{ "ReturnRoot",        &DrawReturnRoot,         0.93f },
 			{ "Filter",            &DrawFilter,             0.93f },
 			{ "Search",            &DrawSearch,             1.109375f },
 			{ "Visible",           &DrawVisible,            0.86f },
@@ -2308,6 +2412,9 @@ namespace Helios::Icons
 			{ "Log",               &DrawLog,                0.93f },
 			{ "FitView",           &DrawFitView,            0.90f },
 			{ "FlipVertical",      &DrawFlipVertical,       0.97f },
+			{ "Maximize",          &DrawMaximize,           0.93f },
+			{ "Restore",           &DrawRestore,            0.95f },
+			{ "Capture",           &DrawCapture,            0.95f },
 			{ "Directory",         &DrawDirectory,          0.86f },
 			{ "File",              &DrawFile,               0.86f },
 			{ "FileImage",         &DrawFileImage,          0.86f },
