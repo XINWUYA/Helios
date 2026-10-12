@@ -33,16 +33,11 @@ int main(int argc, char** argv)
 	Helios::Logger::Init();
 	EDITOR_LOG("Helios Kernel 1.0.0");
 
-	// See the profiler result in: edge://tracing/
-	// More suggested: https://ui.perfetto.dev/
-	// Just Drag the json file in.
-	PROFILER_BEGIN_SESSION("Startup", "TimeCostProfiler-Startup.json");
+	/* 耗时追踪文本默认不写：运行时在性能面板（Stat Info → CPU Timings）的 "Trace Text"
+	 * 开关里控制写盘；要抓启动阶段就临时用 PROFILER_BEGIN_SESSION / PROFILER_END_SESSION
+	 * 包住下面两段。 */
 	auto app = Helios::CreateApplication();
-	PROFILER_END_SESSION();
-
-	PROFILER_BEGIN_SESSION("Runtime", "TimeCostProfiler-Runtime.json");
 	app->Run();
-	PROFILER_END_SESSION();
 
 	Helios::Logger::Shutdown();
 	EndMemoryLeakDetector();

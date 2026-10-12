@@ -39,8 +39,8 @@ namespace Helios
 		m_OpenIndices.clear();
 		m_FrameStart = std::chrono::steady_clock::now();
 
-		/* 帧根：栈空时的第一个作用域（节点 0） */
-		BeginScope("FrameTotal");
+		/* 帧根：栈空时的第一个作用域（节点 0）——合成节点，无插桩点位置 */
+		BeginScope("FrameTotal", nullptr, 0);
 	}
 
 	void CPUTimerProfiler::EndFrame()
@@ -62,7 +62,7 @@ namespace Helios
 		m_FrameBegun = false;
 	}
 
-	uint32_t CPUTimerProfiler::BeginScope(const char* label)
+	uint32_t CPUTimerProfiler::BeginScope(const char* label, const char* file, uint32_t line)
 	{
 		/* 帧外（启动 / 静态初始化）与非 owner 线程（worker）静默跳过，避免池竞争 */
 		if (!m_FrameBegun || std::this_thread::get_id() != m_OwnerThread)
@@ -73,12 +73,12 @@ namespace Helios
 
 		uint32_t index = INVALID_CPU_SCOPE_INDEX;
 		if (parent_index == INVALID_CPU_SCOPE_INDEX)
-			index = AllocNode(label, INVALID_CPU_SCOPE_INDEX);  /* 帧根 */
+			index = AllocNode(label, file, line, INVALID_CPU_SCOPE_INDEX);  /* 帧根 */
 		else
 		{
 			index = FindChild(parent_index, label);
 			if (index == INVALID_CPU_SCOPE_INDEX)
-				index = AllocNode(label, parent_index);
+				index = AllocNode(label, file, line, parent_index);
 		}
 
 		ScopeNode& node = m_ScopeNodes[index];
@@ -113,7 +113,7 @@ namespace Helios
 			node.AccumulatedUs += now_us - node.EntryUs;
 	}
 
-	uint32_t CPUTimerProfiler::AllocNode(const char* label, uint32_t parent_index)
+	uint32_t CPUTimerProfiler::AllocNode(const char* label, const char* file, uint32_t line, uint32_t parent_index)
 	{
 		if (m_UsedNodeCount >= m_ScopeNodes.size())
 			m_ScopeNodes.emplace_back();
@@ -121,6 +121,8 @@ namespace Helios
 		const uint32_t index = m_UsedNodeCount++;
 		ScopeNode& node = m_ScopeNodes[index];
 		node.Label = label;
+		node.File = file;
+		node.Line = line;
 		node.ParentIndex = parent_index;
 		node.ChildrenIndices.clear();
 		node.AccumulatedUs = 0.0;
@@ -183,6 +185,8 @@ namespace Helios
 			out.TotalUs = out.TotalUs * 0.9 + raw.AccumulatedUs * 0.1;
 			out.SelfUs = out.SelfUs * 0.9 + self * 0.1;
 		}
+		out.File = raw.File;
+		out.Line = raw.Line;
 		out.BeginUs = raw.BeginUs;
 		out.EndUs = raw.EndUs;
 		out.CallCount = raw.CallCount;
@@ -209,6 +213,8 @@ namespace Helios
 		out.SelfUs = self;
 		out.BeginUs = raw.BeginUs;
 		out.EndUs = raw.EndUs;
+		out.File = raw.File;
+		out.Line = raw.Line;
 		out.CallCount = raw.CallCount;
 		out.HasData = true;
 
@@ -217,13 +223,13 @@ namespace Helios
 			SettleRaw(out.Children[i], raw.ChildrenIndices[i]);
 	}
 
-	ScopedCPUTimerScope::ScopedCPUTimerScope(const char* label)
+	ScopedCPUTimerScope::ScopedCPUTimerScope(const char* label, const char* file, uint32_t line)
 	{
 		CPUTimerProfiler& profiler = CPUTimerProfiler::Instance();
 		if (!profiler.IsEnabled())
 			return;
 
-		m_NodeIndex = profiler.BeginScope(label);
+		m_NodeIndex = profiler.BeginScope(label, file, line);
 	}
 
 	ScopedCPUTimerScope::~ScopedCPUTimerScope()

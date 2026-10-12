@@ -85,7 +85,7 @@ namespace Helios
 
 				{
 					const ScopedFrameStage update_stage(FrameTimeProfiler::Stage::Update);
-					const ScopedCPUTimerScope cpu_update_scope("Update");
+					const ScopedCPUTimerScope cpu_update_scope("Update", __FILE__, __LINE__);
 
 					/* 帧级渲染准备：GPU 计时器的帧边界。
 					 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
@@ -100,7 +100,7 @@ namespace Helios
 
 				{
 					const ScopedFrameStage ui_stage(FrameTimeProfiler::Stage::UI);
-					const ScopedCPUTimerScope cpu_ui_scope("UI");
+					const ScopedCPUTimerScope cpu_ui_scope("UI", __FILE__, __LINE__);
 
 					/* 后更新UI */
 					m_pImGuiLayer->Begin();
@@ -116,7 +116,7 @@ namespace Helios
 
 			{
 				const ScopedFrameStage present_stage(FrameTimeProfiler::Stage::Present);
-				const ScopedCPUTimerScope cpu_present_scope("Present");
+				const ScopedCPUTimerScope cpu_present_scope("Present", __FILE__, __LINE__);
 
 				// SwapBuffer，显示帧画面到屏幕
 				m_pWindow->OnUpdate();

@@ -16,6 +16,10 @@ namespace Helios
 	struct ResultCPUTimerNode
 	{
 		std::string Label{};
+		/* 插桩点位置（悬浮读数显示"文件名:行号"）：File 指向静态存储（__FILE__ 字面量）、
+		 * Line 0 = 未知；直接构造的调用方可不给 —— 都视为"无位置"，UI 跳过不画 */
+		const char* File{ nullptr };
+		uint32_t Line{ 0 };
 		double TotalUs = 0.0;
 		double SelfUs = 0.0;
 		double BeginUs = 0.0;
@@ -97,12 +101,16 @@ namespace Helios
 		void EndFrame();
 
 		/* 作用域开 / 关（ScopedCPUTimerScope 调用）：返回本次调用的池节点下标；
-		 * 帧外 / 非 owner 线程时返回 INVALID_CPU_SCOPE_INDEX（调用方静默跳过）。 */
-		uint32_t BeginScope(const char* label);
+		 * 帧外 / 非 owner 线程时返回 INVALID_CPU_SCOPE_INDEX（调用方静默跳过）。
+		 * file / line = 插桩点位置（宏给 __FILE__ / __LINE__；也可传 nullptr / 0 = 无位置）。 */
+		uint32_t BeginScope(const char* label, const char* file, uint32_t line);
 		void EndScope(uint32_t node_index);
 
 		/* 实时树（EMA 平滑；面板 Live 视图的数据源） */
 		const ResultCPUTimerNode& GetRealtimeRoot() const { return m_RealtimeRoot; }
+
+		/* 当前帧号（帧边界自增；火焰图画布的帧号浮标用） */
+		uint32_t GetFrameId() const { return m_FrameId; }
 
 		CPUTimerRecorder& GetRecorder() { return m_Recorder; }
 
@@ -110,10 +118,15 @@ namespace Helios
 		CPUTimerProfiler() = default;
 
 		/* 帧内作用域节点（池对象跨帧复用）：同一「父 + 标签」的多次调用聚合成一个
-		 * 节点 —— 树规模 = 调用图边数，而不是每帧调用次数。标签须为静态字符串。 */
+		 * 节点 —— 树规模 = 调用图边数，而不是每帧调用次数。
+		 * 这里只存标签 / 文件指针（帧末结算时才读内容）：两者必须指向静态存储 —— PROFILE_*
+		 * 宏由 PROFILE_LABEL_LINE 的 static constexpr 与 __FILE__ 字面量保证。
+		 * 聚合节点保留帧内首次出现的插桩点位置（同标签多插桩点时显示第一个）。 */
 		struct ScopeNode
 		{
 			const char* Label{ nullptr };
+			const char* File{ nullptr };
+			uint32_t Line{ 0 };
 			uint32_t ParentIndex{ INVALID_CPU_SCOPE_INDEX };
 			std::vector<uint32_t> ChildrenIndices{};
 			double AccumulatedUs{ 0.0 };  /* 累计时长（活跃段首尾之差累加） */
@@ -124,7 +137,7 @@ namespace Helios
 			uint32_t CallCount{ 0 };
 		};
 
-		uint32_t AllocNode(const char* label, uint32_t parent_index);
+		uint32_t AllocNode(const char* label, const char* file, uint32_t line, uint32_t parent_index);
 		uint32_t FindChild(uint32_t parent_index, const char* label) const;
 		double ElapsedUs() const;
 
@@ -146,11 +159,12 @@ namespace Helios
 	};
 
 	/* 作用域 RAII（PROFILE_SCOPE / PROFILE_FUNCTION 宏的落点）：构造进入、析构退出；
-	 * 标签须为静态字符串（宏用字面量 / __PRETTY_FUNCTION__ 之类）。 */
+	 * 标签须指向静态存储（宏经 PROFILE_LABEL_LINE 裁剪并落 static constexpr）；
+	 * file / line = 插桩点位置（宏给 __FILE__ / __LINE__；也可传 nullptr / 0 = 无位置）。 */
 	class ScopedCPUTimerScope
 	{
 	public:
-		explicit ScopedCPUTimerScope(const char* label);
+		ScopedCPUTimerScope(const char* label, const char* file, uint32_t line);
 		~ScopedCPUTimerScope();
 
 		ScopedCPUTimerScope(const ScopedCPUTimerScope&) = delete;

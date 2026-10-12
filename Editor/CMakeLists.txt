@@ -61,7 +61,8 @@ target_compile_definitions(Editor
         $<$<CONFIG:Debug>:HELIOS_DEBUG>
         $<$<CONFIG:Release>:HELIOS_RELEASE>
         $<$<CONFIG:Shipping>:HELIOS_SHIPPING>
-        # 编辑器构建默认开启耗时追踪（Profiler.h 的 HELIOS_PROFILE；Sample 不定义=关闭）
+        # 编辑器默认开启性能插桩（HELIOS_PROFILE）；写追踪文本是运行期全局开关 ——
+        # 性能面板 CPU Timings 的 "Trace Text"（不用重编）；Sample 等其它目标不定义
         HELIOS_PROFILE=1
 )
 
