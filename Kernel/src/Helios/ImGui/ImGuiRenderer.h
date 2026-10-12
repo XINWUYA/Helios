@@ -50,8 +50,6 @@ namespace Helios
         void CreateDepthShader();
         /* 创建缓冲区 */
         void EnsureBuffersCapacity(int vertex_count, int index_count);
-        /* 渲染单个DrawList */
-        void RenderDrawList(const ImDrawList* draw_list, const ImDrawData* draw_data, int vertex_offset, int& index_offset);
         /* 更新投影矩阵 */
         void UpdateProjectionMatrix();
 
@@ -69,12 +67,16 @@ namespace Helios
         /* 深度变体着色器：深度格式纹理（深度附件预览）按 depth2d 采样、灰度输出 */
         SharedPtr<DeviceShader> m_UIDepthShader{ nullptr };
 
-        /* 顶点和索引缓冲区 */
-        SharedPtr<DeviceVertexBuffer> m_VertexBuffer{ nullptr };
-        SharedPtr<IndexBuffer> m_IndexBuffer{ nullptr };
-        SharedPtr<DeviceVertexArray> m_VertexArray{ nullptr };
+        /* 顶点 / 索引缓冲：三槽轮转 —— GPU 在飞帧仍读旧槽，CPU 只覆写下一槽才安全
+         *（对齐 ImGui 官方 Metal 后端的 frames-in-flight；drawable 池天然限流 ≤3 帧在飞）。
+         * 别改成单槽省内存：会偶现顶点 / UV 错乱（拉丝、把字体图集采样出来）。 */
+        static constexpr int kFramesInFlight = 3;
+        SharedPtr<DeviceVertexBuffer> m_VertexBuffers[kFramesInFlight]{};
+        SharedPtr<IndexBuffer> m_IndexBuffers[kFramesInFlight]{};
+        SharedPtr<DeviceVertexArray> m_VertexArrays[kFramesInFlight]{};
+        int m_FrameSlot{ 0 };
 
-        /* 缓冲区容量 */
+        /* 缓冲区容量（槽间共享：扩容时一次性重建全部槽 —— 扩容极少发生） */
         int m_VertexBufferSize{ 0 };
         int m_IndexBufferSize{ 0 };
 

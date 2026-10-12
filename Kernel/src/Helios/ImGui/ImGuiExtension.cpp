@@ -284,9 +284,10 @@ namespace Helios::ImGuiExt
 				v3 = v1;
 			}
 
-			draw_list->PrimWriteIdx(ImDrawIdx(draw_list->_VtxCurrentIdx));
-			draw_list->PrimWriteIdx(ImDrawIdx(draw_list->_VtxCurrentIdx + 1));
-			draw_list->PrimWriteIdx(ImDrawIdx(draw_list->_VtxCurrentIdx + 2));
+			/* ImDrawIdx 是宏（unsigned int）——多词类型的函数式转换不合法，用 static_cast */
+			draw_list->PrimWriteIdx(static_cast<ImDrawIdx>(draw_list->_VtxCurrentIdx));
+			draw_list->PrimWriteIdx(static_cast<ImDrawIdx>(draw_list->_VtxCurrentIdx + 1));
+			draw_list->PrimWriteIdx(static_cast<ImDrawIdx>(draw_list->_VtxCurrentIdx + 2));
 			draw_list->PrimWriteVtx(v1, uv, colLight[ii * 3]);
 			draw_list->PrimWriteVtx(v2, uv, colLight[ii * 3 + 1]);
 			draw_list->PrimWriteVtx(v3, uv, colLight[ii * 3 + 2]);

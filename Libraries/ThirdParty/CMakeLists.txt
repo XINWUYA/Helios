@@ -135,6 +135,9 @@ target_include_directories(ImGui PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends
 )
+# ImGui 顶点索引开 32 位：整帧 UI 顶点超 64k 时 16 位索引会回绕（细节见 ImGuiRenderer 的 static_assert）
+# 放这里是因为 PUBLIC 一次覆盖 ImGui 自身和所有下游；imconfig.h 保持原样不动
+target_compile_definitions(ImGui PUBLIC "ImDrawIdx=unsigned int")
 target_link_libraries(ImGui PUBLIC GLFW)
 set_target_properties(ImGui PROPERTIES 
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"

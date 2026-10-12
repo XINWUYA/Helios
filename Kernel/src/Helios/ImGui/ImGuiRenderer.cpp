@@ -27,10 +27,7 @@ namespace Helios
 
     void ImGuiRenderer::Init()
     {
-        /* 创建顶点数组 - 必须先创建 */
-        m_VertexArray = DeviceVertexArray::Create("ImGui_VertexArray");
-
-        /* 创建初始缓冲区 - 必须在创建着色器之前 */
+        /* 创建初始缓冲区（三槽轮转；VAO 在槽内一起建） - 必须在创建着色器之前 */
         EnsureBuffersCapacity(1000, 2000);
 
         /* 创建UI着色器 - 需要在VertexBuffer设置好布局后创建 */
@@ -50,9 +47,13 @@ namespace Helios
 
     void ImGuiRenderer::Cleanup()
     {
-        m_VertexArray.reset();
-        m_VertexBuffer.reset();
-        m_IndexBuffer.reset();
+        for (int slot = 0; slot < kFramesInFlight; ++slot)
+        {
+            m_VertexArrays[slot].reset();
+            m_VertexBuffers[slot].reset();
+            m_IndexBuffers[slot].reset();
+        }
+        m_FrameSlot = 0;
         m_UIShader.reset();
         m_UIDepthShader.reset();
         m_FontTexture.reset();
@@ -96,6 +97,13 @@ namespace Helios
         /* 确保缓冲区足够大 */
         EnsureBuffersCapacity(total_vertex_count, total_index_count);
 
+        /* 缓冲三槽轮转：本帧写读第 slot 槽、随即换下一槽 —— 与在飞 GPU 帧错开（见头文件） */
+        const int slot = m_FrameSlot;
+        m_FrameSlot = (m_FrameSlot + 1) % kFramesInFlight;
+        auto vertex_buffer = m_VertexBuffers[slot];
+        auto index_buffer = m_IndexBuffers[slot];
+        auto vertex_array = m_VertexArrays[slot];
+
         /* 填充顶点和索引数据 */
         int vertex_offset = 0;
         int index_offset = 0;
@@ -124,10 +132,10 @@ namespace Helios
         }
 
         /* 上传顶点数据 */
-        m_VertexBuffer->SetData(vtx_data, total_vertex_count * sizeof(ImDrawVert));
+        vertex_buffer->SetData(vtx_data, total_vertex_count * sizeof(ImDrawVert));
 
         /* 上传索引数据 - 容量已在 EnsureBuffersCapacity 中保证足够 */
-        m_IndexBuffer->SetData(idx_data, total_index_count * sizeof(ImDrawIdx));
+        index_buffer->SetData(idx_data, total_index_count * sizeof(ImDrawIdx));
 
         /* 统一走通用 RenderAPI：Metal 与 OpenGL 共用同一套绘制调用。
          * 平台差异（管线状态与附件格式、纹理/采样器槽位、裁剪 Y 轴方向、索引类型）
@@ -168,12 +176,15 @@ namespace Helios
             m_UIUniformBuffer->Bind();
         }
 
-        /* 绑定VAO（顶点/索引缓冲已在上面填充好） */
-        m_VertexArray->Bind();
+        /* 绑定VAO（顶点/索引缓冲已在上面填充好；按本帧的槽取） */
+        vertex_array->Bind();
 
         /* 遍历所有DrawList和DrawCmd，分批次渲染 */
         int local_index_offset = 0;
-        ImTextureID last_texture_id = nullptr;
+        /* 纹理绑定状态缓存：GPU 槽位的实际绑定跨帧残留 —— 缓存必须以哨兵（"未知"）起始，
+         * 保证本帧第一条纹理命令真实绑定一次；否则它会沿用上一帧最后绑定的纹理
+         *（表现为整窗 / 整块显示成别的贴图 —— 常见的即字体图集）。 */
+        ImTextureID last_texture_id = reinterpret_cast<ImTextureID>(-1);
         /* 当前登记的着色器：默认 UI 变体，绘制深度纹理时切到深度变体（见纹理绑定处） */
         DeviceShader* bound_shader = m_UIShader.get();
         /* 诊断（临时）：本帧"FrameGraph 资源节点图"（预览 RT，名字前缀 FrameGraphCapture/）
@@ -285,7 +296,7 @@ namespace Helios
                     /* 执行绘制 */
                     renderAPI->DrawIndexed(
                         PrimitiveType::Triangles,
-                        m_VertexArray,
+                        vertex_array,
                         pcmd->ElemCount,
                         static_cast<uint32_t>(local_index_offset)
                     );
@@ -305,7 +316,7 @@ namespace Helios
                 frame_graph_image_names.empty() ? "-" : frame_graph_image_names);
         }
 
-        m_VertexArray->Unbind();
+        vertex_array->Unbind();
         m_UIShader->Unbind();
     }
 
@@ -382,11 +393,16 @@ namespace Helios
     void ImGuiRenderer::CreateUIShader()
     {
         m_UIShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ImGuiUI.glsl"));
-        if (m_UIShader && m_VertexArray)
+        if (m_UIShader)
         {
             /* 把顶点布局交给着色器：OpenGL 在 VAO 中记录属性位置，Metal 需要据此
-             * 生成顶点描述符与管线状态。由后端在内部消化，调用方无需区分平台。 */
-            m_UIShader->BindVertexArray(m_VertexArray);
+             * 生成顶点描述符与管线状态。由后端在内部消化，调用方无需区分平台。
+             * 三槽各一份布局（绘制时按槽取 VAO，见 RenderDrawData）。 */
+            for (int slot = 0; slot < kFramesInFlight; ++slot)
+            {
+                if (m_VertexArrays[slot])
+                    m_UIShader->BindVertexArray(m_VertexArrays[slot]);
+            }
         }
 
         CORE_LOG_INFO("ImGui UI shader created from embedded resource");
@@ -397,9 +413,13 @@ namespace Helios
         /* 深度变体：同一顶点布局，片元按 depth2d<float>（Metal）/ 标准深度采样
          * （OpenGL）读取深度并输出灰度，供 Frame Graph 页显示深度附件预览 */
         m_UIDepthShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ImGuiUIDepth.glsl"));
-        if (m_UIDepthShader && m_VertexArray)
+        if (m_UIDepthShader)
         {
-            m_UIDepthShader->BindVertexArray(m_VertexArray);
+            for (int slot = 0; slot < kFramesInFlight; ++slot)
+            {
+                if (m_VertexArrays[slot])
+                    m_UIDepthShader->BindVertexArray(m_VertexArrays[slot]);
+            }
         }
 
         CORE_LOG_INFO("ImGui depth preview shader created");
@@ -407,107 +427,60 @@ namespace Helios
 
     void ImGuiRenderer::EnsureBuffersCapacity(int vertex_count, int index_count)
     {
-        /* 顶点缓冲区：几何增长扩容，避免UI抖动导致频繁重建GPU buffer */
-        if (!m_VertexBuffer || m_VertexBufferSize < vertex_count)
+        /* 顶点 / 索引缓冲：几何增长扩容，避免UI抖动导致频繁重建GPU buffer。
+         * 三槽一次性重建（扩容极少发生，不值得逐槽管容量）；每槽 = 顶点缓冲 + 索引缓冲 + VAO。 */
+        const bool vertex_grow = m_VertexBufferSize < vertex_count;
+        if (vertex_grow)
         {
             int new_size = m_VertexBufferSize > 0 ? m_VertexBufferSize : 1000;
             while (new_size < vertex_count)
                 new_size = new_size + new_size / 2; /* 1.5x growth */
             m_VertexBufferSize = new_size;
-            m_VertexBuffer = DeviceVertexBuffer::Create("ImGui_VertexBuffer", m_VertexBufferSize * sizeof(ImDrawVert));
+        }
+        const bool index_grow = m_IndexBufferSize < index_count;
+        if (index_grow)
+        {
+            int new_size = m_IndexBufferSize > 0 ? m_IndexBufferSize : 2000;
+            while (new_size < index_count)
+                new_size = new_size + new_size / 2; /* 1.5x growth */
+            m_IndexBufferSize = new_size;
+        }
+        if (!vertex_grow && !index_grow && m_VertexArrays[0])
+            return;
+
+        /* 索引位宽：本渲染器把「局部索引 + 全局顶点偏移」手工烘进索引值（见 RenderDrawData），
+         * 整帧 UI 总顶点会超过 64k —— 16 位 ImDrawIdx 会在这一步回绕成错误索引（表现为偶发
+         * 巨大三角形 / 闪烁，弹窗里的大 Treemap 最易触发）。32 位已在 CMake 里定义（ThirdParty/CMakeLists.txt）；此断言
+         * 把前提钉死，别改回去。 */
+        static_assert(sizeof(ImDrawIdx) >= 4,
+            "ImGuiRenderer bakes a global vertex offset into ImDrawIdx; 16-bit truncates past 64k vertices (see ThirdParty/CMakeLists.txt)");
+        const IndexType index_type = (sizeof(ImDrawIdx) == 2) ? IndexType::UInt16 : IndexType::UInt32;
+
+        for (int slot = 0; slot < kFramesInFlight; ++slot)
+        {
+            m_VertexBuffers[slot] = DeviceVertexBuffer::Create("ImGui_VertexBuffer",
+                static_cast<uint32_t>(m_VertexBufferSize) * sizeof(ImDrawVert));
 
             /* 设置顶点布局 */
             VertexBufferLayout layout;
             layout.EmplaceElement(BufferElement{"Position", BufferDataType::Float2});
             layout.EmplaceElement(BufferElement{"TexCoord", BufferDataType::Float2});
             layout.EmplaceElement(BufferElement{"Color", BufferDataType::UByte4, true});  // normalized
-            m_VertexBuffer->SetLayout(layout);
+            m_VertexBuffers[slot]->SetLayout(layout);
 
-            /* 重新创建顶点数组并添加顶点缓冲区 */
-            m_VertexArray = DeviceVertexArray::Create("ImGui_VertexArray");
-            m_VertexArray->AddVertexBuffer(m_VertexBuffer);
-            /* 若已有IndexBuffer，重新挂回VAO，保持索引绑定一致 */
-            if (m_IndexBuffer)
-                m_VertexArray->SetIndexBuffer(m_IndexBuffer);
+            m_IndexBuffers[slot] = IndexBuffer::Create("ImGui_IndexBuffer",
+                static_cast<uint32_t>(m_IndexBufferSize), index_type);
+
+            m_VertexArrays[slot] = DeviceVertexArray::Create("ImGui_VertexArray");
+            m_VertexArrays[slot]->AddVertexBuffer(m_VertexBuffers[slot]);
+            m_VertexArrays[slot]->SetIndexBuffer(m_IndexBuffers[slot]);
 
             /* 顶点数组被重建，重新把布局同步给着色器（见 CreateUIShader） */
             if (m_UIShader)
-                m_UIShader->BindVertexArray(m_VertexArray);
-        }
-
-        /* 索引缓冲区：几何增长扩容，避免频繁重建 */
-        if (!m_IndexBuffer || m_IndexBufferSize < index_count)
-        {
-            int new_size = m_IndexBufferSize > 0 ? m_IndexBufferSize : 2000;
-            while (new_size < index_count)
-                new_size = new_size + new_size / 2; /* 1.5x growth */
-            m_IndexBufferSize = new_size;
-            /* ImGui 缺省 ImDrawIdx 为 unsigned short，对应 UInt16 */
-            const IndexType index_type = (sizeof(ImDrawIdx) == 2) ? IndexType::UInt16 : IndexType::UInt32;
-            m_IndexBuffer = IndexBuffer::Create("ImGui_IndexBuffer", static_cast<uint32_t>(m_IndexBufferSize), index_type);
-            if (m_VertexArray)
-                m_VertexArray->SetIndexBuffer(m_IndexBuffer);
+                m_UIShader->BindVertexArray(m_VertexArrays[slot]);
+            if (m_UIDepthShader)
+                m_UIDepthShader->BindVertexArray(m_VertexArrays[slot]);
         }
     }
 
-    void ImGuiRenderer::RenderDrawList(const ImDrawList* draw_list, const ImDrawData* draw_data, int vertex_offset, int& index_offset)
-    {
-        /* 遍历所有命令 */
-        for (int cmd_i = 0; cmd_i < draw_list->CmdBuffer.Size; cmd_i++)
-        {
-            const ImDrawCmd* pcmd = &draw_list->CmdBuffer[cmd_i];
-
-            /* 设置裁剪区域 */
-            if (pcmd->UserCallback)
-            {
-                /* 用户回调 */
-                pcmd->UserCallback(draw_list, pcmd);
-            }
-            else
-            {
-                /* 设置裁剪区域 - 使用Scissor而不是Viewport */
-                ImVec2 clip_off = draw_data->DisplayPos;
-                ImVec2 clip_scale = draw_data->FramebufferScale;
-
-                ImVec2 clip_min(
-                    (pcmd->ClipRect.x - clip_off.x) * clip_scale.x,
-                    (pcmd->ClipRect.y - clip_off.y) * clip_scale.y
-                );
-                ImVec2 clip_max(
-                    (pcmd->ClipRect.z - clip_off.x) * clip_scale.x,
-                    (pcmd->ClipRect.w - clip_off.y) * clip_scale.y
-                );
-
-                /* 边界检查 */
-                if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y)
-                    continue;
-
-                /* 应用裁剪区域 - Metal坐标系Y轴向上，需要转换 */
-                uint32_t scissor_x = static_cast<uint32_t>(clip_min.x);
-                uint32_t scissor_y = static_cast<uint32_t>(m_DisplayHeight - clip_max.y);
-                uint32_t scissor_width = static_cast<uint32_t>(clip_max.x - clip_min.x);
-                uint32_t scissor_height = static_cast<uint32_t>(clip_max.y - clip_min.y);
-                
-                Renderer::GetRenderAPI()->SetScissor(scissor_x, scissor_y, scissor_width, scissor_height);
-
-                /* 绑定纹理（如果不是默认字体纹理） */
-                if (pcmd->TextureId)
-                {
-                    auto* texture = reinterpret_cast<DeviceTexture*>(pcmd->TextureId);
-                    texture->Bind(0);
-                }
-
-                /* 绘制 - 索引已经在填充时调整为全局索引，直接使用index_offset */
-                m_VertexArray->Bind();
-                Renderer::GetRenderAPI()->DrawIndexed(
-                    PrimitiveType::Triangles,
-                    m_VertexArray,
-                    pcmd->ElemCount,
-                    index_offset  // 使用当前索引偏移
-                );
-            }
-
-            index_offset += pcmd->ElemCount;
-        }
-    }
 }
