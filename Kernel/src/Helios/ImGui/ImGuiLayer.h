@@ -48,11 +48,20 @@ namespace Helios
 		/* 多视口副窗口渲染（PlatformIO默认实现） */
 		void RenderPlatformWindows();
 
+		/* 挂起的 content-scale 重建：跨 DPI 显示器移动窗口时，GLFW 回调可能在帧中途到达，
+		 * 而字体图集 / 样式只能在帧边界安全重建 —— 这里只记标记，下一帧 Begin() 之前执行。 */
+		void ApplyPendingContentScaleRebuild();
+
 		bool m_IsBlockEvents = false;
 		/* imgui.ini 的绝对路径（SetLayoutSavingEnabled 切换时复用） */
 		std::string m_IniPath;
 		/* 界面外观安装器（见 StyleInstaller；空 = ImGui 内置默认） */
 		StyleInstaller m_StyleInstaller;
 		std::unique_ptr<ImGuiRenderer> m_Renderer;
+
+		/* 当前 content scale（SetupFonts 的入参；跨屏变化时更新） */
+		float m_ContentScale{ 1.0f };
+		/* 待处理的缩放重建请求（见 ApplyPendingContentScaleRebuild） */
+		bool m_PendingContentScaleRebuild{ false };
 	};
 }

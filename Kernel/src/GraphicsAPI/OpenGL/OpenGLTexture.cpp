@@ -141,6 +141,11 @@ namespace Helios
 
 			CHECK_GL_ERROR;
 		}
+
+		/* desc 构造器建的也是"可用纹理"（离屏 RT / 字体图集 / 纯色贴图）：硬件对象已建出即置真。
+		 * 消费方拿 IsLoaded() 判"能不能绑"（见 ImGuiRenderer 的绑定诊断），语义必须与
+		 * MetalTexture 的 `m_Texture != nullptr` 对齐（理由见 OpenGLTexture.h 里 m_IsLoaded 的说明）。 */
+		m_IsLoaded = (m_TextureId != 0);
 	}
 
 	OpenGLTexture::OpenGLTexture(const std::string& path, const TextureLoadConfig& load_config)

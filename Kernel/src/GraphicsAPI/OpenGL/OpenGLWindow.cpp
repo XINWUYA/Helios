@@ -276,11 +276,15 @@ namespace Helios
 		m_WindowInfo.CallBackFunc(&event);
 	}
 
-	/* 内容缩放变化 */
+	/* 内容缩放变化：窗口在 DPI 不同的显示器之间移动时触发。
+	 * 更新字段后派发事件 —— 消费方（ImGuiLayer）据此重建字体图集、重算 UI 缩放。 */
 	void OpenGLWindow::OnContentScaleChanged(float scale_x, float scale_y)
 	{
 		(void)scale_y;
 		m_WindowInfo.ContentScale = (scale_x > 0.0f) ? scale_x : 1.0f;
+
+		ContentScaleChangedEvent event(m_WindowInfo.ContentScale, m_WindowInfo.ContentScale);
+		m_WindowInfo.CallBackFunc(&event);
 	}
 
 	/* 最小化/还原：派发显式事件，由 Application 维护 m_IsMinimized */

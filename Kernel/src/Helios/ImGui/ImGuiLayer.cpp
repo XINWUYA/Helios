@@ -6,7 +6,9 @@
 #include <backends/imgui_impl_glfw.h>
 #include <GLFW/glfw3.h>
 #include <filesystem>
+#include <cmath>
 #include "Helios/Application/Application.h"
+#include "Helios/Events/ApplicationEvent.h"
 #include "Helios/VirtualDevice/DeviceWindow.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderAPI.h"
@@ -79,6 +81,7 @@ namespace Helios
 
 		float dpi_scale = 1.0f;
 		glfwGetWindowContentScale(window, &dpi_scale, nullptr);	/* Retina = 2.0 */
+		m_ContentScale = (dpi_scale > 0.0f) ? dpi_scale : 1.0f;
 
 		/* 界面外观由应用注入（见 StyleInstaller）；未注入 = ImGui 内置默认字体与风格。
 		 * 字体必须在字体图集上传（ImGuiRenderer::Init）前装好。 */
@@ -117,12 +120,56 @@ namespace Helios
 
 	void ImGuiLayer::OnEvent(IEvent* event)
 	{
+		if (event->GetEventType() == EventType::ContentScaleChanged)
+		{
+			const auto scale_event = static_cast<ContentScaleChangedEvent*>(event);
+			const float new_scale = (scale_event->GetScaleY() > 0.0f)
+				? scale_event->GetScaleY() : scale_event->GetScaleX();
+
+			/* 只在真的变了时挂重建（GLFW 有时会因焦点/尺寸抖动重复回调）。
+			 * 重建不能在帧中途做（ImGui 正在构建 DrawData），只记标记，见
+			 * ApplyPendingContentScaleRebuild 在下一帧 Begin() 之前执行。 */
+			if (new_scale > 0.0f && std::abs(new_scale - m_ContentScale) > 1e-3f)
+			{
+				m_ContentScale = new_scale;
+				m_PendingContentScaleRebuild = true;
+			}
+		}
+
 		if (m_IsBlockEvents)
 		{
 			ImGuiIO& io = ImGui::GetIO();
 			event->Handled |= event->IsInCategory(EventCategoryMouse) & io.WantCaptureMouse;
 			event->Handled |= event->IsInCategory(EventCategoryKeyboard) & io.WantCaptureKeyboard;
 		}
+	}
+
+	/* 跨 DPI 显示器移动窗口后的重建：按新的 content scale 重烤字体图集并重算样式。
+	 * 时机：在 Begin()（NewFrame）之前、且不在任何 ImGui 帧构建中 —— 重建字体图集
+	 * 会让 io.Fonts 更新，此时 renderer 需把新图集重新上传成 GPU 纹理。
+	 * 坐标系不变（io.DisplaySize 仍由 GLFW 每帧读取），因此布局 ini 无需迁移。 */
+	void ImGuiLayer::ApplyPendingContentScaleRebuild()
+	{
+		if (!m_PendingContentScaleRebuild)
+			return;
+
+		m_PendingContentScaleRebuild = false;
+
+		CORE_LOG_INFO("Content scale changed to {:.2f}, rebuilding ImGui fonts and style", m_ContentScale);
+
+		/* 重建字体图集：先 Cleanup 旧的、再按新 scale 装一遍。
+		 * StyleInstaller 内部会 AddFontFromFileTTF + Build()，得到新图集。 */
+		ImGuiIO& io = ImGui::GetIO();
+		io.Fonts->Clear();
+
+		if (m_StyleInstaller)
+			m_StyleInstaller(io, m_ContentScale);
+		else
+			io.Fonts->AddFontDefault();
+
+		/* 让渲染器把新图集上传成纹理、并刷新 io.Fonts->TexID */
+		if (m_Renderer)
+			m_Renderer->RebuildFontTexture();
 	}
 
 	void ImGuiLayer::OnImGuiRender()
@@ -135,6 +182,10 @@ namespace Helios
 	void ImGuiLayer::Begin()
 	{
 		PROFILE_FUNCTION();
+
+		/* 帧边界：先把挂起的缩放重建做掉（跨屏移动窗口后），再开新帧。
+		 * 必须在这里而非 OnEvent 里做 —— 事件可能在帧中途到达。 */
+		ApplyPendingContentScaleRebuild();
 
 		// Platform new frame
 		m_Renderer->NewFrame();

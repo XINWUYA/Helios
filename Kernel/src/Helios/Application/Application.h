@@ -33,6 +33,7 @@ namespace Helios
 		virtual bool OnHandleWindowCloseEvent(IEvent* event);
 		virtual bool OnHandleWindowResizeEvent(IEvent* event);
 		virtual bool OnHandleWindowIconifyEvent(IEvent* event);
+		virtual bool OnHandleContentScaleChangedEvent(IEvent* event);
 
 	protected:
 		static Application* s_pInstance;

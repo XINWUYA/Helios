@@ -33,7 +33,8 @@ namespace Helios
 
 		/* 纹理ID */
 		uint32_t GetTextureID() const override { return m_TextureId; }
-		/* 纹理是否成功加载 */
+		/* 纹理是否可用：硬件对象（纹理 / RenderBuffer）已成功创建。
+		 * 注意别退回"仅文件加载才为真"的旧语义（见 m_IsLoaded 的说明）。 */
 		bool IsLoaded() const override { return m_IsLoaded; }
 
 		/* ����operators */
@@ -51,7 +52,11 @@ namespace Helios
 		GLenum m_TextureTarget{};
 		/* 纹理路径（从文件加载时有效） */
 		std::string m_Path{};
-		/* 纹理是否加载完成（从文件加载时有效） */
+		/* 纹理是否可用 —— 语义是"硬件对象创建成功"，与 MetalTexture 一致：
+		 *   文件加载构造器：stbi_load 成功置真；
+		 *   desc 构造器（离屏 RT / 字体图集等）：硬件对象建出来后置真。
+		 * 不能只认文件加载 —— 离屏 RT（如 FrameGraph 的 LightingResult）走 desc 构造器，
+		 * 那样会被误判成"未加载"，ImGuiRenderer 的绑定诊断会刷假阳性日志。 */
 		bool m_IsLoaded{ false };
 
 		friend class OpenGLFrameBuffer;

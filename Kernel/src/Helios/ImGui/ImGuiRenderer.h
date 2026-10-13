@@ -41,6 +41,12 @@ namespace Helios
         /* 获取字体纹理 */
         SharedPtr<DeviceTexture> GetFontTexture() const { return m_FontTexture; }
 
+        /* 重建字体图集纹理：窗口在 DPI 不同的显示器之间移动时，字体需按新的 content scale
+         * 重新光栅化（否则文字发虚 / 过小）。调用前须先重建 ImGui 字体图集（StyleInstaller），
+         * 本方法只负责把新图集数据上传成 GPU 纹理并更新 io.Fonts->TexID。
+         * 释放旧纹理 → 重新取图集 → 重传。 */
+        void RebuildFontTexture();
+
     private:
         /* 创建字体图集纹理 */
         void CreateFontTexture();

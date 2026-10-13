@@ -9,6 +9,40 @@
 
 namespace Helios::EditorTheme
 {
+    /* ==================== UI 缩放（高 DPI 自适应） ==================== */
+
+    /* Windows 与 macOS 的 ImGui 坐标语义不同：
+     * - macOS：GLFW 提供"点/像素"分离（FramebufferScale = 2），ImGui 空间 = 逻辑点；
+     *   物理放大由渲染端乘 FramebufferScale 承担，设计值 1:1 进 ImGui（UiScale = 1）。
+     * - Windows：GLFW 3.4 将进程设为 Per-Monitor DPI Aware，窗口 = 帧缓冲 = 物理像素、
+     *   FramebufferScale = 1；要让 UI 呈现与系统缩放一致的大小，设计值必须显式乘系统缩放
+     *   （UiScale = content scale，4K 200% → 2）。
+     * 约定：一切"固定像素"（字体、Style、Token）按设计值书写，进入 ImGui 前统一乘 UiScale。
+     *
+     * 运行时可变：窗口在 DPI 不同的显示器之间移动时由 ImGuiLayer 更新（重建字体 + 重算样式）。
+     * 所有换算一律"从设计值重算"（design × UiScale），不做累乘 —— 因此可重复调用。 */
+    namespace Detail
+    {
+        inline float& UiScaleStorage()
+        {
+            static float s_UiScale = 1.0f;
+            return s_UiScale;
+        }
+    }
+
+    /* 设计像素 → ImGui 单位的缩放系数（macOS = 1；Windows = 系统 content scale） */
+    inline float UiScale()
+    {
+        return Detail::UiScaleStorage();
+    }
+
+    /* 设计像素 → ImGui 单位（= design_pixels × UiScale）的便捷换算：
+     * Kernel 侧的编辑器 UI 组件用它；Editor 侧另有同义的 Scaled()（见 EditorCommon.h）。 */
+    inline float Scaled(float design_pixels)
+    {
+        return design_pixels * UiScale();
+    }
+
     /* ==================== Design Tokens（单一数据源） ==================== */
 
     namespace Token
@@ -69,25 +103,46 @@ namespace Helios::EditorTheme
         inline const ImVec4 White06 = ImVec4(1.0f, 1.0f, 1.0f, 0.06f);
         inline const ImVec4 White12 = ImVec4(1.0f, 1.0f, 1.0f, 0.12f);
 
-        /* ---- 尺寸 ---- */
+        /* ---- 尺寸 ----
+         * 每个尺寸都是"设计值常量（*Design）+ 运行时值"：设计值按逻辑像素书写，
+         * 运行时值 = 设计值 × UiScale，由 ApplyUiScaleToTokens 在 SetupFonts 内落定。
+         * 使用方只读运行时值（如 Token::PropertyLabelWidth），不要再写 *Design。 */
 
         /* 属性面板标签列宽：全面板共用一档（各卡字段左边界对齐）。覆盖最长的字段名（PrefilterMipLevels）
          * 和最长的材质参数名（u_DisplacementTexture）；行内按实际文本做下限保护，更长名字只撑宽自己那一行。 */
-        inline constexpr float PropertyLabelWidth = 124.0f;
+        inline constexpr float PropertyLabelWidthDesign = 124.0f;
 
         /* 属性行的垂直内边距（FramePadding.y）：行高 = 字体高 + 2×这一档。
          * 行内文字（标签与值）统一取同一档基线，竖直居中、全面板同一节奏。
          * 取值手感：0 = 紧贴文字（过于发挤）；5（全局档）= 回到 24px 的老行高。 */
-        inline constexpr float PropertyRowPadY = 3.0f;
+        inline constexpr float PropertyRowPadYDesign = 3.0f;
 
         /* 分组卡片背景的外扩留白（PanelChrome::CardPad）：容器内边距取这个值就贴住容器两边。
          * 注意：必须是常量（早先按"当前窗口内边距 × 0.6"现算，容器设过内边距后就永远差一截）。 */
-        inline constexpr float CardPad = 6.0f;
+        inline constexpr float CardPadDesign = 6.0f;
 
         /* 滑动条（细线 + 圆点）：线要细、点要粗，"点在线上"才有主次。
          * 圆点直径同时是拖动行程的基准（控件把它压给 GrabMinSize），改这里两端会等量内收。 */
-        inline constexpr float SliderTrackThickness = 3.0f;
-        inline constexpr float SliderDotRadius      = 5.0f;
+        inline constexpr float SliderTrackThicknessDesign = 3.0f;
+        inline constexpr float SliderDotRadiusDesign      = 5.0f;
+
+        /* 运行时值 = 设计值 × UiScale（ApplyUiScaleToTokens 落定，使用方只读） */
+        inline float PropertyLabelWidth   = PropertyLabelWidthDesign;
+        inline float PropertyRowPadY      = PropertyRowPadYDesign;
+        inline float CardPad              = CardPadDesign;
+        inline float SliderTrackThickness = SliderTrackThicknessDesign;
+        inline float SliderDotRadius      = SliderDotRadiusDesign;
+    }
+
+    /* 按 UiScale 落定 Token 尺寸（SetupFonts / 跨屏重建时调用；从设计值重算而非累乘，
+     * 因此可重复调用也安全） */
+    inline void ApplyUiScaleToTokens(float ui_scale)
+    {
+        Token::PropertyLabelWidth   = Token::PropertyLabelWidthDesign * ui_scale;
+        Token::PropertyRowPadY      = Token::PropertyRowPadYDesign * ui_scale;
+        Token::CardPad              = Token::CardPadDesign * ui_scale;
+        Token::SliderTrackThickness = Token::SliderTrackThicknessDesign * ui_scale;
+        Token::SliderDotRadius      = Token::SliderDotRadiusDesign * ui_scale;
     }
 
     inline ImVec4 WithAlpha(const ImVec4& color, float alpha)
@@ -161,6 +216,11 @@ namespace Helios::EditorTheme
         ImGuiStyle& style = ImGui::GetStyle();
         style = ImGuiStyle(); /* 先回到官方默认值，避免残留旧配色 */
         ApplyMetrics(style);
+        /* 设计像素 → ImGui 单位：一次性缩放全部内置尺寸（padding / rounding / spacing /
+         * 滚动条 / 拖拽最小尺寸等）。macOS 与 Windows 100% 下 UiScale = 1，是 no-op；
+         * Windows 高 DPI 下让系统控件与字体同步放大。必须在任何 Push 样式栈之前调用。
+         * 注意：ImFloor 取整，非整数缩放下个别值少 0~1px（可接受，优于半像素模糊）。 */
+        style.ScaleAllSizes(UiScale());
 
         ImVec4* c = style.Colors;
 
@@ -294,7 +354,9 @@ namespace Helios::EditorTheme
                                          io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
         }
 
-        font->Scale = 1.0f / dpi_scale; /* 光栅化保留 dpi 倍细节，逻辑尺寸不变 */
+        font->Scale = UiScale() / dpi_scale; /* 光栅化保留 dpi 倍细节：
+                                              * macOS 缩回逻辑尺寸（Scale = 1/dpi，物理放大由渲染端乘 FramebufferScale 承担）；
+                                              * Windows 不缩回（显示 = 设计值 × UiScale 个物理像素，直接就是最终尺寸）。 */
         return font;
     }
 
@@ -306,6 +368,17 @@ namespace Helios::EditorTheme
                                   const std::string& icon_ttf = std::string())
     {
         EditorFonts fonts;
+
+        /* 先落定 UI 缩放与 Token 尺寸：字体、样式（ApplyDark）、各面板常量都按它折算。
+         * Windows 用系统缩放；macOS 恒 1（物理放大在 framebuffer scale 上，见 UiScale 说明）。
+         * 跨屏重建时会再次进来（先 Clear 图集），因此这里必须"从设计值重算"，不能累乘。 */
+#if defined(_WIN32)
+        const float ui_scale = (dpi_scale > 0.0f) ? dpi_scale : 1.0f;
+#else
+        const float ui_scale = 1.0f;
+#endif
+        Detail::UiScaleStorage() = ui_scale;
+        ApplyUiScaleToTokens(ui_scale);
 
         const std::string latin_regular = font_dir + "/opensans/OpenSans-Regular.ttf";
         const std::string latin_semibold = font_dir + "/opensans/OpenSans-SemiBold.ttf";

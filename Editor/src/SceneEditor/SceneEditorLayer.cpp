@@ -113,13 +113,13 @@ namespace Helios
 		//const FrameBufferDescription desc = m_pFrameBuffer->GetDescription();
 		if (m_ViewportRegion.Width > 0 && m_ViewportRegion.Height > 0/* && (desc.Width != m_ViewportRegion.Width() || desc.Height != m_ViewportRegion.Height())*/)
 		{
-			/* ImGui 给的是逻辑点，RenderTarget 必须按物理像素分配（不然 Retina 上视口只渲染 1/2 分辨率、
-			 * 被拉伸）。ClampRenderSize 负责负值 / 超大值的防护。 */
-			const auto content_scale = Application::Instance()->GetWindow().GetContentScale();
+			/* RenderTarget 按物理像素分配：macOS 上 ImGui 单位是点、×2 到像素（不然视口只渲染
+			 * 1/2 分辨率、被拉伸）；Windows 上 ImGui 单位已是物理像素、×1（见 ImGuiToPhysicalScale）。
+			 * ClampRenderSize 负责负值 / 超大值的防护。 */
 			const auto rt_size = ClampRenderSize(
 				static_cast<float>(m_ViewportRegion.Width),
 				static_cast<float>(m_ViewportRegion.Height),
-				content_scale);
+				ImGuiToPhysicalScale());
 			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
 			//m_pOrthographicCameraController->OnResize(static_cast<float>(m_ViewportRegion.Width()), static_cast<float>(m_ViewportRegion.Height()));
 		}
@@ -696,9 +696,9 @@ namespace Helios
 
 		if (mouse_x > 0 && mouse_y > 0 && mouse_x < viewport_size.x && mouse_y < viewport_size.y)
 		{
-			/* 拾取缓冲是物理像素：逻辑点 × 内容缩放后再翻到 GL 行序（纹理第 0 行在
+			/* 拾取缓冲是物理像素：ImGui 坐标 × 帧缓冲换算比率后再翻到 GL 行序（纹理第 0 行在
 			 * 底部，见 MetalRenderAPI::ApplyViewport），并钳到有效范围。 */
-			const float content_scale = Application::Instance()->GetWindow().GetContentScale();
+			const float to_physical = ImGuiToPhysicalScale();
 			const ViewportRegion& picking_region = m_pEditorCamera->GetViewportRegion();
 
 			int pixel_data = -1;
@@ -706,9 +706,9 @@ namespace Helios
 			{
 				const int32_t fb_width = static_cast<int32_t>(picking_region.Width);
 				const int32_t fb_height = static_cast<int32_t>(picking_region.Height);
-				const int32_t pixel_x = std::clamp(static_cast<int32_t>(mouse_x * content_scale), 0, fb_width - 1);
+				const int32_t pixel_x = std::clamp(static_cast<int32_t>(mouse_x * to_physical), 0, fb_width - 1);
 				const int32_t pixel_y = std::clamp(
-					fb_height - 1 - static_cast<int32_t>(mouse_y * content_scale), 0, fb_height - 1);
+					fb_height - 1 - static_cast<int32_t>(mouse_y * to_physical), 0, fb_height - 1);
 
 				pixel_data = m_pEditorCamera->PickingEntityByPixelPos(
 					static_cast<uint32_t>(pixel_x), static_cast<uint32_t>(pixel_y));

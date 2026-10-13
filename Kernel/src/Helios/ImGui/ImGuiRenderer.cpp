@@ -390,6 +390,18 @@ namespace Helios
         CORE_LOG_INFO("ImGui font texture created: {}x{}", width, height);
     }
 
+    void ImGuiRenderer::RebuildFontTexture()
+    {
+        /* 缩放变化后重建字体纹理：先释放旧纹理（避免显存泄漏），再按新图集重建。
+         * CreateFontTexture 自身可重入（只读 io.Fonts 的当前图集、重建 DeviceTexture、
+         * 刷新 io.Fonts->TexID），所以这里只是"dispose + 重建"的组合。
+         * 不能省掉 reset：不同缩放下图集尺寸不同，旧纹理留着就是泄漏。 */
+        m_FontTexture.reset();
+        CreateFontTexture();
+
+        CORE_LOG_INFO("ImGui font texture rebuilt for content scale change");
+    }
+
     void ImGuiRenderer::CreateUIShader()
     {
         m_UIShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ImGuiUI.glsl"));

@@ -89,6 +89,34 @@ namespace Helios
 		bool m_Iconified;
 	};
 
+	/* 窗口内容缩放变化事件：窗口在不同 DPI 显示器之间移动时由 GLFW 回调上报
+	 * （glfwSetWindowContentScaleCallback）。Windows 上 content scale = 系统缩放
+	 * （150% → 1.5）、且窗口即物理像素；macOS 上恒为 2（点/像素比）。
+	 * 消费方（ImGuiLayer）据此重建字体图集并重算 UI 缩放。 */
+	class ContentScaleChangedEvent : public AppEvent
+	{
+	public:
+		EVENT_CLASS_TYPE(ContentScaleChanged)
+
+			ContentScaleChangedEvent(float scale_x, float scale_y)
+			: m_ScaleX(scale_x), m_ScaleY(scale_y)
+		{
+		}
+
+		float GetScaleX() const { return m_ScaleX; }
+		float GetScaleY() const { return m_ScaleY; }
+
+		std::string ToString() const override
+		{
+			std::stringstream ss;
+			ss << "ContentScaleChangedEvent: " << m_ScaleX << ", " << m_ScaleY;
+			return ss.str();
+		}
+
+	private:
+		float m_ScaleX, m_ScaleY;
+	};
+
 	/*
 	* 应用Tick事件类
 	*/

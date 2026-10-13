@@ -159,6 +159,7 @@ namespace Helios
 		dispatcher.Dispatch<WindowCloseEvent>(BIND_EVENT_FUNC(Application::OnHandleWindowCloseEvent));
 		dispatcher.Dispatch<WindowResizeEvent>(BIND_EVENT_FUNC(Application::OnHandleWindowResizeEvent));
 		dispatcher.Dispatch<WindowIconifyEvent>(BIND_EVENT_FUNC(Application::OnHandleWindowIconifyEvent));
+		dispatcher.Dispatch<ContentScaleChangedEvent>(BIND_EVENT_FUNC(Application::OnHandleContentScaleChangedEvent));
 
 		// 从上层Layer向下层Layer传递
 		for (auto it = m_LayerStack.rbegin(); it != m_LayerStack.rend(); ++it)
@@ -208,6 +209,15 @@ namespace Helios
 		m_IsMinimized = iconify_event->IsIconified();
 
 		// 事件继续向下层传递，应返回false
+		return false;
+	}
+
+	/* 内容缩放变化（跨不同 DPI 显示器移动窗口）：这里不处理，只保证事件向下层传递 ——
+	 * 真正的重建由 ImGuiLayer 承担（重建字体图集 + 重算 style）。与其它窗口事件一致返回 false。 */
+	bool Application::OnHandleContentScaleChangedEvent(IEvent* event)
+	{
+		PROFILE_FUNCTION();
+
 		return false;
 	}
 }

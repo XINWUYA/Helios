@@ -450,6 +450,11 @@ namespace Helios
         {
             m_pMetalContext->OnResize(m_WindowInfo.Descriptor.Width, m_WindowInfo.Descriptor.Height);
         }
+
+        /* 派发事件：消费方（ImGuiLayer）据此重建字体图集、重算 UI 缩放。
+         * macOS 上 content scale 通常恒为 2，实际很少触发；链路上保持一致。 */
+        ContentScaleChangedEvent event(m_WindowInfo.ContentScale, m_WindowInfo.ContentScale);
+        m_WindowInfo.CallBackFunc(&event);
     }
 
     /* 最小化/还原：派发显式事件，由 Application 维护 m_IsMinimized */

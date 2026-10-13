@@ -2714,12 +2714,9 @@ namespace Helios
 				image_width = image_height * aspect;
 			}
 
-			/* 渲染尺寸按物理像素（Retina 上不糊，与场景视口同一笔账）；
-			 * 无应用上下文（检查程序）按 1 倍。 */
-			float content_scale = 1.0f;
-			if (Application* app = Application::Instance())
-				content_scale = app->GetWindow().GetContentScale();
-			const glm::uvec2 render_size = ClampRenderSize(image_width, image_height, content_scale);
+			/* 渲染尺寸按物理像素（macOS：ImGui 单位是点、×2；Windows：已是物理像素、×1，
+			 * 见 ImGuiToPhysicalScale —— 与场景视口同一笔账）。 */
+			const glm::uvec2 render_size = ClampRenderSize(image_width, image_height, ImGuiToPhysicalScale());
 
 			/* 窗口收起 / 停靠标签页被挡住（SkipItems）时不要画面：
 			 * 预览不该在看不见的地方空转（本帧不置请求，帧末结算即停） */

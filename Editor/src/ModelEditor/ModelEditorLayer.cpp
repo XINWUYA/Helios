@@ -145,13 +145,12 @@ namespace Helios
 			m_ViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, viewport_region_max.x - viewport_region_min.x));
 			m_ViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, viewport_region_max.y - viewport_region_min.y));
 
-			/* ImGui 给的是逻辑点，RenderTarget 按物理像素分配；
-			 * ClampRenderSize 负责负值/超大值防护。 */
-			const auto content_scale = Application::Instance()->GetWindow().GetContentScale();
+			/* RenderTarget 按物理像素分配（macOS：ImGui 单位是点、×2 到像素；Windows：已是物理像素、×1，
+			 * 见 ImGuiToPhysicalScale）；ClampRenderSize 负责负值/超大值防护。 */
 			const auto rt_size = ClampRenderSize(
 				static_cast<float>(m_ViewportRegion.Width),
 				static_cast<float>(m_ViewportRegion.Height),
-				content_scale);
+				ImGuiToPhysicalScale());
 			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
 
 			/* 指针悬停在视口上才允许相机起手导航（与场景编辑器同源） */
