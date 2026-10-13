@@ -18,6 +18,7 @@
 #include "Helios/Core/FrameTimeProfiler.h"
 #include "Helios/Core/Logger.h"
 #include "Helios/ImGui/EditorTheme.h"
+#include "EditorCommon.h"
 #include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Renderer/RenderQuery.h"
 #include "Helios/Renderer/Renderer.h"
@@ -97,7 +98,7 @@ namespace Helios
 			draw_list->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height),
 				ImGui::GetColorU32(EditorTheme::Token::Neutral4), style.FrameRounding);
 			draw_list->AddRect(pos, ImVec2(pos.x + width, pos.y + height),
-				ImGui::GetColorU32(EditorTheme::Token::Border), style.FrameRounding, 0, 1.0f);
+				ImGui::GetColorU32(EditorTheme::Token::Border), style.FrameRounding, 0, Scaled(1.0f));
 
 			/* 未选中格悬停时的提亮底：画在滑动块之下 */
 			if (hover_left && right_selected)
@@ -108,23 +109,23 @@ namespace Helios
 					ImGui::GetColorU32(EditorTheme::Token::Neutral5), style.FrameRounding);
 
 			/* 选中块（滑动中：位置在两格之间插值） */
-			constexpr float kBlockInset = 2.0f;
+			const float kBlockInset = Scaled(2.0f);
 			const float block_width = seg_width - kBlockInset * 2.0f;
 			const float block_x = pos.x + kBlockInset + seg_width * slide;
 			const ImVec2 block_min(block_x, pos.y + kBlockInset);
 			const ImVec2 block_max(block_x + block_width, pos.y + height - kBlockInset);
-			const float block_rounding = ImMax(1.0f, style.FrameRounding - 1.0f);
+			const float block_rounding = ImMax(Scaled(1.0f), style.FrameRounding - Scaled(1.0f));
 			draw_list->AddRectFilled(block_min, block_max,
 				ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.17f)), block_rounding);
 			draw_list->AddRect(block_min, block_max,
 				ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.65f)),
-				block_rounding, 0, 1.0f);
+				block_rounding, 0, Scaled(1.0f));
 
 			/* 页签内容（图标 + 文字，格内居中）：激活侧高亮 */
 			const auto draw_tab = [&](float seg_x, const char* label, Icons::Id icon, bool active, bool hovered)
 				{
 					const float icon_size = height * 0.62f;
-					constexpr float kIconGap = 6.0f;
+					const float kIconGap = Scaled(6.0f);
 					const ImVec2 label_size = ImGui::CalcTextSize(label);
 					const float content_width = icon_size + kIconGap + label_size.x;
 					const float content_x = seg_x + (seg_width - content_width) * 0.5f;
@@ -165,7 +166,7 @@ namespace Helios
 			char widest_label[32];
 			snprintf(widest_label, sizeof(widest_label), "Frame %d", v_max);
 
-			constexpr float kGrabPadding = 2.0f; /* 与 ImGui 标准滑条的块内边距一致 */
+			const float kGrabPadding = Scaled(2.0f); /* 与 ImGui 标准滑条的块内边距一致 */
 			const float grab_width = ImGui::CalcTextSize(widest_label).x + style.FramePadding.x * 2.0f;
 			const float usable = ImMax(width - grab_width - kGrabPadding * 2.0f, 1.0f);
 
@@ -631,7 +632,7 @@ namespace Helios
 			snprintf(buffer, sizeof(buffer), "%.2f ms", snapshot.FrameMs);
 			ImGuiExt::DrawCommonTextUI("Frame", buffer);
 
-			ShowFrameTimeGraph(46.0f);
+			ShowFrameTimeGraph(Scaled(46.0f));
 
 			snprintf(buffer, sizeof(buffer), "%.2f ms", snapshot.CpuMs);
 			ImGuiExt::DrawCommonTextUI("CPU", buffer);
@@ -671,12 +672,12 @@ namespace Helios
 
 		/* 底：比卡身暗一档的画布 + 细边框，与属性行区分开（画在内容通道上，不嵌套通道） */
 		draw_list->AddRectFilled(frame_min, frame_max,
-			ImGui::GetColorU32(EditorTheme::Token::Neutral1), 3.0f);
+			ImGui::GetColorU32(EditorTheme::Token::Neutral1), Scaled(3.0f));
 		draw_list->AddRect(frame_min, frame_max,
-			ImGui::GetColorU32(EditorTheme::Token::Border), 3.0f);
+			ImGui::GetColorU32(EditorTheme::Token::Border), Scaled(3.0f));
 
-		constexpr float kPadX = 4.0f;
-		constexpr float kPadY = 3.0f;
+		const float kPadX = Scaled(4.0f);
+		const float kPadY = Scaled(3.0f);
 		const ImVec2 plot_min(frame_min.x + kPadX, frame_min.y + kPadY);
 		const ImVec2 plot_max(frame_max.x - kPadX, frame_max.y - kPadY);
 		const float plot_width = ImMax(plot_max.x - plot_min.x, 1.0f);
@@ -700,8 +701,8 @@ namespace Helios
 		{
 			const float line_y = plot_max.y - kSixtyFpsMs / value_max * plot_height;
 			const ImU32 dash_color = ImGui::GetColorU32(EditorTheme::Token::Separator);
-			for (float x = plot_min.x; x < plot_max.x; x += 11.0f)
-				draw_list->AddLine(ImVec2(x, line_y), ImVec2(ImMin(x + 6.0f, plot_max.x), line_y), dash_color);
+			for (float x = plot_min.x; x < plot_max.x; x += Scaled(11.0f))
+				draw_list->AddLine(ImVec2(x, line_y), ImVec2(ImMin(x + Scaled(6.0f), plot_max.x), line_y), dash_color);
 		}
 
 		if (count >= 1)
@@ -718,17 +719,17 @@ namespace Helios
 			DrawBrokenSeries(draw_list, count,
 				[](uint32_t) { return true; },
 				[&](uint32_t index) { return ImVec2(column_x(index), value_y(profiler.GetHistorySample(index).FrameMs)); },
-				ImGui::GetColorU32(kFrameLineColor), 1.2f);
+				ImGui::GetColorU32(kFrameLineColor), Scaled(1.2f));
 
 			DrawBrokenSeries(draw_list, count,
 				[](uint32_t) { return true; },
 				[&](uint32_t index) { return ImVec2(column_x(index), value_y(profiler.GetHistorySample(index).CpuMs)); },
-				ImGui::GetColorU32(kCpuLineColor), 1.2f);
+				ImGui::GetColorU32(kCpuLineColor), Scaled(1.2f));
 
 			DrawBrokenSeries(draw_list, count,
 				[&](uint32_t index) { return profiler.GetHistorySample(index).GpuValid; },
 				[&](uint32_t index) { return ImVec2(column_x(index), value_y(profiler.GetHistorySample(index).GpuMs)); },
-				ImGui::GetColorU32(kGpuLineColor), 1.2f);
+				ImGui::GetColorU32(kGpuLineColor), Scaled(1.2f));
 
 			/* 上限刻度：左上角小字（与图形的量级对齐） */
 			char scale_text[32];
@@ -767,7 +768,7 @@ namespace Helios
 				if (!first)
 					ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
 
-				constexpr float kDotRadius = 3.0f;
+				const float kDotRadius = Scaled(3.0f);
 				ImGui::Dummy(ImVec2(kDotRadius * 2.0f, ImGui::GetTextLineHeight()));
 				const ImVec2 min = ImGui::GetItemRectMin();
 				const ImVec2 max = ImGui::GetItemRectMax();
@@ -2096,7 +2097,7 @@ namespace Helios
 					/ static_cast<float>(GPUTimerRecorder::MAX_FRAMES);
 				const ImVec2 bar_min = ImGui::GetCursorScreenPos();
 				const float bar_width = ImGui::GetContentRegionAvail().x;
-				constexpr float kBarHeight = 3.0f;
+				const float kBarHeight = Scaled(3.0f);
 				ImDrawList* draw_list = ImGui::GetWindowDrawList();
 				draw_list->AddRectFilled(bar_min, ImVec2(bar_min.x + bar_width, bar_min.y + kBarHeight),
 					ImGui::GetColorU32(EditorTheme::Token::Neutral4), kBarHeight * 0.5f);
@@ -2353,7 +2354,7 @@ namespace Helios
 
 		/* ---- 帧间总耗时曲线：一眼看出尖峰分布；点击/拖动选帧 ---- */
 		const float width = ImGui::GetContentRegionAvail().x;
-		constexpr float kGraphHeight = 60.0f;
+		const float kGraphHeight = Scaled(60.0f);
 		const ImVec2 graph_min = ImGui::GetCursorScreenPos();
 		const ImVec2 graph_max(graph_min.x + width, graph_min.y + kGraphHeight);
 
@@ -2361,11 +2362,11 @@ namespace Helios
 		const bool graph_hovered = ImGui::IsItemHovered();
 
 		ImDrawList* draw_list = ImGui::GetWindowDrawList();
-		draw_list->AddRectFilled(graph_min, graph_max, ImGui::GetColorU32(EditorTheme::Token::Neutral1), 3.0f);
-		draw_list->AddRect(graph_min, graph_max, ImGui::GetColorU32(EditorTheme::Token::Border), 3.0f);
+		draw_list->AddRectFilled(graph_min, graph_max, ImGui::GetColorU32(EditorTheme::Token::Neutral1), Scaled(3.0f));
+		draw_list->AddRect(graph_min, graph_max, ImGui::GetColorU32(EditorTheme::Token::Border), Scaled(3.0f));
 
-		constexpr float kPadX = 4.0f;
-		constexpr float kPadY = 3.0f;
+		const float kPadX = Scaled(4.0f);
+		const float kPadY = Scaled(3.0f);
 		const ImVec2 plot_min(graph_min.x + kPadX, graph_min.y + kPadY);
 		const ImVec2 plot_max(graph_max.x - kPadX, graph_max.y - kPadY);
 		const float plot_width = ImMax(plot_max.x - plot_min.x, 1.0f);
@@ -2394,13 +2395,13 @@ namespace Helios
 		DrawBrokenSeries(draw_list, count,
 			[](uint32_t) { return true; },
 			[&](uint32_t index) { return ImVec2(column_x(index), value_y(recorder.GetFrame(index).GPUTime)); },
-			ImGui::GetColorU32(kGpuLineColor), 1.2f);
+			ImGui::GetColorU32(kGpuLineColor), Scaled(1.2f));
 
 		/* 上限刻度：左上角小字（与 Frame 卡曲线同一笔账） */
 		char scale_text[32];
 		snprintf(scale_text, sizeof(scale_text), "%.0f us", value_max);
 		draw_list->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 0.85f,
-			ImVec2(plot_min.x + 3.0f, plot_min.y),
+			ImVec2(plot_min.x + Scaled(3.0f), plot_min.y),
 			ImGui::GetColorU32(EditorTheme::Token::TextDim), scale_text);
 
 		/* 选中帧游标 */
@@ -2408,7 +2409,7 @@ namespace Helios
 		{
 			const float cursor_x = column_x(static_cast<uint32_t>(m_ReplayFrame));
 			draw_list->AddLine(ImVec2(cursor_x, plot_min.y), ImVec2(cursor_x, plot_max.y),
-				ImGui::GetColorU32(EditorTheme::Token::Accent), 1.0f);
+				ImGui::GetColorU32(EditorTheme::Token::Accent), Scaled(1.0f));
 		}
 
 		/* 点击 / 拖动 = 选帧（按列就近取整） */

@@ -4,21 +4,23 @@
  * 逐像素跳；矢量笔画是亚像素落点、跟盘一起平滑移动。 */
 #include <imgui.h>
 
+#include "Helios/ImGui/EditorTheme.h"
+
 namespace Helios::AxisGlyph
 {
-	/* 字母盒（宽 / 高）与笔画粗细 */
-	inline constexpr float kLetterWidth = 8.0f;
-	inline constexpr float kLetterHeight = 9.0f;
-	inline constexpr float kLetterStroke = 1.8f;
+	/* 字母盒（宽 / 高）与笔画粗细（设计像素、经 EditorTheme::Scaled 折算） */
+	inline float kLetterWidth() { return EditorTheme::Scaled(8.0f); }
+	inline float kLetterHeight() { return EditorTheme::Scaled(9.0f); }
+	inline float kLetterStroke() { return EditorTheme::Scaled(1.8f); }
 	/* 收边 / 圆环线宽：轴盘压在别的元素上时，用最深底色的描边把轮廓"切"出来 */
-	inline constexpr float kRimStroke = 1.5f;
+	inline float kRimStroke() { return EditorTheme::Scaled(1.5f); }
 
 	/* 单个字母（X / Y / Z / W）：三笔以内的直笔画。坐标全部从盘心派生、
 	 * 不经过任何取整 —— "拖动时字和盘一起平滑走"靠的就是这一点。 */
 	inline void DrawLetter(ImDrawList* draw_list, char letter, const ImVec2& center, ImU32 ink)
 	{
-		const float half_w = kLetterWidth * 0.5f;
-		const float half_h = kLetterHeight * 0.5f;
+		const float half_w = kLetterWidth() * 0.5f;
+		const float half_h = kLetterHeight() * 0.5f;
 
 		const ImVec2 top_left(center.x - half_w, center.y - half_h);
 		const ImVec2 top_right(center.x + half_w, center.y - half_h);
@@ -28,16 +30,16 @@ namespace Helios::AxisGlyph
 		switch (letter)
 		{
 		case 'X':
-			draw_list->AddLine(top_left, bottom_right, ink, kLetterStroke);
-			draw_list->AddLine(top_right, bottom_left, ink, kLetterStroke);
+			draw_list->AddLine(top_left, bottom_right, ink, kLetterStroke());
+			draw_list->AddLine(top_right, bottom_left, ink, kLetterStroke());
 			break;
 		case 'Y':
 		{
 			/* 分叉点略高于中线（与字体的 Y 一致），三笔共点 */
 			const ImVec2 junction(center.x, center.y - 1.0f);
-			draw_list->AddLine(top_left, junction, ink, kLetterStroke);
-			draw_list->AddLine(top_right, junction, ink, kLetterStroke);
-			draw_list->AddLine(junction, ImVec2(center.x, center.y + half_h), ink, kLetterStroke);
+			draw_list->AddLine(top_left, junction, ink, kLetterStroke());
+			draw_list->AddLine(top_right, junction, ink, kLetterStroke());
+			draw_list->AddLine(junction, ImVec2(center.x, center.y + half_h), ink, kLetterStroke());
 			break;
 		}
 		case 'W':
@@ -47,17 +49,17 @@ namespace Helios::AxisGlyph
 			const ImVec2 down_left(center.x - half_w * 0.5f, center.y + half_h);
 			const ImVec2 peak(center.x, center.y - half_h * 0.9f);
 			const ImVec2 down_right(center.x + half_w * 0.5f, center.y + half_h);
-			draw_list->AddLine(top_left, down_left, ink, kLetterStroke);
-			draw_list->AddLine(down_left, peak, ink, kLetterStroke);
-			draw_list->AddLine(peak, down_right, ink, kLetterStroke);
-			draw_list->AddLine(down_right, top_right, ink, kLetterStroke);
+			draw_list->AddLine(top_left, down_left, ink, kLetterStroke());
+			draw_list->AddLine(down_left, peak, ink, kLetterStroke());
+			draw_list->AddLine(peak, down_right, ink, kLetterStroke());
+			draw_list->AddLine(down_right, top_right, ink, kLetterStroke());
 			break;
 		}
 		case 'Z':
 		default:
-			draw_list->AddLine(top_left, top_right, ink, kLetterStroke);
-			draw_list->AddLine(top_right, bottom_left, ink, kLetterStroke);
-			draw_list->AddLine(bottom_left, bottom_right, ink, kLetterStroke);
+			draw_list->AddLine(top_left, top_right, ink, kLetterStroke());
+			draw_list->AddLine(top_right, bottom_left, ink, kLetterStroke());
+			draw_list->AddLine(bottom_left, bottom_right, ink, kLetterStroke());
 			break;
 		}
 	}

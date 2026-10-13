@@ -308,7 +308,7 @@ namespace Helios::PanelChrome
 		const float box_center_x = max.x - style.FramePadding.x - icon_size * 0.5f;
 		const ImVec2 box_min(box_center_x - box_half, center_y - box_half);
 		const ImVec2 box_max(box_center_x + box_half, center_y + box_half);
-		constexpr float kBoxRounding = 4.0f;
+		const float kBoxRounding = EditorTheme::Scaled(4.0f);
 
 		if (all_on || !none_on)
 		{
@@ -321,7 +321,7 @@ namespace Helios::PanelChrome
 				/* 勾：ImGui::RenderCheckMark 的几何（内缩、三段折线、sz/5 笔画） */
 				const float pad = box_half * 0.30f;
 				float sz = box_half * 2.0f - pad * 2.0f;
-				const float mark_thickness = ImMax(sz / 5.0f, 1.0f);
+				const float mark_thickness = ImMax(sz / 5.0f, EditorTheme::Scaled(1.0f));
 				sz -= mark_thickness * 0.5f;
 				const float third = sz / 3.0f;
 				const float bx = box_min.x + pad + mark_thickness * 0.25f + third;

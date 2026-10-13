@@ -339,7 +339,7 @@ namespace Helios
 				EditorTheme::WithAlpha(EditorTheme::Token::Neutral5, 0.70f));
 			ImGui::PushStyleColor(ImGuiCol_FrameBgActive, EditorTheme::Token::Neutral4);
 
-			ImGui::SetNextItemWidth(ImMax(width, 40.0f));
+			ImGui::SetNextItemWidth(ImMax(width, Scaled(40.0f)));
 			InputTextString("##EntityName", name);
 
 			ImGui::PopStyleColor(3);
@@ -409,17 +409,17 @@ namespace Helios
 		}
 
 		/* 栏与主体之间那条分隔线（1px，自绘） */
-		constexpr float kBarDivider = 1.0f;
+		inline float kBarDivider() { return Scaled(1.0f); }
 
 		/* 栏里控件"上下各留 1px"：控件框不跟面板边、也不跟那条分隔线贴在一起
 		 * （顶栏 / 底栏共用同一笔账，栏高因此比控件高 2px）。 */
-		constexpr float kBarInset = 1.0f;
+		inline float kBarInset() { return Scaled(1.0f); }
 
 		/* 底栏（控件高 + 上下各 1px + 上面那条分隔线）的总高：
 		 * 实体树按它让出位置，底栏自己也按它定位 —— 一处算，两处用，对得上。 */
 		inline float FooterBandHeight()
 		{
-			return ImGui::GetFrameHeight() + kBarInset * 2.0f + kBarDivider;
+			return ImGui::GetFrameHeight() + kBarInset() * 2.0f + kBarDivider();
 		}
 	}
 
@@ -646,10 +646,10 @@ namespace Helios
 		PanelChrome::HeaderRow row = PanelChrome::BeginHeaderRow(Icons::Id::None);
 
 		/* 控件上下各留 1px：栏高因此比控件高 2px（控件框不贴面板边、也不贴分隔线）。 */
-		row.Height += kBarInset * 2.0f;
+		row.Height += kBarInset() * 2.0f;
 
 		const float control_height = ImGui::GetFrameHeight();
-		const float control_y = row.Min.y + kBarInset;
+		const float control_y = row.Min.y + kBarInset();
 		const float gap = style.ItemInnerSpacing.x;
 
 		/* ---- 右端：筛选 + 新建（两枚图标按钮，筛选在左、新建贴最右）----
@@ -684,8 +684,8 @@ namespace Helios
 		/* ---- 左端：搜索框（贴左端）----
 		 * 搜索框不撑满：够用就好，宽度多出来的部分留给中间那一段留白；
 		 * 空间不足时跟着可用宽度缩，最低 80（再窄就读不了了）。 */
-		const float search_preferred = 220.0f;
-		const float search_min = 80.0f;
+		const float search_preferred = Scaled(220.0f);
+		const float search_min = Scaled(80.0f);
 
 		/* 能用的宽度：到右端那组按钮之前算起（中间隔一格） */
 		const float right_group = control_height * 2.0f + gap;
@@ -719,15 +719,15 @@ namespace Helios
 		/* 定位：贴面板的下边（分隔线在栏的正上方）。栏高 = 控件高 + 上下各 1px ——
 		 * 比控件高 2px 的那点留白与顶栏同一笔账（文本不跟分隔线、也不跟面板下边贴在一起）。 */
 		const float pane_bottom = window->Pos.y + window->Size.y;
-		const float footer_top = pane_bottom - ImGui::GetFrameHeight() - kBarInset * 2.0f;
+		const float footer_top = pane_bottom - ImGui::GetFrameHeight() - kBarInset() * 2.0f;
 		ImGui::SetCursorScreenPos(ImVec2(window->DC.CursorStartPos.x, footer_top));
 
 		/* 上边线自绘而不是用 ImGui::Separator()：Separator 会吃掉「1px + 行距」，
 		 * 于是这一栏就比控件高出一截；自绘的线不参与布局，栏高说得清也量得准。 */
 		ImGui::GetWindowDrawList()->AddLine(
-			ImVec2(window->DC.CursorStartPos.x, footer_top - kBarDivider * 0.5f),
+			ImVec2(window->DC.CursorStartPos.x, footer_top - kBarDivider() * 0.5f),
 			ImVec2(window->DC.CursorStartPos.x + ImGui::GetContentRegionAvail().x,
-				footer_top - kBarDivider * 0.5f),
+				footer_top - kBarDivider() * 0.5f),
 			ImGui::GetColorU32(EditorTheme::Token::Border));
 
 		const PanelChrome::HeaderRow row = PanelChrome::BeginHeaderRow(Icons::Id::None);
@@ -737,7 +737,7 @@ namespace Helios
 		/* ---- 计数贴最右端 ----
 		 * 文本自己算居中的 y（Text 把字形框顶放在光标处，"贴着行顶画"会偏高半个内边距）；
 		 * 顺带清掉"基线偏移"（同一行前面的控件会把后面的文字整体下移，居中值就被顶掉了）。 */
-		const float text_y = row.Min.y + kBarInset + (control_height - ImGui::GetFontSize()) * 0.5f;
+		const float text_y = row.Min.y + kBarInset() + (control_height - ImGui::GetFontSize()) * 0.5f;
 		ImGui::SetCursorScreenPos(ImVec2(row.Right - count_width, text_y));
 		window->DC.CurrLineTextBaseOffset = 0.0f;
 		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
@@ -767,7 +767,7 @@ namespace Helios
 			ImGui::SetKeyboardFocusHere();
 		}
 
-		ImGui::SetNextItemWidth(220.0f);
+		ImGui::SetNextItemWidth(Scaled(220.0f));
 		Icons::BeginSearchInput();
 		ImGui::InputTextWithHint("##NewEntitySearch", "Search...", m_NewEntityFilter,
 			sizeof(m_NewEntityFilter));
@@ -828,7 +828,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		ImGui::SetNextWindowPos(ImVec2(m_PopupTypeFilterAnchor.x, m_PopupTypeFilterAnchor.y + 4.0f),
+		ImGui::SetNextWindowPos(ImVec2(m_PopupTypeFilterAnchor.x, m_PopupTypeFilterAnchor.y + Scaled(4.0f)),
 			ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
 
 		/* 最小宽度取最长行标题 + 图标与勾选列的固定组分（与工具栏两套菜单同一笔账） */
@@ -1436,8 +1436,8 @@ namespace Helios
 	namespace
 	{
 		/* 预览图的尺寸上限：宽度吃满值列，超高 / 超宽的图按比例缩进来 */
-		constexpr float kAssetPreviewMaxWidth = 220.0f;
-		constexpr float kAssetPreviewMaxHeight = 240.0f;
+		inline float kAssetPreviewMaxWidth() { return Scaled(220.0f); }
+		inline float kAssetPreviewMaxHeight() { return Scaled(240.0f); }
 
 		/* 资源大类 -> 头部图标（与资源浏览器同一套图标语言；文件夹单独一档） */
 		Icons::Id AssetIconOf(const AssetSelectionEntry& entry)
@@ -1583,15 +1583,15 @@ namespace Helios
 			{
 				ImGui::Spacing();
 
-				const float max_width = ImMin(ImGui::GetContentRegionAvail().x, kAssetPreviewMaxWidth);
+				const float max_width = ImMin(ImGui::GetContentRegionAvail().x, kAssetPreviewMaxWidth());
 				const float aspect = static_cast<float>(preview->GetHeight())
 					/ static_cast<float>(ImMax(preview->GetWidth(), 1u));
 
 				float width = max_width;
 				float height = width * aspect;
-				if (height > kAssetPreviewMaxHeight)
+				if (height > kAssetPreviewMaxHeight())
 				{
-					height = kAssetPreviewMaxHeight;
+					height = kAssetPreviewMaxHeight();
 					width = height / ImMax(aspect, 1.0e-6f);
 				}
 
@@ -1647,7 +1647,7 @@ namespace Helios
 
 					/* 4:3 的十字图；宽度跟"图片预览"同一档上限，居中 */
 					const float available = ImGui::GetContentRegionAvail().x;
-					const float image_width = ImMin(available, kAssetPreviewMaxWidth);
+					const float image_width = ImMin(available, kAssetPreviewMaxWidth());
 					const float image_height = image_width * 0.75f;
 
 					ImGui::SetCursorPosX(ImGui::GetCursorPosX()
@@ -1662,7 +1662,7 @@ namespace Helios
 					{
 						ImGui::BeginTooltip();
 						ImGui::Image((ImTextureID)probe_image.Texture.get(),
-							ImVec2(320.0f, 240.0f), ImVec2(0, 0), ImVec2(1, 1));
+							ImVec2(Scaled(320.0f), Scaled(240.0f)), ImVec2(0, 0), ImVec2(1, 1));
 						ImGui::TextUnformatted(probe_image.Label.c_str());
 						ImGui::EndTooltip();
 					}
@@ -2537,8 +2537,8 @@ namespace Helios
 		 * 且 Separator 色在卡底上偏淡）——块高 = 上留 5 + 线 1 + 下留 5。 */
 		void DrawMaterialSectionDivider()
 		{
-			const float top_gap = 5.0f;
-			const float bottom_gap = 5.0f;
+			const float top_gap = Scaled(5.0f);
+			const float bottom_gap = Scaled(5.0f);
 			const ImVec2 line_start = ImGui::GetCursorScreenPos();
 			const float line_y = line_start.y + top_gap + 0.5f;
 			ImGui::GetWindowDrawList()->AddLine(
@@ -2702,7 +2702,7 @@ namespace Helios
 		if (card.Open)
 		{
 			/* 画面尺寸：按相机宽高比铺满卡内容宽，高度封顶（过高的画面挤掉下面的组件卡） */
-			constexpr float kMaxImageHeight = 200.0f;
+			const float kMaxImageHeight = Scaled(200.0f);
 
 			const float aspect = camera->GetAspectRatio();
 			const float avail_width = ImGui::GetContentRegionAvail().x;
@@ -2714,8 +2714,7 @@ namespace Helios
 				image_width = image_height * aspect;
 			}
 
-			/* 渲染尺寸按物理像素（macOS：ImGui 单位是点、×2；Windows：已是物理像素、×1，
-			 * 见 ImGuiToPhysicalScale —— 与场景视口同一笔账）。 */
+			/* 渲染尺寸按物理像素（macOS 上不糊，与场景视口同一笔账；Windows 上 ImGui 单位已是物理像素） */
 			const glm::uvec2 render_size = ClampRenderSize(image_width, image_height, ImGuiToPhysicalScale());
 
 			/* 窗口收起 / 停靠标签页被挡住（SkipItems）时不要画面：
@@ -2840,7 +2839,7 @@ namespace Helios
 
 		/* 分组菜单：清单很小，打开的每帧现拼一棵树（Apply 后面板重载缓冲，树自然跟着新清单走）。
 		 * 弹层给一条最小宽度约束：各行铺满弹层，勾选列因此对齐在同一条纵线上。 */
-		ImGui::SetNextWindowSizeConstraints(ImVec2(200.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+		ImGui::SetNextWindowSizeConstraints(ImVec2(Scaled(200.0f), 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 		if (ImGui::BeginPopup("##ShaderMenu"))
 		{
 			/* 菜单打开时重扫一遍可选 Shader：清单平时只在"选中材质 / 材质文件变化"时刷新，
@@ -3182,7 +3181,7 @@ namespace Helios
 			ImGui::SetKeyboardFocusHere();
 		}
 
-		ImGui::SetNextItemWidth(220.0f);
+		ImGui::SetNextItemWidth(Scaled(220.0f));
 		Icons::BeginSearchInput();
 		ImGui::InputTextWithHint("##AddComponentSearch", "Search...", m_AddComponentFilter,
 			sizeof(m_AddComponentFilter));

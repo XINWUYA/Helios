@@ -407,7 +407,7 @@ namespace Helios::ImGuiExt
 			/* 命中 id 用 axis.Letter（"X"），绝不能复用 axis.Id（"##X"）—— 那是同行拖拽框的 id。
 			 * 两个控件共 id 时：拖拽框一激活就把 ActiveIdMouseButton 重置成 -1，下一帧本按钮的 ButtonBehavior
 			 * 在 Mouse 分支读到 -1、直接触发 IM_ASSERT 崩（回归见 vec_row_input_check）。 */
-			const bool clicked = ImGui::InvisibleButton(axis.Letter, ImVec2(height + 3.0f, height));
+			const bool clicked = ImGui::InvisibleButton(axis.Letter, ImVec2(height + EditorTheme::Scaled(3.0f), height));
 
 			const bool hovered = ImGui::IsItemHovered();
 			const bool active = ImGui::IsItemActive();
@@ -483,9 +483,9 @@ namespace Helios::ImGuiExt
 			const ImGuiStyle& style = ImGui::GetStyle();
 
 			/* 组间距：按钮与值贴合靠行内 ItemSpacing 归零，组与组之间显式给一档 */
-			constexpr float kGroupGap = 4.0f;
-			const float button_width = frame_height + 3.0f;
-			const float box_width = ImMax(12.0f,
+			const float kGroupGap = EditorTheme::Scaled(4.0f);
+			const float button_width = frame_height + EditorTheme::Scaled(3.0f);
+			const float box_width = ImMax(EditorTheme::Scaled(12.0f),
 				(value_width - static_cast<float>(component_count - 1) * kGroupGap)
 					/ static_cast<float>(component_count) - button_width);
 
@@ -577,7 +577,7 @@ namespace Helios::ImGuiExt
 
 		/* Image：ImTextureID 统一存放 DeviceTexture 指针，
 		 * 由渲染后端自行解析为硬件句柄（避免 32 位 GetTextureID 截断指针）。 */
-		const float thumbnail = 72.0f;
+		const float thumbnail = EditorTheme::Scaled(72.0f);
 		ImGui::ImageButton((ImTextureID)show_texture.get(), ImVec2(thumbnail, thumbnail),
 			ImVec2(0, 1), ImVec2(1, 0), 1, ImVec4(0, 0, 0, 0), ImVec4(1, 1, 1, 1));
 

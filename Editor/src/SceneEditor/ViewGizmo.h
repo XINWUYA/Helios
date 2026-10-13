@@ -15,10 +15,10 @@
 namespace Helios::ViewGizmo
 {
 	inline constexpr int32_t kDiscCount = 6;
-	/* 轴盘半径：命中与绘制共用同一值（悬停外扩只影响观感，不改变命中） */
-	inline constexpr float kDiscRadius = 10.5f;
+	/* 轴盘半径（设计像素、经 EditorTheme::Scaled 折算）：命中与绘制共用同一值（悬停外扩只影响观感，不改变命中） */
+	inline float kDiscRadius() { return EditorTheme::Scaled(10.5f); }
 	/* 悬停 / 按下：轴色亮一档 + 外扩一圈（与主题控件"提亮一档"的状态语言一致） */
-	inline constexpr float kHighlightGrow = 2.0f;
+	inline float kHighlightGrow() { return EditorTheme::Scaled(2.0f); }
 
 	/* 六个轴盘方向：+X / -X / +Y / -Y / +Z / -Z */
 	inline const glm::vec3 kDiscDirections[kDiscCount] = {
@@ -74,7 +74,7 @@ namespace Helios::ViewGizmo
 		{
 			const float dx = point.x - discs[i].Position.x;
 			const float dy = point.y - discs[i].Position.y;
-			if (dx * dx + dy * dy <= kDiscRadius * kDiscRadius)
+			if (dx * dx + dy * dy <= kDiscRadius() * kDiscRadius())
 				return discs[i].Index;
 		}
 		return -1;
@@ -96,18 +96,18 @@ namespace Helios::ViewGizmo
 			const bool highlighted = (disc.Index == hovered_index) || (disc.Index == pressed_index);
 
 			const ImVec4& color = highlighted ? axis.Hover : axis.Base;
-			const float radius = kDiscRadius + (highlighted ? kHighlightGrow : 0.0f);
+			const float radius = kDiscRadius() + (highlighted ? kHighlightGrow() : 0.0f);
 
 			if (positive)
 			{
 				draw_list->AddCircleFilled(disc.Position, radius, ImGui::GetColorU32(color));
-				draw_list->AddCircle(disc.Position, radius, separator, 0, AxisGlyph::kRimStroke);
+				draw_list->AddCircle(disc.Position, radius, separator, 0, AxisGlyph::kRimStroke());
 			}
 			else
 			{
 				/* 空心环：先垫一圈底色描边再画本色环 —— 环压在同色实心盘上也分得开 */
-				draw_list->AddCircle(disc.Position, radius, separator, 0, AxisGlyph::kRimStroke + 2.0f);
-				draw_list->AddCircle(disc.Position, radius, ImGui::GetColorU32(color), 0, AxisGlyph::kRimStroke);
+				draw_list->AddCircle(disc.Position, radius, separator, 0, AxisGlyph::kRimStroke() + EditorTheme::Scaled(2.0f));
+				draw_list->AddCircle(disc.Position, radius, ImGui::GetColorU32(color), 0, AxisGlyph::kRimStroke());
 			}
 
 			/* 字母：实心盘用石墨墨色（对三个轴色的对比度都高于浅色字），空心盘用轴色 */

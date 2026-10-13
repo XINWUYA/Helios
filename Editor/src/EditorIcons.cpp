@@ -2219,12 +2219,13 @@ namespace Helios::Icons
 
 		float SvgDarkOpticalBoost(float size)
 		{
-			if (size <= 16.0f)
+			/* 阈值与区间按设计像素、经 Scaled 折算（size 是修复后的物理尺寸） */
+			if (size <= EditorTheme::Scaled(16.0f))
 				return 1.30f;
-			if (size <= 24.0f)
-				return 1.30f - (size - 16.0f) * (0.16f / 8.0f);
-			if (size <= 32.0f)
-				return 1.14f - (size - 24.0f) * (0.14f / 8.0f);
+			if (size <= EditorTheme::Scaled(24.0f))
+				return 1.30f - (size - EditorTheme::Scaled(16.0f)) * (0.16f / EditorTheme::Scaled(8.0f));
+			if (size <= EditorTheme::Scaled(32.0f))
+				return 1.14f - (size - EditorTheme::Scaled(24.0f)) * (0.14f / EditorTheme::Scaled(8.0f));
 			return 1.0f;
 		}
 
@@ -2499,12 +2500,12 @@ namespace Helios::Icons
 	/* 前置图标（输入框 / 下拉框左端那个小图标）的摆法：图标中心距控件左端多远，
 	 * 以及控件要为此额外留出的横向内边距（留宽一点，文字才不会贴着图标）。
 	 * 搜索框与类型筛选共用这一组数 —— 两个控件的图标位置才对得齐。 */
-	constexpr float kLeadingIconX = 11.0f;
-	constexpr float kLeadingIconPad = 20.0f;
+	inline float kLeadingIconX() { return EditorTheme::Scaled(11.0f); }
+	inline float kLeadingIconPad() { return EditorTheme::Scaled(20.0f); }
 
 	inline float LeadingIconSize()
 	{
-		return std::min(ImGui::GetFontSize(), 14.0f);
+		return std::min(ImGui::GetFontSize(), EditorTheme::Scaled(14.0f));
 	}
 
 	/* 预留图标占的横向空间（包住控件，之后用 Pop 还原）。
@@ -2514,7 +2515,7 @@ namespace Helios::Icons
 	{
 		const ImVec2 frame_padding = ImGui::GetStyle().FramePadding;
 		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-			ImVec2(frame_padding.x + kLeadingIconPad, frame_padding.y));
+			ImVec2(frame_padding.x + kLeadingIconPad(), frame_padding.y));
 	}
 
 	/* 把图标画在控件左端中部：用弱化色（跟搜索框的放大镜同一个色，都是"这东西是干嘛的"的提示）。
@@ -2522,7 +2523,7 @@ namespace Helios::Icons
 	void DrawLeadingIcon(Id id, const ImVec2& frame_min, const ImVec2& frame_max)
 	{
 		Draw(ImGui::GetWindowDrawList(), id,
-			ImVec2(frame_min.x + kLeadingIconX, (frame_min.y + frame_max.y) * 0.5f),
+			ImVec2(frame_min.x + kLeadingIconX(), (frame_min.y + frame_max.y) * 0.5f),
 			LeadingIconSize(), ImGui::GetColorU32(ImGuiCol_TextDisabled));
 	}
 
@@ -2533,7 +2534,7 @@ namespace Helios::Icons
 
 	float LeadingIconSpace()
 	{
-		return kLeadingIconPad;
+		return kLeadingIconPad();
 	}
 
 	bool IconButton(Id id, const ImVec2& size, bool checked, const char* tooltip)

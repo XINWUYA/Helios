@@ -33,9 +33,13 @@ namespace Helios
 		constexpr float kMinTreePaneWidth = 96.0f;
 		constexpr float kMinContentWidth = 160.0f;
 
-		/* 缩略图缩放范围（顶部一行的滑动条） */
-		constexpr float kMinThumbnailSize = 16.0f;
-		constexpr float kMaxThumbnailSize = 128.0f;
+		/* 缩略图缩放范围（顶部一行的滑动条）：设计像素，喂给滑动条前经 Scaled 折算 */
+		constexpr float kDefaultThumbnailSizeDesign = 64.0f;
+		constexpr float kMinThumbnailSizeDesign = 16.0f;
+		constexpr float kMaxThumbnailSizeDesign = 128.0f;
+		inline float kDefaultThumbnailSize() { return Scaled(kDefaultThumbnailSizeDesign); }
+		inline float kMinThumbnailSize() { return Scaled(kMinThumbnailSizeDesign); }
+		inline float kMaxThumbnailSize() { return Scaled(kMaxThumbnailSizeDesign); }
 
 		/* 网格里两格之间的最小横向间距：定死，不做成可调项（原本有个 Spacing 滑动条，
 		 * 它和缩放滑动条是两套"调版式"的手感，值调到 0 也只是把格子挤在一起）。
@@ -460,6 +464,11 @@ namespace Helios
 	void EditorResourceBrowser::OnImGuiRenderer()
 	{
 		PROFILE_FUNCTION();
+
+		/* 缩略图尺寸是"用户偏好"、以 ImGui 单位存：初值 0 表示尚未按当前缩放落定，
+		 * 首次进 UI 帧时按设计值 64 折算（见头文件成员说明）。之后由滑动条按用户所见改。 */
+		if (m_ThumbnailSize <= 0.0f)
+			m_ThumbnailSize = kDefaultThumbnailSize();
 
 		/* 就地改名的"本帧画过没有"每帧从头记：帧末据此收起画不出来的编辑器（见函数尾） */
 		m_RenameEditDrawn = false;
@@ -2156,7 +2165,7 @@ namespace Helios
 
 		ImGui::SetNextItemWidth(zoom_width);
 		ImGuiExt::DrawDotSliderFloat("##ThumbnailSize", m_ThumbnailSize,
-			kMinThumbnailSize, kMaxThumbnailSize, "%.0f");
+			kMinThumbnailSize(), kMaxThumbnailSize(), "%.0f");
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Thumbnail size: %.0f px — below 32, content area falls back to details list", m_ThumbnailSize);
 

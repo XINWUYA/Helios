@@ -404,8 +404,9 @@ namespace Helios
 		 * 中途变成拖拽（把文件夹拖去别处）就不算点击，与"拖动不是查看"同一套语义
 		 * （见 DrawFolderNode 的松开判定）。 */
 		SharedPtr<FileNode> m_PendingTreeNav;
-		/* 缩略图尺寸与间距：视图菜单里可调，属于"用户偏好"，所以留在实例上 */
-		float m_ThumbnailSize{ 64.0f };
+		/* 缩略图边长（ImGui 单位，视图菜单里可调，属于"用户偏好"，所以留在实例上）；
+		 * 0 = 尚未按当前缩放落定，首次进 UI 帧时折算成 kDefaultThumbnailSize（见 OnImGuiRenderer）。 */
+		float m_ThumbnailSize{ 0.0f };
 
 		/* 目录状态指纹：目录数量 + 最新的目录写入时间 */
 		size_t m_DirectoryCount{ 0 };

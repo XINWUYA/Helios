@@ -614,9 +614,9 @@ namespace Helios
 		if (m_PlayMode != PlayMode::Edit)
 			return;
 
-		constexpr float kBoxSize = 92.0f;		/* 指示器方框边长（逻辑像素） */
-		constexpr float kBoxMargin = 6.0f;		/* 距视口上 / 右边缘 */
-		constexpr float kClickSlop = 4.0f;		/* 累计位移超过它即算拖拽（转视角），否则算点击（切视角） */
+		const float kBoxSize = Scaled(92.0f);	/* 指示器方框边长（设计像素 → 物理，见 Scaled） */
+		const float kBoxMargin = Scaled(6.0f);	/* 距视口上 / 右边缘 */
+		const float kClickSlop = Scaled(4.0f);	/* 累计位移超过它即算拖拽（转视角），否则算点击（切视角） */
 		constexpr float kQuarterTurn = glm::radians(90.0f);
 
 		if (m_ViewportRegion.Width < static_cast<uint32_t>(kBoxSize + 2.0f * kBoxMargin) ||
@@ -627,7 +627,7 @@ namespace Helios
 			static_cast<float>(m_ViewportRegion.MinX) + static_cast<float>(m_ViewportRegion.Width) - kBoxMargin - kBoxSize,
 			static_cast<float>(m_ViewportRegion.MinY) + kBoxMargin);
 		const ImVec2 center(box_min.x + kBoxSize * 0.5f, box_min.y + kBoxSize * 0.5f);
-		const float orbit_radius = kBoxSize * 0.5f - ViewGizmo::kDiscRadius - 4.0f;
+		const float orbit_radius = kBoxSize * 0.5f - ViewGizmo::kDiscRadius() - Scaled(4.0f);
 
 		/* 六个轴盘：世界轴方向经视线旋转投影 + 深度排序（近者在后 = 后画、优先命中） */
 		ViewGizmo::Disc discs[ViewGizmo::kDiscCount];

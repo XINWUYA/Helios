@@ -149,7 +149,7 @@ namespace Helios
 		void ToolbarSeparator(float button_size, float gap)
 		{
 			ImGui::SameLine(0.0f, gap);
-			ImGui::Dummy(ImVec2(1.0f, button_size));
+			ImGui::Dummy(ImVec2(Scaled(1.0f), button_size));
 
 			const ImVec2 min = ImGui::GetItemRectMin();
 			const float x = min.x + 0.5f;
@@ -157,7 +157,7 @@ namespace Helios
 			const float half = button_size * 0.32f;
 
 			ImGui::GetWindowDrawList()->AddLine(ImVec2(x, center_y - half), ImVec2(x, center_y + half),
-				ImGui::GetColorU32(EditorTheme::Token::Border), 1.0f);
+				ImGui::GetColorU32(EditorTheme::Token::Border), Scaled(1.0f));
 
 			ImGui::SameLine(0.0f, gap);
 		}
@@ -519,13 +519,13 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		constexpr float kToolbarHeight = 34.0f;
-		constexpr float kButtonSize = 24.0f;
-		constexpr float kGroupGap = 9.0f;
-		constexpr float kSidePadding = 8.0f;
+		const float kToolbarHeight = Scaled(34.0f);
+		const float kButtonSize    = Scaled(24.0f);
+		const float kGroupGap      = Scaled(9.0f);
+		const float kSidePadding   = Scaled(8.0f);
 
 		ImGui::PushStyleColor(ImGuiCol_ChildBg, EditorTheme::Token::Neutral3);
-		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2.0f, 0.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(Scaled(2.0f), 0.0f));
 
 		ImGui::BeginChild("##MainToolbar", ImVec2(0.0f, kToolbarHeight), false,
 			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoNavFocus);
@@ -618,9 +618,9 @@ namespace Helios
 			const ImVec2 debug_menu_button_max = ImGui::GetItemRectMax();
 			const float debug_menu_min_width = ImGui::CalcTextSize("Ambient Occlusion").x
 				+ ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f
-				+ ImGui::GetFontSize() * 2.0f + 24.0f;
+				+ ImGui::GetFontSize() * 2.0f + Scaled(24.0f);
 
-			ImGui::SetNextWindowPos(ImVec2(debug_menu_button_max.x, debug_menu_button_max.y + 4.0f),
+			ImGui::SetNextWindowPos(ImVec2(debug_menu_button_max.x, debug_menu_button_max.y + Scaled(4.0f)),
 				ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
 			ImGui::SetNextWindowSizeConstraints(ImVec2(debug_menu_min_width, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 			if (ImGui::BeginPopup("##DebugViewMenu"))
@@ -642,9 +642,9 @@ namespace Helios
 			const ImVec2 gizmo_button_max = ImGui::GetItemRectMax();
 			const float gizmo_menu_min_width = ImGui::CalcTextSize("Reflection Probes").x
 				+ ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f
-				+ ImGui::GetFontSize() * 2.0f + 24.0f;
+				+ ImGui::GetFontSize() * 2.0f + Scaled(24.0f);
 
-			ImGui::SetNextWindowPos(ImVec2(gizmo_button_max.x, gizmo_button_max.y + 4.0f),
+			ImGui::SetNextWindowPos(ImVec2(gizmo_button_max.x, gizmo_button_max.y + Scaled(4.0f)),
 				ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
 			ImGui::SetNextWindowSizeConstraints(ImVec2(gizmo_menu_min_width, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 			if (ImGui::BeginPopup("##GizmoMenu"))
