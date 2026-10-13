@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "PostProcessPasses.h"
 #include "Effects/Bloom.h"
-#include <Helios/Application/AssetManager.h>
+#include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
@@ -57,7 +57,7 @@ namespace Helios
 			PROFILE_FUNCTION();
 
 			auto& frame_graph = render_view.GetFrameGraph();
-			const auto present_shader = ShaderAssetManager::Instance().GetOrLoad(
+			const auto present_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 				ABSOLUTE_PATH("Shaders/PostProcessShaders/PostProcessPresent.glsl"));
 
 			struct PresentPassData

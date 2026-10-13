@@ -1,6 +1,6 @@
 #include "Pch.h"
 #include "Bloom.h"
-#include <Helios/Application/AssetManager.h>
+#include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderView.h>
@@ -90,13 +90,13 @@ namespace Helios
 
 				auto& frame_graph = render_view.GetFrameGraph();
 
-				const auto prefilter_shader = ShaderAssetManager::Instance().GetOrLoad(
+				const auto prefilter_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/PostProcessShaders/BloomPrefilter.glsl"));
-				const auto downsample_shader = ShaderAssetManager::Instance().GetOrLoad(
+				const auto downsample_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/PostProcessShaders/BloomDownsample.glsl"));
-				const auto upsample_shader = ShaderAssetManager::Instance().GetOrLoad(
+				const auto upsample_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/PostProcessShaders/BloomUpsample.glsl"));
-				const auto composite_shader = ShaderAssetManager::Instance().GetOrLoad(
+				const auto composite_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/PostProcessShaders/BloomComposite.glsl"));
 
 				const auto mip_desc = [&viewport_region](uint32_t level)
