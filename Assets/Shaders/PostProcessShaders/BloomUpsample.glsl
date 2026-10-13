@@ -20,8 +20,10 @@ layout(location = 0) in vec2 v_TexCoord;
 
 layout(binding = 0) uniform sampler2D u_Source;
 
-uniform vec2 u_TexelSize = vec2(0.0f);
-uniform float u_Scatter = 0.7f;
+/* 源纹理纹素尺寸 / 散射系数：非 opaque uniform 必须显式 location（Windows GLSL→SPIR-V）。
+ * 本 stage 两个参数，按声明顺序占 0 / 1。 */
+layout(location = 0) uniform vec2 u_TexelSize = vec2(0.0f);
+layout(location = 1) uniform float u_Scatter = 0.7f;
 
 void main()
 {

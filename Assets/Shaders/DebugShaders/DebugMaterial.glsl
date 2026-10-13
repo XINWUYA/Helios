@@ -57,8 +57,9 @@ layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 
 
 /* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
  * 本 shader 处理 Mipmap（两条管线）与前向的 Surface 档；延迟的 Surface 档走
- * G-Buffer 直读（DebugView.glsl），不经这里。 */
-uniform int u_DebugMode = 0;
+ * G-Buffer 直读（DebugView.glsl），不经这里。
+ * location：本 stage 的 0 已被 u_AlbedoTilingOffset 占用，这里取 1。 */
+layout(location = 1) uniform int u_DebugMode = 0;
 
 const int kDebugAlbedo = 1;
 const int kDebugNormal = 2;

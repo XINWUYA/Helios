@@ -32,9 +32,11 @@ layout(location = 0) out vec4 FragColor;
 layout(binding = 0) uniform sampler2D u_DepthTexture;
 
 /* 显示范围（写过像素的 [min, max]，抓取端按层刷新写入预览纹理；见 FrameGraphCapture）。
- * max <= min（空层 / 常量层 / 未登记）时回退提亮曲线。 */
-uniform float u_DepthMin;
-uniform float u_DepthMax;
+ * max <= min（空层 / 常量层 / 未登记）时回退提亮曲线。
+ * 非 opaque uniform 必须显式 location（Windows 走 GLSL→SPIR-V 的 shaderc 路径，
+ * 裸声明会报 "non-opaque uniform variables need a layout(location=L)"）；本 stage 两个参数占 0 / 1。 */
+layout(location = 0) uniform float u_DepthMin;
+layout(location = 1) uniform float u_DepthMax;
 
 void main()
 {

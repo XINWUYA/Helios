@@ -38,7 +38,7 @@ layout(binding = 6) uniform sampler2D u_OverdrawTexture;
 
 /* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
  * 本 shader 处理 Surface 档（延迟：G-Buffer 直读）与 Overdraw 热力图。 */
-uniform int u_DebugMode = 0;
+layout(location = 0) uniform int u_DebugMode = 0;
 
 const int kDebugAlbedo = 1;
 const int kDebugNormal = 2;

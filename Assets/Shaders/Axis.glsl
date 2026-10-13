@@ -13,9 +13,13 @@ layout (location = 1) out vec3 v_WorldPos;
 layout (location = 2) noperspective out float v_Side;
 layout (location = 3) out vec3 v_Dir;
 
-/* 轴带宽度与视口尺寸（均为物理像素），由材质参数写入 —— 见 EditorBuiltinCamera */
-uniform float u_LineWidth;
-uniform vec2 u_ViewportSize;
+/* 轴带宽度与视口尺寸（均为物理像素），由材质参数写入 —— 见 EditorBuiltinCamera。
+ * GLSL→SPIR-V（Windows/OpenGL 后端走 shaderc）要求非 opaque uniform 显式 location，
+ * 且编号是【整个 program 级】命名空间：GL 链接跨 stage 查重，不同名撞号会直接
+ * 报 Link error（Duplicate location）。顶点阶段占 0/1；u_LineWidth 与片元阶段同名，
+ * 两处共用 0。 */
+layout(location = 0) uniform float u_LineWidth;
+layout(location = 1) uniform vec2 u_ViewportSize;
 
 void main()
 {
@@ -58,14 +62,17 @@ layout (location = 3) in vec3 v_Dir;
 
 /* 远景淡出范围（到相机的水平距离，世界单位）：[Inner, Outer] 之间线性渐隐。
  * 取值与 EditorBuiltinCamera 的网格常量同源，由材质浮点参数写入 —— 未设置时
- * smoothstep(0,0,·) 是未定义值，材质漏设会整片消失。 */
-uniform float u_FadeInner;
-uniform float u_FadeOuter;
-/* 轴带宽度（物理像素）：与顶点着色器同源，用于把带边缘羽化 1 像素 */
-uniform float u_LineWidth;
+ * smoothstep(0,0,·) 是未定义值，材质漏设会整片消失。
+ * location 是整个 program 级命名空间：GL 链接会跨 stage 查重，不同名 uniform
+ * 不能撞号 —— 顶点阶段占 0/1，本阶段自己的参数从 2 起编号；同名的 u_LineWidth
+ * 与顶点阶段共用 0（同名校验要求两边一致）。 */
+layout(location = 2) uniform float u_FadeInner;
+layout(location = 3) uniform float u_FadeOuter;
+/* 轴带宽度（物理像素）：与顶点着色器同源（location = 0，两边必须一致），用于把带边缘羽化 1 像素 */
+layout(location = 0) uniform float u_LineWidth;
 
 /* 网格的格距（世界单位）；0 = 当前绘制不是网格（坐标轴 / 实体 gizmo 不参与分类） */
-uniform float u_GridMajor;
+layout(location = 4) uniform float u_GridMajor;
 
 layout (location = 0) out vec4 OutFragColor;
 

@@ -21,7 +21,9 @@ layout(location = 0) in vec2 v_TexCoord;
 layout(binding = 0) uniform sampler2D u_SceneColor;
 layout(binding = 1) uniform sampler2D u_BloomTexture;
 
-uniform float u_Intensity = 0.6f;
+/* 泛光强度：非 opaque uniform 必须显式 location（Windows GLSL→SPIR-V）。
+ * 本 stage 无其它非 opaque uniform，独占 0。 */
+layout(location = 0) uniform float u_Intensity = 0.6f;
 
 void main()
 {

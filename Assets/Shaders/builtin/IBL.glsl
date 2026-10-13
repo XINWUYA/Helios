@@ -9,7 +9,9 @@
 layout(binding = 10) uniform samplerCube u_IrradianceMap;
 layout(binding = 11) uniform samplerCube u_PrefilterMap;
 layout(binding = 12) uniform sampler2D   u_BRDFLut;
-uniform int u_UseIBL = 0;
+/* location 需在全 stage 唯一：宿主 stage 的 0 被材质参数占用（u_AlbedoTilingOffset /
+ * u_EnvironmentStrength），固定为 1（u_ComposeAmbientEmission 见 DirectLight.glsl 为 4）。 */
+layout(location = 1) uniform int u_UseIBL = 0;
 
 /* 间接光（漫反射辐照度 + 粗糙度预滤波镜面）：辐照度图是半球卷积、预滤波图按粗糙度分级
  * （mip m 对应 roughness = m/(层数-1)），采样层级 = roughness × 最大 mip 序号（由尺寸反推）。

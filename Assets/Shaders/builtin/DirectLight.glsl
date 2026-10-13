@@ -10,8 +10,10 @@
 
 /* 逐光源"笔"的合成开关：环境 / 自发光跟光源无关，逐笔合成时只能由第 0 笔累加。
  * 非 0 = 本笔合成；0 = 只输出直接光。这个声明也是材质契约 —— 渲染端按它判断
- * Shader 是否走逐光源光照（见 Material::SupportsDirectLighting）。 */
-uniform int u_ComposeAmbientEmission = 1;
+ * Shader 是否走逐光源光照（见 Material::SupportsDirectLighting）。
+ * location 需在全 stage 唯一：宿主 BuiltinLit / PBRStandard 已占 0（TilingOffset）、
+ * 1（u_UseIBL，见 IBL.glsl）；Lighting.glsl 占 0..3（探针参数）—— 这里固定为 4。 */
+layout(location = 4) uniform int u_ComposeAmbientEmission = 1;
 
 /* 平滑范围衰减：距离在 [0, range] 内按 (1 - d/range)^2 衰减，到 range 处归零。
  * 不用物理逆平方 —— 引擎的强度没有单位体系，逆平方在 d→0 时数值发散，

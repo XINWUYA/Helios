@@ -21,7 +21,10 @@ layout(location = 0) in vec2 v_TexCoord;
 
 layout(binding = 0) uniform sampler2D u_SceneColor;
 
-uniform float u_Threshold = 0.8f;
+/* 亮部提取阈值：非 opaque uniform 必须显式 location（Windows 走 GLSL→SPIR-V 的
+ * shaderc 路径，裸声明会报 "non-opaque uniform variables need a layout(location=L)"）。
+ * 本 stage 无其它非 opaque uniform，独占 0。 */
+layout(location = 0) uniform float u_Threshold = 0.8f;
 
 void main()
 {

@@ -51,10 +51,12 @@ layout(binding = 11) uniform samplerCube u_PrefilterMap1;
 layout(binding = 12) uniform samplerCube u_PrefilterMap2;
 layout(binding = 13) uniform sampler2D   u_BRDFLut;
 
-uniform int u_ProbeCount = 0;
-uniform vec3 u_ProbePosition0 = vec3(0.0f);
-uniform vec3 u_ProbePosition1 = vec3(0.0f);
-uniform vec3 u_ProbePosition2 = vec3(0.0f);
+/* 非 opaque uniform 显式 location（本 stage 编号分配：探针 0..3、
+ * u_ComposeAmbientEmission 4、调试分流 5/6 —— 后两者见各自 include 文件）。 */
+layout(location = 0) uniform int  u_ProbeCount = 0;
+layout(location = 1) uniform vec3 u_ProbePosition0 = vec3(0.0f);
+layout(location = 2) uniform vec3 u_ProbePosition1 = vec3(0.0f);
+layout(location = 3) uniform vec3 u_ProbePosition2 = vec3(0.0f);
 
 /* 逐像素选择最近的探针（只在本帧参与集合内比较） */
 int SelectIBLProbe(vec3 world_pos)

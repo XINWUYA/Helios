@@ -6,8 +6,10 @@
 #ifndef DEBUG_LIGHTING_GLSL
 #define DEBUG_LIGHTING_GLSL
 
-uniform int u_DebugView = 0;
-uniform int u_DebugShadowCompose = 0;
+/* location 需与宿主 stage（Lighting.glsl）的分配联动：0..3 = 探针参数、
+ * 4 = u_ComposeAmbientEmission（DirectLight.glsl），这里从 5 起。 */
+layout(location = 5) uniform int u_DebugView = 0;
+layout(location = 6) uniform int u_DebugShadowCompose = 0;
 
 const int kDebugDiffuse = 9;
 const int kDebugSpecular = 10;
