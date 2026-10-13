@@ -2298,7 +2298,7 @@ namespace Helios
 					ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
 
 					const auto& show_texture = texture ? texture
-						: TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/default.png"));
+						: TextureAssetManager::Instance().GetOrCreateTexture(ABSOLUTE_PATH("Textures/Default.png"));
 
 					/* 缩略图与行高同高（frame 高含 1px 外框）：逐行对齐、不撑行 */
 					const float thumbnail = ImGui::GetFrameHeight() - 2.0f;
