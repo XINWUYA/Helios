@@ -28,6 +28,7 @@ namespace Helios
 			m_pSessionInfo->Name = name;
 
 			WriteHeader();
+			m_bSessionActive = true;
 		}
 		else
 		{
@@ -44,6 +45,10 @@ namespace Helios
 
 	void TimeCostProfiler::WriteProfileResult(const ProfileResult& result)
 	{
+		/* 快径：会话没开直接丢（写文本关闭时近乎零开销 —— 不构造 json、不抢锁） */
+		if (!m_bSessionActive.load(std::memory_order_relaxed))
+			return;
+
 		std::stringstream json;
 
 		json << std::setprecision(3) << std::fixed;
@@ -53,7 +58,8 @@ namespace Helios
 		json << "\"name\":\"" << result.Name << "\",";
 		json << "\"ph\":\"X\",";
 		json << "\"pid\":0,";
-		json << "\"tid\":" << result.ThreadId << ",";
+		/* tid 用哈希：libc++ 直接打印 thread::id 是十六进制（0x…），追踪文件就不是合法 JSON 了 */
+		json << "\"tid\":" << std::hash<std::thread::id>{}(result.ThreadId) << ",";
 		json << "\"ts\":" << result.StartTime.count();
 		json << "}";
 
@@ -84,6 +90,8 @@ namespace Helios
 
 	void TimeCostProfiler::InternalEndSession()
 	{
+		m_bSessionActive = false;
+
 		if (m_pSessionInfo)
 		{
 			WriteFooter();
@@ -98,6 +106,13 @@ namespace Helios
 	ProfilerTimer::ProfilerTimer(const char* name)
 		: m_pName(name)
 	{
+		/* 写文本全局开关关着：直接空转 —— 不记时间、析构也不提交 */
+		if (!TimeCostProfiler::Instance().IsSessionActive())
+		{
+			m_Stopped = true;
+			return;
+		}
+
 		m_StartTimePoint = std::chrono::steady_clock::now();
 	}
 

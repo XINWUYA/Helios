@@ -12,6 +12,7 @@
 #include "Camera.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderView.h"
+#include "Helios/Renderer/PostProcess/PostProcessEffectRegistry.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "SceneCommon.h"
 
@@ -291,6 +292,37 @@ namespace Helios
 			if (!rht) return true;
 			return lft->GetPriority() > rht->GetPriority();
 			});
+
+		/* 后处理解析（每帧一次）：场景里首个可见且总开关开启的「后处理对象」→ 逐效果采集设置进快照 →
+		 * 推给本帧各视图。搜索按实体 ID 升序取首个（确定性）；隐藏 / 总开关关闭 = 不参与（与探针 / 光源同源）。
+		 * 无对象 = 空快照 = 全部效果缺省关闭（旧场景零变化）。 */
+		PostProcess::PostProcessState post_process_state;
+		{
+			entt::entity owner_id = entt::null;
+			for (const entt::entity entity_id : m_Registry.view<PostProcessComponent>())
+			{
+				if (!IsEntityVisible(entity_id) || !m_Registry.get<PostProcessComponent>(entity_id).m_Enabled)
+					continue;
+				if (owner_id == entt::null || entt::to_integral(entity_id) < entt::to_integral(owner_id))
+					owner_id = entity_id;
+			}
+
+			if (owner_id != entt::null)
+			{
+				const Entity owner{ owner_id, shared_from_this() };
+				for (const PostProcess::EffectDesc& effect : PostProcess::PostProcessEffectRegistry::Instance().All())
+				{
+					if (effect.Capture != nullptr)
+						effect.Capture(owner, post_process_state);
+				}
+			}
+		}
+
+		for (RenderView* render_view : m_RenderViews)
+		{
+			if (render_view != nullptr)
+				render_view->SetPostProcessState(post_process_state);
+		}
 	}
 
 	/* 执行本帧收集到的所有渲染视图。

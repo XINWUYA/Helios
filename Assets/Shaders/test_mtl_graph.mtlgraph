@@ -3,7 +3,7 @@
     <Nodes>
         <Node NodeIndex="0" NodeType="0" ScreenPosX="703.98871" ScreenPosY="1.1920929e-06"/>
         <Node NodeIndex="1" NodeType="1" ScreenPosX="-809.94965" ScreenPosY="65.496147">
-            <Texture TexturePath="Textures/default.png" IsGenMipmap="true" TilingFactor="1"/>
+            <Texture TexturePath="Textures/Default.png" IsGenMipmap="true" TilingFactor="1"/>
         </Node>
         <Node NodeIndex="2" NodeType="2" ScreenPosX="-552.4903" ScreenPosY="5.0331502">
             <SamplerState WrapMode="0" MinFilter="1" MagFilter="1"/>

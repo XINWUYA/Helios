@@ -4,8 +4,8 @@
 
 namespace Helios
 {
-	/* 编辑器统一图标系统（单一数据源）：全部是矢量 —— 由 ImDrawList 直接绘制，没有外部资源、
-	 * 跟分辨率无关；主描边跟着 UI 状态色走。UI 代码只引用 Icons::Id、不出现贴图路径字面量。 */
+	/* 编辑器统一图标系统：图标来自 EditorRes/icons 目录的 SVG 文件，文件名和枚举名相同，
+	 * 由 ImDrawList 直接绘制、跟分辨率无关；UI 代码只引用 Icons::Id，不写资源路径。 */
 	namespace Icons
 	{
 		enum class Id : uint16_t
@@ -27,8 +27,10 @@ namespace Helios
 			 * game-engine-icons-final-v13-performance）：上一帧 / 下一帧
 			 * （胶片格 + 方向箭头）、峰值（peak）/ 谷值（valley）折线图 */
 			PreviousFrame, NextFrame, Peak, Valley,
+			/* CPU 录制选项：同时写追踪文本（chrome://tracing 时间线 JSON） */
+			TraceText,
 			/* 通用 */
-			Menu, Add, Remove, Return, Filter, Search, Visible, Hidden,
+			Menu, Add, Remove, Return, ReturnRoot, Filter, Search, Visible, Hidden,
 			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
 			Scene, Entity, Model, Cube, Sphere, Plane, Shape3D, Camera, Light, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Sprite,
 			Audio, Particle, Terrain,
@@ -40,8 +42,12 @@ namespace Helios
 			FrameGraph,
 			/* 面板/分组：日志窗口用 */
 			Log,
-			/* 面板工具动作：适配视图（把整张图收进视野） */
-			FitView,
+			/* 面板工具动作：适配视图（把整张图收进视野）/ 预览垂直翻转（Frame Graph 的镜像开关） */
+			FitView, FlipVertical,
+			/* 弹窗窗口控制（CPU 图表弹窗的行尾按钮）：最大化铺满主视口 / 还原为浮动窗 */
+			Maximize, Restore,
+			/* 抓取当前帧（实时视图：冻结数据供分析） */
+			Capture,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
 			Directory, File, FileImage, FileScene, FileMtlGraph, FileShader, FileModel, FileMaterial, FileProbe,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */
@@ -62,10 +68,9 @@ namespace Helios
 		{
 			const char*  Name;      /* 语义名：用于调试与阅读 */
 			IconDrawFunc Draw;
-			float OpticalScale;     /* 最终 SVG 预览中的逐图光学尺寸 */
 		};
 
-		/* 元数据表：新增图标只在这里加一行（Id 与表项一一对应） */
+		/* 图标元数据表：与 Id 枚举一一对应，Draw 是加载失败时的回退画法 */
 		const IconDesc& Get(Id id);
 
 		/* 绘制图标本体（不进入交互；按钮请用 IconButton） */

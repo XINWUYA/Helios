@@ -110,21 +110,21 @@ namespace Helios
 	std::string AssetNameError(const std::string& name)
 	{
 		if (name.empty())
-			return "名字不能为空";
+			return "Name cannot be empty";
 
 		if (name == "." || name == "..")
-			return "这个名字不合法";
+			return "Invalid name";
 
 		if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos)
-			return "名字里不能有路径分隔符";
+			return "Name cannot contain path separators";
 
 		/* 以 '.' 开头的东西资源树一律不列（见 BuildFileNodeTree），建了也看不见 */
 		if (name.front() == '.')
-			return "名字不能以 '.' 开头";
+			return "Name cannot start with '.'";
 
 		/* Windows 上这些字符建不出文件；资源要跨平台，直接一起挡掉 */
 		if (name.find_first_of("<>:\"|?*") != std::string::npos)
-			return "名字里不能有 < > : \" | ? * 这些字符";
+			return "Name cannot contain < > : \" | ? *";
 
 		return {};
 	}
@@ -135,25 +135,25 @@ namespace Helios
 
 		/* 移动不改名：落点就是"目标目录 / 源自己的名字" */
 		if (from.empty() || PathToUtf8(from.filename()).empty())
-			return "源的名字为空";
+			return "Source name is empty";
 
 		if (!std::filesystem::exists(from, error) || error)
-			return "源已经不在了";
+			return "Source no longer exists";
 
 		if (!std::filesystem::is_directory(target_dir, error) || error)
-			return "目标不是目录";
+			return "Target is not a folder";
 
 		/* 拖回它所在的目录（含"拖到它自己身上"）= 原位放下，不算一次移动 */
 		if (target_dir / from.filename() == from)
-			return "它已经在这个目录里";
+			return "Already in this folder";
 
 		/* 不能把目录搬进它自己或它的子孙里（磁盘上必然失败，先挡下来） */
 		if (IsPathPrefix(from, target_dir))
-			return "不能移动到自身内部";
+			return "Cannot move into itself";
 
 		/* 目标里已有同名项：与重命名同一条原则 —— 不覆盖（换名字是用户自己的事） */
 		if (std::filesystem::exists(target_dir / from.filename(), error) && !error)
-			return "目标目录里已有同名项";
+			return "Target folder already has an item with the same name";
 
 		return {};
 	}
@@ -241,14 +241,14 @@ namespace Helios
 		std::error_code error;
 		if (!std::filesystem::exists(target, error) || error)
 		{
-			out_error = "找不到它：" + PathToUtf8(target);
+			out_error = "Not found: " + PathToUtf8(target);
 			return false;
 		}
 
 		std::filesystem::create_directories(trash_root, error);
 		if (error)
 		{
-			out_error = "建不了回收站目录 " + PathToUtf8(trash_root) + "：" + error.message();
+			out_error = "Cannot create trash folder " + PathToUtf8(trash_root) + ": " + error.message();
 			return false;
 		}
 
@@ -258,7 +258,7 @@ namespace Helios
 		if (error)
 		{
 			/* 跨盘（回收站与资源不在同一个卷）搬不动：说清原因，别装作删掉了 */
-			out_error = "移到回收站失败：" + error.message();
+			out_error = "Move to trash failed: " + error.message();
 			return false;
 		}
 
@@ -272,7 +272,7 @@ namespace Helios
 		std::error_code error;
 		if (!std::filesystem::exists(trashed, error) || error)
 		{
-			out_error = "回收站里已经没有它了：" + PathToUtf8(trashed);
+			out_error = "Not in trash: " + PathToUtf8(trashed);
 			return false;
 		}
 
@@ -281,7 +281,7 @@ namespace Helios
 		std::filesystem::rename(trashed, target, error);
 		if (error)
 		{
-			out_error = "从回收站搬回来失败：" + error.message();
+			out_error = "Restore from trash failed: " + error.message();
 			return false;
 		}
 

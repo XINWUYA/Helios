@@ -74,8 +74,9 @@ float PunctualShadowZOffset(sampler2DArray shadowMap, vec3 light_to_frag, vec3 n
 	const float constant_z = u_ShadowBias * near_plane * far_plane
 		/ max((far_plane - near_plane) * distance_sq, 1e-6f);
 
-	/* 斜率自适应项：1.5 ×（单纹素世界尺寸）× tanθ × |dz/dd| */
-	const float ndl = clamp(dot(normalize(n), light_to_frag / max(distance, 1e-5f)), 0.0f, 1.0f);
+	/* 斜率自适应项：1.5 ×（单纹素世界尺寸）× tanθ × |dz/dd|。
+	 * ndl 照级联的口径用「指向光源」方向 —— light_to_frag 是光源指到片元（反向），取负才是。 */
+	const float ndl = clamp(dot(normalize(n), -light_to_frag / max(distance, 1e-5f)), 0.0f, 1.0f);
 	const float slope_tan = sqrt(max(1.0f - ndl * ndl, 0.0f)) / max(ndl, 1e-3f);
 	const float slope_z = 3.0f * near_plane * far_plane * slope_tan
 		/ max((far_plane - near_plane) * distance * float(textureSize(shadowMap, 0).x), 1e-6f);

@@ -25,6 +25,12 @@ namespace Helios
 		EditorResourceBrowser::HistorySink history;
 		history.Execute = [this](UniquePtr<ICommand> command) { m_Context.Execute(std::move(command)); };
 		m_ResourceBrowser.SetHistorySink(std::move(history));
+
+		/* 双击资源浏览器里的 .scn → 打开场景：同样经 EditorContext 转达（面板不认识场景层）。
+		 * 路径按绝对路径给 —— 与导入对话框 / 拖入同一口径。 */
+		EditorResourceBrowser::SceneOpenSink scene_open;
+		scene_open.Open = [this](const std::string& path) { m_Context.OpenScene(path); };
+		m_ResourceBrowser.SetSceneOpenSink(std::move(scene_open));
 	}
 
 	void MainEditorLayer::OnDetached()
@@ -37,6 +43,9 @@ namespace Helios
 	void MainEditorLayer::OnImGuiRender()
 	{
 		PROFILE_FUNCTION();
+
+		/* 还原上次关闭时的停靠前台页签：须在任何窗口提交之前（节点回写读当前焦点窗口） */
+		m_LayoutRestore.Update();
 
 		/* 菜单（含 DockSpace 宿主） */
 		ShowMenuUI();
@@ -61,6 +70,10 @@ namespace Helios
 	bool MainEditorLayer::OnKeyPressed(KeyPressedEvent* event)
 	{
 		PROFILE_FUNCTION();
+
+		/* ImGui 正收键盘（输入框激活等）时快捷键让位（键进编辑框，不进命令） */
+		if (ImGui::GetIO().WantCaptureKeyboard)
+			return true;
 
 		if (event->GetRepeatCount() > 0)
 			return false;

@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "Application.h"
 #include <GLFW/glfw3.h>
+#include "Helios/Core/CPUTimerProfiler.h"
 #include "Helios/Core/FrameTimeProfiler.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/ImGui/ImGuiLayer.h"
@@ -78,8 +79,13 @@ namespace Helios
 					render_api->PrepareNextFrame();
 				}
 
+				/* CPU 函数级采集的帧边界：在垂直同步等待之后 —— 与 Frame 卡的
+				 * CPU 口径一致（FrameTotal 不含等待） */
+				CPUTimerProfiler::Instance().BeginFrame();
+
 				{
 					const ScopedFrameStage update_stage(FrameTimeProfiler::Stage::Update);
+					const ScopedCPUTimerScope cpu_update_scope("Update", __FILE__, __LINE__);
 
 					/* 帧级渲染准备：GPU 计时器的帧边界。
 					 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
@@ -94,6 +100,7 @@ namespace Helios
 
 				{
 					const ScopedFrameStage ui_stage(FrameTimeProfiler::Stage::UI);
+					const ScopedCPUTimerScope cpu_ui_scope("UI", __FILE__, __LINE__);
 
 					/* 后更新UI */
 					m_pImGuiLayer->Begin();
@@ -109,6 +116,7 @@ namespace Helios
 
 			{
 				const ScopedFrameStage present_stage(FrameTimeProfiler::Stage::Present);
+				const ScopedCPUTimerScope cpu_present_scope("Present", __FILE__, __LINE__);
 
 				// SwapBuffer，显示帧画面到屏幕
 				m_pWindow->OnUpdate();
@@ -118,6 +126,7 @@ namespace Helios
 			const ResultGPUTimerNode& gpu_timer_root = Renderer::GetGPUTimerRoot();
 			frame_profiler.EndFrame(gpu_timer_root.HasData,
 				static_cast<float>(gpu_timer_root.GPUTime * 0.001)); /* us → ms */
+			CPUTimerProfiler::Instance().EndFrame();
 		}
 	}
 

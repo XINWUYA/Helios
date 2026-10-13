@@ -27,7 +27,7 @@ namespace Helios
 			if (!MoveAssetToTrash(m_TrashRoot, entry.Path, entry.Trashed, error))
 			{
 				/* 单个失败不放倒整批：能删的照删，撤销时也只搬回真删掉的那些 */
-				CORE_LOG_ERROR("删除失败：{0}", error);
+				CORE_LOG_ERROR("Delete failed: {0}", error);
 				continue;
 			}
 
@@ -48,7 +48,7 @@ namespace Helios
 			std::string error;
 			if (!RestoreAssetFromTrash(entry->Trashed, entry->Path, error))
 			{
-				CORE_LOG_ERROR("撤销删除失败：{0}", error);
+				CORE_LOG_ERROR("Undo delete failed: {0}", error);
 				continue;
 			}
 

@@ -18,15 +18,23 @@ namespace Helios
 		constexpr float kChipGap = 6.0f;
 
 		/* 工具行切换芯片：圆角底 + 状态圆点 + 文字（激活 = 强调色淡底，
-		 * 圆点按调用方给的状态色）；返回本帧是否被点击，值由调用方翻转。
+		 * 圆点按调用方给的状态色）；count >= 0 时在文字右侧画弱化条数。
+		 * 返回本帧是否被点击，值由调用方翻转。
 		 * 与 Frame Graph 的切换芯片同一套形状语言（同高 / 同底 / 悬停提亮 / 1px 描边）。 */
-		bool ToggleChip(const char* id, const char* label, bool active, const ImVec4& dot_on)
+		bool ToggleChip(const char* id, const char* label, bool active, const ImVec4& dot_on, int count = -1)
 		{
 			const ImGuiStyle& style = ImGui::GetStyle();
 			const float height = ImGui::GetFrameHeight();
 			const ImVec2 label_size = ImGui::CalcTextSize(label);
 			const float dot_radius = 3.0f;
-			const float width = style.FramePadding.x * 2.0f + dot_radius * 2.0f + kChipGap + label_size.x;
+
+			char count_text[16] = {};
+			if (count >= 0)
+				std::snprintf(count_text, sizeof(count_text), "%d", count);
+			const ImVec2 count_size = count >= 0 ? ImGui::CalcTextSize(count_text) : ImVec2(0.0f, 0.0f);
+
+			const float width = style.FramePadding.x * 2.0f + dot_radius * 2.0f + kChipGap + label_size.x
+				+ (count >= 0 ? kChipGap + count_size.x : 0.0f);
 			const ImVec2 pos = ImGui::GetCursorScreenPos();
 
 			ImGui::PushID(id);
@@ -49,10 +57,20 @@ namespace Helios
 			const ImVec2 dot_center(pos.x + style.FramePadding.x + dot_radius, pos.y + height * 0.5f);
 			draw_list->AddCircleFilled(dot_center, dot_radius,
 				ImGui::GetColorU32(active ? dot_on : EditorTheme::WithAlpha(dot_on, 0.35f)));
-			draw_list->AddText(
-				ImVec2(dot_center.x + dot_radius + kChipGap, pos.y + (height - label_size.y) * 0.5f),
+
+			const float label_x = dot_center.x + dot_radius + kChipGap;
+			draw_list->AddText(ImVec2(label_x, pos.y + (height - label_size.y) * 0.5f),
 				ImGui::GetColorU32(active ? EditorTheme::Token::Text : EditorTheme::Token::TextDim),
 				label);
+			if (count >= 0)
+			{
+				/* 条数比标签再弱一档；未激活的芯片整体更淡 */
+				draw_list->AddText(
+					ImVec2(label_x + label_size.x + kChipGap, pos.y + (height - count_size.y) * 0.5f),
+					ImGui::GetColorU32(active ? EditorTheme::Token::TextDim
+						: EditorTheme::WithAlpha(EditorTheme::Token::TextDim, 0.6f)),
+					count_text);
+			}
 
 			return clicked;
 		}
@@ -131,6 +149,24 @@ namespace Helios
 			}
 		}
 
+		/* 计数槽位：critical 并进 error（两者共用 Error 芯片开关，数字也合并显示） */
+		size_t LevelCountSlot(int level)
+		{
+			const auto index = static_cast<size_t>(level);
+			return index < static_cast<size_t>(spdlog::level::err)
+				? index
+				: static_cast<size_t>(spdlog::level::err);
+		}
+
+		/* 单行文本（时间 [级别] 来源: 正文）：双击复制与选中复制共用同一格式 */
+		std::string FormatEntryLine(const LogBuffer::Record& record)
+		{
+			char time_text[32];
+			FormatTime(record.Seconds, record.Millis, time_text);
+			return std::string(time_text) + " [" + LevelTag(record.Level) + "] "
+				+ record.Logger + ": " + record.Message;
+		}
+
 		/* 行内单行化：换行等控制字符压成空格（完整原文留给悬停提示） */
 		void MakeSingleLine(std::string& text)
 		{
@@ -151,7 +187,7 @@ namespace Helios
 		if (!visible)
 			return;
 
-		ImGui::SetNextWindowSize(ImVec2(620.0f, 320.0f), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSize(ImVec2(780.0f, 320.0f), ImGuiCond_FirstUseEver);
 
 		if (!ImGui::Begin(Panel::kLog, &visible))
 		{
@@ -188,13 +224,114 @@ namespace Helios
 		return index < IM_ARRAYSIZE(m_LevelVisible) ? m_LevelVisible[index] : true;
 	}
 
+	uint32_t LogPanel::GetLevelCount(spdlog::level::level_enum level) const
+	{
+		return m_LevelCounts[LevelCountSlot(static_cast<int>(level))];
+	}
+
+	void LogPanel::SelectAllVisible()
+	{
+		m_SelectedSeqs.clear();
+		for (uint32_t index : m_VisibleEntries)
+			m_SelectedSeqs.insert(m_Entries[index].Seq);
+
+		/* 锚点落到首个可见行：接着 Shift 点选从它算 */
+		m_HasSelectionAnchor = !m_VisibleEntries.empty();
+		if (m_HasSelectionAnchor)
+			m_SelectionAnchor = m_Entries[m_VisibleEntries.front()].Seq;
+	}
+
+	void LogPanel::SelectSingle(uint64_t seq)
+	{
+		m_SelectedSeqs.clear();
+		m_SelectedSeqs.insert(seq);
+		m_SelectionAnchor = seq;
+		m_HasSelectionAnchor = true;
+	}
+
+	void LogPanel::ToggleSelection(uint64_t seq)
+	{
+		if (m_SelectedSeqs.count(seq) != 0)
+			m_SelectedSeqs.erase(seq);
+		else
+			m_SelectedSeqs.insert(seq);
+
+		/* 锚点仍是刚点的这一行：接着 Shift 点选从它算（与资源浏览器同） */
+		m_SelectionAnchor = seq;
+		m_HasSelectionAnchor = true;
+	}
+
+	void LogPanel::SelectRangeTo(uint64_t seq)
+	{
+		const auto index_of = [&](uint64_t target)
+		{
+			for (size_t i = 0; i < m_VisibleEntries.size(); ++i)
+			{
+				if (m_Entries[m_VisibleEntries[i]].Seq == target)
+					return static_cast<int>(i);
+			}
+			return -1;
+		};
+
+		const int to = index_of(seq);
+		const int from = m_HasSelectionAnchor ? index_of(m_SelectionAnchor) : -1;
+
+		/* 锚点不在当前列表里（刚清过 / 被过滤掉了）就当这次是第一次点选 */
+		if (to < 0 || from < 0)
+		{
+			SelectSingle(seq);
+			return;
+		}
+
+		m_SelectedSeqs.clear();
+		for (int i = ImMin(from, to); i <= ImMax(from, to); ++i)
+			m_SelectedSeqs.insert(m_Entries[m_VisibleEntries[static_cast<size_t>(i)]].Seq);
+
+		/* 锚点不动：连续 Shift 点选时范围始终从同一个锚点算起 */
+	}
+
+	void LogPanel::ClearSelection()
+	{
+		m_SelectedSeqs.clear();
+		m_HasSelectionAnchor = false;
+	}
+
+	uint32_t LogPanel::GetSelectedCount() const
+	{
+		uint32_t count = 0;
+		for (uint32_t index : m_VisibleEntries)
+		{
+			if (m_SelectedSeqs.count(m_Entries[index].Seq) != 0)
+				++count;
+		}
+		return count;
+	}
+
+	std::string LogPanel::BuildSelectedText() const
+	{
+		std::string text;
+		for (uint32_t index : m_VisibleEntries)
+		{
+			const LogBuffer::Record& record = m_Entries[index];
+			if (m_SelectedSeqs.count(record.Seq) == 0)
+				continue;
+			if (!text.empty())
+				text += '\n';
+			text += FormatEntryLine(record);
+		}
+		return text;
+	}
+
 	void LogPanel::SyncEntries()
 	{
 		std::vector<LogBuffer::Record> fetched;
 		const bool rebuild = LogBuffer::Instance().FetchSince(m_LastSeq, fetched);
 
 		if (rebuild)
+		{
 			m_Entries.clear();
+			m_SelectedSeqs.clear(); /* 数据源换代，选择快照作废 */
+		}
 
 		for (LogBuffer::Record& record : fetched)
 			m_Entries.push_back(std::move(record));
@@ -208,19 +345,24 @@ namespace Helios
 	{
 		m_VisibleEntries.clear();
 		m_VisibleEntries.reserve(m_Entries.size());
+		for (uint32_t& count : m_LevelCounts)
+			count = 0;
 
 		for (uint32_t index = 0; index < m_Entries.size(); ++index)
 		{
-			if (PassesFilter(m_Entries[index]))
+			const LogBuffer::Record& record = m_Entries[index];
+			if (!PassesSearchFilter(record))
+				continue;
+
+			/* 条数只跟搜索词走、不受级别显隐影响：数字 = 该级别当前的全部条数（含被藏起来的） */
+			++m_LevelCounts[LevelCountSlot(record.Level)];
+			if (IsLevelVisible(static_cast<spdlog::level::level_enum>(record.Level)))
 				m_VisibleEntries.push_back(index);
 		}
 	}
 
-	bool LogPanel::PassesFilter(const LogBuffer::Record& record) const
+	bool LogPanel::PassesSearchFilter(const LogBuffer::Record& record) const
 	{
-		if (!IsLevelVisible(static_cast<spdlog::level::level_enum>(record.Level)))
-			return false;
-
 		if (m_SearchFilter.empty())
 			return true;
 
@@ -232,13 +374,13 @@ namespace Helios
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 
-		/* 级别过滤芯片：圆点着色 = 该级别的标色（未选整体压暗）；
-		 * Error 芯片连 Critical 一起开关（两者同一显示语义） */
+		/* 级别过滤芯片：圆点着色 = 该级别的标色（未选整体压暗）；右侧数字 = 该级别条数
+		 * （搜索过滤后、级别显隐前）；Error 芯片连 Critical 一起开关（两者同一显示语义） */
 		const auto level_chip = [&](const char* label, spdlog::level::level_enum level,
 			const ImVec4& color, bool with_critical)
 		{
 			const auto index = static_cast<size_t>(level);
-			if (ToggleChip(label, label, m_LevelVisible[index], color))
+			if (ToggleChip(label, label, m_LevelVisible[index], color, static_cast<int>(m_LevelCounts[index])))
 			{
 				m_LevelVisible[index] = !m_LevelVisible[index];
 				if (with_critical)
@@ -295,6 +437,7 @@ namespace Helios
 			LogBuffer::Instance().Clear();
 			m_Entries.clear();
 			m_VisibleEntries.clear();
+			m_SelectedSeqs.clear();
 		}
 
 		ImGui::Dummy(ImVec2(0.0f, 2.0f));
@@ -310,12 +453,13 @@ namespace Helios
 		{
 			/* ListClipper 虚拟化：只画视口内的行（缓冲上限 2048，全画也不致命，
 			 * 但查询 / 反复打开时逐行布局是纯浪费） */
+			bool clicked_any_row = false;
 			ImGuiListClipper clipper;
 			clipper.Begin(static_cast<int>(m_VisibleEntries.size()), row_pitch);
 			while (clipper.Step())
 			{
 				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
-					DrawEntryRow(m_Entries[m_VisibleEntries[static_cast<size_t>(row)]], row_height);
+					clicked_any_row |= DrawEntryRow(m_Entries[m_VisibleEntries[static_cast<size_t>(row)]], row_height);
 			}
 			clipper.End();
 
@@ -327,6 +471,11 @@ namespace Helios
 					: "No entries match the current filter.");
 				ImGui::PopStyleColor();
 			}
+
+			/* 点空白 = 清空选择：条目一个都没点到（遍历完再判，按下帧 hover 判读到的是上一帧），
+			 * 而左键确实按在这一栏里 */
+			if (!clicked_any_row && ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+				ClearSelection();
 
 			/* 跟随语义：手动上滚自动暂停（先看历史），滚回底部恢复 */
 			if (ImGui::IsWindowHovered())
@@ -341,29 +490,69 @@ namespace Helios
 
 			if (m_Follow)
 				ImGui::SetScrollHereY(1.0f);
+
+			HandleListShortcuts();
 		}
 		ImGui::EndChild();
 	}
 
-	void LogPanel::DrawEntryRow(const LogBuffer::Record& record, float row_height)
+	void LogPanel::HandleListShortcuts()
+	{
+		const ImGuiIO& io = ImGui::GetIO();
+		/* 搜索框聚焦时不抢键（WantTextInput，输入框自己处理 Ctrl+A/C）；列表外也不响应 */
+		if (!ImGui::IsWindowHovered() || io.WantTextInput)
+			return;
+
+		if ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A))
+			SelectAllVisible();
+
+		if ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_C))
+		{
+			const std::string text = BuildSelectedText();
+			if (!text.empty())
+				ImGui::SetClipboardText(text.c_str());
+		}
+
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+			ClearSelection();
+	}
+
+	void LogPanel::ApplyClickSelection(uint64_t seq)
+	{
+		const ImGuiIO& io = ImGui::GetIO();
+
+		if (io.KeyShift)
+			SelectRangeTo(seq);
+		else if (io.KeyCtrl || io.KeySuper)
+			ToggleSelection(seq);
+		else
+			SelectSingle(seq);
+	}
+
+	bool LogPanel::DrawEntryRow(const LogBuffer::Record& record, float row_height)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 		const ImVec2 row_min = ImGui::GetCursorScreenPos();
 		const float row_width = ImGui::GetContentRegionAvail().x;
 
-		/* 行命中区：悬停底色（Selectable 自带）；双击 = 复制该条 */
+		/* 行命中区：悬停 / 选中底色（Selectable 自带）；单击 = 选择（见 ApplyClickSelection）、
+		 * 双击 = 复制该条 */
+		const bool selected = m_SelectedSeqs.count(record.Seq) != 0;
 		ImGui::PushID(static_cast<int>(record.Seq & 0x7fffffff));
-		ImGui::Selectable("##LogRow", false, ImGuiSelectableFlags_None, ImVec2(row_width, row_height));
+		ImGui::Selectable("##LogRow", selected, ImGuiSelectableFlags_None, ImVec2(row_width, row_height));
 		const bool hovered = ImGui::IsItemHovered();
+		const bool clicked = ImGui::IsItemClicked();
 		ImGui::PopID();
+
+		if (clicked)
+			ApplyClickSelection(record.Seq);
 
 		char time_text[32];
 		FormatTime(record.Seconds, record.Millis, time_text);
 
 		if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 		{
-			const std::string line = std::string(time_text) + " [" + LevelTag(record.Level) + "] "
-				+ record.Logger + ": " + record.Message;
+			const std::string line = FormatEntryLine(record);
 			ImGui::SetClipboardText(line.c_str());
 		}
 
@@ -419,7 +608,10 @@ namespace Helios
 			ImGui::TextUnformatted(record.Message.c_str());
 			ImGui::PopTextWrapPos();
 			ImGui::TextDisabled("Double-click to copy");
+			ImGui::TextDisabled("Ctrl/Cmd+A select all, Ctrl/Cmd+C copy");
 			ImGui::EndTooltip();
 		}
+
+		return clicked;
 	}
 }

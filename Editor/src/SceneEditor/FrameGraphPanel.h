@@ -10,7 +10,7 @@ namespace Helios
 	/* FrameGraph 可视化页：整页 = 所选相机当前帧的渲染图 —— Pass 行布局（每个 Pass 一行，行头和
 	 * 背景合并 + 标题；输出资源卡叠在区域内，缩略图 = 执行完当刻的快照；可缩放 / 平移 / 点选；
 	 * 默认只显示生效的 Pass；抓取开关由 SceneEditorLayer 落地）。连线相邻直连、其余绕左侧总线；
-	 * 同名资源副本跨行对齐（虚线关联）。 */
+	 * 同名资源副本跨行对齐（虚线关联），其余资源每行从最左起排（无冲突的列可复用）。 */
 	class FrameGraphPanel final
 	{
 	public:
@@ -75,6 +75,16 @@ namespace Helios
 		};
 		[[nodiscard]] const std::vector<IconRect>& GetLastIconRects() const { return m_LastIconRects; }
 
+		/* 上一帧规划的跨行依赖连线（自检 / 自动化验证用）：源 = 引出连线的资源卡
+		 * （SourcePass = 写出该副本的行），目标 = 消费该副本的 Pass */
+		struct EdgeLink
+		{
+			std::string ResourceName;  /* 源卡名（同名副本链里的具体一份） */
+			std::string SourcePass;    /* 源卡所属 Pass（写出该副本的行） */
+			std::string TargetPass;    /* 消费该副本的 Pass */
+		};
+		[[nodiscard]] const std::vector<EdgeLink>& GetLastEdgeLinks() const { return m_LastEdgeLinks; }
+
 			/* 当前选中的 Pass 名（聚焦的是 Pass 背景区域时 = 该名字；否则空。
 		 * 聚焦卡的描边用强调色标记） */
 		[[nodiscard]] const std::string& GetSelectedPassName() const { return m_SelectedPassName; }
@@ -95,6 +105,12 @@ namespace Helios
 		void SetSearchFilter(const std::string& filter);
 		[[nodiscard]] const std::string& GetSearchFilter() const { return m_SearchFilter; }
 
+		/* 工具行"反转"开关（预览图垂直翻转）：与输出自带的行序（TopDown）异或 ——
+		 * 对照源纹理 / Xcode 抓帧的 Flip 视图用；对所有快照缩略图与悬停放大图生效。
+		 * 程序化入口供自检。 */
+		void SetPreviewFlip(bool flip) { m_PreviewFlip = flip; }
+		[[nodiscard]] bool IsPreviewFlipped() const { return m_PreviewFlip; }
+
 		/* 阶段标识色查询（自检 / 自动化验证用）：名字命中阶段关键字就返回饱和标识色（节点描边用的
 		 * 那个）；没命中返回 nullptr（用默认的卡片 / 面板色和 Border 描边）。 */
 		[[nodiscard]] static const ImVec4* GetStageColor(const std::string& node_name);
@@ -107,6 +123,7 @@ namespace Helios
 
 		bool m_CaptureEnabled{ true };      /* 抓取开关（面板可见时生效） */
 		bool m_ShowCulled{ false };         /* 是否显示被剔除的节点（默认只看生效节点） */
+		bool m_PreviewFlip{ false };        /* 预览图垂直翻转（工具行"反转"开关，见 SetPreviewFlip） */
 		bool m_CaptureRequested{ false };
 		std::string m_SelectedPassName{};
 		FocusRef m_Focus{};                 /* 聚焦的卡片（见 GetFocusedCard） */
@@ -123,5 +140,6 @@ namespace Helios
 		std::vector<OutputRect> m_LastOutputRects{};
 		std::vector<LaneRect> m_LastLaneRects{};
 		std::vector<IconRect> m_LastIconRects{};
+		std::vector<EdgeLink> m_LastEdgeLinks{};
 	};
 }

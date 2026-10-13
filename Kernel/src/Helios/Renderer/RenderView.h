@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 
 #include "FrameGraph/FrameGraphResourceHandle.h"
+#include "PostProcess/PostProcessEffectRegistry.h"
 
 namespace Helios
 {
@@ -68,6 +69,11 @@ namespace Helios
 		void SetDebugViewMode(DebugViewMode mode) { m_DebugViewMode = mode; }
 		[[nodiscard]] DebugViewMode GetDebugViewMode() const { return m_DebugViewMode; }
 
+		/* 本帧的后处理设置快照：由 Scene 每帧解析（后处理对象 → 逐效果采集）后写入；
+		 * 渲染侧（各效果的 Build）只读这份快照，不认识场景实体。缺省空 = 全部效果关闭。 */
+		void SetPostProcessState(const PostProcess::PostProcessState& state) { m_PostProcessState = state; }
+		[[nodiscard]] const PostProcess::PostProcessState& GetPostProcessState() const { return m_PostProcessState; }
+
 		/* 设置视口区域 */
 		void SetViewportRegion(const ViewportRegion& region);
 		[[nodiscard]] const ViewportRegion& GetViewportRegion() const { return m_ViewportRegion; }
@@ -131,6 +137,8 @@ namespace Helios
 		RenderPipeline m_RenderPipeline{ RenderPipeline::Forward };
 		/* 调试视图模式（Surface / Lighting / Analysis 分类） */
 		DebugViewMode m_DebugViewMode{ DebugViewMode::None };
+		/* 后处理设置快照（每视图一份；Scene 解析写入，缺省空 = 全部效果关闭） */
+		PostProcess::PostProcessState m_PostProcessState{};
 		/* 相机 */
 		Camera* m_pOwnerCamera{ nullptr };
 		/* 所属的Scene */

@@ -610,7 +610,8 @@ namespace Helios
             m_LastSubmittedCommandBuffer->waitUntilCompleted();
     }
 
-    void MetalRenderAPI::CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst)
+    void MetalRenderAPI::CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst,
+        uint32_t src_layer)
     {
         PROFILE_FUNCTION();
 
@@ -621,6 +622,15 @@ namespace Helios
 
         MTL::Texture* src_texture = metal_src->GetMetalTexture();
         MTL::Texture* dst_texture = metal_dst->GetMetalTexture();
+
+        /* 注意：2D 数组的层数是 arrayLength（非数组纹理恒为 1、3D 为 1）——
+         * depth() 是 3D 深度，在数组纹理上恒 1，不能拿来判层号 */
+        if (src_layer >= src_texture->arrayLength())
+        {
+            CORE_LOG_ERROR("MetalRenderAPI::CopyTexture: layer {} out of range ({})",
+                src_layer, src_texture->arrayLength());
+            return;
+        }
 
         /* 与 GenerateMipmap 同一模式：Metal 同一时刻只允许一个命令编码器，
          * 先收束可能还在开启的渲染通道，再在当前帧的命令缓冲区上插入 blit ——
@@ -649,7 +659,7 @@ namespace Helios
             return;
         }
 
-        blit->copyFromTexture(src_texture, 0, 0, MTL::Origin(0, 0, 0),
+        blit->copyFromTexture(src_texture, src_layer, 0, MTL::Origin(0, 0, 0),
             MTL::Size(src_texture->width(), src_texture->height(), 1),
             dst_texture, 0, 0, MTL::Origin(0, 0, 0));
         blit->endEncoding();

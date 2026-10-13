@@ -119,6 +119,10 @@ namespace Helios
 		/* 取某光源的点光/聚光阴影数据；该光源无阴影时返回 Valid = false */
 		[[nodiscard]] PunctualShadowData GetPunctualShadowData(const Light* light) const;
 
+		/* 阴影图数组各层的显示名，下标 = 数组层号：级联 "Cascade N"、点光/聚光 "Punctual N"。
+		 * ShadowPass 各层的 Debug 组与渲染图抓取的逐层条目共用（与 GPU 计时树同名同级）。 */
+		[[nodiscard]] std::vector<std::string> GetShadowLayerNames() const;
+
 	private:
 		void PrepareRequiredTexture();
 

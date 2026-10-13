@@ -84,6 +84,17 @@ namespace Helios
 
 		/* 获取名称 */
 		[[nodiscard]] const std::string& GetDebugName() const { return m_DebugName; }
+
+		/* 深度预览的显示范围（FrameGraphCapture 按帧刷新写入）：写过像素的 [min, max]，
+		 * 预览端据此逐层归一化显示（观感对齐 Xcode 抓帧）。max <= min = 无有效范围
+		 * （空层 / 常量层 / 未登记），预览端回退默认提亮曲线。 */
+		void SetDisplayRange(float min_value, float max_value)
+		{
+			m_DisplayRangeMin = min_value;
+			m_DisplayRangeMax = max_value;
+		}
+		[[nodiscard]] float GetDisplayRangeMin() const { return m_DisplayRangeMin; }
+		[[nodiscard]] float GetDisplayRangeMax() const { return m_DisplayRangeMax; }
 		/* 获取纹理原始尺寸 */
 		[[nodiscard]] uint32_t GetWidth() const { return m_TextureDesc.Width; }
 		[[nodiscard]] uint32_t GetHeight() const { return m_TextureDesc.Height; }
@@ -121,6 +132,9 @@ namespace Helios
 
 		/* 名称 */
 		std::string m_DebugName{ "Unnamed DeviceTexture" };
+		/* 深度预览显示范围（默认无效：max <= min，预览端回退提亮曲线） */
+		float m_DisplayRangeMin{ 1.0f };
+		float m_DisplayRangeMax{ 0.0f };
 		/* 纹理描述 */
 		TextureDesc m_TextureDesc{};
 		/* 加载配置 */

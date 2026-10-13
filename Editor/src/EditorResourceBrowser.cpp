@@ -1222,7 +1222,7 @@ namespace Helios
 
 		if (const std::string reason = AssetMoveError(from_abs, into_abs); !reason.empty())
 		{
-			CORE_LOG_INFO("拖拽移动已忽略：{0}（{1}）", from, reason);
+			CORE_LOG_INFO("Drag move ignored: {0} ({1})", from, reason);
 			return;
 		}
 
@@ -1455,8 +1455,8 @@ namespace Helios
 
 			/* 说清"删到哪儿去了"：撤销能用 Ctrl+Z，但 File 菜单 / 工具栏的 Undo 也一样管用 */
 			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
-			ImGui::TextUnformatted("移到项目回收站 .helios-trash（Assets 旁边）");
-			ImGui::TextUnformatted("可用 Ctrl+Z 或工具栏的 Undo 还原");
+			ImGui::TextUnformatted("Will move to project trash (.helios-trash, next to Assets)");
+			ImGui::TextUnformatted("Restore with Ctrl+Z or Undo in the toolbar");
 			ImGui::PopStyleColor();
 
 			constexpr size_t kMaxListed = 8;
@@ -1541,14 +1541,14 @@ namespace Helios
 
 		if (!error.empty())
 		{
-			ImGui::Text("名字不合法：%s", error.c_str());
+			ImGui::Text("Invalid name: %s", error.c_str());
 		}
 		else if (target != requested || final_name != typed)
 		{
 			/* 最终名字与输入的不一样：说清会建成什么，免得用户以为没生效
 			 * （两种来路 —— 同名被占了要让开，后缀被自动补上）。 */
 			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
-			ImGui::Text("将创建为 %s", PathToUtf8(target.filename()).c_str());
+			ImGui::Text("Will create as %s", PathToUtf8(target.filename()).c_str());
 			ImGui::PopStyleColor();
 		}
 
@@ -2158,7 +2158,7 @@ namespace Helios
 		ImGuiExt::DrawDotSliderFloat("##ThumbnailSize", m_ThumbnailSize,
 			kMinThumbnailSize, kMaxThumbnailSize, "%.0f");
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Thumbnail size: %.0f px — 拖到 32 以下内容区退回详细列表", m_ThumbnailSize);
+			ImGui::SetTooltip("Thumbnail size: %.0f px — below 32, content area falls back to details list", m_ThumbnailSize);
 
 		ImGui::PopID();
 
@@ -2329,8 +2329,9 @@ namespace Helios
 							m_PressSkipsSlowClick = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 						}
 
-						/* 快速双击的第二击：文件夹 = 进去，文件 = 就地改名。注意：带修饰键的双击不算"打开" ——
-						 * Ctrl / Shift 连点同一个文件夹是在加选 / 移出，两次落在同一格被判成双击会意外进目录（选择被清空）。 */
+						/* 快速双击的第二击：文件夹 = 进去，场景文件 = 打开，其余文件 = 就地改名。
+						 * 注意：带修饰键的双击不算"打开" —— Ctrl / Shift 连点同一个文件夹是在加选 / 移出，
+						 * 两次落在同一格被判成双击会意外进目录（选择被清空）。 */
 						if (!ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper
 							&& ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
 						{
@@ -2338,6 +2339,12 @@ namespace Helios
 							{
 								ClearRenameCandidate();
 								SetCurrentNode(child_node);
+							}
+							else if (child_node->Type == FileType::Scene && m_SceneOpenSink.Open)
+							{
+								/* 双击是"用"：打开场景；.scn 的改名留给慢双击 / 右键菜单 */
+								ClearRenameCandidate();
+								m_SceneOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
 							}
 							else
 							{
@@ -2552,7 +2559,7 @@ namespace Helios
 					m_PressSkipsSlowClick = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 				}
 
-				/* 快速双击的第二击：文件夹 = 进去、文件 = 就地改名（见网格里那段说明）；
+				/* 快速双击的第二击：文件夹 = 进去、场景文件 = 打开、其余文件 = 就地改名（见网格里那段说明）；
 				 * 带修饰键的双击是加选 / 移出，不是"打开" */
 				if (!ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && !ImGui::GetIO().KeySuper
 					&& ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
@@ -2561,6 +2568,12 @@ namespace Helios
 					{
 						ClearRenameCandidate();
 						SetCurrentNode(child_node);
+					}
+					else if (child_node->Type == FileType::Scene && m_SceneOpenSink.Open)
+					{
+						/* 双击是"用"：打开场景；.scn 的改名留给慢双击 / 右键菜单 */
+						ClearRenameCandidate();
+						m_SceneOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
 					}
 					else
 					{

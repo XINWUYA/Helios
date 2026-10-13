@@ -1,13 +1,15 @@
 #include "Pch.h"
 #include "EditorIcons.h"
-#include "EditorIconsSvg.h"
 #include "Helios/ImGui/EditorTheme.h"
+#include "Helios/Scene/SceneCommon.h"
+#include <magic_enum.hpp>
 #include <tinyxml2.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -438,6 +440,29 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.438f, 0.688f), c.Len(0.0875f), color);
 		}
 
+		/* 追踪文本（CPU 录制选项：录制时同步写 chrome://tracing 时间线 JSON）：
+		 * 文件页（文件族语言，折角软紫）+ 波形折线（性能族语言，薄荷） */
+		void DrawTraceText(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			static constexpr float kPage[5][2] = {
+				{ 0.25f, 0.125f }, { 0.594f, 0.125f }, { 0.75f, 0.281f }, { 0.75f, 0.875f }, { 0.25f, 0.875f }
+			};
+			dl->AddTriangleFilled(c.At(0.594f, 0.125f), c.At(0.75f, 0.281f), c.At(0.594f, 0.281f),
+				PaletteColor(color, kViolet, 0.18f));
+			StrokePolyline(dl, c, kPage, t, color, true);
+			dl->AddLine(c.At(0.594f, 0.125f), c.At(0.594f, 0.281f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.594f, 0.281f), c.At(0.75f, 0.281f), PaletteColor(color, kViolet), t);
+
+			static constexpr float kWave[7][2] = {
+				{ 0.344f, 0.688f }, { 0.419f, 0.688f }, { 0.475f, 0.469f }, { 0.556f, 0.797f },
+				{ 0.619f, 0.594f }, { 0.663f, 0.688f }, { 0.688f, 0.688f }
+			};
+			StrokePolyline(dl, c, kWave, t * 1.1f, PaletteColor(color, kMint), false);
+		}
+
 		/* ---- 通用 ---- */
 
 		void DrawMenu(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -478,18 +503,42 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 			const ImU32 violet = PaletteColor(color, kViolet);
 
-			/* 折返路径先向左、再下行，末端箭头明确指向左侧 */
-			dl->PathLineTo(c.At(0.86f, 0.28f));
-			dl->PathLineTo(c.At(0.40f, 0.28f));
-			dl->PathBezierCubicCurveTo(c.At(0.31f, 0.28f), c.At(0.30f, 0.35f), c.At(0.30f, 0.44f), 8);
-			dl->PathLineTo(c.At(0.30f, 0.72f));
+			/* 折返路径：顶栏（带左向箭头）绕右侧下行、沿底栏折回；与 SVG symbol 同一副坐标 */
+			dl->PathLineTo(c.At(22.0f / 32.0f, 7.0f / 32.0f));
+			dl->PathBezierQuadraticCurveTo(c.At(26.0f / 32.0f, 7.0f / 32.0f), c.At(26.0f / 32.0f, 11.0f / 32.0f), 8);
+			dl->PathLineTo(c.At(26.0f / 32.0f, 18.0f / 32.0f));
+			dl->PathBezierQuadraticCurveTo(c.At(26.0f / 32.0f, 23.0f / 32.0f), c.At(21.0f / 32.0f, 23.0f / 32.0f), 8);
+			dl->PathLineTo(c.At(6.0f / 32.0f, 23.0f / 32.0f));
 			dl->PathStroke(color, 0, t);
 
-			dl->PathLineTo(c.At(0.30f, 0.58f));
-			dl->PathLineTo(c.At(0.12f, 0.72f));
-			dl->PathLineTo(c.At(0.30f, 0.86f));
+			dl->PathLineTo(c.At(10.0f / 32.0f, 3.0f / 32.0f));
+			dl->PathLineTo(c.At(6.0f / 32.0f, 7.0f / 32.0f));
+			dl->PathLineTo(c.At(10.0f / 32.0f, 11.0f / 32.0f));
 			dl->PathStroke(violet, 0, t);
-			dl->AddLine(c.At(0.68f, 0.28f), c.At(0.86f, 0.28f), PaletteColor(color, kMint), t);
+
+			dl->AddLine(c.At(9.0f / 32.0f, 7.0f / 32.0f), c.At(22.0f / 32.0f, 7.0f / 32.0f),
+				PaletteColor(color, kMint), t);
+		}
+
+		/* 一键回根（Treemap 面包屑：跳过逐层返回、直接回根）：浏览器"主页"式房子 ——
+		 * 屋顶折线 + 房身（软紫底 + 描边）+ 门（薄荷），与 Return 的折返箭头明显区分 */
+		void DrawReturnRoot(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 房身 */
+			dl->AddRectFilled(c.At(0.24f, 0.46f), c.At(0.76f, 0.84f),
+				PaletteColor(color, kViolet, 0.16f), c.Len(0.05f));
+			dl->AddRect(c.At(0.24f, 0.46f), c.At(0.76f, 0.84f), color, c.Len(0.05f), 0, t);
+
+			/* 屋顶折线（左右屋檐探出房身） */
+			dl->AddLine(c.At(0.13f, 0.51f), c.At(0.50f, 0.16f), color, t);
+			dl->AddLine(c.At(0.50f, 0.16f), c.At(0.87f, 0.51f), color, t);
+
+			/* 门（薄荷） */
+			dl->AddRectFilled(c.At(0.43f, 0.62f), c.At(0.57f, 0.84f),
+				PaletteColor(color, kMint), c.Len(0.02f));
 		}
 
 		void DrawFilter(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -1023,6 +1072,91 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.053f), mint);
 		}
 
+		/* 预览垂直翻转（Frame Graph 工具行的镜像开关）：水平镜像轴（虚线）上下两块
+		 * 互为镜像的三角块 —— 上块紫调（当前朝向）、下块藏青调（翻转后的朝向），
+		 * 轴上中心一枚薄荷轴点。 */
+		void DrawFlipVertical(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 镜像轴：虚线（"3 3"节奏 —— 小尺寸下短划不糊成点噪；中心一格留空给轴点，
+			 * 与 light-point 的外圈虚线同族） */
+			constexpr float dash_on = 3.0f / 32.0f;
+			constexpr float dash_cycle = 3.0f / 32.0f * 2.0f;
+			for (float x = 5.0f / 32.0f; x < 26.0f / 32.0f; x += dash_cycle)
+				dl->AddLine(c.At(x, 0.5f), c.At(x + dash_on, 0.5f), PaletteColor(color, kViolet), t);
+
+			static constexpr float kTop[3][2] = {
+				{ 9.0f / 32.0f, 5.0f / 32.0f }, { 23.0f / 32.0f, 5.0f / 32.0f }, { 9.0f / 32.0f, 14.5f / 32.0f }
+			};
+			FillPoly(dl, c, kTop, PaletteColor(color, kViolet, 0.22f));
+			StrokePolyline(dl, c, kTop, t, PaletteColor(color, kViolet), true);
+
+			static constexpr float kBottom[3][2] = {
+				{ 9.0f / 32.0f, 27.0f / 32.0f }, { 23.0f / 32.0f, 27.0f / 32.0f }, { 9.0f / 32.0f, 17.5f / 32.0f }
+			};
+			FillPoly(dl, c, kBottom, PaletteColor(color, kMint, 0.20f));
+			StrokePolyline(dl, c, kBottom, t, color, true);
+
+			/* 轴点：镜像中心（薄荷芯，落在留空的半格上） */
+			dl->AddCircleFilled(c.At(0.5f, 0.5f), c.Len(0.05f), PaletteColor(color, kMint));
+		}
+
+		/* 弹窗最大化（CPU 图表弹窗的行尾按钮）：窗块（软紫底 + 标题条）+ 右上角向外撑的
+		 * 角标箭头 —— 语汇与 Scale 的四角箭头同族，这里只留右上向外、读作"撑到全窗"。 */
+		void DrawMaximize(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 mint = PaletteColor(color, kMint);
+
+			/* 窗块 */
+			dl->AddRectFilled(c.At(0.156f, 0.312f), c.At(0.688f, 0.750f), PaletteColor(color, kViolet, 0.16f), c.Len(0.056f));
+			dl->AddRect(c.At(0.156f, 0.312f), c.At(0.688f, 0.750f), color, c.Len(0.056f), 0, t);
+			dl->AddLine(c.At(0.156f, 0.453f), c.At(0.688f, 0.453f), PaletteColor(color, kViolet), t);
+
+			/* 右上角标箭头：顶点 + 左 / 下两条短边 + 指向窗内的对角线 */
+			dl->AddLine(c.At(0.8125f, 0.1875f), c.At(0.6250f, 0.1875f), mint, t * 1.1f);
+			dl->AddLine(c.At(0.8125f, 0.1875f), c.At(0.8125f, 0.3750f), mint, t * 1.1f);
+			dl->AddLine(c.At(0.8125f, 0.1875f), c.At(0.5938f, 0.4063f), mint, t * 1.1f);
+		}
+
+		/* 还原为浮动窗：前下后上两个错层窗块（经典"还原"语汇；后块灰调后退、
+		 * 前块软紫底 + 标题条 —— 与 Overdraw 的两块叠放同族但层级感相反）。 */
+		void DrawRestore(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddRectFilled(c.At(0.359f, 0.219f), c.At(0.828f, 0.594f), PaletteColor(color, kGray), c.Len(0.056f));
+			dl->AddRectFilled(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), PaletteColor(color, kViolet, 0.16f), c.Len(0.056f));
+			dl->AddRect(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), color, c.Len(0.056f), 0, t);
+			dl->AddLine(c.At(0.172f, 0.531f), c.At(0.641f, 0.531f), PaletteColor(color, kViolet), t);
+		}
+
+		/* 抓取当前帧（相机）：机身（软紫底 + 描边）+ 顶部取景凸起 + 镜头（紫环 + 薄荷芯） */
+		void DrawCapture(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			/* 顶部取景凸起 */
+			dl->AddLine(c.At(0.3438f, 0.2813f), c.At(0.4063f, 0.1875f), color, t);
+			dl->AddLine(c.At(0.4063f, 0.1875f), c.At(0.5938f, 0.1875f), color, t);
+			dl->AddLine(c.At(0.5938f, 0.1875f), c.At(0.6563f, 0.2813f), color, t);
+
+			/* 机身 */
+			dl->AddRectFilled(c.At(0.1563f, 0.2813f), c.At(0.8438f, 0.7500f),
+				PaletteColor(color, kViolet, 0.16f), c.Len(0.069f));
+			dl->AddRect(c.At(0.1563f, 0.2813f), c.At(0.8438f, 0.7500f), color, c.Len(0.069f), 0, t);
+
+			/* 镜头：紫环 + 薄荷芯 */
+			dl->AddCircleFilled(c.At(0.5f, 0.5156f), c.Len(0.1313f), PaletteColor(color, kViolet, 0.22f));
+			dl->AddCircle(c.At(0.5f, 0.5156f), c.Len(0.1313f), PaletteColor(color, kViolet), t);
+			dl->AddCircleFilled(c.At(0.5f, 0.5156f), c.Len(0.0438f), PaletteColor(color, kMint));
+		}
+
 		/* ---- 内容（资源浏览器）----
 		 * 文件夹管"在哪"、文件图标管"是什么"；双色调：外形描边 + 主体低透明度同色（缩略图网格
 		 * 放到 100px 也不显单薄）。 */
@@ -1552,20 +1686,6 @@ namespace Helios::Icons
 			std::vector<SvgShape> Shapes;
 		};
 
-		constexpr const char* kSvgSymbolIds[] = {
-			"", "new-scene", "open-scene", "save", "import", "export", "new-asset", "undo", "redo", "back", "forward",
-			"translate", "rotate", "scale",
-			"play", "stop", "live", "record", "previous-frame", "next-frame", "peak", "valley", "menu", "add", "remove", "return", "filter", "search", "visible", "hidden", "scene",
-			"entity", "model", "cube", "sphere", "plane", "shape-3d", "camera", "light", "light-directional", "light-point", "light-spot",
-			"reflection-probe", "sprite", "audio", "particle", "terrain", "transform", "tag", "stats", "frame-graph", "log", "fit-view",
-			"directory", "file", "file-image", "file-scene", "file-mtl-graph", "file-shader", "file-model",
-			"file-material", "file-probe", "gizmos", "grid", "world-axis", "debug-view",
-			"albedo", "normal", "roughness", "metallic", "specular-color", "ambient-occlusion", "emission", "ambient",
-			"diffuse", "specular", "shadow", "indirect", "overdraw", "mipmap",
-		};
-		static_assert(IM_ARRAYSIZE(kSvgSymbolIds) == static_cast<size_t>(Id::COUNT),
-			"SVG symbol map must remain aligned with Icons::Id");
-
 		constexpr ImU32 SvgInkColor(SvgInk ink, uint8_t alpha, bool dark_canvas)
 		{
 			if (dark_canvas)
@@ -1971,33 +2091,55 @@ namespace Helios::Icons
 		}
 
 		std::array<SvgIcon, static_cast<size_t>(Id::COUNT)> s_SvgIcons;
+		std::array<float, static_cast<size_t>(Id::COUNT)> s_OpticalScales;
 		std::once_flag s_SvgIconsInit;
 
+		/* 按枚举名从 EditorRes/icons 目录逐个加载 SVG，光学尺寸读 SVG 根元素上的
+		 * data-optical-scale；加载不到的图标用回退画法兜底。 */
 		void InitializeSvgIcons()
 		{
-			tinyxml2::XMLDocument document;
-			if (document.Parse(Detail::kSvgSymbols) != tinyxml2::XML_SUCCESS || document.RootElement() == nullptr)
-				return;
-			const tinyxml2::XMLElement* defs = document.RootElement()->FirstChildElement("defs");
-			if (defs == nullptr)
-				return;
+			std::fill(s_OpticalScales.begin(), s_OpticalScales.end(), 1.0f);
 
+			const std::filesystem::path directory = ResolveAssetPath(PathFromUtf8("EditorRes/icons"));
+			if (!std::filesystem::is_directory(directory))
+			{
+				CORE_LOG_ERROR("Editor icons: directory not found: {}", PathToUtf8(directory));
+				return;
+			}
+
+			size_t loaded = 0;
+			size_t failed = 0;
 			for (size_t i = 1; i < static_cast<size_t>(Id::COUNT); ++i)
 			{
-				const tinyxml2::XMLElement* symbol = nullptr;
-				for (const tinyxml2::XMLElement* candidate = defs->FirstChildElement("symbol"); candidate != nullptr;
-					candidate = candidate->NextSiblingElement("symbol"))
+				const std::string file_name = std::string(magic_enum::enum_name(static_cast<Id>(i))) + ".svg";
+				const std::filesystem::path file = directory / PathFromUtf8(file_name);
+
+				if (!std::filesystem::exists(file))
 				{
-					const char* symbol_id = candidate->Attribute("id");
-					if (symbol_id != nullptr && std::strcmp(symbol_id, kSvgSymbolIds[i]) == 0)
-					{
-						symbol = candidate;
-						break;
-					}
+					CORE_LOG_WARN("Editor icon missing: {}", file_name);
+					++failed;
+					continue;
 				}
-				if (symbol != nullptr)
-					ParseSvgElement(symbol, SvgStyle{}, s_SvgIcons[i]);
+
+				tinyxml2::XMLDocument document;
+				if (document.LoadFile(PathToUtf8(file).c_str()) != tinyxml2::XML_SUCCESS || document.RootElement() == nullptr)
+				{
+					CORE_LOG_WARN("Editor icon parse failed: {}", file_name);
+					++failed;
+					continue;
+				}
+
+				const tinyxml2::XMLElement* root = document.RootElement();
+				if (const char* scale = root->Attribute("data-optical-scale"))
+					s_OpticalScales[i] = std::strtof(scale, nullptr);
+				ParseSvgElement(root, SvgStyle{}, s_SvgIcons[i]);
+				++loaded;
 			}
+
+			if (failed > 0)
+				CORE_LOG_WARN("Editor icons: {} loaded, {} missing or failed (EditorRes/icons)", loaded, failed);
+			else
+				CORE_LOG_INFO("Editor icons: {} loaded from EditorRes/icons", loaded);
 		}
 
 		bool IsSvgPointInsideTriangle(const ImVec2& p, const ImVec2& a, const ImVec2& b, const ImVec2& c)
@@ -2223,90 +2365,96 @@ namespace Helios::Icons
 
 		/* 元数据表：Id 与表项一一对应（顺序必须与 Id 枚举一致）*/
 		constexpr IconDesc s_Icons[] = {
-			{ "None",              nullptr,                 1.0f },
-			{ "NewScene",          &DrawNewScene,           0.86f },
-			{ "OpenScene",         &DrawOpenScene,          0.86f },
-			{ "Save",              &DrawSave,               0.97f },
-			{ "Import",            &DrawImport,             0.93f },
-			{ "Export",            &DrawExport,             0.93f },
-			{ "NewAsset",          &DrawNewAsset,           1.0f },
-			{ "Undo",              &DrawUndo,               0.96f },
-			{ "Redo",              &DrawRedo,               1.04f },
-			{ "Back",              &DrawBack,               0.97f },
-			{ "Forward",           &DrawForward,            0.97f },
-			{ "Translate",         &DrawTranslate,          0.92f },
-			{ "Rotate",            &DrawRotate,             1.09375f },
-			{ "Scale",             &DrawScale,              0.93f },
-			{ "Play",              &DrawPlay,               0.93f },
-			{ "Stop",              &DrawStop,               0.93f },
-			{ "Live",              &DrawLive,               0.97f },
-			{ "Record",            &DrawRecord,             0.93f },
-			{ "PreviousFrame",     &DrawPreviousFrame,      0.93f },
-			{ "NextFrame",         &DrawNextFrame,          0.93f },
-			{ "Peak",              &DrawPeak,               0.93f },
-			{ "Valley",            &DrawValley,             0.93f },
-			{ "Menu",              &DrawMenu,               1.09f },
-			{ "Add",               &DrawAdd,                0.93f },
-			{ "Remove",            &DrawRemove,             0.93f },
-			{ "Return",            &DrawReturn,             0.91f },
-			{ "Filter",            &DrawFilter,             0.93f },
-			{ "Search",            &DrawSearch,             1.109375f },
-			{ "Visible",           &DrawVisible,            0.86f },
-			{ "Hidden",            &DrawHidden,             0.86f },
-			{ "Scene",             &DrawScene,              0.90f },
-			{ "Entity",            &DrawEntity,             0.93f },
-			{ "Model",             &DrawModel,              0.93f },
-			{ "Cube",              &DrawCubeShape,          0.93f },
-			{ "Sphere",            &DrawSphereShape,        0.93f },
-			{ "Plane",             &DrawPlaneShape,         0.93f },
-			{ "Shape3D",           &DrawShape3D,            0.93f },
-			{ "Camera",            &DrawCamera,             0.83f },
-			{ "Light",             &DrawLight,              0.86f },
-			{ "LightDirectional",  &DrawDirectionalLight,   0.83f },
-			{ "LightPoint",        &DrawPointLight,         0.76f },
-			{ "LightSpot",         &DrawSpotLight,          0.81f },
-			{ "ReflectionProbe",   &DrawReflectionProbe,    0.93f },
-			{ "Sprite",            &DrawSprite,             0.93f },
-			{ "Audio",             &DrawAudio,              0.90f },
-			{ "Particle",          &DrawParticle,           0.97f },
-			{ "Terrain",           &DrawTerrain,            0.86f },
-			{ "Transform",         &DrawTransform,          0.81f },
-			{ "Tag",               &DrawTag,                0.93f },
-			{ "Stats",             &DrawStats,              0.93f },
-			{ "FrameGraph",        &DrawFrameGraph,         0.93f },
-			{ "Log",               &DrawLog,                0.93f },
-			{ "FitView",           &DrawFitView,            0.90f },
-			{ "Directory",         &DrawDirectory,          0.86f },
-			{ "File",              &DrawFile,               0.86f },
-			{ "FileImage",         &DrawFileImage,          0.86f },
-			{ "FileScene",         &DrawScene,              0.86f },
-			{ "FileMtlGraph",      &DrawFileMtlGraph,       0.86f },
-			{ "FileShader",        &DrawFileShader,         0.86f },
-			{ "FileModel",         &DrawFileModel,          0.86f },
-			{ "FileMaterial",      &DrawFileMaterial,       0.86f },
-			{ "FileProbe",         &DrawFileProbe,          0.86f },
-			{ "Gizmos",            &DrawGizmos,             0.90f },
-			{ "Grid",              &DrawGrid,               0.90f },
-			{ "WorldAxis",         &DrawWorldAxis,          0.90f },
-			{ "DebugView",         &DrawDebugView,          0.93f },
-			{ "Albedo",            &DrawAlbedo,             0.93f },
-			{ "Normal",            &DrawNormal,             0.93f },
-			{ "Roughness",         &DrawRoughness,          0.93f },
-			{ "Metallic",          &DrawMetallic,           0.93f },
-			{ "SpecularColor",     &DrawSpecularColor,      0.93f },
-			{ "AmbientOcclusion",  &DrawAmbientOcclusion,   0.93f },
-			{ "Emission",          &DrawEmission,           0.93f },
-			{ "Ambient",           &DrawAmbient,            0.93f },
-			{ "Diffuse",           &DrawDiffuse,            1.0f },
-			{ "Specular",          &DrawSpecular,           1.0f },
-			{ "Shadow",            &DrawShadow,             0.97f },
-			{ "Indirect",          &DrawIndirect,           1.0f },
-			{ "Overdraw",          &DrawOverdraw,           0.97f },
-			{ "Mipmap",            &DrawMipmap,             0.93f },
+			{ "None",              nullptr },
+			{ "NewScene",          &DrawNewScene },
+			{ "OpenScene",         &DrawOpenScene },
+			{ "Save",              &DrawSave },
+			{ "Import",            &DrawImport },
+			{ "Export",            &DrawExport },
+			{ "NewAsset",          &DrawNewAsset },
+			{ "Undo",              &DrawUndo },
+			{ "Redo",              &DrawRedo },
+			{ "Back",              &DrawBack },
+			{ "Forward",           &DrawForward },
+			{ "Translate",         &DrawTranslate },
+			{ "Rotate",            &DrawRotate },
+			{ "Scale",             &DrawScale },
+			{ "Play",              &DrawPlay },
+			{ "Stop",              &DrawStop },
+			{ "Live",              &DrawLive },
+			{ "Record",            &DrawRecord },
+			{ "PreviousFrame",     &DrawPreviousFrame },
+			{ "NextFrame",         &DrawNextFrame },
+			{ "Peak",              &DrawPeak },
+			{ "Valley",            &DrawValley },
+			{ "TraceText",         &DrawTraceText },
+			{ "Menu",              &DrawMenu },
+			{ "Add",               &DrawAdd },
+			{ "Remove",            &DrawRemove },
+			{ "Return",            &DrawReturn },
+			{ "ReturnRoot",        &DrawReturnRoot },
+			{ "Filter",            &DrawFilter },
+			{ "Search",            &DrawSearch },
+			{ "Visible",           &DrawVisible },
+			{ "Hidden",            &DrawHidden },
+			{ "Scene",             &DrawScene },
+			{ "Entity",            &DrawEntity },
+			{ "Model",             &DrawModel },
+			{ "Cube",              &DrawCubeShape },
+			{ "Sphere",            &DrawSphereShape },
+			{ "Plane",             &DrawPlaneShape },
+			{ "Shape3D",           &DrawShape3D },
+			{ "Camera",            &DrawCamera },
+			{ "Light",             &DrawLight },
+			{ "LightDirectional",  &DrawDirectionalLight },
+			{ "LightPoint",        &DrawPointLight },
+			{ "LightSpot",         &DrawSpotLight },
+			{ "ReflectionProbe",   &DrawReflectionProbe },
+			{ "Sprite",            &DrawSprite },
+			{ "Audio",             &DrawAudio },
+			{ "Particle",          &DrawParticle },
+			{ "Terrain",           &DrawTerrain },
+			{ "Transform",         &DrawTransform },
+			{ "Tag",               &DrawTag },
+			{ "Stats",             &DrawStats },
+			{ "FrameGraph",        &DrawFrameGraph },
+			{ "Log",               &DrawLog },
+			{ "FitView",           &DrawFitView },
+			{ "FlipVertical",      &DrawFlipVertical },
+			{ "Maximize",          &DrawMaximize },
+			{ "Restore",           &DrawRestore },
+			{ "Capture",           &DrawCapture },
+			{ "Directory",         &DrawDirectory },
+			{ "File",              &DrawFile },
+			{ "FileImage",         &DrawFileImage },
+			{ "FileScene",         &DrawScene },
+			{ "FileMtlGraph",      &DrawFileMtlGraph },
+			{ "FileShader",        &DrawFileShader },
+			{ "FileModel",         &DrawFileModel },
+			{ "FileMaterial",      &DrawFileMaterial },
+			{ "FileProbe",         &DrawFileProbe },
+			{ "Gizmos",            &DrawGizmos },
+			{ "Grid",              &DrawGrid },
+			{ "WorldAxis",         &DrawWorldAxis },
+			{ "DebugView",         &DrawDebugView },
+			{ "Albedo",            &DrawAlbedo },
+			{ "Normal",            &DrawNormal },
+			{ "Roughness",         &DrawRoughness },
+			{ "Metallic",          &DrawMetallic },
+			{ "SpecularColor",     &DrawSpecularColor },
+			{ "AmbientOcclusion",  &DrawAmbientOcclusion },
+			{ "Emission",          &DrawEmission },
+			{ "Ambient",           &DrawAmbient },
+			{ "Diffuse",           &DrawDiffuse },
+			{ "Specular",          &DrawSpecular },
+			{ "Shadow",            &DrawShadow },
+			{ "Indirect",          &DrawIndirect },
+			{ "Overdraw",          &DrawOverdraw },
+			{ "Mipmap",            &DrawMipmap },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),
-			"Icons 元数据表与 Id 枚举数量不一致，请同步新增项");
+			"Icons metadata table out of sync with the Id enum; add the new entries");
 	}
 
 	const IconDesc& Get(Id id)
@@ -2325,7 +2473,7 @@ namespace Helios::Icons
 			return;
 
 		std::call_once(s_SvgIconsInit, InitializeSvgIcons);
-		const float optical_size = size * s_Icons[index].OpticalScale;
+		const float optical_size = size * s_OpticalScales[index];
 		if (s_SvgIcons[index].Shapes.empty())
 		{
 			if (s_Icons[index].Draw != nullptr)

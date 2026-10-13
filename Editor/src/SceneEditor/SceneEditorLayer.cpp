@@ -186,6 +186,11 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* ImGui 正收键盘（输入框激活等）时快捷键让位——否则改名框里按 Ctrl+Z 会连场景
+		 * 一起撤销；消费掉，兜底层（主编辑器）也不会再响应同一批快捷键 */
+		if (ImGui::GetIO().WantCaptureKeyboard)
+			return true;
+
 		if (event->GetRepeatCount() > 0)
 			return false;
 
@@ -229,8 +234,8 @@ namespace Helios
 			if (is_ctrl_pressed)
 				Redo();
 			return true;
-		case Key::F: /* F：视角聚焦到选中实体（指针需在视口上，且在输入文本时让位） */
-			if (m_PlayMode == PlayMode::Edit && m_IsViewportHovered && !ImGui::GetIO().WantCaptureKeyboard)
+		case Key::F: /* F：视角聚焦到选中实体（指针需在视口上） */
+			if (m_PlayMode == PlayMode::Edit && m_IsViewportHovered)
 				FocusSelectedEntity();
 			return true;
 		}
@@ -244,13 +249,14 @@ namespace Helios
 
 		if (event->GetMouseButton() == Mouse::ButtonLeft)
 		{
-			CheckMouseSelectEntity();
-
-			/* 飞行中（按住 RMB）左键不作选择：避免飞行操作误改变选中；
-			 * 指针落在视口内控件（视图指示器）上时点击也不穿透到场景 */
+			/* 这一击真落在场景视口上才拾取：指针不在视口上（如 Frame Graph 页签
+			 * 顶替视口时）、飞行 / Alt 轨道中、落在 Gizmo 或视图指示器上都不拾取 */
 			if (m_IsViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(Key::LeftAlt)
 				&& !m_pEditorCamera->IsFlying() && !ImGui::IsAnyItemHovered())
+			{
+				CheckMouseSelectEntity();
 				m_SceneHierarchy.SetSelectedEntity(m_HoveredEntity);
+			}
 		}
 		return false;
 	}
@@ -286,13 +292,7 @@ namespace Helios
 		/* 场景文件 */
 		if (extension == ".scn")
 		{
-			const std::string scene_path = PathToUtf8(path);
-			EDITOR_LOG_DEBUG("Import scene file: {}.", scene_path);
-
-			SharedPtr<Scene> new_scene = CreateSharedPtr<Scene>();
-			if (new_scene->Deserializer(scene_path))
-				SetActiveScene(new_scene, scene_path);
-
+			OpenScene(PathToUtf8(path));
 			return;
 		}
 
@@ -373,6 +373,20 @@ namespace Helios
 		SetActiveScene(CreateSharedPtr<Scene>(), std::string());
 	}
 
+	/* 打开场景文件：加载进一个新场景，成功才切换（失败不动当前场景）。
+	 * 对话框 / 拖入 / 资源浏览器双击三条入口共用这一处，行为保持一致。 */
+	void SceneEditorLayer::OpenScene(const std::string& path)
+	{
+		PROFILE_FUNCTION();
+
+		SharedPtr<Scene> scene = CreateSharedPtr<Scene>();
+		if (!scene->Deserializer(path))
+			return;
+
+		EDITOR_LOG_INFO("Open scene: {}.", path);
+		SetActiveScene(scene, path);
+	}
+
 	void SceneEditorLayer::ImportScene()
 	{
 		PROFILE_FUNCTION();
@@ -381,8 +395,7 @@ namespace Helios
 		if (file_path.empty())
 			return;
 
-		m_pMainScene->Deserializer(file_path);
-		SetActiveScene(m_pMainScene, file_path);
+		OpenScene(file_path);
 	}
 
 	void SceneEditorLayer::SaveScene()
@@ -711,7 +724,12 @@ namespace Helios
 					m_HoveredEntity = picked;
 			}
 
-			EDITOR_LOG_DEBUG(pixel_data);
+			/* 拾取结果：命中打实体名 + ID，点空打 None */
+			if (m_HoveredEntity && m_HoveredEntity.HasComponent<NameComponent>())
+				EDITOR_LOG_DEBUG("Pick: {} (id {})",
+					m_HoveredEntity.GetComponent<NameComponent>().m_Name, pixel_data);
+			else
+				EDITOR_LOG_DEBUG("Pick: None");
 		}
 	}
 

@@ -23,6 +23,7 @@
 #include "Command/SetEntityVisibilityCommand.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/Components.h"
+#include "Helios/Renderer/PostProcess/Effects/Bloom.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <tinyxml2.h>
 #include <algorithm>
@@ -123,6 +124,11 @@ namespace Helios
 			return entity.HasComponent<SpriteComponent>();
 		}
 
+		bool HasPostProcessComponent(const Entity& entity)
+		{
+			return entity.HasComponent<PostProcessComponent>();
+		}
+
 		/* 光源按类型再分：方向光 / 点光 / 聚光在树里要能一眼区分。
 		 * 默认构造的 LightComponent 没有 Light 对象，这时退化看 m_Type。 */
 		bool IsLightOfType(const Entity& entity, LightType type)
@@ -160,6 +166,8 @@ namespace Helios
 			{ Icons::Id::Plane,            &IsBuiltinPlane },
 			{ Icons::Id::Model,            &HasModelComponent },
 			{ Icons::Id::Sprite,           &HasSpriteComponent },
+			/* 后处理对象排在表尾：挂了模型的实体保留模型造型（追加组件不改既有图标） */
+			{ Icons::Id::Emission,         &HasPostProcessComponent },
 		};
 
 		/* 没有任何可识别组件的实体（只有 Name / Transform）用通用图标 */
@@ -247,6 +255,8 @@ namespace Helios
 			if (type == typeid(ModelComponent))           return Icons::Id::Model;
 			if (type == typeid(SpriteComponent))          return Icons::Id::Sprite;
 			if (type == typeid(ReflectionProbeComponent)) return Icons::Id::ReflectionProbe;
+			if (type == typeid(PostProcessComponent))     return Icons::Id::Emission;
+			if (type == typeid(BloomComponent))           return Icons::Id::Emission;
 
 			/* 光源是一个组件块但造型分三种：图标跟着「当前光源类型」走，
 			 * 这样把 Type 从点光改成聚光时，卡头图标会立刻跟着变。
@@ -2288,7 +2298,7 @@ namespace Helios
 					ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
 
 					const auto& show_texture = texture ? texture
-						: AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/default.png"));
+						: AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Default.png"));
 
 					/* 缩略图与行高同高（frame 高含 1px 外框）：逐行对齐、不撑行 */
 					const float thumbnail = ImGui::GetFrameHeight() - 2.0f;

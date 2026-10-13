@@ -33,6 +33,12 @@ namespace Helios
 		 * 行序 = glReadPixels 口径（底行在前，top_down = false，与离屏纹理一致） */
 		SharedPtr<DeviceTexture> AcquireDefaultTargetSnapshot(bool& top_down) override;
 
+		/* 纹理拷贝（逐 Pass 抓取中间渲染结果用，见 RenderAPI 的说明）：临时 FBO +
+		 * glBlitFramebuffer 逐层直拷（4.1 兼容，不用 4.3+ 的 glCopyImageSubData）；
+		 * 深度格式按深度附件走。调用点的 FBO 绑定会保存 / 还原。 */
+		void CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst,
+			uint32_t src_layer) override;
+
 		/* 压入DebugGroup，以便在RenderDoc抓帧时使用Pipeline结构组织DebugMarker */
 		void PushDebugGroup(const char* name) override;
 		void PopDebugGroup() override;

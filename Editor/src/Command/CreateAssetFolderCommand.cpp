@@ -16,7 +16,7 @@ namespace Helios
 
 		if (error)
 		{
-			CORE_LOG_ERROR("新建文件夹失败：{0}（{1}）", PathToUtf8(m_Folder), error.message());
+			CORE_LOG_ERROR("Create folder failed: {0} ({1})", PathToUtf8(m_Folder), error.message());
 			return;
 		}
 
@@ -33,14 +33,14 @@ namespace Helios
 		const std::filesystem::directory_iterator entry(m_Folder, error);
 		if (error || entry != std::filesystem::directory_iterator())
 		{
-			CORE_LOG_WARN("撤销新建文件夹时目录已非空，保持原样：{0}", PathToUtf8(m_Folder));
+			CORE_LOG_WARN("Undo create folder: folder not empty, left as is: {0}", PathToUtf8(m_Folder));
 			return;
 		}
 
 		std::filesystem::remove(m_Folder, error);
 		if (error)
 		{
-			CORE_LOG_ERROR("撤销新建文件夹失败：{0}（{1}）", PathToUtf8(m_Folder), error.message());
+			CORE_LOG_ERROR("Undo create folder failed: {0} ({1})", PathToUtf8(m_Folder), error.message());
 			return;
 		}
 

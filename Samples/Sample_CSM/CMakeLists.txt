@@ -44,6 +44,9 @@ target_compile_definitions(Sample_CSM
         $<$<CONFIG:Debug>:HELIOS_DEBUG>
         $<$<CONFIG:Release>:HELIOS_RELEASE>
         $<$<CONFIG:Shipping>:HELIOS_SHIPPING>
+        # 打开性能插桩（HELIOS_PROFILE）：解开后 Main.cpp 里的 PROFILER_BEGIN/END_SESSION
+        # 会话生效、写 TimeCostProfiler-*.json（chrome://tracing 可开）；不写就注释掉会话
+        # HELIOS_PROFILE=1
 )
 
 # Output directory

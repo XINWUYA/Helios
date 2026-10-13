@@ -203,14 +203,15 @@ namespace Helios
 		if (render_view.GetRenderPipeline() == RenderPipeline::Deferred)
 		{
 			Deferred::AddDeferredPasses(&render_view);
-			overlay_output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("LightingPassOutput");
+			/* 视图最终颜色 = 后处理链末端（未启用 = 管线原输出）——统一键，不按管线 / 效果取 */
+			overlay_output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("PostProcessOutput");
 			overlay_depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
 		}
 		else
 		{
 			render_view.AddShadowMapPasses();
 			Forward::AddScenePassToTexture(&render_view);
-			overlay_output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassOutput");
+			overlay_output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("PostProcessOutput");
 			overlay_depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassDepth");
 		}
 

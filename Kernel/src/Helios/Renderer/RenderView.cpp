@@ -63,7 +63,11 @@ namespace Helios
 		const auto it = m_PassFrameBuffers.find(name);
 		if (it != m_PassFrameBuffers.end())
 			return it->second;
-		return {};
+
+		/* 缺失时返回静态空值：直接 `return {}` 会悬垂（临时对象），
+		 * 查询不存在的 Pass 名即崩 */
+		static const SharedPtr<DeviceFrameBuffer> s_EmptyFrameBuffer{};
+		return s_EmptyFrameBuffer;
 	}
 
 	/* 为本视图的渲染图准备阴影：中性深度数组恒建（保证任何着色阶段都能采样到合法纹理），
