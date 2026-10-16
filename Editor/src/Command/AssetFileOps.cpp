@@ -72,6 +72,8 @@ namespace Helios
 			{ ".TGA", AssetFileKind::Image }, { ".PSD", AssetFileKind::Image },
 			{ ".GIF", AssetFileKind::Image }, { ".HDR", AssetFileKind::Image },
 			{ ".DDS", AssetFileKind::Image },
+			/* 矢量图：.svg 是编辑器图标源，资源面板直接按文件渲染预览（不进纹理解码器） */
+			{ ".SVG", AssetFileKind::Svg },
 			{ ".SCN", AssetFileKind::Scene },
 			{ ".MTLGRAPH", AssetFileKind::MtlGraph },
 			/* 着色器：.glsl 是源，.metal 是同一次编译的产物（落在 Assets/Cache/Shaders 下）——

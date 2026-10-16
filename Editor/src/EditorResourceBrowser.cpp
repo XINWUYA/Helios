@@ -283,6 +283,7 @@ namespace Helios
 		case FileType::Default:  return Icons::Id::File;
 		case FileType::Folder:   return Icons::Id::Directory;
 		case FileType::Image:    return Icons::Id::FileImage;
+		case FileType::Svg:      return Icons::Id::FileSvg;
 		case FileType::Scene:    return Icons::Id::FileScene;
 		case FileType::MtlGraph: return Icons::Id::FileMtlGraph;
 		case FileType::Shader:   return Icons::Id::FileShader;
@@ -302,6 +303,7 @@ namespace Helios
 		{
 		case AssetFileKind::Other:    return FileType::Default;
 		case AssetFileKind::Image:    return FileType::Image;
+		case AssetFileKind::Svg:      return FileType::Svg;
 		case AssetFileKind::Scene:    return FileType::Scene;
 		case AssetFileKind::MtlGraph: return FileType::MtlGraph;
 		case AssetFileKind::Shader:   return FileType::Shader;
@@ -320,6 +322,7 @@ namespace Helios
 		{
 		case FileType::Default:  return AssetFileKind::Other;
 		case FileType::Image:    return AssetFileKind::Image;
+		case FileType::Svg:      return AssetFileKind::Svg;
 		case FileType::Scene:    return AssetFileKind::Scene;
 		case FileType::MtlGraph: return AssetFileKind::MtlGraph;
 		case FileType::Shader:   return AssetFileKind::Shader;
@@ -341,6 +344,7 @@ namespace Helios
 		case TypeFilter::All:      return "All types";
 		case TypeFilter::Folder:   return "Folders";
 		case TypeFilter::Image:    return "Images";
+		case TypeFilter::Svg:      return "SVGs";
 		case TypeFilter::Scene:    return "Scenes";
 		case TypeFilter::MtlGraph: return "Mtl Graphs";
 		case TypeFilter::Shader:   return "Shaders";
@@ -359,6 +363,7 @@ namespace Helios
 		case TypeFilter::All:      return true;
 		case TypeFilter::Folder:   return type == FileType::Folder;
 		case TypeFilter::Image:    return type == FileType::Image;
+		case TypeFilter::Svg:      return type == FileType::Svg;
 		case TypeFilter::Scene:    return type == FileType::Scene;
 		case TypeFilter::MtlGraph: return type == FileType::MtlGraph;
 		case TypeFilter::Shader:   return type == FileType::Shader;
@@ -394,6 +399,16 @@ namespace Helios
 		}
 
 		return node.Thumbnail;
+	}
+
+	/* SVG 缩略图不是纹理：解析出形状表直接画，缓存的失效判断（文件写入时间）在 Svg 模块里 ——
+	 * 在外部编辑器里改图标，这里下一帧就能看到新的 */
+	SharedPtr<const Svg::Image> EditorResourceBrowser::SvgImageOf(FileNode& node)
+	{
+		if (node.Type != FileType::Svg)
+			return nullptr;
+
+		return Svg::GetImage(AbsoluteAssetPath(node.FilePath));
 	}
 
 	std::string EditorResourceBrowser::DisplayNodeName(const FileNode& node)
@@ -1428,6 +1443,7 @@ namespace Helios
 		case TypeFilter::All:      return Icons::Id::Filter;
 		case TypeFilter::Folder:   return Icons::Id::Directory;
 		case TypeFilter::Image:    return Icons::Id::FileImage;
+		case TypeFilter::Svg:      return Icons::Id::FileSvg;
 		case TypeFilter::Scene:    return Icons::Id::FileScene;
 		case TypeFilter::MtlGraph: return Icons::Id::FileMtlGraph;
 		case TypeFilter::Shader:   return Icons::Id::FileShader;
@@ -2270,6 +2286,8 @@ namespace Helios
 					const bool is_selected = IsNodeSelected(child_node.get());
 					const ImVec2 cell_rect(m_ThumbnailSize, m_ThumbnailSize);
 					const SharedPtr<DeviceTexture> thumbnail = ThumbnailOf(*child_node);
+					const SharedPtr<const Svg::Image> svg_image = (thumbnail == nullptr)
+						? SvgImageOf(*child_node) : nullptr;
 
 					grid_draw->PushClipRect(grid_clip_min, grid_clip_max, false);
 
@@ -2288,6 +2306,11 @@ namespace Helios
 						/* 图片：自己往这一格里画（上下翻转，贴图 v 轴朝下） */
 						ImGui::GetWindowDrawList()->AddImage((ImTextureID)thumbnail.get(),
 							cell_min, cell_max, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+					}
+					else if (svg_image != nullptr)
+					{
+						/* SVG：把形状等比铺进这一格（等比装框在模块里算） */
+						Svg::DrawImage(ImGui::GetWindowDrawList(), *svg_image, cell_min, cell_max);
 					}
 					else
 					{

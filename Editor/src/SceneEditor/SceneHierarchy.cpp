@@ -4,6 +4,7 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "Svg.h"
 #include "Helios/Application/Application.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/PathUtils.h"
@@ -1448,6 +1449,7 @@ namespace Helios
 			switch (entry.Kind)
 			{
 			case AssetFileKind::Image:    return Icons::Id::FileImage;
+			case AssetFileKind::Svg:      return Icons::Id::FileSvg;
 			case AssetFileKind::Scene:    return Icons::Id::FileScene;
 			case AssetFileKind::MtlGraph: return Icons::Id::FileMtlGraph;
 			case AssetFileKind::Shader:   return Icons::Id::FileShader;
@@ -1470,6 +1472,7 @@ namespace Helios
 			{
 			case AssetFileKind::Other:    return "File";
 			case AssetFileKind::Image:    return "Image";
+			case AssetFileKind::Svg:      return "SVG";
 			case AssetFileKind::Scene:    return "Scene";
 			case AssetFileKind::MtlGraph: return "Material Graph";
 			case AssetFileKind::Shader:   return "Shader";
@@ -1599,6 +1602,31 @@ namespace Helios
 					ImVec2(0, 1), ImVec2(1, 0));
 			}
 		}
+		/* SVG：按原色画形状（不走纹理），比例照 viewBox 装进预览框 */
+		else if (entry.Kind == AssetFileKind::Svg)
+		{
+			const SharedPtr<const Svg::Image> preview = Svg::GetImage(absolute_path);
+			if (preview != nullptr)
+			{
+				ImGui::Spacing();
+
+				const float max_width = ImMin(ImGui::GetContentRegionAvail().x, kAssetPreviewMaxWidth());
+				const float aspect = preview->ViewBoxSize.y / ImMax(preview->ViewBoxSize.x, 1.0f);
+
+				float width = max_width;
+				float height = width * aspect;
+				if (height > kAssetPreviewMaxHeight())
+				{
+					height = kAssetPreviewMaxHeight();
+					width = height / ImMax(aspect, 1.0e-6f);
+				}
+
+				const ImVec2 preview_min = ImGui::GetCursorScreenPos();
+				ImGui::Dummy(ImVec2(width, height));
+				Svg::DrawImage(ImGui::GetWindowDrawList(), *preview, preview_min,
+					ImVec2(preview_min.x + width, preview_min.y + height));
+			}
+		}
 
 		PanelChrome::EndCard(card);
 
@@ -1684,7 +1712,7 @@ namespace Helios
 
 		const PanelChrome::Card card = PanelChrome::BeginCard("Assets", Icons::Id::File);
 
-		int kind_counts[8] = {};
+		int kind_counts[9] = {};
 		int folder_count = 0;
 		uintmax_t total_bytes = 0;
 		for (const AssetSelectionEntry& entry : m_AssetSelection)
@@ -1711,7 +1739,7 @@ namespace Helios
 			types += std::to_string(count) + " " + name + ((count > 1) ? "s" : "");
 		};
 
-		for (size_t kind = 0; kind < 8; ++kind)
+		for (size_t kind = 0; kind < 9; ++kind)
 			append(kind_counts[kind], AssetKindName(static_cast<AssetFileKind>(kind), false));
 		append(folder_count, "Folder");
 
@@ -1763,6 +1791,19 @@ namespace Helios
 				m_AssetDetailRows.emplace_back("Dimensions",
 					std::to_string(width) + " x " + std::to_string(height));
 				m_AssetDetailRows.emplace_back("Channels", std::to_string(channels));
+			}
+		}
+		else if (entry.Kind == AssetFileKind::Svg)
+		{
+			/* 矢量图：viewBox 说明坐标系（预览按它装框），形状数看看文件里有什么 */
+			const SharedPtr<const Svg::Image> image = Svg::GetImage(absolute_path);
+			if (image != nullptr)
+			{
+				char view_box[64];
+				std::snprintf(view_box, sizeof(view_box), "%g %g %g %g",
+					image->ViewBoxMin.x, image->ViewBoxMin.y, image->ViewBoxSize.x, image->ViewBoxSize.y);
+				m_AssetDetailRows.emplace_back("ViewBox", view_box);
+				m_AssetDetailRows.emplace_back("Shapes", std::to_string(image->Shapes.size()));
 			}
 		}
 		else if (entry.Kind == AssetFileKind::Scene)

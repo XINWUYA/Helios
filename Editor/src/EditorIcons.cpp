@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "EditorIcons.h"
+#include "Svg.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/SceneCommon.h"
 #include <magic_enum.hpp>
@@ -1211,6 +1212,23 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.68f, 0.44f), c.Len(0.085f), PaletteColor(color, kMint));
 		}
 
+		/* SVG 文件：页里一段贝塞尔曲线 + 两端锚点（矢量绘图的通行记号）——
+		 * 几何与 FileSvg.svg 同一副数（见同目录的矢量版）。 */
+		void DrawFileSvg(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			StrokePage(dl, c, t, color);
+
+			dl->PathLineTo(c.At(0.359f, 0.703f));
+			dl->PathBezierCubicCurveTo(c.At(0.437f, 0.500f), c.At(0.547f, 0.422f), c.At(0.641f, 0.406f));
+			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+
+			dl->AddCircleFilled(c.At(0.359f, 0.703f), c.Len(0.044f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.641f, 0.406f), c.Len(0.044f), PaletteColor(color, kMint));
+		}
+
 		void DrawFileMtlGraph(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -1677,18 +1695,12 @@ namespace Helios::Icons
 			bool RoundJoin = false;
 		};
 
-		struct SvgContour
-		{
-			std::vector<ImVec2> Points;
-			bool Closed = false;
-		};
-
 		struct SvgShape
 		{
 			enum class Type : uint8_t { Path, Circle, Rect };
 			Type Kind = Type::Path;
 			SvgStyle Style;
-			std::vector<SvgContour> Contours;
+			std::vector<Svg::Contour> Contours;
 			float X = 0.0f;
 			float Y = 0.0f;
 			float Width = 0.0f;
@@ -1781,286 +1793,6 @@ namespace Helios::Icons
 			return style;
 		}
 
-		struct SvgPathToken
-		{
-			char Command = 0;
-			float Number = 0.0f;
-			bool IsCommand = false;
-		};
-
-		std::vector<SvgPathToken> TokenizeSvgPath(const char* data)
-		{
-			std::vector<SvgPathToken> tokens;
-			const char* cursor = data;
-			while (*cursor != '\0')
-			{
-				if ((*cursor >= 'A' && *cursor <= 'Z') || (*cursor >= 'a' && *cursor <= 'z'))
-				{
-					tokens.push_back({ *cursor++, 0.0f, true });
-					continue;
-				}
-				if (*cursor == ',' || *cursor == ' ' || *cursor == '\n' || *cursor == '\r' || *cursor == '\t')
-				{
-					++cursor;
-					continue;
-				}
-				char* end = nullptr;
-				const float number = std::strtof(cursor, &end);
-				if (end == cursor)
-				{
-					++cursor;
-					continue;
-				}
-				tokens.push_back({ 0, number, false });
-				cursor = end;
-			}
-			return tokens;
-		}
-
-		void AppendSvgArc(std::vector<ImVec2>& points, const ImVec2& from,
-		                  float rx, float ry, float rotation, bool large_arc, bool sweep,
-		                  const ImVec2& to)
-		{
-			rx = std::fabs(rx);
-			ry = std::fabs(ry);
-			if (rx <= 0.0f || ry <= 0.0f || (std::fabs(from.x - to.x) < 0.0001f && std::fabs(from.y - to.y) < 0.0001f))
-			{
-				points.push_back(to);
-				return;
-			}
-
-			const float phi = rotation * (kPi / 180.0f);
-			const float cos_phi = std::cos(phi);
-			const float sin_phi = std::sin(phi);
-			const float dx = (from.x - to.x) * 0.5f;
-			const float dy = (from.y - to.y) * 0.5f;
-			const float x1p = cos_phi * dx + sin_phi * dy;
-			const float y1p = -sin_phi * dx + cos_phi * dy;
-			const float lambda = x1p * x1p / (rx * rx) + y1p * y1p / (ry * ry);
-			if (lambda > 1.0f)
-			{
-				const float scale = std::sqrt(lambda);
-				rx *= scale;
-				ry *= scale;
-			}
-
-			const float rx2 = rx * rx;
-			const float ry2 = ry * ry;
-			const float numerator = std::max(0.0f, rx2 * ry2 - rx2 * y1p * y1p - ry2 * x1p * x1p);
-			const float denominator = rx2 * y1p * y1p + ry2 * x1p * x1p;
-			const float sign = large_arc == sweep ? -1.0f : 1.0f;
-			const float factor = denominator > 0.0f ? sign * std::sqrt(numerator / denominator) : 0.0f;
-			const float cxp = factor * rx * y1p / ry;
-			const float cyp = factor * -ry * x1p / rx;
-			const float cx = cos_phi * cxp - sin_phi * cyp + (from.x + to.x) * 0.5f;
-			const float cy = sin_phi * cxp + cos_phi * cyp + (from.y + to.y) * 0.5f;
-
-			const float ux = (x1p - cxp) / rx;
-			const float uy = (y1p - cyp) / ry;
-			const float vx = (-x1p - cxp) / rx;
-			const float vy = (-y1p - cyp) / ry;
-			float start = std::atan2(uy, ux);
-			float delta = std::atan2(ux * vy - uy * vx, ux * vx + uy * vy);
-			if (!sweep && delta > 0.0f)
-				delta -= 2.0f * kPi;
-			else if (sweep && delta < 0.0f)
-				delta += 2.0f * kPi;
-
-			const int segments = std::max(4, static_cast<int>(std::ceil(std::fabs(delta) * 12.0f / kPi)));
-			for (int i = 1; i <= segments; ++i)
-			{
-				const float angle = start + delta * (static_cast<float>(i) / segments);
-				const float x = rx * std::cos(angle);
-				const float y = ry * std::sin(angle);
-				points.emplace_back(cx + cos_phi * x - sin_phi * y, cy + sin_phi * x + cos_phi * y);
-			}
-		}
-
-		std::vector<SvgContour> ParseSvgPath(const char* data, SvgInk fill)
-		{
-			const std::vector<SvgPathToken> tokens = TokenizeSvgPath(data);
-			std::vector<SvgContour> contours;
-			SvgContour contour;
-			ImVec2 current(0.0f, 0.0f);
-			ImVec2 start(0.0f, 0.0f);
-			ImVec2 previous_cubic(0.0f, 0.0f);
-			ImVec2 previous_quadratic(0.0f, 0.0f);
-			char command = 0;
-			size_t index = 0;
-			bool previous_was_cubic = false;
-			bool previous_was_quadratic = false;
-
-			const auto flush = [&]()
-			{
-				if (contour.Points.size() > 1)
-				{
-					if (fill != SvgInk::None)
-						contour.Closed = true;
-					contours.push_back(std::move(contour));
-				}
-				contour = SvgContour{};
-			};
-			const auto read_number = [&](float& value) -> bool
-			{
-				if (index >= tokens.size() || tokens[index].IsCommand)
-					return false;
-				value = tokens[index++].Number;
-				return true;
-			};
-			const auto read_point = [&](bool relative, ImVec2& point) -> bool
-			{
-				float x = 0.0f, y = 0.0f;
-				if (!read_number(x) || !read_number(y))
-					return false;
-				point = relative ? ImVec2(current.x + x, current.y + y) : ImVec2(x, y);
-				return true;
-			};
-
-			while (index < tokens.size())
-			{
-				if (tokens[index].IsCommand)
-					command = tokens[index++].Command;
-				if (command == 0)
-					break;
-
-				const bool relative = command >= 'a' && command <= 'z';
-				const char op = relative ? static_cast<char>(command - 'a' + 'A') : command;
-				if (op == 'Z')
-				{
-					current = start;
-					contour.Closed = true;
-					flush();
-					previous_was_cubic = false;
-					previous_was_quadratic = false;
-					command = 0;
-					continue;
-				}
-				if (index >= tokens.size() || tokens[index].IsCommand)
-					continue;
-
-				if (op == 'M' || op == 'L')
-				{
-					ImVec2 point;
-					if (!read_point(relative, point))
-						break;
-					if (op == 'M')
-					{
-						flush();
-						current = point;
-						start = point;
-						contour.Points.push_back(point);
-						command = relative ? 'l' : 'L';
-					}
-					else
-					{
-						current = point;
-						contour.Points.push_back(point);
-					}
-					previous_was_cubic = false;
-					previous_was_quadratic = false;
-					continue;
-				}
-				if (op == 'H' || op == 'V')
-				{
-					float value = 0.0f;
-					if (!read_number(value))
-						break;
-					current = op == 'H' ? ImVec2(relative ? current.x + value : value, current.y)
-					                    : ImVec2(current.x, relative ? current.y + value : value);
-					contour.Points.push_back(current);
-					previous_was_cubic = false;
-					previous_was_quadratic = false;
-					continue;
-				}
-				if (op == 'C')
-				{
-					ImVec2 c1, c2, end;
-					if (!read_point(relative, c1) || !read_point(relative, c2) || !read_point(relative, end))
-						break;
-					const ImVec2 from = current;
-					for (int step = 1; step <= 12; ++step)
-					{
-						const float t = static_cast<float>(step) / 12.0f;
-						const float u = 1.0f - t;
-						contour.Points.emplace_back(u*u*u*from.x + 3*u*u*t*c1.x + 3*u*t*t*c2.x + t*t*t*end.x,
-							u*u*u*from.y + 3*u*u*t*c1.y + 3*u*t*t*c2.y + t*t*t*end.y);
-					}
-					current = end;
-					previous_cubic = c2;
-					previous_was_cubic = true;
-					previous_was_quadratic = false;
-					continue;
-				}
-				if (op == 'S')
-				{
-					ImVec2 c1, c2, end;
-					c1 = previous_was_cubic
-						? ImVec2(2.0f * current.x - previous_cubic.x, 2.0f * current.y - previous_cubic.y)
-						: current;
-					if (!read_point(relative, c2) || !read_point(relative, end))
-						break;
-					const ImVec2 from = current;
-					for (int step = 1; step <= 12; ++step)
-					{
-						const float t = static_cast<float>(step) / 12.0f;
-						const float u = 1.0f - t;
-						contour.Points.emplace_back(u*u*u*from.x + 3*u*u*t*c1.x + 3*u*t*t*c2.x + t*t*t*end.x,
-							u*u*u*from.y + 3*u*u*t*c1.y + 3*u*t*t*c2.y + t*t*t*end.y);
-					}
-					current = end;
-					previous_cubic = c2;
-					previous_was_cubic = true;
-					previous_was_quadratic = false;
-					continue;
-				}
-				if (op == 'Q' || op == 'T')
-				{
-					ImVec2 control, end;
-					if (op == 'Q')
-					{
-						if (!read_point(relative, control) || !read_point(relative, end))
-						break;
-					}
-					else
-					{
-						control = previous_was_quadratic
-							? ImVec2(2.0f * current.x - previous_quadratic.x, 2.0f * current.y - previous_quadratic.y)
-							: current;
-						if (!read_point(relative, end))
-						break;
-					}
-					const ImVec2 from = current;
-					for (int step = 1; step <= 10; ++step)
-					{
-						const float t = static_cast<float>(step) / 10.0f;
-						const float u = 1.0f - t;
-						contour.Points.emplace_back(u*u*from.x + 2*u*t*control.x + t*t*end.x,
-							u*u*from.y + 2*u*t*control.y + t*t*end.y);
-					}
-					current = end;
-					previous_quadratic = control;
-					previous_was_quadratic = true;
-					previous_was_cubic = false;
-					continue;
-				}
-				if (op == 'A')
-				{
-					float rx = 0.0f, ry = 0.0f, rotation = 0.0f, large = 0.0f, sweep = 0.0f;
-					ImVec2 end;
-					if (!read_number(rx) || !read_number(ry) || !read_number(rotation)
-						|| !read_number(large) || !read_number(sweep) || !read_point(relative, end))
-						break;
-					AppendSvgArc(contour.Points, current, rx, ry, rotation, large != 0.0f, sweep != 0.0f, end);
-					current = end;
-					previous_was_cubic = false;
-					previous_was_quadratic = false;
-					continue;
-				}
-				break;
-			}
-			flush();
-			return contours;
-		}
 
 		void ParseSvgElement(const tinyxml2::XMLElement* element, const SvgStyle& inherited, SvgIcon& icon)
 		{
@@ -2081,7 +1813,7 @@ namespace Helios::Icons
 					shape.Kind = SvgShape::Type::Path;
 					const char* data = child->Attribute("d");
 					if (data != nullptr)
-						shape.Contours = ParseSvgPath(data, style.Fill);
+						shape.Contours = Svg::ParsePath(data);
 				}
 				else if (std::strcmp(tag, "circle") == 0)
 				{
@@ -2157,75 +1889,6 @@ namespace Helios::Icons
 				CORE_LOG_INFO("Editor icons: {} loaded from EditorRes/icons", loaded);
 		}
 
-		bool IsSvgPointInsideTriangle(const ImVec2& p, const ImVec2& a, const ImVec2& b, const ImVec2& c)
-		{
-			const auto edge = [](const ImVec2& p0, const ImVec2& p1, const ImVec2& p2)
-			{
-				return (p2.x - p0.x) * (p1.y - p0.y) - (p1.x - p0.x) * (p2.y - p0.y);
-			};
-			const float d1 = edge(p, a, b);
-			const float d2 = edge(p, b, c);
-			const float d3 = edge(p, c, a);
-			const bool negative = d1 < 0.0f || d2 < 0.0f || d3 < 0.0f;
-			const bool positive = d1 > 0.0f || d2 > 0.0f || d3 > 0.0f;
-			return !(negative && positive);
-		}
-
-		void FillSvgPolygon(ImDrawList* draw_list, const std::vector<ImVec2>& points, ImU32 color)
-		{
-			if (points.size() < 3)
-				return;
-			std::vector<int> indices(points.size());
-			for (size_t i = 0; i < indices.size(); ++i)
-				indices[i] = static_cast<int>(i);
-			float area = 0.0f;
-			for (size_t i = 0; i < points.size(); ++i)
-			{
-				const ImVec2& a = points[i];
-				const ImVec2& b = points[(i + 1) % points.size()];
-				area += a.x * b.y - b.x * a.y;
-			}
-			const float orientation = area >= 0.0f ? 1.0f : -1.0f;
-			int guard = static_cast<int>(points.size() * points.size());
-			while (indices.size() > 3 && guard-- > 0)
-			{
-				bool clipped = false;
-				for (size_t i = 0; i < indices.size(); ++i)
-				{
-					const int ia = indices[(i + indices.size() - 1) % indices.size()];
-					const int ib = indices[i];
-					const int ic = indices[(i + 1) % indices.size()];
-					const ImVec2& a = points[ia];
-					const ImVec2& b = points[ib];
-					const ImVec2& c = points[ic];
-					const float cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
-					if (cross * orientation <= 0.00001f)
-						continue;
-					bool contains = false;
-					for (int index : indices)
-					{
-						if (index == ia || index == ib || index == ic)
-							continue;
-						if (IsSvgPointInsideTriangle(points[index], a, b, c))
-						{
-							contains = true;
-						break;
-						}
-					}
-					if (contains)
-						continue;
-					draw_list->AddTriangleFilled(a, b, c, color);
-					indices.erase(indices.begin() + static_cast<ptrdiff_t>(i));
-					clipped = true;
-					break;
-				}
-				if (!clipped)
-					break;
-			}
-			if (indices.size() == 3)
-				draw_list->AddTriangleFilled(points[indices[0]], points[indices[1]], points[indices[2]], color);
-		}
-
 		float SvgStrokeWidth(const SvgStyle& style, float unit, bool dark_canvas)
 		{
 			const float scaled = style.StrokeWidth * unit * (dark_canvas ? 1.12f : 1.0f);
@@ -2244,7 +1907,7 @@ namespace Helios::Icons
 			return 1.0f;
 		}
 
-		void DrawSvgContour(ImDrawList* draw_list, const SvgContour& contour, const SvgStyle& style,
+		void DrawSvgContour(ImDrawList* draw_list, const Svg::Contour& contour, const SvgStyle& style,
 		                    const ImVec2& center, float unit, uint8_t alpha, bool dark_canvas)
 		{
 			if (contour.Points.size() < 2)
@@ -2254,69 +1917,15 @@ namespace Helios::Icons
 			for (const ImVec2& point : contour.Points)
 				points.emplace_back(center.x + (point.x - 16.0f) * unit, center.y + (point.y - 16.0f) * unit);
 
-			if (style.Fill != SvgInk::None && contour.Closed)
-				FillSvgPolygon(draw_list, points, SvgInkColor(style.Fill, alpha, dark_canvas));
+			/* 图标源的填充面常不带 Z：有填充就按闭合画（描边也跟着闭合） */
+			const bool closed = contour.Closed || style.Fill != SvgInk::None;
+			if (style.Fill != SvgInk::None)
+				Svg::FillPolygon(draw_list, points, SvgInkColor(style.Fill, alpha, dark_canvas));
 
 			if (style.Stroke != SvgInk::None && style.StrokeWidth > 0.0f)
-			{
-				const ImU32 stroke_color = SvgInkColor(style.Stroke, alpha, dark_canvas);
-				const float width = SvgStrokeWidth(style, unit, dark_canvas);
-				const bool dashed = style.DashOn > 0.0f && style.DashOff > 0.0f;
-				const size_t segment_count = points.size() - 1 + (contour.Closed ? 1 : 0);
-
-				if (!dashed)
-				{
-					draw_list->PathClear();
-					for (const ImVec2& point : points)
-						draw_list->PathLineTo(point);
-					draw_list->PathStroke(stroke_color, contour.Closed ? ImDrawFlags_Closed : 0, width);
-				}
-
-				for (size_t i = 0; i < segment_count; ++i)
-				{
-					const ImVec2& a = points[i];
-					const ImVec2& b = points[(i + 1) % points.size()];
-					if (!dashed)
-						continue;
-
-					const float dx = b.x - a.x;
-					const float dy = b.y - a.y;
-					const float length = std::sqrt(dx * dx + dy * dy);
-					const float cycle = (style.DashOn + style.DashOff) * unit;
-					if (length <= 0.001f || cycle <= 0.001f)
-						continue;
-					for (float offset = 0.0f; offset < length; offset += cycle)
-					{
-						const float end = std::min(offset + style.DashOn * unit, length);
-						const ImVec2 p0(a.x + dx * (offset / length), a.y + dy * (offset / length));
-						const ImVec2 p1(a.x + dx * (end / length), a.y + dy * (end / length));
-						draw_list->AddLine(p0, p1, stroke_color, width);
-						if (style.RoundCap)
-						{
-							const float radius = width * 0.5f;
-							draw_list->AddCircleFilled(p0, radius, stroke_color, 8);
-							draw_list->AddCircleFilled(p1, radius, stroke_color, 8);
-						}
-					}
-				}
-
-				if (!dashed && style.RoundCap && !contour.Closed)
-				{
-					const float radius = width * 0.5f;
-					draw_list->AddCircleFilled(points.front(), radius, stroke_color, 8);
-					draw_list->AddCircleFilled(points.back(), radius, stroke_color, 8);
-				}
-				if (style.RoundJoin)
-				{
-					const float radius = width * 0.5f;
-					const size_t point_count = contour.Closed ? points.size() : points.size() - 2;
-					for (size_t i = 0; i < point_count; ++i)
-					{
-						const size_t point_index = contour.Closed ? i : i + 1;
-						draw_list->AddCircleFilled(points[point_index], radius, stroke_color, 8);
-					}
-				}
-			}
+				Svg::StrokePolyline(draw_list, points, closed,
+					SvgInkColor(style.Stroke, alpha, dark_canvas), SvgStrokeWidth(style, unit, dark_canvas),
+					style.DashOn * unit, style.DashOff * unit, style.RoundCap, style.RoundJoin);
 		}
 
 		void DrawSvgIcon(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 input_color)
@@ -2336,7 +1945,7 @@ namespace Helios::Icons
 			{
 				if (shape.Kind == SvgShape::Type::Path)
 				{
-					for (const SvgContour& contour : shape.Contours)
+					for (const Svg::Contour& contour : shape.Contours)
 						DrawSvgContour(draw_list, contour, shape.Style, center, unit, alpha, dark_canvas);
 					continue;
 				}
@@ -2443,6 +2052,7 @@ namespace Helios::Icons
 			{ "Directory",         &DrawDirectory },
 			{ "File",              &DrawFile },
 			{ "FileImage",         &DrawFileImage },
+			{ "FileSvg",           &DrawFileSvg },
 			{ "FileScene",         &DrawScene },
 			{ "FileMtlGraph",      &DrawFileMtlGraph },
 			{ "FileShader",        &DrawFileShader },

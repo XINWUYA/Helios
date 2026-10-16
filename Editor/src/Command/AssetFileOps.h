@@ -11,6 +11,7 @@ namespace Helios
 	{
 		Other = 0,   /* 认不出的后缀：通用文件图标，只在「All types」下出现 */
 		Image,       /* .png / .jpg / .jpeg / .bmp / .tga / .psd / .gif / .hdr / .dds */
+		Svg,         /* .svg（矢量图：编辑器图标源。面板按原色渲染预览，引擎不加载它） */
 		Scene,       /* .scn */
 		MtlGraph,    /* .mtlgraph */
 		Shader,      /* .glsl（源） / .metal（Metal 目标，编译产物） */

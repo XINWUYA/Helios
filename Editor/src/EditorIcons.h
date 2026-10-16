@@ -49,7 +49,7 @@ namespace Helios
 			/* 抓取当前帧（实时视图：冻结数据供分析） */
 			Capture,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
-			Directory, File, FileImage, FileScene, FileMtlGraph, FileShader, FileModel, FileMaterial, FileProbe,
+			Directory, File, FileImage, FileSvg, FileScene, FileMtlGraph, FileShader, FileModel, FileMaterial, FileProbe,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */
 			Gizmos, Grid, WorldAxis,
 			/* 调试视图（工具栏按钮 + 弹层档位） */

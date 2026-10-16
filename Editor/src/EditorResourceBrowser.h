@@ -6,6 +6,7 @@
 #include <vector>
 #include <imgui.h>
 #include "EditorIcons.h"
+#include "Svg.h"
 #include "Command/AssetFileOps.h"
 #include "Helios/Command/Command.h"
 #include "Helios/Common/Common.h"
@@ -70,6 +71,7 @@ namespace Helios
 			Default,
 			Folder,
 			Image,
+			Svg,
 			Scene,
 			MtlGraph,
 			Shader,
@@ -86,6 +88,7 @@ namespace Helios
 			All = 0,
 			Folder,
 			Image,
+			Svg,
 			Scene,
 			MtlGraph,
 			Shader,
@@ -187,6 +190,9 @@ namespace Helios
 		[[nodiscard]] bool PassesContentFilter(const FileNode& node) const;
 		/* 图片缩略图按需加载：只有真的要画的时候才建贴图（建树时全加载会拖慢启动、白占显存） */
 		static SharedPtr<DeviceTexture> ThumbnailOf(FileNode& node);
+		/* SVG 的矢量缩略图：解析结果不是纹理，绘制时直接画形状（缓存与失效在 Svg 模块里）。
+		 * 非 SVG 或解析失败返回空 —— 调用方回落到类型图标。 */
+		static SharedPtr<const Svg::Image> SvgImageOf(FileNode& node);
 
 		/* ---- 浏览位置（右栏当前目录）与它的历史 ----
 		 * 顶栏的「回到上次路径 / 重进路径」走这里：历史按相对 Assets 的路径记
