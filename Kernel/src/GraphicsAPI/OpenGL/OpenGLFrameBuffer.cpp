@@ -117,6 +117,12 @@ namespace Helios
 		glBindFramebuffer(GL_FRAMEBUFFER, m_FrameBufferId);
 		glViewport(m_FrameBufferDesc.ViewportRegion.MinX, m_FrameBufferDesc.ViewportRegion.MinY, (GLsizei)m_FrameBufferDesc.ViewportRegion.Width, (GLsizei)m_FrameBufferDesc.ViewportRegion.Height);
 
+		/* scissor 是上下文状态，会跨 Pass、跨帧残留。这里重置为整个 viewport 并关闭，
+		 * 未显式设置 scissor 的绘制就不会被裁剪；需要裁剪的 Pass 在绑定后自行设置 */
+		glScissor(m_FrameBufferDesc.ViewportRegion.MinX, m_FrameBufferDesc.ViewportRegion.MinY,
+			(GLsizei)m_FrameBufferDesc.ViewportRegion.Width, (GLsizei)m_FrameBufferDesc.ViewportRegion.Height);
+		glDisable(GL_SCISSOR_TEST);
+
 		/* Layered模式：将指定附件重新绑定到Texture2DArray/CubeMap的指定层/面/mip：用于CSM多Cascade渲染到同一数组纹理的不同切片，或分层渲染到Color数组纹理，或烘焙到CubeMap各面各mip */
 		if (bind_info.Mode == FrameBufferBindMode::Layered)
 			SetAttachmentLayer(bind_info.TargetAttachment, bind_info.ColorIndex, bind_info.LayerIndex, bind_info.MipLevel);
@@ -125,9 +131,6 @@ namespace Helios
 			m_FrameBufferDesc.ColorClearValues.size(), m_FrameBufferDesc.ColorRenderBuffers.size());
 		if (clear_count > 0)
 		{
-			const GLboolean scissor_enabled = glIsEnabled(GL_SCISSOR_TEST);
-			glDisable(GL_SCISSOR_TEST);
-
 			for (size_t i = 0; i < clear_count; ++i)
 			{
 				if (!m_FrameBufferDesc.ColorClearValues[i].has_value())
@@ -151,8 +154,6 @@ namespace Helios
 					glClearBufferfv(GL_COLOR, static_cast<GLint>(i), float_values);
 			}
 
-			if (scissor_enabled)
-				glEnable(GL_SCISSOR_TEST);
 			CHECK_GL_ERROR;
 		}
 	}

@@ -59,8 +59,16 @@ namespace Helios
 
 	void OpenGLRenderAPI::SetScissor(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 	{
-		glEnable(GL_SCISSOR_TEST);
 		glScissor((GLint)x, (GLint)y, (GLsizei)width, (GLsizei)height);
+
+		/* 范围等于整个 viewport 时视为全屏绘制，直接关闭裁剪（与帧缓冲绑定时一致） */
+		GLint vp[4] = { 0, 0, 0, 0 };
+		glGetIntegerv(GL_VIEWPORT, vp);
+		if (x == static_cast<uint32_t>(vp[0]) && y == static_cast<uint32_t>(vp[1]) &&
+			width == static_cast<uint32_t>(vp[2]) && height == static_cast<uint32_t>(vp[3]))
+			glDisable(GL_SCISSOR_TEST);
+		else
+			glEnable(GL_SCISSOR_TEST);
 	}
 
 	void OpenGLRenderAPI::SetClearColor(const glm::vec4& color)
