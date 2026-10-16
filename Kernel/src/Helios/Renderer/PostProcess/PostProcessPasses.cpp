@@ -14,31 +14,9 @@ namespace Helios
 {
 	namespace PostProcess
 	{
-		FrameGraphResourceHandleTyped<FrameGraphTexture> AddPostProcessPasses(
-			RenderView& render_view, FrameGraphResourceHandleTyped<FrameGraphTexture> source)
-		{
-			PROFILE_FUNCTION();
-
-			auto output = source;
-
-			/* 调试视图（读数纯净）下整体直通 */
-			if (render_view.GetDebugViewMode() == DebugViewMode::None)
-			{
-				for (const EffectDesc& effect : PostProcessEffectRegistry::Instance().All())
-				{
-					if (effect.Build != nullptr)
-						output = effect.Build(render_view, output);
-				}
-			}
-
-			/* 无条件落统一键：下游（编辑器叠加层等）只读一个名字，不按管线 / 效果分支 */
-			render_view.GetFrameGraph()->GetBlackboard()["PostProcessOutput"] = output;
-			return output;
-		}
-
 		bool HasEnabledEffects(const RenderView& render_view)
 		{
-			/* 调试视图非 None 与纹理路径的"整体直通"同一语义：不旁路、不产 Pass */
+			/* 调试视图不支持后处理 */
 			if (render_view.GetDebugViewMode() != DebugViewMode::None)
 				return false;
 
@@ -51,14 +29,33 @@ namespace Helios
 			return false;
 		}
 
+		FrameGraphResourceHandleTyped<FrameGraphTexture> AddPostProcessPasses(
+			RenderView& render_view, FrameGraphResourceHandleTyped<FrameGraphTexture> source)
+		{
+			PROFILE_FUNCTION();
+
+			auto output = source;
+
+			/* 调试视图时不执行后处理 */
+			if (render_view.GetDebugViewMode() == DebugViewMode::None)
+			{
+				for (const EffectDesc& effect : PostProcessEffectRegistry::Instance().All())
+				{
+					if (effect.Build != nullptr)
+						output = effect.Build(render_view, output);
+				}
+			}
+
+			render_view.GetFrameGraph()->GetBlackboard()["PostProcessOutput"] = output;
+			return output;
+		}
+
 		void AddPresentToDefaultTarget(
 			RenderView& render_view, FrameGraphResourceHandleTyped<FrameGraphTexture> source)
 		{
 			PROFILE_FUNCTION();
 
 			auto& frame_graph = render_view.GetFrameGraph();
-			const auto present_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-				ABSOLUTE_PATH("Shaders/PostProcessShaders/PostProcessPresent.glsl"));
 
 			struct PresentPassData
 			{
@@ -70,20 +67,23 @@ namespace Helios
 				{
 					data.Source = source;
 					builder.BindInputResource(data.Source, FrameGraphTexture::Usage::Sampleable);
-					/* 无附件 = 渲染到默认目标；AsSideEffect 保活（链的输出在这里被最后消费） */
+					/* 无附件 = 渲染到默认目标；AsSideEffect 保活 */
 					builder.AsSideEffect();
 				},
-				[&render_view, present_shader](const FrameGraphResources& resources, const PresentPassData& data)
+				[&render_view](const FrameGraphResources& resources, const PresentPassData& data)
 				{
 					auto render_api = Renderer::GetRenderAPI();
 					const auto& viewport_region = render_view.GetViewportRegion();
 					render_api->SetViewport(0, 0, viewport_region.Width, viewport_region.Height);
 					render_api->SetScissor(0, 0, viewport_region.Width, viewport_region.Height);
 
+					const auto present_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+						ABSOLUTE_PATH("Shaders/PostProcessShaders/PostProcessPresent.glsl"));
+
 					/* 全屏直出：深度写关（引擎约定 = 连深度测试一起关），不混合 */
 					auto material = CreateSharedPtr<Material>();
-					material->GetRasterState().EnableDepthWrite = false;
 					material->SetShader(present_shader);
+					material->GetRasterState().EnableDepthWrite = false;
 					material->SetTexture("u_Source", resources.Get(data.Source).Texture);
 					Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
 					render_api->Flush();
@@ -93,8 +93,7 @@ namespace Helios
 		namespace
 		{
 			/* ==================== 内置效果注册清单 ====================
-			 * 新增效果在这补一行（清单是"目录"不是"逻辑"）；注册对象靠本 TU 被引用而链进来
-			 * （静态库不会丢弃本文件）。 */
+			 * 新增效果在这补一行。 */
 			struct BuiltinPostProcessRegistration
 			{
 				BuiltinPostProcessRegistration()
