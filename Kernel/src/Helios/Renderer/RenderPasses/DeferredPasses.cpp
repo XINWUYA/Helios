@@ -36,6 +36,7 @@ namespace Helios
 			case DebugViewMode::Specular:
 			case DebugViewMode::Shadow:
 			case DebugViewMode::Indirect:
+			case DebugViewMode::Probe:
 				return static_cast<int>(mode);
 			case DebugViewMode::None:
 			case DebugViewMode::Albedo:
@@ -351,14 +352,18 @@ namespace Helios
 							 * BRDF LUT 未就绪（没有探针烘焙过）时不做 IBL。 */
 							std::vector<SharedPtr<ReflectionProbe>> ibl_probes;
 							SharedPtr<DeviceTexture> ibl_brdf_lut;
+							bool ibl_blend_enabled = false;
 							if (const auto scene = render_view.GetOwnerScene())
 							{
 								if (const auto probe_manager = scene->GetReflectionProbeManager())
 								{
 									ibl_brdf_lut = probe_manager->GetBRDFLutMap();
 									if (ibl_brdf_lut != nullptr)
+									{
 										ibl_probes = probe_manager->CollectClosestBakedProbes(
 											render_view.GetCullingCamera()->GetPosition(), kMaxDeferredIBLProbes);
+										ibl_blend_enabled = probe_manager->IsProbeBlendingEnabled();
+									}
 								}
 							}
 
@@ -410,12 +415,20 @@ namespace Helios
 								 * 上一笔）；采样槽位不管有没有效都必须有绑定（缺绑定会被 Metal 校验断言），无效槽位用中性兜底。 */
 								material->SetParameters(ParamType::Int, "u_ProbeCount",
 									static_cast<int>(ibl_probes.size()));
+								/* 混合开关：没有探针配过渡时，着色器走旧的"距离最近"路径 */
+								material->SetParameters(ParamType::Int, "u_ProbeBlendEnabled",
+									ibl_blend_enabled ? 1 : 0);
 								for (size_t probe_index = 0; probe_index < kMaxDeferredIBLProbes; ++probe_index)
 								{
 									const std::string suffix = std::to_string(probe_index);
 									const bool valid = probe_index < ibl_probes.size();
 									material->SetParameters(ParamType::Vec3, "u_ProbePosition" + suffix,
 										valid ? ibl_probes[probe_index]->GetPosition() : glm::vec3(0.0f));
+									/* 盒体参数：xyz = 半尺寸、w = 混合距离（关闭混合时不读） */
+									material->SetParameters(ParamType::Vec4, "u_ProbeExtent" + suffix,
+										valid ? glm::vec4(ibl_probes[probe_index]->GetBoxSize() * 0.5f,
+											ibl_probes[probe_index]->GetBlendDistance())
+										: glm::vec4(0.0f));
 
 									material->SetTexture("u_IrradianceMap" + suffix,
 										valid ? ibl_probes[probe_index]->GetIrradianceMap() : DeviceTexture::BlackCube());

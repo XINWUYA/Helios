@@ -39,6 +39,15 @@ namespace Helios
         void SetRealtime(bool realtime) { m_IsRealtime = realtime; }
         bool IsRealtime() const { return m_IsRealtime; }
 
+        /* ---- 影响盒体与混合（IBL 应用：像素级选择 / top2 混合用） ----
+         * 盒体描述探针"管哪片区域"（中心 = 探针位置，全尺寸）；像素在盒内、深入盒面超过
+         * BlendDistance 后权重拉满，越靠盒边权重越低。BlendDistance = 0 表示这个探针不做
+         * 过渡（盒内即满权重）；场景里所有探针都是 0 时不启用混合，退回"距离最近"选择。 */
+        void SetBoxSize(const glm::vec3& size) { m_BoxSize = size; }
+        const glm::vec3& GetBoxSize() const { return m_BoxSize; }
+        void SetBlendDistance(float distance) { m_BlendDistance = distance; }
+        float GetBlendDistance() const { return m_BlendDistance; }
+
         /* 执行烘焙 */
         void Bake(RenderView* render_view);
         /* 重置烘焙状态、下次渲染重新烘焙。注意：它会当场销毁烘焙结果和预览纹理 —— 这些可能仍被
@@ -172,6 +181,10 @@ namespace Helios
         bool m_IsRealtime{ false };
         bool m_BakeCompleted{ false };
 
+        /* IBL 应用参数（见上方 getter / setter 的说明） */
+        glm::vec3 m_BoxSize{ 10.0f };
+        float m_BlendDistance{ 0.0f };
+
         /* 烘焙结果缓存 */
         std::string m_BakeCachePath{};
         BakeCacheWriteState m_CacheWriteState{ BakeCacheWriteState::Idle };
@@ -211,8 +224,13 @@ namespace Helios
         /* 是否存在已注册的反射探针 */
         bool HasProbe() const { return !m_RegisteredProbes.empty(); }
 
-        /* 获取距离最近的反射探针 */
+        /* 获取用于 IBL 的反射探针：启用混合时按盒体权重选最高的（与延迟的逐像素选择同语义），
+         * 未启用混合时就是距离最近的那个（旧行为）。 */
         SharedPtr<ReflectionProbe> GetClostedReflectionProbe(const glm::vec3& target_pos) const;
+
+        /* 是否有探针启用了过渡混合（任一 BlendDistance > 0）：
+         * 没有时前向 / 延迟整套走旧的"距离最近"路径。 */
+        [[nodiscard]] bool IsProbeBlendingEnabled() const;
 
         /* 按到目标点的距离升序收集可用的已烘焙探针（最多 max_count 个；
          * "可用"= 启用 + 已烘焙 + 双图齐备）。延迟光照据此决定本帧参与

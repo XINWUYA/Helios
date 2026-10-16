@@ -1606,6 +1606,21 @@ namespace Helios::Icons
 			dl->AddCircle(center, radius, color, 0, t);
 		}
 
+		/* Probe：圆盘分三段（灰底 + 红 / 青绿两段弧）：两个探针按权重混合的示意 */
+		void DrawProbe(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			const float radius = c.Len(0.30f);
+			dl->AddCircleFilled(center, radius, PaletteColor(color, kGray));
+			dl->PathArcTo(center, radius, 0.0f, kPi * 0.5f, 12);	/* 右下 1/4：探针 0 */
+			dl->PathFillConvex(PaletteColor(color, kRed));
+			dl->PathArcTo(center, radius, kPi * 0.5f, kPi, 12);	/* 左下 1/4：探针 1 */
+			dl->PathFillConvex(PaletteColor(color, kMint));
+			dl->AddCircle(center, radius, color, 0, t);
+		}
+
 		/* Overdraw：两层半透明方块的叠加计数 */
 		void DrawOverdraw(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
@@ -2452,6 +2467,7 @@ namespace Helios::Icons
 			{ "Indirect",          &DrawIndirect },
 			{ "Overdraw",          &DrawOverdraw },
 			{ "Mipmap",            &DrawMipmap },
+			{ "Probe",             &DrawProbe },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),

@@ -202,6 +202,7 @@ namespace Helios
 			{ DebugViewMode::Specular, Icons::Id::Specular, "Specular" },
 			{ DebugViewMode::Shadow, Icons::Id::Shadow, "Shadow" },
 			{ DebugViewMode::Indirect, Icons::Id::Indirect, "Indirect" },
+			{ DebugViewMode::Probe, Icons::Id::Probe, "Probe" },
 		};
 
 		constexpr DebugViewMenuItem kDebugViewAnalysisItems[] = {

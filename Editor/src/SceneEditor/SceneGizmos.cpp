@@ -43,11 +43,13 @@ namespace Helios
 			{ 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
 
 		/* === 实体类型 gizmo（光源 / 相机 / 反射探针 / 精灵）===
-		 * 两种尺寸语义：参数驱动（点光 / 聚光 / 相机 = 真世界尺度，不吃实体缩放）和
-		 * 图标驱动（屏上尺寸随距离收缩；平行光不响应缩放、探针和精灵按轴完整响应）。 */
+		 * 两种尺寸语义：参数驱动（点光 / 聚光 / 相机 / 反射探针盒 = 真世界尺度，不吃实体缩放）
+		 * 和图标驱动（屏上尺寸随距离收缩；平行光不响应缩放、精灵按轴完整响应，
+		 * 反射探针的轴心点保持屏幕恒定）。 */
 		const glm::vec3 kLightGizmoColor{ 1.00f, 0.84f, 0.42f };	/* 暖黄：光源 */
 		const glm::vec3 kCameraGizmoColor{ 0.66f, 0.82f, 1.00f };	/* 淡蓝：相机 */
 		const glm::vec3 kProbeGizmoColor{ 0.45f, 0.90f, 0.78f };	/* 青绿：反射探针 */
+		const glm::vec3 kProbeInnerGizmoColor{ 0.25f, 0.50f, 0.43f };	/* 过渡带核心区（外框同色暗版） */
 		const glm::vec3 kSpriteGizmoColor{ 0.95f, 0.62f, 0.85f };	/* 粉紫：精灵 */
 
 		/* 线框圆段数：真世界尺度的球 / 锥可占屏很大，段数低时折线棱角明显 */
@@ -373,11 +375,19 @@ namespace Helios
 			return vertices;
 		}
 
-		/* 反射探针：方盒线框（Unity 式）+ 轴心点 */
-		std::vector<float> BuildProbeGizmoVertices()
+		/* 反射探针：影响范围盒（单位盒，提交时按 BoxSize 缩放成真尺度）——
+		 * 外框与过渡内框共用几何、两套颜色 */
+		std::vector<float> BuildProbeBoxVertices(const glm::vec3& color)
 		{
 			std::vector<float> vertices;
-			PushBoxBand(vertices, glm::vec3(0.0f), glm::vec3(kProbeBoxHalfExtent), kProbeGizmoColor);
+			PushBoxBand(vertices, glm::vec3(0.0f), glm::vec3(kProbeBoxHalfExtent), color);
+			return vertices;
+		}
+
+		/* 探针轴心点：位置标记，屏幕恒定小尺寸（不随 BoxSize 变形） */
+		std::vector<float> BuildProbePivotDotVertices()
+		{
+			std::vector<float> vertices;
 			PushPivotDot(vertices, glm::vec3(0.0f), kProbeGizmoColor);
 			return vertices;
 		}
@@ -499,11 +509,30 @@ namespace Helios
 			return vertex_array;
 		}
 
-		SharedPtr<DeviceVertexArray> GetProbeGizmoVertexArray()
+		SharedPtr<DeviceVertexArray> GetProbeBoxVertexArray()
 		{
 			static SharedPtr<DeviceVertexArray> vertex_array;
 			if (!vertex_array)
-				vertex_array = MakeGizmoVertexArray("EditorProbeGizmo_VertexArray", BuildProbeGizmoVertices());
+				vertex_array = MakeGizmoVertexArray("EditorProbeBox_VertexArray",
+					BuildProbeBoxVertices(kProbeGizmoColor));
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetProbeInnerBoxVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorProbeInnerBox_VertexArray",
+					BuildProbeBoxVertices(kProbeInnerGizmoColor));
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetProbePivotDotVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorProbePivotDot_VertexArray",
+					BuildProbePivotDotVertices());
 			return vertex_array;
 		}
 
@@ -808,7 +837,9 @@ namespace Helios
 			}
 		}
 
-		/* 反射探针：盒 = 体积边界（Godot / Unity 的探针盒语义），完整响应缩放、各轴独立 */
+		/* 反射探针：盒 = 影响范围盒（BoxSize，中心 = 探针位置、轴对齐）——真世界尺度，
+		 * 不吃实体旋转 / 缩放，与 IBL 的盒体权重同一份语义（见 Lighting.glsl 的 ProbeBoxWeight）。
+		 * 过渡内框 = 每轴向内缩 BlendDistance（权重拉满的核心区）；轴心点屏幕恒定、单独提交。 */
 		void SubmitProbeGizmos(const SharedPtr<Scene>& scene, const SharedPtr<Material>& material,
 			const glm::vec3& camera_position, float gizmo_screen_scale)
 		{
@@ -821,12 +852,39 @@ namespace Helios
 			const auto probe_view = registry.view<TransformComponent, ReflectionProbeComponent>();
 			for (const entt::entity entity : probe_view)
 			{
+				const auto& probe = probe_view.get<ReflectionProbeComponent>(entity).m_ReflectionProbe;
+				if (probe == nullptr)
+					continue;
+
 				const GizmoTransformParts parts = DecomposeGizmoTransform(scene->GetWorldTransform(entity));
+				const glm::vec3 box_size = probe->GetBoxSize();
+
+				/* 影响范围盒：单位盒按 BoxSize 缩放（平移不变、无旋转 —— 盒体是轴对齐的） */
+				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
+					glm::translate(glm::mat4(1.0f), parts.Translation) * glm::scale(glm::mat4(1.0f), box_size),
+					nullptr, nullptr });
+				Renderer::Submit(material, MeshPrimitive{ GetProbeBoxVertexArray(), PrimitiveType::Triangles });
+
+				/* 过渡内框：内缩到零以下（blend 覆盖整个盒）就不画 */
+				const float blend = probe->GetBlendDistance();
+				if (blend > 0.0f)
+				{
+					const glm::vec3 inner_size = box_size - glm::vec3(2.0f * blend);
+					if (inner_size.x > 0.0f && inner_size.y > 0.0f && inner_size.z > 0.0f)
+					{
+						Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
+							glm::translate(glm::mat4(1.0f), parts.Translation) * glm::scale(glm::mat4(1.0f), inner_size),
+							nullptr, nullptr });
+						Renderer::Submit(material, MeshPrimitive{ GetProbeInnerBoxVertexArray(), PrimitiveType::Triangles });
+					}
+				}
+
+				/* 位置标记：轴心点保持屏幕恒定小尺寸（不随 BoxSize / 实体缩放变形） */
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
 					BuildGizmoModel(parts, GizmoWorldScaleAt(camera_position, parts.Translation,
 						kProbeGizmoPixelSize, gizmo_screen_scale),
-						glm::quat(1.0f, 0.0f, 0.0f, 0.0f), parts.Scale), nullptr, nullptr });
-				Renderer::Submit(material, MeshPrimitive{ GetProbeGizmoVertexArray(), PrimitiveType::Triangles });
+						glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f)), nullptr, nullptr });
+				Renderer::Submit(material, MeshPrimitive{ GetProbePivotDotVertexArray(), PrimitiveType::Triangles });
 			}
 		}
 

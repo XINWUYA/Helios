@@ -57,7 +57,7 @@ namespace Helios
 			/* 调试视图弹层的档位图形（分区各成族：Surface = 圆角方块、Lighting = 圆盘、
 			 * Analysis = 叠层方块）—— 与 DebugView 卡片同族的小图形 */
 			Albedo, Normal, Roughness, Metallic, SpecularColor, AmbientOcclusion, Emission, Ambient,
-			Diffuse, Specular, Shadow, Indirect, Overdraw, Mipmap,
+			Diffuse, Specular, Shadow, Indirect, Overdraw, Mipmap, Probe,
 			COUNT
 		};
 

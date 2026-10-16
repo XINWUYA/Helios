@@ -44,6 +44,7 @@ namespace Helios
 				case DebugViewMode::Specular:
 				case DebugViewMode::Shadow:
 				case DebugViewMode::Indirect:
+				case DebugViewMode::Probe:
 				case DebugViewMode::Overdraw:
 					break;
 				}
@@ -332,6 +333,7 @@ namespace Helios
 			case DebugViewMode::Specular:
 			case DebugViewMode::Shadow:
 			case DebugViewMode::Indirect:
+			case DebugViewMode::Probe:
 				return;
 
 			case DebugViewMode::Overdraw:

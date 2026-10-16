@@ -376,6 +376,9 @@ namespace Helios
 		/* Analysis：逐片元统计 */
 		Overdraw = 13,
 		Mipmap = 14,
+
+		/* 反射探针选择可视化（Lighting 类；值追加在尾部，不动既有序号） */
+		Probe = 15,
 	};
 
 	/* 视口区域信息 */

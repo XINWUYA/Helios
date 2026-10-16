@@ -906,13 +906,36 @@ namespace Helios
             return probe != nullptr && probe->GetEnable() && probe->IsBaked()
                 && probe->GetIrradianceMap() != nullptr && probe->GetPrefilterMap() != nullptr;
         }
+
+        /* 盒内深度：到最近盒面的余量（出盒为负） */
+        float ProbeBoxDepth(const ReflectionProbe& probe, const glm::vec3& position)
+        {
+            const glm::vec3 half_size = probe.GetBoxSize() * 0.5f;
+            const glm::vec3 delta = glm::abs(position - probe.GetPosition());
+            return glm::min(glm::min(half_size.x - delta.x, half_size.y - delta.y), half_size.z - delta.z);
+        }
+
+        /* 盒体权重（与 Lighting.glsl 的 ProbeBoxWeight 同口径）：
+         * 盒内深度过 BlendDistance 拉满；BlendDistance = 0 时盒内即满权重（阶跃） */
+        float ProbeBoxWeight(const ReflectionProbe& probe, const glm::vec3& position)
+        {
+            const float depth = ProbeBoxDepth(probe, position);
+            const float blend = probe.GetBlendDistance();
+            if (blend > 0.0f)
+                return glm::clamp(depth / blend, 0.0f, 1.0f);
+            return depth > 0.0f ? 1.0f : 0.0f;
+        }
     }
 
-    /* 获取距离最近的反射探针 */
+    /* 获取用于 IBL 的反射探针（前向 per-draw）：启用混合时选"盒体权重最高"的（权重并列
+     * 或全部出盒时比距离）；未启用（没有探针配 BlendDistance）时就是距离最近的旧行为。 */
     SharedPtr<ReflectionProbe> ReflectionProbeManager::GetClostedReflectionProbe(const glm::vec3& target_pos) const
     {
         PROFILE_FUNCTION();
 
+        const bool blend_enabled = IsProbeBlendingEnabled();
+
+        float best_weight = -1.0f;
         float best_dist_sq = std::numeric_limits<float>::max();
         SharedPtr<ReflectionProbe> chosen = nullptr;
 
@@ -920,15 +943,40 @@ namespace Helios
         {
             if (!IsProbeUsableForIBL(probe))
                 continue;
+
             const float dist_sq = glm::distance2(target_pos, probe->GetPosition());
-            if (dist_sq < best_dist_sq)
+            if (!blend_enabled)
             {
+                if (dist_sq < best_dist_sq)
+                {
+                    best_dist_sq = dist_sq;
+                    chosen = probe;
+                }
+                continue;
+            }
+
+            const float weight = ProbeBoxWeight(*probe, target_pos);
+            if (weight > best_weight || (weight == best_weight && dist_sq < best_dist_sq))
+            {
+                best_weight = weight;
                 best_dist_sq = dist_sq;
                 chosen = probe;
             }
         }
 
         return chosen;
+    }
+
+    bool ReflectionProbeManager::IsProbeBlendingEnabled() const
+    {
+        PROFILE_FUNCTION();
+
+        for (const auto& probe : m_RegisteredProbes)
+        {
+            if (IsProbeUsableForIBL(probe) && probe->GetBlendDistance() > 0.0f)
+                return true;
+        }
+        return false;
     }
 
     /* 按到目标点的距离升序收集可用的已烘焙探针（最多 max_count 个）。

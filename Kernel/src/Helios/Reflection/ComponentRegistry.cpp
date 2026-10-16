@@ -1377,6 +1377,12 @@ namespace Helios
 					.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 							&ReflectionProbe::IsRealtime, &ReflectionProbe::SetRealtime>(),
 						"Realtime", FieldType::Bool)
+					.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBoxSize, &ReflectionProbe::SetBoxSize>(),
+						"BoxSize", FieldType::Vec3, 0.1f, 10.0f)
+					.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+							&ReflectionProbe::GetBlendDistance, &ReflectionProbe::SetBlendDistance>(),
+						"BlendDistance", FieldType::Float, 0.01f)
 					.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 							&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
 							&ReflectionProbe::BakeConfig::EnvSize>(),
