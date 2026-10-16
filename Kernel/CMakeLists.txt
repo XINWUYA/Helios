@@ -34,6 +34,14 @@ target_sources(Kernel PRIVATE
 # Organize source files in Visual Studio by directory structure
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" FILES ${KERNEL_SOURCES} ${TRACY_CLIENT_DST})
 
+# 着色器是引擎和各 App 共用的资产，挂这里方便在 IDE 里直接查看和编辑：
+# 只进导航不参与编译，运行期仍按 ASSETS_PATH 读源文件，改完重跑即生效。
+file(GLOB_RECURSE HELIOS_SHADER_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/Assets/Shaders/*.glsl"
+)
+set_source_files_properties(${HELIOS_SHADER_SOURCES} PROPERTIES HEADER_FILE_ONLY TRUE)
+target_sources(Kernel PRIVATE ${HELIOS_SHADER_SOURCES})
+source_group(TREE "${CMAKE_SOURCE_DIR}/Assets/Shaders" PREFIX "Shaders" FILES ${HELIOS_SHADER_SOURCES})
 
 # Precompiled header (CMake 3.20+ handles /Yc automatically)
 if(MSVC)
