@@ -31,7 +31,7 @@ namespace Helios
 	namespace PostProcess
 	{
 		/* 效果自含登记（由内置清单调用）：只做效果注册表登记；
-		 * 组件注册按既有惯例在 ComponentRegistry.cpp 补一段（"新增组件补一段"）。 */
+		 * 组件注册照 Builtin/ 的惯例：一组件一文件，再到清单补一行。 */
 		void RegisterBloomEffect();
 	}
 }

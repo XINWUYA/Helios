@@ -3124,7 +3124,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		/* 全部组件：由 ComponentRegistry 驱动，本类不认识任何具体组件类型。
-		 * 新增组件只需在注册表补一段，这里零改动。
+		 * 新增组件照 Builtin/ 建注册文件，这里零改动。
 		 * 例外只有一处：已在面板头部就地编辑的组件（Name）不再单独成卡。 */
 		for (const ComponentDesc& desc : ComponentRegistry::Instance().All())
 		{
