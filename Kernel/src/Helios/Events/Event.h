@@ -9,7 +9,7 @@ namespace Helios
 	enum class EventType
 	{
 		None = 0,
-		WindowClose, WindowResize, WindowFocus, WindowLostFocus, WindowMoved, WindowIconify, ContentScaleChanged,  // Windows Related
+		WindowClose, WindowResize, WindowFocus, WindowLostFocus, WindowMoved, WindowIconify, ContentScaleChanged, WindowFileDrop,  // Windows Related
 		AppTick, AppUpdate, AppRender,  // Application Related
 		KeyPressed, KeyReleased, KeyTyped,  // Keyboard Related
 		MouseButtonPressed, MouseButtonReleased, MouseMoved, MouseScrolled  // Mouse Related

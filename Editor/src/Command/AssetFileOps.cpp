@@ -79,9 +79,10 @@ namespace Helios
 			/* 着色器：.glsl 是源，.metal 是同一次编译的产物（落在 Assets/Cache/Shaders 下）——
 			 * 两样都是"一个着色器"，筛 Shaders 时一起出来。 */
 			{ ".GLSL", AssetFileKind::Shader }, { ".METAL", AssetFileKind::Shader },
-			/* 模型：引擎自己只导 .obj（tinyobjloader），.mesh 是它旁边那份二进制网格缓存；
-			 * .fbx / .dae / .stl 是随模型一起带进来的交换格式 —— 都算"这个模型的文件"。 */
+			/* 模型：支持的交换格式是 .obj / .fbx / .gltf / .glb / .dae / .stl（内置解析 + assimp），
+			 * .mesh 是它旁边那份二进制网格缓存 —— 都算"这个模型的文件"。 */
 			{ ".OBJ", AssetFileKind::Model }, { ".MESH", AssetFileKind::Model }, { ".FBX", AssetFileKind::Model },
+			{ ".GLTF", AssetFileKind::Model }, { ".GLB", AssetFileKind::Model },
 			{ ".DAE", AssetFileKind::Model }, { ".STL", AssetFileKind::Model },
 			/* 材质资产：.mtl 既是独立单条目材质资产，也是模型伴生的槽表（同一份 schema） */
 			{ ".MTL", AssetFileKind::Material },

@@ -84,6 +84,11 @@ namespace Helios
 		 * 同样由装配层接线，转发给层级面板（属性面板与层级树同属一个面板实现）。 */
 		void SetAssetSelection(const std::vector<AssetSelectionEntry>& selection);
 
+		/* 模型编辑器入口（跨面板能力）：属性面板的「Model Editor」卡点击 → 在模型编辑器里打开该模型。
+		 * 同样由装配层接线（面板不查 Layer）。 */
+		using ModelEditorFunc = std::function<void(const std::string&)>;
+		void SetModelEditorFunc(ModelEditorFunc func);
+
 	private:
 		/* 切换到指定场景并重置一切与「旧场景内容」绑定的状态。
 		 * 新建 / 打开 / 拖拽导入都必须经过这里，否则容易漏掉其中一项。 */
@@ -110,8 +115,15 @@ namespace Helios
 		bool OnMouseScrolled(class MouseScrolledEvent* event);
 		/* 切换运行模式 */
 		void OnPlayModeChanged();
-		/* 响应拖拽文件到主窗口 */
+		/* 响应拖拽文件到主窗口（资源浏览器内部拖拽） */
 		void OnDragItemToScene(const std::filesystem::path& path);
+		/* 响应系统文件拖入（Finder 把文件拖到窗口上）：落点在场景视口内才算「拖进场景」 */
+		bool OnFileDrop(class WindowFileDropEvent* event);
+		/* 拖入的模型文件进场景：.obj 先收进资产目录并转成 .mesh + .mtl（已在项目里就原地转换），
+		 * .mesh 直接收录引用；随后建一个引用它的实体。返回是否成功处理了这个文件。 */
+		bool ImportModelFile(const std::filesystem::path& path);
+		/* 建一个挂指定 .mesh 的模型实体（导入 / 拖入共用）：加载失败返回空句柄 */
+		Entity CreateModelEntity(const std::string& absolute_mesh_path);
 
 		/* 显示主场景视口 */
 		void ShowSceneViewportUI();

@@ -46,6 +46,10 @@ namespace Helios
 		 * 由上层接线注入（装配层 → SceneEditorLayer → 这里），面板不查 Layer。 */
 		using AssetRevealFunc = std::function<void(const std::string&)>;
 		void SetAssetRevealFunc(AssetRevealFunc func) { m_AssetRevealFunc = std::move(func); }
+		/* 模型编辑器入口（跨面板能力）：Model 卡的「Model Editor」按钮点击 → 打开该模型。
+		 * 同样由上层接线注入（装配层 → SceneEditorLayer → 这里），未注入时点击无动作。 */
+		using ModelEditorFunc = std::function<void(const std::string&)>;
+		void SetModelEditorFunc(ModelEditorFunc func) { m_ModelEditorFunc = std::move(func); }
 		/* 绘制相关UI */
 		void OnImGuiRender();
 		/* 选中实体 */
@@ -107,6 +111,14 @@ namespace Helios
 		/* Model 的材质卡：每槽一张，排在 Model 组件卡之后（卡片背景走绘制通道、通道不可嵌套，
 		 * "卡中卡"画不出来 —— 所以材质详情不能画在组件卡里，只能同级平铺）。 */
 		void DrawModelMaterialCards(Entity entity, ModelComponent& component);
+		/* Model 编辑器的入口卡：模型是文件资产时给一个「Open in Model Editor」按钮
+		 * （内建模型没有资产文件，不出现），平铺在 Model 组件卡之后、材质卡之前 */
+		void DrawModelEditorCard(const ModelComponent& component);
+		/* 「Model Editor」入口卡的本体（实体属性面板与资源属性面板共用） */
+		void DrawModelEditorEntry(const char* id, const std::string& absolute_path);
+		/* 资源属性面板的模型入口卡：选中的是能打开的模型文件时给同一个按钮
+		 * （.mesh / .obj 才支持，平铺在资源详情卡之后 —— 与 probe 图卡 / 材质卡同路数） */
+		void DrawAssetModelEditorCard(const AssetSelectionEntry& entry);
 		/* 材质卡主体：当前材质的属性行（Shader + 参数，可就地编辑 → 自动实例化） */
 		bool DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index);
 		/* Camera 的预览卡：被选中相机视野的实时画面（编辑器侧工具预览相机渲染，
@@ -251,6 +263,8 @@ namespace Helios
 		CommandStack* m_pCommandStack{ nullptr };
 		/* 资源定位（材质卡的贴图点击）；由上层注入，未注入时点击无动作 */
 		AssetRevealFunc m_AssetRevealFunc;
+		/* 模型编辑器入口（Model 卡的按钮）；由上层注入，未注入时点击无动作 */
+		ModelEditorFunc m_ModelEditorFunc;
 		/* 相机预览：编辑器侧工具预览相机（懒创建 —— 没预览过相机的会话不付这份成本） */
 		UniquePtr<CameraPreview> m_pCameraPreview{ nullptr };
 		/* 预览相机已登记进场景（正在渲染预览画面） */

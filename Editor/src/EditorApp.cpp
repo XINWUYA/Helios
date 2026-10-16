@@ -40,6 +40,12 @@ namespace Helios
 			main_layer->RevealAsset(relative_path);
 		});
 
+		/* 属性面板的「Model Editor」入口：点了就在模型编辑器里打开该模型（同一条接线思路） */
+		scene_layer->SetModelEditorFunc([main_layer](const std::string& path)
+		{
+			main_layer->OpenModel(path);
+		});
+
 		/* 反方向的同一条思路：资源浏览器选中资源 → 属性面板显示它的详细内容。
 		 * 选中项由浏览器在帧末发布（含"同一项被再次点选"），点实体即切回组件视图。 */
 		main_layer->SetAssetSelectionSink(EditorResourceBrowser::AssetSelectionSink{

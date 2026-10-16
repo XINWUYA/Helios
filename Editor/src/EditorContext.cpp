@@ -213,4 +213,10 @@ namespace Helios
 		if (auto* layer = GetModelLayer())
 			layer->ImportModel();
 	}
+
+	void EditorContext::OpenModel(const std::string& path)
+	{
+		if (auto* layer = GetModelLayer())
+			layer->OpenModel(path);
+	}
 }

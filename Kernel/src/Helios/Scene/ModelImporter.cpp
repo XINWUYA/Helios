@@ -1,229 +1,1191 @@
 ﻿#include "Pch.h"
 #include "ModelImporter.h"
 #include <tiny_obj_loader.h>
-#include <tinyxml2.h>
 
-#include "SceneCommon.h"
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
+#include <assimp/material.h>
+
 #include "Helios/Common/Utils.h"
+#include "Helios/Core/AssetManager.h"
+#include "Helios/Scene/Material.h"
+#include "Helios/VirtualDevice/DeviceBuffer.h"
+#include "SceneCommon.h"
+
+/* 贴图通道拆分要写 PNG（打包金属粗糙度的拆分 / 未压缩内嵌贴图的落盘）：
+ * stb_image 的实现已在 OpenGLTexture.cpp，这里只补 image_write 的实现（全工程唯一一份）。 */
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image.h>
+#include <stb_image_write.h>
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <vector>
 
 namespace Helios
 {
-	/* 导入Obj模型，从模型路径生成对应的.mesh和.mtl文件 */
-	void ImportObj(const std::string& filepath)
+	namespace
 	{
-		if (filepath.empty())
+		/* 顶点契约（与内置几何、G Buffer 着色器一致）：位置 f3 / 法线 f3 / 颜色 f4 / UV f3 / 切线 f3。
+		 * 元素按这个顺序声明，location 就是 0..4；stride 按 float 数记（16）。 */
+		constexpr size_t kVertexElementCount = 5;
+		constexpr const char* kVertexElementNames[kVertexElementCount] = {
+			"a_Position", "a_Normal", "a_Color", "a_TexCoord", "a_Tangent"
+		};
+		constexpr BufferDataType kVertexElementTypes[kVertexElementCount] = {
+			BufferDataType::Float3, BufferDataType::Float3, BufferDataType::Float4,
+			BufferDataType::Float3, BufferDataType::Float3
+		};
+		constexpr uint32_t kVertexStride = 16; /* 每个顶点的 float 数 */
+
+		/* 新材质用的默认着色器（与模型编辑器导入同一份） */
+		constexpr const char* kDefaultMaterialShader = "Shaders/DeferredShaders/GBufferMaterial.glsl";
+
+		/* 一个 Obj shape / assimp mesh 的转换结果：对应一个 MeshSegment */
+		struct ShapeImportResult
 		{
-			CORE_LOG_ERROR("Model filepath is empty.");
-		}
+			std::string Name;
+			std::vector<float> VertexData;   /* kVertexStride 个 float 一个顶点 */
+			std::vector<uint32_t> Indices;
+			glm::vec3 AabbMin{ 0.0f };
+			glm::vec3 AabbMax{ 0.0f };
+			int MaterialIndex{ -1 };
+		};
 
-		const size_t pos = filepath.find_last_of("/\\");
-		const std::string basedir = pos != std::string::npos ? filepath.substr(0, pos + 1) : ""; /* 模型所在路径 */
-		const std::string basename = filepath.substr(pos + 1); /* 模型名 */
-
-		tinyobj::attrib_t in_attribs; /* 包含所有的vertex、normal、texcoords */
-		std::vector<tinyobj::shape_t> in_shapes; /* 包含每个shape的数据、indices、faces、material_idx */
-		std::vector<tinyobj::material_t> in_materials; /* textures */
-
-		/* 加载模型数据 */
-		std::string warn, err;
-		bool ret = tinyobj::LoadObj(&in_attribs, &in_shapes, &in_materials, &warn, &err, filepath.c_str(), basedir.c_str());
-
-		if (!warn.empty())
-			CORE_LOG_WARN("Load Obj Warning: {}.", warn);
-
-		if (!err.empty())
-			CORE_LOG_ERROR("Load Obj Error: {}.", err);
-
-#if HELIOS_DEBUG
-		/* 打印模型信息 */
-		CORE_LOG_DEBUG("Loading Obj: {}", filepath);
-		CORE_LOG_DEBUG("Vertices  : {}", in_attribs.vertices.size() / 3);
-		CORE_LOG_DEBUG("Normals   : {}", in_attribs.normals.size() / 3);
-		CORE_LOG_DEBUG("Texcoords : {}", in_attribs.texcoords.size() / 2);
-		CORE_LOG_DEBUG("Shapes    : {}", in_shapes.size());
-		CORE_LOG_DEBUG("Materials : {}", in_materials.size());
-#endif
-
-		/* 1. 导出模型对象信息到.mesh文件 */
+		/* 一张要收进目标目录的贴图：外部文件复制过来；内嵌的（fbx / glb）字节直接写成文件 */
+		struct ImportedTexture
 		{
-			std::ofstream out_mesh_file(filepath + ".mesh", std::ios::out | std::ios::binary);
-			size_t shape_count = in_shapes.size();
-			out_mesh_file.write((char*)&(shape_count), sizeof(size_t)); /* shape数量 */
+			std::string SourcePath;              /* 外部贴图的绝对源路径；内嵌为空 */
+			std::string DestinationRelative;     /* 目标目录下的相对落点 */
+			std::vector<unsigned char> Embedded; /* 内嵌贴图的文件字节（PNG / JPG / …） */
+		};
 
-			for (size_t shape_idx = 0; shape_idx < in_shapes.size(); ++shape_idx)
+		/* 一条材质槽：贴图按引擎参数名绑好（值 = ImportedTexture 下标） */
+		struct ImportedMaterial
+		{
+			std::string SlotName;
+			std::vector<std::pair<std::string, size_t>> Textures;
+		};
+
+		/* 一次导入的中间结果：各格式解析器填它，收尾步骤（收文件 / 写 .mesh / .mtl）共用 */
+		struct ImportedModel
+		{
+			std::vector<ShapeImportResult> Shapes;
+			std::vector<ImportedMaterial> Materials;
+			std::vector<ImportedTexture> Textures;
+		};
+
+		constexpr size_t kInvalidTextureIndex = static_cast<size_t>(-1);
+
+		/* UTF-8 路径的材质读取器：tinyobj 默认自己 fopen，中文路径在 Windows 上会失败；
+		 * 这里改为自己开文件流（与模型编辑器的读取器同一套做法）。 */
+		class Utf8MaterialReader final : public tinyobj::MaterialReader
+		{
+		public:
+			explicit Utf8MaterialReader(std::filesystem::path base_directory)
+				: m_BaseDirectory(std::move(base_directory))
 			{
-				/* 构建VertexData */
-				std::vector<float> data;
+			}
 
-				/* 记录AABB信息 */
-				glm::vec3 aabb_min = glm::vec3(std::numeric_limits<float>::max());
-				glm::vec3 aabb_max = glm::vec3(-std::numeric_limits<float>::max());
-
-				const auto& shape_data = in_shapes[shape_idx];
-				const uint32_t face_count = shape_data.mesh.indices.size() / 3;
-				for (size_t face_idx = 0; face_idx < face_count; ++face_idx)
+			bool operator()(const std::string& material_name,
+				std::vector<tinyobj::material_t>* materials,
+				std::map<std::string, int>* material_map,
+				std::string* warning,
+				std::string* error) override
+			{
+				std::filesystem::path relative_path;
+				if (!TryPathFromUtf8(material_name, relative_path))
 				{
-					/* 遍历三角形片3个顶点索引 */
-					auto index0 = shape_data.mesh.indices[face_idx * 3 + 0];
-					auto index1 = shape_data.mesh.indices[face_idx * 3 + 1];
-					auto index2 = shape_data.mesh.indices[face_idx * 3 + 2];
-
-					/* �ռ�3���������� */
-					ASSERT(index0.vertex_index >= 0 && index1.vertex_index >= 0 && index2.vertex_index >= 0);
-					float vertex[3][3];
-					for (int i = 0; i < 3; ++i)
-					{
-						/* x->y->z值，依次位取 */
-						vertex[0][i] = in_attribs.vertices[index0.vertex_index * 3 + i];
-						vertex[1][i] = in_attribs.vertices[index1.vertex_index * 3 + i];
-						vertex[2][i] = in_attribs.vertices[index2.vertex_index * 3 + i];
-
-						/* 记录AABB */
-						aabb_min[i] = std::min(vertex[0][i], aabb_min[i]);
-						aabb_min[i] = std::min(vertex[1][i], aabb_min[i]);
-						aabb_min[i] = std::min(vertex[2][i], aabb_min[i]);
-						aabb_max[i] = std::max(vertex[0][i], aabb_max[i]);
-						aabb_max[i] = std::max(vertex[1][i], aabb_max[i]);
-						aabb_max[i] = std::max(vertex[2][i], aabb_max[i]);
-					}
-
-					/* 收集3个顶点法线 */
-					float normal[3][3];
-					bool invalid_normal = false;
-					if (!in_attribs.normals.empty())
-					{
-						if (index0.normal_index < 0 || index1.normal_index < 0 || index2.normal_index < 0)
-						{
-							invalid_normal = true;
-						}
-						else
-						{
-							for (int i = 0; i < 3; ++i)
-							{
-								/* x->y->z值，依次位取 */
-								normal[0][i] = in_attribs.normals[index0.normal_index * 3 + i];
-								normal[1][i] = in_attribs.normals[index1.normal_index * 3 + i];
-								normal[2][i] = in_attribs.normals[index2.normal_index * 3 + i];
-							}
-						}
-					}
-
-					if (invalid_normal)
-					{
-						/* todo: 生成法线 */
-					}
-
-					/* 收集3个顶点颜色 */
-					float color[3][3];
-					memset(color, 1.0f, 9 * sizeof(float)); /* 默认为白色 */
-					if (!in_attribs.colors.empty())
-					{
-						for (int i = 0; i < 3; ++i)
-						{
-							/* x->y->z值，依次位取 */
-							color[0][i] = in_attribs.colors[index0.vertex_index * 3 + i];
-							color[1][i] = in_attribs.colors[index1.vertex_index * 3 + i];
-							color[2][i] = in_attribs.colors[index2.vertex_index * 3 + i];
-						}
-					}
-
-					/* 收集3个顶点uv */
-					float uv[3][2];
-					memset(uv, 0.0f, 6 * sizeof(float));
-					if (!in_attribs.texcoords.empty())
-					{
-						if (index0.texcoord_index >= 0 && index1.texcoord_index >= 0 && index2.texcoord_index >= 0)
-						{
-							uv[0][0] = in_attribs.texcoords[index0.texcoord_index * 2];
-							uv[0][1] = 1.0f - in_attribs.texcoords[index0.texcoord_index * 2 + 1];
-							uv[1][0] = in_attribs.texcoords[index1.texcoord_index * 2];
-							uv[1][1] = 1.0f - in_attribs.texcoords[index1.texcoord_index * 2 + 1];
-							uv[2][0] = in_attribs.texcoords[index2.texcoord_index * 2];
-							uv[2][1] = 1.0f - in_attribs.texcoords[index2.texcoord_index * 2 + 1];
-						}
-					}
-
-					/* Combine */
-					for (int v = 0; v < 3; ++v)
-					{
-						data.emplace_back(vertex[v][0]);
-						data.emplace_back(vertex[v][1]);
-						data.emplace_back(vertex[v][2]);
-						data.emplace_back(normal[v][0]);
-						data.emplace_back(normal[v][1]);
-						data.emplace_back(normal[v][2]);
-						data.emplace_back(color[v][0]);
-						data.emplace_back(color[v][1]);
-						data.emplace_back(color[v][2]);
-						data.emplace_back(uv[v][0]);
-						data.emplace_back(uv[v][1]);
-					}
+					if (warning != nullptr)
+						*warning += "Material path is not valid UTF-8: " + material_name + "\n";
+					return false;
 				}
-				size_t name_size = shape_data.name.size();
-				out_mesh_file.write((char*)&name_size, sizeof(size_t));
-				out_mesh_file.write(shape_data.name.c_str(), name_size);
 
-				size_t vertex_data_size = data.size();
-				out_mesh_file.write((char*)&vertex_data_size, sizeof(size_t));
-				out_mesh_file.write((char*)(data.data()), sizeof(float) * data.size());
+				const std::filesystem::path material_path = relative_path.is_absolute()
+					? relative_path : m_BaseDirectory / relative_path;
+				std::ifstream material_stream(material_path, std::ios::in | std::ios::binary);
+				if (!material_stream)
+				{
+					if (warning != nullptr)
+						*warning += "Material file not found: " + material_name + "\n";
+					return false;
+				}
 
-				int shape_material_id = shape_data.mesh.material_ids[0];
-				if (shape_material_id < 0 || shape_material_id >= in_materials.size())
-					shape_material_id = in_materials.size() - 1; /* 使用默认材质 */
-				out_mesh_file.write((char*)&shape_material_id, sizeof(int));
-
-				out_mesh_file.write((char*)&aabb_min, sizeof(glm::vec3));
-				out_mesh_file.write((char*)&aabb_max, sizeof(glm::vec3));
+				tinyobj::LoadMtl(material_map, materials, &material_stream, warning, error);
+				return true;
 			}
 
-			/* 关闭Mesh文件 */
-			out_mesh_file.close();		}
+		private:
+			std::filesystem::path m_BaseDirectory;
+		};
 
-		/* 2. 导出材质到.mtl文件 */
+		/* 导入中的一个顶点：按 (顶点, 法线, UV) 三位索引去重，切线逐面累加 */
+		struct ImportedVertex
 		{
-			auto* out_mtl_file = new tinyxml2::XMLDocument();
-			out_mtl_file->InsertEndChild(out_mtl_file->NewDeclaration());
-		tinyxml2::XMLElement* mtl_root = out_mtl_file->NewElement("Materials");
-		mtl_root->SetAttribute("Count", static_cast<unsigned int>(in_materials.size()));
-		out_mtl_file->InsertEndChild(mtl_root);
+			glm::vec3 Position{ 0.0f };
+			glm::vec3 Normal{ 0.0f, 0.0f, 1.0f };
+			glm::vec3 Color{ 1.0f };
+			glm::vec2 TexCoord{ 0.0f };
+			glm::vec3 TangentAccum{ 0.0f };
+		};
 
-			for (size_t material_idx = 0; material_idx < in_materials.size(); ++material_idx)
+		/* 面切线（两条边与 UV 的差分；UV 退化的面给固定朝向，保证 TBN 可建） */
+		glm::vec3 ComputeFaceTangent(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
+			const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2)
+		{
+			const glm::vec3 edge01 = p1 - p0;
+			const glm::vec3 edge02 = p2 - p0;
+			const glm::vec2 uv01 = uv1 - uv0;
+			const glm::vec2 uv02 = uv2 - uv0;
+			const float determinant = uv01.x * uv02.y - uv01.y * uv02.x;
+			if (std::fabs(determinant) <= 1.0e-12f)
+				return glm::vec3(1.0f, 0.0f, 0.0f);
+			return (1.0f / determinant) * (uv02.y * edge01 - uv01.y * edge02);
+		}
+
+		/* 顶点收尾：切线去掉沿法线的分量（退化换一条不平行方向）、再按 16 float 契约打包
+		 * （位置 f3 / 法线 f3 / 颜色 f4[w 补 1] / UV f3[w 补 0] / 切线 f3）。 */
+		void FinalizeVertices(const std::vector<ImportedVertex>& vertices, std::vector<float>& out_vertex_data)
+		{
+			out_vertex_data.reserve(vertices.size() * kVertexStride);
+			for (const ImportedVertex& vertex : vertices)
 			{
-				const auto& material_data = in_materials[material_idx];
+				const float normal_length = glm::length(vertex.Normal);
+				const glm::vec3 normal = (normal_length > 1.0e-6f)
+					? vertex.Normal / normal_length : glm::vec3(0.0f, 0.0f, 1.0f);
 
-				tinyxml2::XMLElement* mtl_inst = mtl_root->InsertNewChildElement("Material");
-				mtl_inst->SetAttribute("ID", static_cast<unsigned int>(material_idx));
-				mtl_inst->SetAttribute("Name", material_data.name.c_str());
-				mtl_inst->SetAttribute("Shader", ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl").c_str()); /* 首次加载使用默认材质 */
+				glm::vec3 tangent = vertex.TangentAccum - normal * glm::dot(normal, vertex.TangentAccum);
+				if (glm::dot(tangent, tangent) < 1.0e-12f)
+				{
+					const glm::vec3 fallback = (std::fabs(normal.x) < 0.9f)
+						? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 0.0f, 1.0f);
+					tangent = fallback - normal * glm::dot(normal, fallback);
+				}
+				tangent = glm::normalize(tangent);
 
-				if (!material_data.diffuse_texname.empty())
-					mtl_inst->SetAttribute("AlbedoTex", (basedir + material_data.diffuse_texname).c_str());
+				out_vertex_data.emplace_back(vertex.Position.x);
+				out_vertex_data.emplace_back(vertex.Position.y);
+				out_vertex_data.emplace_back(vertex.Position.z);
+				out_vertex_data.emplace_back(normal.x);
+				out_vertex_data.emplace_back(normal.y);
+				out_vertex_data.emplace_back(normal.z);
+				out_vertex_data.emplace_back(vertex.Color.r);
+				out_vertex_data.emplace_back(vertex.Color.g);
+				out_vertex_data.emplace_back(vertex.Color.b);
+				out_vertex_data.emplace_back(1.0f);
+				out_vertex_data.emplace_back(vertex.TexCoord.x);
+				out_vertex_data.emplace_back(vertex.TexCoord.y);
+				out_vertex_data.emplace_back(0.0f);
+				out_vertex_data.emplace_back(tangent.x);
+				out_vertex_data.emplace_back(tangent.y);
+				out_vertex_data.emplace_back(tangent.z);
+			}
+		}
 
-				if (!material_data.specular_texname.empty())
-					mtl_inst->SetAttribute("SpecularTex", (basedir + material_data.specular_texname).c_str());
+		/* 一个 shape 的三角形转成顶点数组 + 索引：UV 翻转 V（引擎纹理原点在左上），
+		 * 颜色缺省白，法线缺省 +Z；切线由 UV 差分逐面累加、最后去掉沿法线的分量。 */
+		bool ConvertShape(const tinyobj::attrib_t& attribs, const tinyobj::shape_t& shape,
+			std::vector<float>& out_vertex_data, std::vector<uint32_t>& out_indices,
+			glm::vec3& out_aabb_min, glm::vec3& out_aabb_max)
+		{
+			out_vertex_data.clear();
+			out_indices.clear();
+			out_aabb_min = glm::vec3(std::numeric_limits<float>::max());
+			out_aabb_max = glm::vec3(-std::numeric_limits<float>::max());
 
-				if (!material_data.bump_texname.empty())
-					mtl_inst->SetAttribute("NormalTex", (basedir + material_data.bump_texname).c_str());
+			std::map<std::array<int, 3>, uint32_t> vertex_lookup;
+			std::vector<ImportedVertex> vertices;
 
-				if (!material_data.roughness_texname.empty())
-					mtl_inst->SetAttribute("RoughnessTex", (basedir + material_data.roughness_texname).c_str());
+			const auto& indices = shape.mesh.indices;
+			const size_t face_count = indices.size() / 3;
+			for (size_t face = 0; face < face_count; ++face)
+			{
+				const tinyobj::index_t corner_indices[3] = {
+					indices[face * 3 + 0], indices[face * 3 + 1], indices[face * 3 + 2] };
+				if (corner_indices[0].vertex_index < 0 || corner_indices[1].vertex_index < 0
+					|| corner_indices[2].vertex_index < 0)
+					continue; /* 缺顶点索引的无效面（obj 允许省略），跳过 */
 
-				if (!material_data.metallic_texname.empty())
-					mtl_inst->SetAttribute("MetallicTex", (basedir + material_data.metallic_texname).c_str());
+				/* 三个角的位置与 UV：AABB 与面切线都用它们 */
+				glm::vec3 positions[3];
+				glm::vec2 texcoords[3];
+				for (int corner = 0; corner < 3; ++corner)
+				{
+					const int vertex_index = corner_indices[corner].vertex_index;
+					positions[corner] = glm::vec3(
+						attribs.vertices[vertex_index * 3 + 0],
+						attribs.vertices[vertex_index * 3 + 1],
+						attribs.vertices[vertex_index * 3 + 2]);
 
-				if (!material_data.emissive_texname.empty())
-					mtl_inst->SetAttribute("EmissiveTex", (basedir + material_data.emissive_texname).c_str());
+					const int texcoord_index = corner_indices[corner].texcoord_index;
+					texcoords[corner] = (texcoord_index >= 0 && !attribs.texcoords.empty())
+						? glm::vec2(attribs.texcoords[texcoord_index * 2 + 0],
+							1.0f - attribs.texcoords[texcoord_index * 2 + 1])
+						: glm::vec2(0.0f);
 
-				glm::vec3 diffuse(material_data.diffuse[0], material_data.diffuse[1], material_data.diffuse[2]);
-				mtl_inst->SetAttribute("Diffuse", ToString(diffuse).c_str());
-				glm::vec3 specular(material_data.specular[0], material_data.specular[1], material_data.specular[2]);
-				mtl_inst->SetAttribute("Specular", ToString(specular).c_str());
+					out_aabb_min = glm::min(out_aabb_min, positions[corner]);
+					out_aabb_max = glm::max(out_aabb_max, positions[corner]);
+				}
+
+				/* 面切线（两条边与 UV 的差分；UV 退化的面给固定朝向，保证 TBN 可建） */
+				const glm::vec3 face_tangent = ComputeFaceTangent(
+					positions[0], positions[1], positions[2], texcoords[0], texcoords[1], texcoords[2]);
+
+				for (int corner = 0; corner < 3; ++corner)
+				{
+					const tinyobj::index_t& index = corner_indices[corner];
+					const std::array<int, 3> key = {
+						index.vertex_index, index.normal_index, index.texcoord_index };
+
+					auto iter = vertex_lookup.find(key);
+					if (iter == vertex_lookup.end())
+					{
+						ImportedVertex vertex;
+						vertex.Position = positions[corner];
+						vertex.TexCoord = texcoords[corner];
+
+						if (index.normal_index >= 0 && !attribs.normals.empty())
+						{
+							vertex.Normal = glm::vec3(
+								attribs.normals[index.normal_index * 3 + 0],
+								attribs.normals[index.normal_index * 3 + 1],
+								attribs.normals[index.normal_index * 3 + 2]);
+						}
+
+						if (!attribs.colors.empty())
+						{
+							vertex.Color = glm::vec3(
+								attribs.colors[index.vertex_index * 3 + 0],
+								attribs.colors[index.vertex_index * 3 + 1],
+								attribs.colors[index.vertex_index * 3 + 2]);
+						}
+
+						iter = vertex_lookup.emplace(key, static_cast<uint32_t>(vertices.size())).first;
+						vertices.emplace_back(vertex);
+					}
+
+					vertices[iter->second].TangentAccum += face_tangent;
+					out_indices.emplace_back(iter->second);
+				}
 			}
 
-			/* 保存材质文件 */
-			auto out_mtl_path = filepath + ".mtl";
-			out_mtl_file->SaveFile(out_mtl_path.c_str());
-			delete out_mtl_file;
+			if (vertices.empty())
+				return false;
+
+			FinalizeVertices(vertices, out_vertex_data);
+			return true;
 		}
+
+		/* 写出 .mesh：布局与 Model::Create 的读取一一对应 */
+		bool WriteMeshFile(const std::filesystem::path& mesh_path, const std::vector<ShapeImportResult>& shapes)
+		{
+			std::ofstream mesh_file(mesh_path, std::ios::out | std::ios::binary);
+			if (!mesh_file)
+			{
+				CORE_LOG_ERROR("Failed to open mesh file for writing: {}.", PathToUtf8(mesh_path));
+				return false;
+			}
+
+			const size_t shape_count = shapes.size();
+			mesh_file.write((char*)&shape_count, sizeof(size_t));
+
+			for (const ShapeImportResult& shape : shapes)
+			{
+				const size_t name_size = shape.Name.size();
+				mesh_file.write((char*)&name_size, sizeof(size_t));
+				mesh_file.write(shape.Name.c_str(), static_cast<std::streamsize>(name_size));
+
+				const uint32_t vertex_count = static_cast<uint32_t>(shape.VertexData.size() / kVertexStride);
+				mesh_file.write((char*)&vertex_count, sizeof(uint32_t));
+
+				const size_t index_count = shape.Indices.size();
+				mesh_file.write((char*)&index_count, sizeof(size_t));
+				mesh_file.write((char*)shape.Indices.data(),
+					static_cast<std::streamsize>(index_count * sizeof(uint32_t)));
+
+				const size_t vertex_buffer_count = 1;
+				mesh_file.write((char*)&vertex_buffer_count, sizeof(size_t));
+				mesh_file.write((char*)&kVertexStride, sizeof(uint32_t));
+				mesh_file.write((char*)shape.VertexData.data(),
+					static_cast<std::streamsize>(shape.VertexData.size() * sizeof(float)));
+
+				const size_t element_count = kVertexElementCount;
+				mesh_file.write((char*)&element_count, sizeof(size_t));
+				size_t element_offset = 0; /* 元素在 stride 内的字节偏移（读取端会按顺序重算，这里写实际值） */
+				for (size_t element_index = 0; element_index < kVertexElementCount; ++element_index)
+				{
+					const char* element_name = kVertexElementNames[element_index];
+					const size_t element_name_size = std::strlen(element_name);
+					mesh_file.write((char*)&element_name_size, sizeof(size_t));
+					mesh_file.write(element_name, static_cast<std::streamsize>(element_name_size));
+
+					const uint8_t element_type = static_cast<uint8_t>(kVertexElementTypes[element_index]);
+					mesh_file.write((char*)&element_type, sizeof(uint8_t));
+					mesh_file.write((char*)&element_offset, sizeof(size_t));
+					const bool normalized = false;
+					mesh_file.write((char*)&normalized, sizeof(bool));
+
+					element_offset += BufferElement(element_name, kVertexElementTypes[element_index]).Size;
+				}
+
+				const int material_index = shape.MaterialIndex;
+				mesh_file.write((char*)&material_index, sizeof(int));
+				mesh_file.write((char*)&shape.AabbMin, sizeof(glm::vec3));
+				mesh_file.write((char*)&shape.AabbMax, sizeof(glm::vec3));
+			}
+
+			mesh_file.close();
+			return true;
+		}
+
+		/* 贴图引用解析成源文件路径（相对路径按模型所在目录解释） */
+		bool ResolveSourceTexture(const std::filesystem::path& source_dir,
+			const std::string& texture_name, std::filesystem::path& out_path)
+		{
+			out_path.clear();
+			if (texture_name.empty())
+				return false;
+
+			std::filesystem::path texture_path;
+			if (!TryPathFromUtf8(texture_name, texture_path))
+				return false;
+
+			out_path = texture_path.is_absolute() ? texture_path : source_dir / texture_path;
+			return true;
+		}
+
+		/* 贴图在目标目录里的相对落点：复制时保持相对子目录结构；源目录之外的引用退化为文件名 */
+		std::filesystem::path TextureDestination(const std::filesystem::path& source_dir,
+			const std::string& texture_name)
+		{
+			std::filesystem::path source_path;
+			if (!ResolveSourceTexture(source_dir, texture_name, source_path))
+				return {};
+
+			std::filesystem::path relative = source_path.lexically_relative(source_dir);
+			if (relative.empty() || *relative.begin() == "..")
+				relative = source_path.filename();
+			return relative;
+		}
+
+		/* 模型引用的贴图名（去重后返回；.mtl 里列了但没用上的字段也一并收，
+		 * 保证收进项目的目录是自包含的） */
+		std::vector<std::string> CollectTextureNames(const std::vector<tinyobj::material_t>& materials)
+		{
+			std::vector<std::string> names;
+			const auto append = [&names](const std::string& name)
+			{
+				if (name.empty())
+					return;
+				for (const std::string& existing : names)
+				{
+					if (existing == name)
+						return;
+				}
+				names.emplace_back(name);
+			};
+
+			for (const tinyobj::material_t& material : materials)
+			{
+				append(material.ambient_texname);
+				append(material.diffuse_texname);
+				append(material.specular_texname);
+				append(material.normal_texname);
+				append(material.bump_texname);
+				append(material.displacement_texname);
+				append(material.roughness_texname);
+				append(material.metallic_texname);
+				append(material.emissive_texname);
+			}
+			return names;
+		}
+
+		/* 复制模型文件本体（已经就在目标目录里则跳过；目录先建出来） */
+		bool CopyModelFile(const std::filesystem::path& source_path, const std::filesystem::path& dest_dir)
+		{
+			std::error_code error;
+			std::filesystem::create_directories(dest_dir, error);
+			if (error)
+			{
+				CORE_LOG_ERROR("Failed to create model folder: {}.", PathToUtf8(dest_dir));
+				return false;
+			}
+
+			std::error_code equivalent_error;
+			if (std::filesystem::equivalent(source_path.parent_path(), dest_dir, equivalent_error))
+				return true;
+
+			std::filesystem::copy_file(source_path, dest_dir / source_path.filename(),
+				std::filesystem::copy_options::overwrite_existing, error);
+			if (error)
+			{
+				CORE_LOG_ERROR("Failed to copy model file: {}.", PathToUtf8(source_path));
+				return false;
+			}
+			return true;
+		}
+
+		/* 登记一张外部贴图：按源路径去重（同一张图被多个材质引用只收一份）；
+		 * 源文件不在（或路径非法）返回 kInvalidTextureIndex */
+		size_t RegisterExternalTexture(ImportedModel& model, const std::filesystem::path& source_dir,
+			const std::string& texture_name)
+		{
+			std::filesystem::path source_texture;
+			if (!ResolveSourceTexture(source_dir, texture_name, source_texture))
+				return kInvalidTextureIndex;
+
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(source_texture, error))
+			{
+				CORE_LOG_WARN("Texture referenced by the model is missing: {}.", texture_name);
+				return kInvalidTextureIndex;
+			}
+
+			const std::string source_key = PathToUtf8(source_texture);
+			for (size_t index = 0; index < model.Textures.size(); ++index)
+			{
+				if (model.Textures[index].Embedded.empty() && model.Textures[index].SourcePath == source_key)
+					return index;
+			}
+
+			ImportedTexture texture;
+			texture.SourcePath = source_key;
+			texture.DestinationRelative = PathToUtf8(TextureDestination(source_dir, texture_name));
+			model.Textures.push_back(std::move(texture));
+			return model.Textures.size() - 1;
+		}
+
+		/* 登记一张内嵌贴图：按目标文件名去重，bytes 是文件字节（PNG / JPG 等） */
+		size_t RegisterEmbeddedTexture(ImportedModel& model, const std::string& destination_name,
+			std::vector<unsigned char> bytes)
+		{
+			if (bytes.empty())
+				return kInvalidTextureIndex;
+
+			for (size_t index = 0; index < model.Textures.size(); ++index)
+			{
+				if (model.Textures[index].DestinationRelative == destination_name)
+					return index;
+			}
+
+			ImportedTexture texture;
+			texture.DestinationRelative = destination_name;
+			texture.Embedded = std::move(bytes);
+			model.Textures.push_back(std::move(texture));
+			return model.Textures.size() - 1;
+		}
+
+		/* RGBA 像素编码成 PNG 字节（内嵌贴图落盘 / 打包通道拆分共用） */
+		bool EncodeRgbaToPng(const unsigned char* pixels, int width, int height, std::vector<unsigned char>& out_png)
+		{
+			out_png.clear();
+			const auto append_bytes = [](void* context, void* data, int size)
+			{
+				auto* bytes = static_cast<std::vector<unsigned char>*>(context);
+				const auto* begin = static_cast<unsigned char*>(data);
+				bytes->insert(bytes->end(), begin, begin + size);
+			};
+			return stbi_write_png_to_func(append_bytes, &out_png, width, height, 4, pixels, width * 4) != 0;
+		}
+
+		/* 贴图收进目标目录：外部文件复制（模型已在目标目录里就跳过），内嵌的字节写成文件 */
+		void MaterializeTextures(const std::filesystem::path& dest_dir, const ImportedModel& model, bool copy_external)
+		{
+			std::error_code error;
+			for (const ImportedTexture& texture : model.Textures)
+			{
+				const std::filesystem::path dest_texture = dest_dir / PathFromUtf8(texture.DestinationRelative);
+
+				if (!texture.Embedded.empty())
+				{
+					std::filesystem::create_directories(dest_texture.parent_path(), error);
+					std::ofstream texture_file(dest_texture, std::ios::binary | std::ios::trunc);
+					texture_file.write(reinterpret_cast<const char*>(texture.Embedded.data()),
+						static_cast<std::streamsize>(texture.Embedded.size()));
+					continue;
+				}
+
+				if (!copy_external || texture.SourcePath.empty())
+					continue;
+
+				std::filesystem::create_directories(dest_texture.parent_path(), error);
+				std::filesystem::copy_file(PathFromUtf8(texture.SourcePath), dest_texture,
+					std::filesystem::copy_options::overwrite_existing, error);
+				if (error)
+					CORE_LOG_WARN("Failed to copy texture: {}.", texture.SourcePath);
+			}
+		}
+
+		/* 写出伴生 .mtl（槽表）：一条材质一条，贴图引用「收进来之后」的落点
+		 * （序列化时统一转成资产相对形式）。 */
+		void WriteMaterialFile(const std::filesystem::path& mtl_path, const std::filesystem::path& dest_dir,
+			const ImportedModel& model)
+		{
+			auto material_group = CreateSharedPtr<MaterialGroup>();
+			/* 着色器按资产根解析成绝对路径：相对路径直接喂文件流是相对进程工作目录的，会读不到 */
+			auto default_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(kDefaultMaterialShader));
+
+			TextureLoadConfig load_config;
+			load_config.IsFlipV = false; /* UV 在导入时已翻转，贴图按原样上传（与既有模型资产同口径） */
+
+			for (size_t material_index = 0; material_index < model.Materials.size(); ++material_index)
+			{
+				const ImportedMaterial& material_data = model.Materials[material_index];
+				auto material = Material::Create(default_shader);
+
+				for (const auto& [param_name, texture_index] : material_data.Textures)
+				{
+					if (texture_index >= model.Textures.size())
+						continue;
+
+					const std::filesystem::path texture_path = dest_dir / PathFromUtf8(model.Textures[texture_index].DestinationRelative);
+					std::error_code error;
+					if (!std::filesystem::is_regular_file(texture_path, error))
+						continue;
+
+					auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(PathToUtf8(texture_path), load_config);
+					if (texture != nullptr)
+						material->SetTexture(param_name, texture);
+				}
+
+				material_group->EmplaceMaterial(material);
+				material_group->SetEntrySlotName(static_cast<int>(material_index), material_data.SlotName);
+			}
+
+			material_group->Serializer(PathToUtf8(mtl_path));
+		}
+
+		/* Obj 伴生材质的避让：引擎写的 .mtl 是 XML 格式，和 obj 的 mtllib 同名会互相踩。
+		 * 把 obj 风格的伴生 .mtl 收成 <名字>.obj.mtl（归档的自包含）——
+		 *   - 项目外收进来的：复制一份，并把复制版 obj 的 mtllib 指向改成新名字（源文件不动）
+		 *   - 原地转换：已存在的 obj 风格 .mtl 复制保留（不改用户的源 obj；之后 XML 会写到原位）
+		 * 目标位置已经是 XML 的（上一次的转换产物）不动，后面照常重写。 */
+		void ArchiveObjMaterials(const std::filesystem::path& source_path, const std::filesystem::path& dest_dir)
+		{
+			std::ifstream obj_stream(source_path, std::ios::in | std::ios::binary);
+			if (!obj_stream)
+				return;
+
+			/* 找 mtllib 行引用的伴生材质文件（取第一个真实存在的） */
+			std::string referenced;
+			{
+				std::string line;
+				while (std::getline(obj_stream, line))
+				{
+					const size_t token = line.find("mtllib");
+					if (token == std::string::npos || line.find_first_not_of(" \t") != token)
+						continue;
+
+					std::istringstream tokens(line.substr(token + 6));
+					std::string candidate;
+					while (tokens >> candidate)
+					{
+						std::filesystem::path resolved;
+						if (ResolveSourceTexture(source_path.parent_path(), candidate, resolved)
+							&& std::filesystem::is_regular_file(resolved))
+						{
+							referenced = candidate;
+							break;
+						}
+					}
+					if (!referenced.empty())
+						break;
+				}
+			}
+			if (referenced.empty())
+				return;
+
+			/* 引用的文件是 XML 格式就不用归档（之前转换过 / 就是引擎格式） */
+			std::filesystem::path source_mtl;
+			ResolveSourceTexture(source_path.parent_path(), referenced, source_mtl);
+			{
+				std::ifstream material_stream(source_mtl, std::ios::in | std::ios::binary);
+				std::string head;
+				std::getline(material_stream, head);
+				const size_t first = head.find_first_not_of(" \t");
+				if (first != std::string::npos && head[first] == '<')
+					return;
+			}
+
+			std::error_code error;
+			const std::string stem = PathToUtf8(source_path.stem());
+			const std::string archive_name = stem + ".obj.mtl";
+			const std::filesystem::path archive_path = dest_dir / PathFromUtf8(archive_name);
+
+			std::filesystem::path source_mtl_absolute = std::filesystem::absolute(source_mtl, error);
+			const std::filesystem::path archive_absolute = std::filesystem::absolute(archive_path, error);
+			if (source_mtl_absolute != archive_absolute)
+			{
+				std::filesystem::copy_file(source_mtl, archive_path,
+					std::filesystem::copy_options::overwrite_existing, error);
+				if (error)
+				{
+					CORE_LOG_WARN("Failed to archive obj material file: {}.", PathToUtf8(source_mtl));
+					return;
+				}
+			}
+
+			/* 项目外的把复制版 obj 的 mtllib 指向改成归档名（原地转换不动用户的源文件） */
+			std::error_code equivalent_error;
+			if (std::filesystem::equivalent(source_path.parent_path(), dest_dir, equivalent_error))
+				return;
+
+			const std::filesystem::path copied_obj = dest_dir / source_path.filename();
+			std::ifstream copied_stream(copied_obj, std::ios::in | std::ios::binary);
+			if (!copied_stream)
+				return;
+
+			std::vector<std::string> lines;
+			{
+				std::string line;
+				while (std::getline(copied_stream, line))
+				{
+					if (line.find("mtllib") == line.find_first_not_of(" \t"))
+						line = "mtllib " + archive_name;
+					lines.push_back(std::move(line));
+				}
+			}
+			copied_stream.close();
+
+			std::ofstream patched_stream(copied_obj, std::ios::out | std::ios::binary | std::ios::trunc);
+			for (const std::string& line : lines)
+			{
+				patched_stream << line << '\n';
+			}
+		}
+
+		/* 收尾：收文件（模型本体 + 贴图）→ 写 .mesh → 写 .mtl（没有材质就不写）。
+		 * preserve_obj_materials：Obj 源要走伴生材质避让（见 ArchiveObjMaterials）。
+		 * 返回生成的 .mesh 路径；失败返回空串。 */
+		std::string FinishImport(const std::filesystem::path& source_path, const std::filesystem::path& dest_dir,
+			ImportedModel& model, bool preserve_obj_materials)
+		{
+			if (!CopyModelFile(source_path, dest_dir))
+				return {};
+
+			if (preserve_obj_materials)
+				ArchiveObjMaterials(source_path, dest_dir);
+
+			std::error_code equivalent_error;
+			const bool in_place = std::filesystem::equivalent(source_path.parent_path(), dest_dir, equivalent_error);
+			MaterializeTextures(dest_dir, model, /*copy_external=*/!in_place);
+
+			const std::string stem = PathToUtf8(source_path.stem());
+			const std::filesystem::path mesh_path = dest_dir / PathFromUtf8(stem + ".mesh");
+			if (!WriteMeshFile(mesh_path, model.Shapes))
+				return {};
+
+			if (!model.Materials.empty())
+				WriteMaterialFile(dest_dir / PathFromUtf8(stem + ".mtl"), dest_dir, model);
+
+			return PathToUtf8(mesh_path);
+		}
+
+		/* 解析 Obj（tinyobjloader）：每个 shape 一段顶点数据；材质按老口径映射参数名 */
+		bool LoadObjModel(const std::filesystem::path& source_path, ImportedModel& out_model)
+		{
+			tinyobj::attrib_t in_attribs;
+			std::vector<tinyobj::shape_t> in_shapes;
+			std::vector<tinyobj::material_t> in_materials;
+			std::ifstream model_stream(source_path, std::ios::in | std::ios::binary);
+			if (!model_stream)
+			{
+				CORE_LOG_ERROR("Failed to open model file: {}.", PathToUtf8(source_path));
+				return false;
+			}
+
+			Utf8MaterialReader material_reader(source_path.parent_path());
+			std::string warn, err;
+			const bool loaded = tinyobj::LoadObj(&in_attribs, &in_shapes, &in_materials,
+				&warn, &err, &model_stream, &material_reader);
+
+			if (!warn.empty())
+				CORE_LOG_WARN("Load Obj Warning: {}.", warn);
+			if (!err.empty())
+				CORE_LOG_ERROR("Load Obj Error: {}.", err);
+			if (!loaded || in_shapes.empty())
+				return false;
+
+			/* 每个 shape 转成一段顶点数据 + 索引（空段跳过） */
+			for (const tinyobj::shape_t& shape : in_shapes)
+			{
+				ShapeImportResult result;
+				result.Name = shape.name;
+				if (!ConvertShape(in_attribs, shape, result.VertexData, result.Indices,
+					result.AabbMin, result.AabbMax))
+					continue;
+
+				const int material_index = shape.mesh.material_ids.empty() ? -1 : shape.mesh.material_ids[0];
+				result.MaterialIndex = (material_index >= 0 && material_index < static_cast<int>(in_materials.size()))
+					? material_index : -1;
+				out_model.Shapes.emplace_back(std::move(result));
+			}
+
+			if (out_model.Shapes.empty())
+			{
+				CORE_LOG_ERROR("Model has no valid faces: {}.", PathToUtf8(source_path));
+				return false;
+			}
+
+			/* 材质：字段 -> 参数名。法线优先 norm 声明，多数文件只有 map_Bump——都按法线贴图
+			 * 处理；map_Bump 不再兼作高度图（拿法线图当高度会出怪波动）。贴图按名字登记。 */
+			std::map<std::string, size_t> texture_indices;
+			for (const std::string& texture_name : CollectTextureNames(in_materials))
+				texture_indices.emplace(texture_name,
+					RegisterExternalTexture(out_model, source_path.parent_path(), texture_name));
+
+			/* 材质条目的去留：tinyobj 在 .mtl 解析不出来时会给一条没名字也没贴图的兜底材质 ——
+			 * 不落进 .mtl（与 assimp 路径同一口径），段的材质索引跟着重映射 */
+			std::vector<int> material_remap(in_materials.size(), -1);
+			for (size_t material_index = 0; material_index < in_materials.size(); ++material_index)
+			{
+				const tinyobj::material_t& material_data = in_materials[material_index];
+				ImportedMaterial material;
+				material.SlotName = material_data.name;
+
+				const auto reference = [&](const char* param_name, const std::string& texture_name)
+				{
+					if (texture_name.empty())
+						return;
+					const auto iter = texture_indices.find(texture_name);
+					if (iter != texture_indices.end() && iter->second != kInvalidTextureIndex)
+						material.Textures.emplace_back(param_name, iter->second);
+				};
+
+				reference("u_AmbientTexture", material_data.ambient_texname);
+				reference("u_AlbedoTexture", material_data.diffuse_texname);
+				reference("u_SpecularTexture", material_data.specular_texname);
+				reference("u_NormalTexture", !material_data.normal_texname.empty()
+					? material_data.normal_texname : material_data.bump_texname);
+				reference("u_DisplacementTexture", material_data.displacement_texname);
+				reference("u_RoughnessTexture", material_data.roughness_texname);
+				reference("u_MetallicTexture", material_data.metallic_texname);
+				reference("u_EmissiveTexture", material_data.emissive_texname);
+
+				if (material.SlotName.empty() && material.Textures.empty())
+					continue;
+
+				material_remap[material_index] = static_cast<int>(out_model.Materials.size());
+				out_model.Materials.push_back(std::move(material));
+			}
+
+			for (ShapeImportResult& shape : out_model.Shapes)
+			{
+				shape.MaterialIndex = (shape.MaterialIndex >= 0
+					&& shape.MaterialIndex < static_cast<int>(material_remap.size()))
+					? material_remap[shape.MaterialIndex] : -1;
+			}
+
+			return true;
+		}
+
+		/* assimp 材质里的贴图引用：外部文件 或 scene.mTextures 里的内嵌项（*N） */
+		struct AssimpTextureRef
+		{
+			bool IsEmbedded{ false };
+			std::string SourceName;        /* 外部：材质里的路径串（相对模型目录 / 绝对） */
+			std::string EmbeddedName;      /* 内嵌：*N 的原文（去重与命名用） */
+			const aiTexture* Embedded{ nullptr };
+		};
+
+		/* 登记一条 assimp 贴图引用：外部复制 / 内嵌落盘（生成名 <模型名>_<序号>.<扩展名>） */
+		size_t RegisterAssimpTexture(ImportedModel& model, const std::filesystem::path& source_dir,
+			const std::string& stem, const AssimpTextureRef& reference)
+		{
+			if (!reference.IsEmbedded || reference.Embedded == nullptr)
+				return RegisterExternalTexture(model, source_dir, reference.SourceName);
+
+			const aiTexture& texture = *reference.Embedded;
+
+			/* 生成名先定（压缩内嵌的扩展名看格式提示；未压缩的编码成 png），按名字去重 */
+			const bool is_raw = texture.mHeight != 0;
+			const std::string extension_name = is_raw ? "png"
+				: ((texture.achFormatHint[0] != '\0') ? texture.achFormatHint : "png");
+			const std::string tag = reference.EmbeddedName.empty() ? "tex" : reference.EmbeddedName.substr(1);
+			const std::string destination_name = stem + "_" + tag + "." + extension_name;
+
+			for (size_t index = 0; index < model.Textures.size(); ++index)
+			{
+				if (model.Textures[index].DestinationRelative == destination_name)
+					return index;
+			}
+
+			std::vector<unsigned char> bytes;
+			if (is_raw)
+			{
+				/* 未压缩内嵌：pcData 是 RGBA 像素，编码成 PNG */
+				if (!EncodeRgbaToPng(reinterpret_cast<const unsigned char*>(texture.pcData),
+					static_cast<int>(texture.mWidth), static_cast<int>(texture.mHeight), bytes))
+					return kInvalidTextureIndex;
+			}
+			else
+			{
+				/* 压缩内嵌：pcData 就是文件字节（mWidth = 字节数） */
+				const auto* begin = reinterpret_cast<const unsigned char*>(texture.pcData);
+				bytes.assign(begin, begin + texture.mWidth);
+			}
+
+			return RegisterEmbeddedTexture(model, destination_name, std::move(bytes));
+		}
+
+		/* 把打包的金属粗糙度贴图拆成两张单通道图（glTF / ORM 惯用：G = 粗糙度、B = 金属度）。
+		 * 像素解不出来返回 false（调用方退回原样直挂，至少数据在）。 */
+		bool SplitPackedChannels(const AssimpTextureRef& reference, const std::filesystem::path& source_dir,
+			std::vector<unsigned char>& out_roughness_png, std::vector<unsigned char>& out_metallic_png)
+		{
+			int width = 0;
+			int height = 0;
+			std::vector<unsigned char> pixels;
+
+			if (reference.IsEmbedded && reference.Embedded != nullptr && reference.Embedded->mHeight != 0)
+			{
+				/* 未压缩内嵌：pcData 就是 RGBA 像素 */
+				const aiTexture& texture = *reference.Embedded;
+				width = static_cast<int>(texture.mWidth);
+				height = static_cast<int>(texture.mHeight);
+				const auto* begin = reinterpret_cast<const unsigned char*>(texture.pcData);
+				pixels.assign(begin, begin + static_cast<size_t>(width) * height * 4);
+			}
+			else
+			{
+				int channels = 0;
+				unsigned char* decoded = nullptr;
+				if (reference.IsEmbedded && reference.Embedded != nullptr)
+				{
+					const aiTexture& texture = *reference.Embedded;
+					decoded = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(texture.pcData),
+						static_cast<int>(texture.mWidth), &width, &height, &channels, 4);
+				}
+				else
+				{
+					std::filesystem::path source_texture;
+					if (!ResolveSourceTexture(source_dir, reference.SourceName, source_texture))
+						return false;
+					decoded = stbi_load(PathToUtf8(source_texture).c_str(), &width, &height, &channels, 4);
+				}
+
+				if (decoded == nullptr || width <= 0 || height <= 0)
+				{
+					if (decoded != nullptr)
+						stbi_image_free(decoded);
+					return false;
+				}
+				pixels.assign(decoded, decoded + static_cast<size_t>(width) * height * 4);
+				stbi_image_free(decoded);
+			}
+
+			/* 拆分：两张图都把通道写在 R（着色器采样 .r），其余通道补满 */
+			std::vector<unsigned char> roughness(pixels.size(), 255);
+			std::vector<unsigned char> metallic(pixels.size(), 255);
+			for (size_t pixel = 0; pixel + 3 < pixels.size(); pixel += 4)
+			{
+				roughness[pixel + 0] = pixels[pixel + 1]; /* G -> R */
+				metallic[pixel + 0] = pixels[pixel + 2];  /* B -> R */
+			}
+
+			return EncodeRgbaToPng(roughness.data(), width, height, out_roughness_png)
+				&& EncodeRgbaToPng(metallic.data(), width, height, out_metallic_png);
+		}
+
+		/* 从 assimp 材质登记引擎参数（返回登记完的槽；名字与贴图都空的返回空壳，调用方跳过）。
+		 * 参数名用 u_* 一族（与 GBufferMaterial / PBRStandard 的声明同名）：
+		 *   BASE_COLOR 或 DIFFUSE -> u_AlbedoTexture；NORMALS 或 NORMAL_CAMERA -> u_NormalTexture；
+		 *   EMISSION_COLOR 或 EMISSIVE -> u_EmissiveTexture；METALNESS / DIFFUSE_ROUGHNESS 两条
+		 *   贴图指向同一张时按打包图拆通道（glTF 口径），不同图就各自直挂。 */
+		ImportedMaterial BuildAssimpMaterial(const aiScene& scene, const aiMaterial& material,
+			const std::filesystem::path& source_dir, const std::string& stem, size_t material_index,
+			ImportedModel& out_model)
+		{
+			ImportedMaterial out;
+
+			aiString material_name;
+			if (material.Get(AI_MATKEY_NAME, material_name) == AI_SUCCESS)
+				out.SlotName = material_name.C_Str();
+
+			const auto resolve = [&scene, &material](aiTextureType type, AssimpTextureRef& out_reference) -> bool
+			{
+				aiString path;
+				if (material.GetTexture(type, 0, &path) != AI_SUCCESS)
+					return false;
+
+				const std::string name = path.C_Str();
+				if (name.empty())
+					return false;
+
+				if (name[0] == '*')
+				{
+					const int embedded_index = std::atoi(name.c_str() + 1);
+					if (embedded_index < 0 || embedded_index >= static_cast<int>(scene.mNumTextures))
+						return false;
+					out_reference.IsEmbedded = true;
+					out_reference.EmbeddedName = name;
+					out_reference.Embedded = scene.mTextures[embedded_index];
+					return true;
+				}
+
+				out_reference.SourceName = name;
+				return true;
+			};
+
+			const auto attach = [&](const char* param_name, const AssimpTextureRef& reference)
+			{
+				const size_t index = RegisterAssimpTexture(out_model, source_dir, stem, reference);
+				if (index != kInvalidTextureIndex)
+					out.Textures.emplace_back(param_name, index);
+			};
+
+			AssimpTextureRef albedo;
+			if (resolve(aiTextureType_BASE_COLOR, albedo) || resolve(aiTextureType_DIFFUSE, albedo))
+				attach("u_AlbedoTexture", albedo);
+
+			AssimpTextureRef normal;
+			if (resolve(aiTextureType_NORMALS, normal) || resolve(aiTextureType_NORMAL_CAMERA, normal))
+				attach("u_NormalTexture", normal);
+
+			AssimpTextureRef emissive;
+			if (resolve(aiTextureType_EMISSION_COLOR, emissive) || resolve(aiTextureType_EMISSIVE, emissive))
+				attach("u_EmissiveTexture", emissive);
+
+			AssimpTextureRef metallic;
+			AssimpTextureRef roughness;
+			const bool has_metallic = resolve(aiTextureType_METALNESS, metallic);
+			const bool has_roughness = resolve(aiTextureType_DIFFUSE_ROUGHNESS, roughness);
+			const bool packed = has_metallic && has_roughness
+				&& metallic.IsEmbedded == roughness.IsEmbedded
+				&& (metallic.IsEmbedded ? metallic.EmbeddedName == roughness.EmbeddedName
+					: metallic.SourceName == roughness.SourceName);
+			if (packed)
+			{
+				std::vector<unsigned char> roughness_png;
+				std::vector<unsigned char> metallic_png;
+				if (SplitPackedChannels(metallic, source_dir, roughness_png, metallic_png))
+				{
+					const std::string prefix = stem + "_material" + std::to_string(material_index);
+					out.Textures.emplace_back("u_RoughnessTexture",
+						RegisterEmbeddedTexture(out_model, prefix + "_roughness.png", std::move(roughness_png)));
+					out.Textures.emplace_back("u_MetallicTexture",
+						RegisterEmbeddedTexture(out_model, prefix + "_metallic.png", std::move(metallic_png)));
+				}
+				else
+				{
+					CORE_LOG_WARN("Failed to split packed metallic-roughness texture in material {}.", out.SlotName);
+					attach("u_RoughnessTexture", roughness);
+					attach("u_MetallicTexture", metallic);
+				}
+			}
+			else
+			{
+				if (has_roughness)
+					attach("u_RoughnessTexture", roughness);
+				if (has_metallic)
+					attach("u_MetallicTexture", metallic);
+			}
+
+			return out;
+		}
+
+		/* assimp 支持的交换格式（fbx / gltf / glb / dae / stl）→ 中间结果。
+		 * 统一烘焙成静态网格：节点变换烘进顶点、三角化、补法线与 UV；蒙皮与动画不带。 */
+		bool LoadAssimpModel(const std::filesystem::path& source_path, ImportedModel& out_model)
+		{
+			Assimp::Importer importer;
+			unsigned int flags = aiProcess_Triangulate | aiProcess_PreTransformVertices
+				| aiProcess_GenSmoothNormals | aiProcess_GenUVCoords | aiProcess_FindInvalidData
+				| aiProcess_FlipUVs;
+			/* UV 原点：assimp 里 UV 统一是左下原点（glTF 导入器会先自己把 V 翻一道），
+			 * 引擎纹理原点在左上 —— 这里统一翻一次（与 obj 导入的 1-v 同口径） */
+
+			const aiScene* scene = importer.ReadFile(PathToUtf8(source_path), flags);
+			if (scene == nullptr || scene->mNumMeshes == 0)
+			{
+				CORE_LOG_ERROR("Failed to load model: {}. {}", PathToUtf8(source_path), importer.GetErrorString());
+				return false;
+			}
+
+			const std::string stem = PathToUtf8(source_path.stem());
+			const std::filesystem::path source_dir = source_path.parent_path();
+
+			/* 材质：没有贴图、名字为空或就是 assimp 的兜底名字的，不落进 .mtl
+			 * （如 stl 这类没有材质的格式不生成槽表），段里的索引跟着重映射 */
+			std::vector<int> material_remap(scene->mNumMaterials, -1);
+			for (unsigned material_index = 0; material_index < scene->mNumMaterials; ++material_index)
+			{
+				ImportedMaterial material = BuildAssimpMaterial(*scene, *scene->mMaterials[material_index],
+					source_dir, stem, material_index, out_model);
+				if (material.Textures.empty()
+					&& (material.SlotName.empty() || material.SlotName == AI_DEFAULT_MATERIAL_NAME))
+					continue;
+
+				material_remap[material_index] = static_cast<int>(out_model.Materials.size());
+				out_model.Materials.push_back(std::move(material));
+			}
+
+			/* 网格段：assimp 的顶点已按 位置 / 法线 / UV 缝 拆好，直接用它的索引 */
+			for (unsigned mesh_index = 0; mesh_index < scene->mNumMeshes; ++mesh_index)
+			{
+				const aiMesh* mesh = scene->mMeshes[mesh_index];
+				if (mesh == nullptr || mesh->mNumVertices == 0 || mesh->mNumFaces == 0)
+					continue;
+
+				ShapeImportResult result;
+				result.Name = (mesh->mName.length > 0)
+					? std::string(mesh->mName.C_Str()) : ("mesh_" + std::to_string(mesh_index));
+				result.AabbMin = glm::vec3(std::numeric_limits<float>::max());
+				result.AabbMax = glm::vec3(-std::numeric_limits<float>::max());
+
+				std::vector<ImportedVertex> vertices(mesh->mNumVertices);
+				for (unsigned vertex_index = 0; vertex_index < mesh->mNumVertices; ++vertex_index)
+				{
+					ImportedVertex& vertex = vertices[vertex_index];
+					vertex.Position = glm::vec3(mesh->mVertices[vertex_index].x,
+						mesh->mVertices[vertex_index].y, mesh->mVertices[vertex_index].z);
+
+					if (mesh->mNormals != nullptr)
+					{
+						vertex.Normal = glm::vec3(mesh->mNormals[vertex_index].x,
+							mesh->mNormals[vertex_index].y, mesh->mNormals[vertex_index].z);
+					}
+
+					if (mesh->mColors[0] != nullptr)
+					{
+						vertex.Color = glm::vec3(mesh->mColors[0][vertex_index].r,
+							mesh->mColors[0][vertex_index].g, mesh->mColors[0][vertex_index].b);
+					}
+
+					if (mesh->mTextureCoords[0] != nullptr)
+					{
+						vertex.TexCoord = glm::vec2(mesh->mTextureCoords[0][vertex_index].x,
+							mesh->mTextureCoords[0][vertex_index].y);
+					}
+
+					result.AabbMin = glm::min(result.AabbMin, vertex.Position);
+					result.AabbMax = glm::max(result.AabbMax, vertex.Position);
+				}
+
+				for (unsigned face_index = 0; face_index < mesh->mNumFaces; ++face_index)
+				{
+					const aiFace& face = mesh->mFaces[face_index];
+					if (face.mNumIndices != 3) /* 三角化后应当恒为 3；异常面跳过 */
+						continue;
+
+					const uint32_t corner0 = face.mIndices[0];
+					const uint32_t corner1 = face.mIndices[1];
+					const uint32_t corner2 = face.mIndices[2];
+					const glm::vec3 face_tangent = ComputeFaceTangent(
+						vertices[corner0].Position, vertices[corner1].Position, vertices[corner2].Position,
+						vertices[corner0].TexCoord, vertices[corner1].TexCoord, vertices[corner2].TexCoord);
+					vertices[corner0].TangentAccum += face_tangent;
+					vertices[corner1].TangentAccum += face_tangent;
+					vertices[corner2].TangentAccum += face_tangent;
+
+					result.Indices.emplace_back(corner0);
+					result.Indices.emplace_back(corner1);
+					result.Indices.emplace_back(corner2);
+				}
+
+				if (result.Indices.empty())
+					continue;
+
+				FinalizeVertices(vertices, result.VertexData);
+				result.MaterialIndex = (mesh->mMaterialIndex < material_remap.size())
+					? material_remap[mesh->mMaterialIndex] : -1;
+				out_model.Shapes.push_back(std::move(result));
+			}
+
+			return !out_model.Shapes.empty();
+		}
+	}
+
+	/* 导入 Obj 模型（ImportModel 的 obj 分支，也供检查直接调用） */
+	std::string ImportObj(const std::string& filepath, const std::string& dest_dir)
+	{
+		if (filepath.empty() || dest_dir.empty())
+		{
+			CORE_LOG_ERROR("Model filepath or destination folder is empty.");
+			return {};
+		}
+
+		std::filesystem::path source_path;
+		if (!TryPathFromUtf8(filepath, source_path) || !std::filesystem::is_regular_file(source_path))
+		{
+			CORE_LOG_ERROR("Model file not found: {}.", filepath);
+			return {};
+		}
+
+		ImportedModel model;
+		if (!LoadObjModel(source_path, model))
+			return {};
+
+		return FinishImport(source_path, PathFromUtf8(dest_dir), model, /*preserve_obj_materials=*/true);
+	}
+
+	/* 导入模型：按后缀分派 —— obj 走内置解析，fbx / gltf / glb / dae / stl 走 assimp */
+	std::string ImportModel(const std::string& filepath, const std::string& dest_dir)
+	{
+		if (filepath.empty() || dest_dir.empty())
+		{
+			CORE_LOG_ERROR("Model filepath or destination folder is empty.");
+			return {};
+		}
+
+		std::filesystem::path source_path;
+		if (!TryPathFromUtf8(filepath, source_path) || !std::filesystem::is_regular_file(source_path))
+		{
+			CORE_LOG_ERROR("Model file not found: {}.", filepath);
+			return {};
+		}
+
+		std::string extension = ExtractFileSuffix(filepath);
+		std::transform(extension.begin(), extension.end(), extension.begin(),
+			[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+		extension.insert(extension.begin(), '.');
+
+		if (extension == ".obj")
+			return ImportObj(filepath, dest_dir);
+
+		const bool assimp_format = extension == ".fbx" || extension == ".gltf" || extension == ".glb"
+			|| extension == ".dae" || extension == ".stl";
+		if (!assimp_format)
+		{
+			CORE_LOG_ERROR("Unsupported model format: {}.", filepath);
+			return {};
+		}
+
+		ImportedModel model;
+		if (!LoadAssimpModel(source_path, model))
+			return {};
+
+		/* glTF 的外部二进制缓冲（.bin）一并收进项目：源文件搬过去还能再打开 */
+		if (extension == ".gltf")
+		{
+			std::error_code error;
+			for (const auto& entry : std::filesystem::directory_iterator(source_path.parent_path(), error))
+			{
+				if (!entry.is_regular_file(error))
+					continue;
+
+				std::string sibling_extension = PathToUtf8(entry.path().extension());
+				std::transform(sibling_extension.begin(), sibling_extension.end(), sibling_extension.begin(),
+					[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+				if (sibling_extension != ".bin")
+					continue;
+
+				ImportedTexture companion;
+				companion.SourcePath = PathToUtf8(entry.path());
+				companion.DestinationRelative = PathToUtf8(entry.path().filename());
+				model.Textures.push_back(std::move(companion));
+			}
+		}
+
+		return FinishImport(source_path, PathFromUtf8(dest_dir), model, /*preserve_obj_materials=*/false);
 	}
 }

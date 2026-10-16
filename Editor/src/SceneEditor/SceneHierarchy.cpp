@@ -1657,6 +1657,10 @@ namespace Helios
 
 		PanelChrome::EndCard(card);
 
+		/* 模型文件（.mesh / .obj）：模型编辑器入口卡 —— 同级平铺在详情卡之后，
+		 * 与 probe 图卡 / 材质卡同路数 */
+		DrawAssetModelEditorCard(entry);
+
 		/* .probe：三张烘焙图各一张卡片 —— 同级平铺在详情卡之后（卡片通道不可嵌套，
 		 * "卡中卡"画不出来，与材质卡排在组件卡之后是同一条路数）。
 		 * 图是十字展开预览；无图形上下文（headless）时只有规格行，图跳过。 */
@@ -2691,6 +2695,61 @@ namespace Helios
 		return changed;
 	}
 
+	/* 「Model Editor」入口卡的本体：一个全宽按钮（实体属性面板与资源属性面板共用） */
+	void SceneHierarchy::DrawModelEditorEntry(const char* id, const std::string& absolute_path)
+	{
+		PROFILE_FUNCTION();
+
+		if (absolute_path.empty())
+			return;
+
+		ImGui::PushID(id);
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("Model Editor", Icons::Id::Model);
+
+		if (card.Open)
+		{
+			const float button_width = ImGui::GetContentRegionAvail().x;
+			if (ImGui::Button("Open in Model Editor", ImVec2(button_width, 0.0f)) && m_ModelEditorFunc)
+				m_ModelEditorFunc(absolute_path);
+		}
+
+		PanelChrome::EndCard(card);
+		ImGui::PopID();
+	}
+
+	/* Model 编辑器的入口卡：把当前模型交给模型编辑器（重看子网格 / 调材质）。
+	 * 内建模型没有资产文件、模型为空都没有可编辑的东西，不画。 */
+	void SceneHierarchy::DrawModelEditorCard(const ModelComponent& component)
+	{
+		PROFILE_FUNCTION();
+
+		const auto& model = component.m_Model;
+		if (model == nullptr)
+			return;
+
+		BuiltinModelType builtin_type{};
+		if (model->TryGetBuiltinType(builtin_type))
+			return;
+
+		DrawModelEditorEntry("##ModelEditorCard", model->GetPath());
+	}
+
+	/* 资源属性面板的模型入口卡：.mesh / .obj 才能被模型编辑器打开（fbx 等还没有导入器） */
+	void SceneHierarchy::DrawAssetModelEditorCard(const AssetSelectionEntry& entry)
+	{
+		PROFILE_FUNCTION();
+
+		if (entry.IsFolder || entry.Kind != AssetFileKind::Model)
+			return;
+
+		const std::string extension = ToLowercase(PathToUtf8(PathFromUtf8(entry.Path).extension()).c_str());
+		if (extension != ".mesh" && extension != ".obj")
+			return;
+
+		DrawModelEditorEntry("##AssetModelEditorCard", PathToUtf8(g_AssetsPath / PathFromUtf8(entry.Path)));
+	}
+
 	/* Model 的材质卡：每槽一张，排在 Model 组件卡之后同级平铺。 */
 	void SceneHierarchy::DrawModelMaterialCards(Entity entity, ModelComponent& component)
 	{
@@ -3213,10 +3272,13 @@ namespace Helios
 			ImGui::PushID(static_cast<int>(desc.Type.hash_code()));
 			DrawComponentBlock(desc, m_SelectedEntity, component);
 
-			/* Model 的材质卡 / Camera 的预览卡：各自排在组件卡之后同级平铺
+			/* Model 的入口卡与材质卡 / Camera 的预览卡：各自排在组件卡之后同级平铺
 			 * （卡片背景走绘制通道、通道不可嵌套 —— 附加卡画不进组件卡里）。 */
 			if (desc.Type == std::type_index(typeid(ModelComponent)))
+			{
+				DrawModelEditorCard(*static_cast<ModelComponent*>(component));
 				DrawModelMaterialCards(m_SelectedEntity, *static_cast<ModelComponent*>(component));
+			}
 			else if (desc.Type == std::type_index(typeid(CameraComponent)))
 				DrawCameraPreviewCard(m_SelectedEntity, *static_cast<CameraComponent*>(component));
 			ImGui::PopID();

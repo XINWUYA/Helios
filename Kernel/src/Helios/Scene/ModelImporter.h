@@ -1,17 +1,16 @@
 ﻿#pragma once
+#include <string>
 
 namespace Helios
 {
-	/* 导入Obj模型，在模型所在路径中生成对应的.mesh和.mtl文件
-	 * 其中mesh文件为二进制文件，包含：
-	 * MeshSegment count : size_t
-	 * each MeshSegment name size : size_t
-	 * each MeshSegment name : each MeshSegment name size
-	 * each MeshSegment VertexDataSize : size_t
-	 * each MeshSegment VertexData : sizeof(float) * each MeshSegment VertexDataSize
-	 * each MeshSegment Mtl Id : int
-	 * each MeshSegment AABB min : glm::vec3
-	 * each MeshSegment AABB max : glm::vec3
-	 */
-	void ImportObj(const std::string& filepath);
+	/* 导入模型：按后缀分派到对应解析器 ——
+	 *   obj                走内置解析（tinyobjloader）
+	 *   fbx / gltf / glb / dae / stl   走 assimp
+	 * 统一把模型与它引用的贴图收进目标目录（已经在该目录里就只做转换），再写出
+	 * .mesh 与 .mtl（格式与 Model::Create 的读取一一对应；.mtl 是槽表，没有材质就不写）。
+	 * 返回生成的 .mesh 文件路径；失败返回空串。 */
+	std::string ImportModel(const std::string& filepath, const std::string& dest_dir);
+
+	/* 导入 Obj 模型（ImportModel 的 obj 分支，也供检查直接调用），说明同 ImportModel。 */
+	std::string ImportObj(const std::string& filepath, const std::string& dest_dir);
 }

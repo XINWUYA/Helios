@@ -6,10 +6,13 @@
 #include "ViewGizmo.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "Command/AssetFileOps.h"
 #include "Command/TransformCommand.h"
 #include "Helios/Application/Application.h"
+#include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include "Helios/Scene/Components.h"
+#include "Helios/Scene/ModelImporter.h"
 #include "ImGuizmo.h"
 
 namespace Helios
@@ -68,6 +71,12 @@ namespace Helios
 		m_SceneHierarchy.SetAssetSelection(selection);
 	}
 
+	/* 模型编辑器入口：转给层级面板（属性面板的「Model Editor」卡点击用它打开模型编辑器）。 */
+	void SceneEditorLayer::SetModelEditorFunc(ModelEditorFunc func)
+	{
+		m_SceneHierarchy.SetModelEditorFunc(std::move(func));
+	}
+
 	void SceneEditorLayer::OnImGuiRender()
 	{
 		PROFILE_FUNCTION();
@@ -104,6 +113,7 @@ namespace Helios
 		dispatcher.Dispatch<KeyPressedEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnKeyPressed));
 		dispatcher.Dispatch<MouseButtonPressedEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnMouseButtonPressed));
 		dispatcher.Dispatch<MouseScrolledEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnMouseScrolled));
+		dispatcher.Dispatch<WindowFileDropEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnFileDrop));
 	}
 
 	void SceneEditorLayer::UpdateViewport()
@@ -282,7 +292,7 @@ namespace Helios
 		return true;
 	}
 
-	/* 响应拖拽文件到主窗口 */
+	/* 响应拖拽资源到主窗口（资源浏览器内部拖拽）：.scn 打开场景，模型文件走导入 / 收录 */
 	void SceneEditorLayer::OnDragItemToScene(const std::filesystem::path& path)
 	{
 		PROFILE_FUNCTION();
@@ -296,22 +306,136 @@ namespace Helios
 			return;
 		}
 
-		/* 模型文件 */
-		if (extension == ".mesh")
+		/* 模型文件：.obj 转成 .mesh + .mtl 再进场景，.mesh 直接收录（与系统拖入同一条路） */
+		ImportModelFile(path);
+	}
+
+	/* 响应系统文件拖入：指针落在场景视口上才算「拖进场景」，其余位置不处理 */
+	bool SceneEditorLayer::OnFileDrop(WindowFileDropEvent* event)
+	{
+		PROFILE_FUNCTION();
+
+		if (event == nullptr || !m_IsViewportVisible)
+			return false;
+
+		const float x = event->GetX();
+		const float y = event->GetY();
+		const auto region_x = static_cast<float>(m_ViewportRegion.MinX);
+		const auto region_y = static_cast<float>(m_ViewportRegion.MinY);
+		if (x < region_x || x > region_x + static_cast<float>(m_ViewportRegion.Width)
+			|| y < region_y || y > region_y + static_cast<float>(m_ViewportRegion.Height))
+			return false;
+
+		bool handled = false;
+		for (const std::string& path : event->GetPaths())
 		{
-			const std::string model_path = PathToUtf8(path);
-			EDITOR_LOG_DEBUG("Import model file: {}.", model_path);
+			std::filesystem::path dropped_path;
+			if (!TryPathFromUtf8(path, dropped_path))
+			{
+				EDITOR_LOG_WARN("Dropped file path is not valid UTF-8.");
+				continue;
+			}
 
-			Entity entity = m_pMainScene->CreateEntity(PathToUtf8(path.stem()));
-			auto& model_component = entity.AddComponent<ModelComponent>();
-			model_component.m_Model = Model::Create(model_path);
-
-			/* 这条改动不走命令栈（没有对应的撤销），脏标记只能在这里显式补上 */
-			m_HasUnrecordedChange = true;
-
-			return;
+			handled |= ImportModelFile(dropped_path);
 		}
-		
+		return handled;
+	}
+
+	/* 拖入的模型文件进场景：交换格式（obj / fbx / gltf / glb / dae / stl）收进项目并转成
+	 * .mesh + .mtl（已在项目里就原地转换），.mesh 直接收进项目引用；然后建实体。 */
+	bool SceneEditorLayer::ImportModelFile(const std::filesystem::path& path)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_pMainScene == nullptr || path.empty())
+			return false;
+
+		const std::string extension = ToLowercase(PathToUtf8(path.extension()).c_str());
+		const bool exchange_format = extension == ".obj" || extension == ".fbx" || extension == ".gltf"
+			|| extension == ".glb" || extension == ".dae" || extension == ".stl";
+		if (extension != ".mesh" && !exchange_format)
+			return false;
+
+		/* 已经在本项目资产里的（资源浏览器拖入 / 项目内的文件）原地转换；
+		 * 项目外的（电脑里随便拖进来的）先收进 Assets/Models/<名字>/ */
+		const std::string relative_path = AssetRelativePath(path);
+		const bool in_assets = (relative_path != PathToUtf8(path));
+		std::filesystem::path dest_dir = in_assets
+			? path.parent_path()
+			: MakeUniquePath(g_AssetsPath / "Models", PathToUtf8(path.stem()));
+
+		std::string mesh_path;
+		if (exchange_format)
+		{
+			EDITOR_LOG_INFO("Import model: {}.", PathToUtf8(path));
+			mesh_path = ImportModel(PathToUtf8(path), PathToUtf8(dest_dir));
+		}
+		else
+		{
+			if (in_assets)
+			{
+				mesh_path = PathToUtf8(path);
+			}
+			else
+			{
+				/* 项目外收进来的 .mesh：连伴生的 .mtl 一起搬（贴图按槽表里的相对路径寻址，
+				 * 引用项目外贴图的那种搬进来也不全，出错在加载时自然报） */
+				std::error_code error;
+				std::filesystem::create_directories(dest_dir, error);
+
+				const std::filesystem::path dest_mesh = dest_dir / path.filename();
+				std::filesystem::copy_file(path, dest_mesh,
+					std::filesystem::copy_options::overwrite_existing, error);
+				if (error)
+				{
+					EDITOR_LOG_ERROR("Failed to copy model file: {}.", PathToUtf8(path));
+					return false;
+				}
+
+				const std::filesystem::path source_mtl = PathFromUtf8(ReplaceFileSuffix(PathToUtf8(path), ".mtl"));
+				if (std::filesystem::exists(source_mtl, error))
+				{
+					std::filesystem::copy_file(source_mtl, PathFromUtf8(ReplaceFileSuffix(PathToUtf8(dest_mesh), ".mtl")),
+						std::filesystem::copy_options::overwrite_existing, error);
+				}
+
+				mesh_path = PathToUtf8(dest_mesh);
+			}
+		}
+
+		if (mesh_path.empty())
+			return false;
+
+		return static_cast<bool>(CreateModelEntity(mesh_path));
+	}
+
+	/* 建一个挂指定 .mesh 的模型实体：拖入与导入共用，加载失败不留空实体 */
+	Entity SceneEditorLayer::CreateModelEntity(const std::string& absolute_mesh_path)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_pMainScene == nullptr)
+			return {};
+
+		SharedPtr<Model> model = Model::Create(absolute_mesh_path);
+		if (model == nullptr)
+		{
+			EDITOR_LOG_ERROR("Failed to load model: {}.", absolute_mesh_path);
+			return {};
+		}
+
+		const std::string name = PathToUtf8(PathFromUtf8(absolute_mesh_path).stem());
+		Entity entity = m_pMainScene->CreateEntity(name);
+		entity.AddComponent<ModelComponent>().m_Model = std::move(model);
+
+		/* 这条改动不走命令栈（没有对应的撤销），脏标记只能在这里显式补上 */
+		m_HasUnrecordedChange = true;
+
+		/* 新进场的模型顺手选中：属性面板里的模型信息与模型编辑器入口直接可见 */
+		m_SceneHierarchy.SetSelectedEntity(entity);
+
+		EDITOR_LOG_INFO("Place model in scene: {}.", absolute_mesh_path);
+		return entity;
 	}
 
 	void SceneEditorLayer::SetActiveScenePath(const std::string& path)

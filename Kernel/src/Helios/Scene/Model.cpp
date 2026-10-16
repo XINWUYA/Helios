@@ -352,10 +352,10 @@ namespace Helios
 
 			for (size_t mesh_segment_idx = 0; mesh_segment_idx < mesh_segment_cnt; ++mesh_segment_idx)
 			{
-				/* 子模型Name */
+				/* 子模型Name（先按长度开好缓冲再读：名字超过短串容量时直写 data() 会越界） */
 				size_t name_size;
 				in_mesh_file.read((char*)&name_size, sizeof(size_t));
-				std::string name;
+				std::string name(name_size, '\0');
 				in_mesh_file.read(name.data(), name_size);
 
 				/* Vertex Array */
@@ -400,7 +400,7 @@ namespace Helios
 						/* Name */
 						size_t element_name_size;
 						in_mesh_file.read((char*)&element_name_size, sizeof(size_t));
-						std::string element_name;
+						std::string element_name(element_name_size, '\0');
 						in_mesh_file.read(element_name.data(), element_name_size);
 
 						/* Type */

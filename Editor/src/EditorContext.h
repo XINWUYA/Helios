@@ -76,6 +76,8 @@ namespace Helios
 
 		/* 模型导入（ModelEditor 面板） */
 		void ImportModel();
+		/* 在模型编辑器里打开指定模型文件（属性面板的入口走这里；path 为绝对路径） */
+		void OpenModel(const std::string& path);
 
 	private:
 		/* 惰性解析并缓存：MainEditorLayer 是最先被 Push 的 Layer（见 EditorApp），

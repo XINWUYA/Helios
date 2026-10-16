@@ -26,6 +26,10 @@ namespace Helios
 		 * 跨面板通道由装配层（EditorApp）接线到 SceneEditorLayer。 */
 		void RevealAsset(const std::string& relative_path) { m_ResourceBrowser.RevealAsset(relative_path); }
 
+		/* 模型编辑器入口：属性面板的「Model Editor」按钮 → 在模型编辑器里打开该模型。
+		 * 同样由装配层接线到 SceneEditorLayer（面板不查 Layer）。 */
+		void OpenModel(const std::string& path) { m_Context.OpenModel(path); }
+
 		/* 资源选中 → 属性面板（跨面板通道，反方向）：装配层把浏览器发布的选中项
 		 * 接到 SceneEditorLayer 的属性面板上。 */
 		void SetAssetSelectionSink(EditorResourceBrowser::AssetSelectionSink sink)

@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <vector>
 #include "Event.h"
 
 namespace Helios
@@ -115,6 +116,35 @@ namespace Helios
 
 	private:
 		float m_ScaleX, m_ScaleY;
+	};
+
+	/* 文件拖入事件（GLFW drop 回调）：从系统文件管理器往窗口里拖文件。
+	 * Paths 为 UTF-8 形态的绝对路径；X / Y 是拖放落点（窗口逻辑点坐标，
+	 * 与 ImGui 的鼠标坐标同一空间）—— 面板据此判断这次拖放落在哪个窗口上。 */
+	class WindowFileDropEvent : public AppEvent
+	{
+	public:
+		EVENT_CLASS_TYPE(WindowFileDrop)
+
+			WindowFileDropEvent(std::vector<std::string> paths, float x, float y)
+			: m_Paths(std::move(paths)), m_X(x), m_Y(y)
+		{
+		}
+
+		const std::vector<std::string>& GetPaths() const { return m_Paths; }
+		float GetX() const { return m_X; }
+		float GetY() const { return m_Y; }
+
+		std::string ToString() const override
+		{
+			std::stringstream ss;
+			ss << "WindowFileDropEvent: " << m_Paths.size() << " file(s) at (" << m_X << ", " << m_Y << ")";
+			return ss.str();
+		}
+
+	private:
+		std::vector<std::string> m_Paths;
+		float m_X, m_Y;
 	};
 
 	/*

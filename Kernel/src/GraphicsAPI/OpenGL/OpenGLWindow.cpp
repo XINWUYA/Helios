@@ -261,6 +261,23 @@ namespace Helios
 				MouseMovedEvent event((float)xpos, (float)ypos);
 				info.CallBackFunc(&event);
 			});
+
+		// 设置文件拖入回调：系统文件管理器往窗口里拖文件时触发；落点取当前光标位置
+		// （与鼠标事件同一坐标系，面板据此判断这次拖放落在哪个窗口上）
+		glfwSetDropCallback(m_pGLFWWindow, [](GLFWwindow* window, int count, const char** paths)
+			{
+				WindowInfo& info = *(WindowInfo*)glfwGetWindowUserPointer(window);
+				if (count <= 0 || paths == nullptr)
+					return;
+
+				double xpos = 0.0;
+				double ypos = 0.0;
+				glfwGetCursorPos(window, &xpos, &ypos);
+
+				std::vector<std::string> dropped_paths(paths, paths + count);
+				WindowFileDropEvent event(std::move(dropped_paths), (float)xpos, (float)ypos);
+				info.CallBackFunc(&event);
+			});
 	}
 
 	/* 物理像素变化：派发 resize 事件（Application 用它设置 viewport） */

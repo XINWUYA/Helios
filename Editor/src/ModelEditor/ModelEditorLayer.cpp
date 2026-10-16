@@ -408,51 +408,122 @@ namespace Helios
 
 		const auto extension = PathToUtf8(path.extension());
 
-		/* 模型文件 */
+		/* 模型文件（与弹窗导入同一条路） */
 		if (extension == ".obj")
-		{
-			EDITOR_LOG_DEBUG("Import model file: {}.", PathToUtf8(path));
-
-			/* 读取模型 */
-			m_pModelInfo->Reset();
-			m_pModelInfo->LoadFromObj(PathToUtf8(path));
-
-			/* 初始化材质 */
-			m_pMaterialGroup->ClearAllMaterials();
-			for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-				m_pMaterialGroup->EmplaceMaterial(Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/DeferredShaders/GBufferMaterial.glsl")));
-
-			/* 更新场景模型信息 */
-			UpdateModel();
-
-			return;
-		}
+			LoadObjModel(PathToUtf8(path));
 	}
 
-	/* 导入模型 */
+	/* 导入模型：弹窗选文件 */
 	void ModelEditorLayer::ImportModel()
 	{
 		PROFILE_FUNCTION();
 
 		const auto file_path = FileDialog::OpenFile("Obj(*.obj)\0*.obj\0");
-		if (!file_path.empty())
+		if (file_path.empty())
+			return;
+
+		if (!LoadObjModel(file_path))
+			return;
+
+		/* 模型已就绪：层与视口窗口一并唤回，导入结果必然可见 */
+		m_IsActivated = true;
+		m_IsViewportVisible = true;
+	}
+
+	/* 打开模型（属性面板入口）：按后缀分派到对应加载流程 */
+	void ModelEditorLayer::OpenModel(const std::string& path)
+	{
+		PROFILE_FUNCTION();
+
+		const std::string extension = ToLowercase(PathToUtf8(PathFromUtf8(path).extension()).c_str());
+		bool loaded = false;
+		if (extension == ".obj")
+			loaded = LoadObjModel(path);
+		else if (extension == ".mesh")
+			loaded = LoadMeshModel(path);
+		else
+			EDITOR_LOG_WARN("Model editor can not open this file: {}.", path);
+
+		if (!loaded)
+			return;
+
+		/* 模型已就绪：层与视口窗口一并唤回（同导入） */
+		m_IsActivated = true;
+		m_IsViewportVisible = true;
+	}
+
+	/* 读取 Obj 模型：原始数据 + 每段一份材质，再重建模型进场景 */
+	bool ModelEditorLayer::LoadObjModel(const std::string& path)
+	{
+		PROFILE_FUNCTION();
+
+		EDITOR_LOG_DEBUG("Import model file: {}.", path);
+
+		/* 读取模型 */
+		m_pModelInfo->Reset();
+		m_pModelInfo->LoadFromObj(path);
+		if (m_pModelInfo->m_SubModelInfos.empty())
+			return false;
+
+		/* 初始化材质 */
+		m_pMaterialGroup->ClearAllMaterials();
+		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
+			m_pMaterialGroup->EmplaceMaterial(Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/DeferredShaders/GBufferMaterial.glsl")));
+
+		/* 更新场景模型信息 */
+		UpdateModel();
+		return true;
+	}
+
+	/* 加载 .mesh：模型编辑器对"场景里在用的那份资产"打开 —— 网格段与槽表材质都来自资产本身。
+	 * 材质克隆进编辑缓冲（就地改参数看效果），几何不重建、直接用加载好的对象。 */
+	bool ModelEditorLayer::LoadMeshModel(const std::string& path)
+	{
+		PROFILE_FUNCTION();
+
+		EDITOR_LOG_DEBUG("Open model asset: {}.", path);
+
+		SharedPtr<Model> model = Model::Create(path);
+		if (model == nullptr)
 		{
-			/* 读取模型 */
-			m_pModelInfo->Reset();
-			m_pModelInfo->LoadFromObj(file_path);
-
-			/* 初始化材质 */
-			m_pMaterialGroup->ClearAllMaterials();
-			for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-				m_pMaterialGroup->EmplaceMaterial(Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/DeferredShaders/GBufferMaterial.glsl")));
-
-			/* 更新场景模型信息 */
-			UpdateModel();
-
-			/* 模型已就绪：层与视口窗口一并唤回，导入结果必然可见 */
-			m_IsActivated = true;
-			m_IsViewportVisible = true;
+			EDITOR_LOG_ERROR("Failed to load model: {}.", path);
+			return false;
 		}
+
+		m_pModelInfo->Reset();
+		m_pModelInfo->m_Path = path;
+		m_pMaterialGroup->ClearAllMaterials();
+
+		/* 每个网格段一张子模型卡 + 一条材质条目（按段索引对位）：
+		 * 材质取段的槽默认绑定（伴生 .mtl），没有就补默认材质 */
+		const auto& segments = model->GetMeshSegments();
+		for (size_t i = 0; i < segments.size(); ++i)
+		{
+			const auto& segment = segments[i];
+
+			auto sub_model_info = CreateSharedPtr<SubModelInfo>();
+			sub_model_info->Name = segment->GetDebugName();
+			sub_model_info->VertexArray = segment->GetMeshPrimitive().VertexArray;
+			sub_model_info->AABB = std::make_pair(segment->GetAABBMin(), segment->GetAABBMax());
+
+			const MaterialSlot* slot = model->GetSlotByIndex(segment->GetSlotIndex());
+			if (slot != nullptr)
+				sub_model_info->MaterialParams.Name = slot->Name;
+			m_pModelInfo->m_SubModelInfos.emplace_back(std::move(sub_model_info));
+
+			auto material = (slot != nullptr && slot->pDefault != nullptr)
+				? slot->pDefault->Clone()
+				: Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/DeferredShaders/GBufferMaterial.glsl"));
+			m_pMaterialGroup->EmplaceMaterial(std::move(material));
+			if (slot != nullptr)
+				m_pMaterialGroup->SetEntrySlotName(static_cast<int>(i), slot->Name);
+		}
+
+		m_pModelInfo->m_AABB = std::make_pair(model->GetAABBMin(), model->GetAABBMax());
+
+		m_pModel = std::move(model);
+		ShowModelInScene();
+		return true;
 	}
 
 	/* 拷贝指定格式的文件到目标路径 */
@@ -592,13 +663,10 @@ namespace Helios
 		out_mesh_file.close();
 	}
 
-	/* 更新模型 */
+	/* 更新模型：按导入数据重建（导入 / 打开 obj 走这条），再放进场景 */
 	void ModelEditorLayer::UpdateModel()
 	{
 		PROFILE_FUNCTION();
-
-		/* 先移除场景中的其他模型 */
-		m_pDefaultScene->DestroyTargetEntities<ModelComponent>();
 
 		/* 新建模型 */
 		m_pModel = CreateSharedPtr<Model>(m_pModelInfo->m_Path);
@@ -623,6 +691,21 @@ namespace Helios
 
 			m_pModel->AddMeshSegment(mesh_segment);
 		}
+
+		ShowModelInScene();
+	}
+
+	/* 把当前模型放进编辑器场景：旧模型实体全部销毁，只留一个挂当前模型的实体，
+	 * 相机按包围盒自适应 */
+	void ModelEditorLayer::ShowModelInScene()
+	{
+		PROFILE_FUNCTION();
+
+		/* 先移除场景中的其他模型 */
+		m_pDefaultScene->DestroyTargetEntities<ModelComponent>();
+
+		if (m_pModel == nullptr)
+			return;
 
 		/* 将模型添加到场景中 */
 		Entity entity = m_pDefaultScene->CreateEntity(m_pModel->GetDebugName());

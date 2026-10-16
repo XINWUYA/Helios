@@ -29,14 +29,24 @@ namespace Helios
 		void SetViewportVisible(bool visible) { m_IsViewportVisible = visible; }
 		[[nodiscard]] bool IsViewportVisible() const { return m_IsViewportVisible; }
 
-		/* 导入模型 */
+		/* 导入模型（弹窗选文件） */
 		void ImportModel();
+		/* 在模型编辑器里打开模型（属性面板入口）：.obj 走导入流程、.mesh 直接打开资产；
+		 * 成功后把编辑器与视口窗口一并唤回 */
+		void OpenModel(const std::string& path);
 		/* 导出模型(.mesh & .mtl) */
 		void ExportMeshAndMtl();
 		/* 导出Mesh */
 		void ExportMesh(const std::string& path);
 
 	private:
+		/* 读取 Obj 模型（ImportModel 与 OpenModel 共用）：成功后重建模型并放进场景 */
+		bool LoadObjModel(const std::string& path);
+		/* 加载 .mesh：对"场景里在用的那份资产"打开 —— 网格段与槽表材质来自资产本身，
+		 * 材质克隆进编辑缓冲；几何不重建，直接用加载好的对象 */
+		bool LoadMeshModel(const std::string& path);
+		/* 把当前模型放进编辑器场景（只留一个模型实体）+ 相机按包围盒自适应 */
+		void ShowModelInScene();
 		/* 显示主场景视口 */
 		void ShowSceneViewportUI();
 		/* 显示模型编辑UI */

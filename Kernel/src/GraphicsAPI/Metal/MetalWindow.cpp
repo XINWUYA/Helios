@@ -418,6 +418,22 @@ namespace Helios
             info->CallBackFunc(&event);
         });
 
+        /* 设置文件拖入回调：Finder 把文件拖到窗口上时触发；落点取当前光标位置
+         * （与鼠标事件同一坐标系，面板据此判断这次拖放落在哪个窗口上） */
+        glfwSetDropCallback(m_pGLFWWindow, [](GLFWwindow* window, int count, const char** paths) {
+            WindowInfo* info = (WindowInfo*)glfwGetWindowUserPointer(window);
+            if (!info || count <= 0 || paths == nullptr)
+                return;
+
+            double x = 0.0;
+            double y = 0.0;
+            glfwGetCursorPos(window, &x, &y);
+
+            std::vector<std::string> dropped_paths(paths, paths + count);
+            WindowFileDropEvent event(std::move(dropped_paths), static_cast<float>(x), static_cast<float>(y));
+            info->CallBackFunc(&event);
+        });
+
         CORE_LOG_INFO("Metal window created: {} ({}x{} pixels, content scale {})",
             m_WindowInfo.Descriptor.Title, m_WindowInfo.Descriptor.Width, m_WindowInfo.Descriptor.Height,
             m_WindowInfo.ContentScale);
