@@ -1,6 +1,5 @@
 ﻿#include "Pch.h"
 #include "ModelImporter.h"
-#include <tiny_obj_loader.h>
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -86,49 +85,7 @@ namespace Helios
 
 		constexpr size_t kInvalidTextureIndex = static_cast<size_t>(-1);
 
-		/* UTF-8 路径的材质读取器：tinyobj 默认自己 fopen，中文路径在 Windows 上会失败；
-		 * 这里改为自己开文件流（与模型编辑器的读取器同一套做法）。 */
-		class Utf8MaterialReader final : public tinyobj::MaterialReader
-		{
-		public:
-			explicit Utf8MaterialReader(std::filesystem::path base_directory)
-				: m_BaseDirectory(std::move(base_directory))
-			{
-			}
-
-			bool operator()(const std::string& material_name,
-				std::vector<tinyobj::material_t>* materials,
-				std::map<std::string, int>* material_map,
-				std::string* warning,
-				std::string* error) override
-			{
-				std::filesystem::path relative_path;
-				if (!TryPathFromUtf8(material_name, relative_path))
-				{
-					if (warning != nullptr)
-						*warning += "Material path is not valid UTF-8: " + material_name + "\n";
-					return false;
-				}
-
-				const std::filesystem::path material_path = relative_path.is_absolute()
-					? relative_path : m_BaseDirectory / relative_path;
-				std::ifstream material_stream(material_path, std::ios::in | std::ios::binary);
-				if (!material_stream)
-				{
-					if (warning != nullptr)
-						*warning += "Material file not found: " + material_name + "\n";
-					return false;
-				}
-
-				tinyobj::LoadMtl(material_map, materials, &material_stream, warning, error);
-				return true;
-			}
-
-		private:
-			std::filesystem::path m_BaseDirectory;
-		};
-
-		/* 导入中的一个顶点：按 (顶点, 法线, UV) 三位索引去重，切线逐面累加 */
+		/* 导入中的一个顶点：切线逐面累加、收尾时去掉沿法线的分量 */
 		struct ImportedVertex
 		{
 			glm::vec3 Position{ 0.0f };
@@ -189,100 +146,6 @@ namespace Helios
 				out_vertex_data.emplace_back(tangent.y);
 				out_vertex_data.emplace_back(tangent.z);
 			}
-		}
-
-		/* 一个 shape 的三角形转成顶点数组 + 索引：UV 翻转 V（引擎纹理原点在左上），
-		 * 颜色缺省白，法线缺省 +Z；切线由 UV 差分逐面累加、最后去掉沿法线的分量。 */
-		bool ConvertShape(const tinyobj::attrib_t& attribs, const tinyobj::shape_t& shape,
-			std::vector<float>& out_vertex_data, std::vector<uint32_t>& out_indices,
-			glm::vec3& out_aabb_min, glm::vec3& out_aabb_max)
-		{
-			out_vertex_data.clear();
-			out_indices.clear();
-			out_aabb_min = glm::vec3(std::numeric_limits<float>::max());
-			out_aabb_max = glm::vec3(-std::numeric_limits<float>::max());
-
-			std::map<std::array<int, 3>, uint32_t> vertex_lookup;
-			std::vector<ImportedVertex> vertices;
-
-			const auto& indices = shape.mesh.indices;
-			const size_t face_count = indices.size() / 3;
-			for (size_t face = 0; face < face_count; ++face)
-			{
-				const tinyobj::index_t corner_indices[3] = {
-					indices[face * 3 + 0], indices[face * 3 + 1], indices[face * 3 + 2] };
-				if (corner_indices[0].vertex_index < 0 || corner_indices[1].vertex_index < 0
-					|| corner_indices[2].vertex_index < 0)
-					continue; /* 缺顶点索引的无效面（obj 允许省略），跳过 */
-
-				/* 三个角的位置与 UV：AABB 与面切线都用它们 */
-				glm::vec3 positions[3];
-				glm::vec2 texcoords[3];
-				for (int corner = 0; corner < 3; ++corner)
-				{
-					const int vertex_index = corner_indices[corner].vertex_index;
-					positions[corner] = glm::vec3(
-						attribs.vertices[vertex_index * 3 + 0],
-						attribs.vertices[vertex_index * 3 + 1],
-						attribs.vertices[vertex_index * 3 + 2]);
-
-					const int texcoord_index = corner_indices[corner].texcoord_index;
-					texcoords[corner] = (texcoord_index >= 0 && !attribs.texcoords.empty())
-						? glm::vec2(attribs.texcoords[texcoord_index * 2 + 0],
-							1.0f - attribs.texcoords[texcoord_index * 2 + 1])
-						: glm::vec2(0.0f);
-
-					out_aabb_min = glm::min(out_aabb_min, positions[corner]);
-					out_aabb_max = glm::max(out_aabb_max, positions[corner]);
-				}
-
-				/* 面切线（两条边与 UV 的差分；UV 退化的面给固定朝向，保证 TBN 可建） */
-				const glm::vec3 face_tangent = ComputeFaceTangent(
-					positions[0], positions[1], positions[2], texcoords[0], texcoords[1], texcoords[2]);
-
-				for (int corner = 0; corner < 3; ++corner)
-				{
-					const tinyobj::index_t& index = corner_indices[corner];
-					const std::array<int, 3> key = {
-						index.vertex_index, index.normal_index, index.texcoord_index };
-
-					auto iter = vertex_lookup.find(key);
-					if (iter == vertex_lookup.end())
-					{
-						ImportedVertex vertex;
-						vertex.Position = positions[corner];
-						vertex.TexCoord = texcoords[corner];
-
-						if (index.normal_index >= 0 && !attribs.normals.empty())
-						{
-							vertex.Normal = glm::vec3(
-								attribs.normals[index.normal_index * 3 + 0],
-								attribs.normals[index.normal_index * 3 + 1],
-								attribs.normals[index.normal_index * 3 + 2]);
-						}
-
-						if (!attribs.colors.empty())
-						{
-							vertex.Color = glm::vec3(
-								attribs.colors[index.vertex_index * 3 + 0],
-								attribs.colors[index.vertex_index * 3 + 1],
-								attribs.colors[index.vertex_index * 3 + 2]);
-						}
-
-						iter = vertex_lookup.emplace(key, static_cast<uint32_t>(vertices.size())).first;
-						vertices.emplace_back(vertex);
-					}
-
-					vertices[iter->second].TangentAccum += face_tangent;
-					out_indices.emplace_back(iter->second);
-				}
-			}
-
-			if (vertices.empty())
-				return false;
-
-			FinalizeVertices(vertices, out_vertex_data);
-			return true;
 		}
 
 		/* 写出 .mesh：布局与 Model::Create 的读取一一对应 */
@@ -375,38 +238,6 @@ namespace Helios
 			if (relative.empty() || *relative.begin() == "..")
 				relative = source_path.filename();
 			return relative;
-		}
-
-		/* 模型引用的贴图名（去重后返回；.mtl 里列了但没用上的字段也一并收，
-		 * 保证收进项目的目录是自包含的） */
-		std::vector<std::string> CollectTextureNames(const std::vector<tinyobj::material_t>& materials)
-		{
-			std::vector<std::string> names;
-			const auto append = [&names](const std::string& name)
-			{
-				if (name.empty())
-					return;
-				for (const std::string& existing : names)
-				{
-					if (existing == name)
-						return;
-				}
-				names.emplace_back(name);
-			};
-
-			for (const tinyobj::material_t& material : materials)
-			{
-				append(material.ambient_texname);
-				append(material.diffuse_texname);
-				append(material.specular_texname);
-				append(material.normal_texname);
-				append(material.bump_texname);
-				append(material.displacement_texname);
-				append(material.roughness_texname);
-				append(material.metallic_texname);
-				append(material.emissive_texname);
-			}
-			return names;
 		}
 
 		/* 复制模型文件本体（已经就在目标目录里则跳过；目录先建出来） */
@@ -690,104 +521,6 @@ namespace Helios
 			return PathToUtf8(mesh_path);
 		}
 
-		/* 解析 Obj（tinyobjloader）：每个 shape 一段顶点数据；材质按老口径映射参数名 */
-		bool LoadObjModel(const std::filesystem::path& source_path, ImportedModel& out_model)
-		{
-			tinyobj::attrib_t in_attribs;
-			std::vector<tinyobj::shape_t> in_shapes;
-			std::vector<tinyobj::material_t> in_materials;
-			std::ifstream model_stream(source_path, std::ios::in | std::ios::binary);
-			if (!model_stream)
-			{
-				CORE_LOG_ERROR("Failed to open model file: {}.", PathToUtf8(source_path));
-				return false;
-			}
-
-			Utf8MaterialReader material_reader(source_path.parent_path());
-			std::string warn, err;
-			const bool loaded = tinyobj::LoadObj(&in_attribs, &in_shapes, &in_materials,
-				&warn, &err, &model_stream, &material_reader);
-
-			if (!warn.empty())
-				CORE_LOG_WARN("Load Obj Warning: {}.", warn);
-			if (!err.empty())
-				CORE_LOG_ERROR("Load Obj Error: {}.", err);
-			if (!loaded || in_shapes.empty())
-				return false;
-
-			/* 每个 shape 转成一段顶点数据 + 索引（空段跳过） */
-			for (const tinyobj::shape_t& shape : in_shapes)
-			{
-				ShapeImportResult result;
-				result.Name = shape.name;
-				if (!ConvertShape(in_attribs, shape, result.VertexData, result.Indices,
-					result.AabbMin, result.AabbMax))
-					continue;
-
-				const int material_index = shape.mesh.material_ids.empty() ? -1 : shape.mesh.material_ids[0];
-				result.MaterialIndex = (material_index >= 0 && material_index < static_cast<int>(in_materials.size()))
-					? material_index : -1;
-				out_model.Shapes.emplace_back(std::move(result));
-			}
-
-			if (out_model.Shapes.empty())
-			{
-				CORE_LOG_ERROR("Model has no valid faces: {}.", PathToUtf8(source_path));
-				return false;
-			}
-
-			/* 材质：字段 -> 参数名。法线优先 norm 声明，多数文件只有 map_Bump——都按法线贴图
-			 * 处理；map_Bump 不再兼作高度图（拿法线图当高度会出怪波动）。贴图按名字登记。 */
-			std::map<std::string, size_t> texture_indices;
-			for (const std::string& texture_name : CollectTextureNames(in_materials))
-				texture_indices.emplace(texture_name,
-					RegisterExternalTexture(out_model, source_path.parent_path(), texture_name));
-
-			/* 材质条目的去留：tinyobj 在 .mtl 解析不出来时会给一条没名字也没贴图的兜底材质 ——
-			 * 不落进 .mtl（与 assimp 路径同一口径），段的材质索引跟着重映射 */
-			std::vector<int> material_remap(in_materials.size(), -1);
-			for (size_t material_index = 0; material_index < in_materials.size(); ++material_index)
-			{
-				const tinyobj::material_t& material_data = in_materials[material_index];
-				ImportedMaterial material;
-				material.SlotName = material_data.name;
-
-				const auto reference = [&](const char* param_name, const std::string& texture_name)
-				{
-					if (texture_name.empty())
-						return;
-					const auto iter = texture_indices.find(texture_name);
-					if (iter != texture_indices.end() && iter->second != kInvalidTextureIndex)
-						material.Textures.emplace_back(param_name, iter->second);
-				};
-
-				reference("u_AmbientTexture", material_data.ambient_texname);
-				reference("u_AlbedoTexture", material_data.diffuse_texname);
-				reference("u_SpecularTexture", material_data.specular_texname);
-				reference("u_NormalTexture", !material_data.normal_texname.empty()
-					? material_data.normal_texname : material_data.bump_texname);
-				reference("u_DisplacementTexture", material_data.displacement_texname);
-				reference("u_RoughnessTexture", material_data.roughness_texname);
-				reference("u_MetallicTexture", material_data.metallic_texname);
-				reference("u_EmissiveTexture", material_data.emissive_texname);
-
-				if (material.SlotName.empty() && material.Textures.empty())
-					continue;
-
-				material_remap[material_index] = static_cast<int>(out_model.Materials.size());
-				out_model.Materials.push_back(std::move(material));
-			}
-
-			for (ShapeImportResult& shape : out_model.Shapes)
-			{
-				shape.MaterialIndex = (shape.MaterialIndex >= 0
-					&& shape.MaterialIndex < static_cast<int>(material_remap.size()))
-					? material_remap[shape.MaterialIndex] : -1;
-			}
-
-			return true;
-		}
-
 		/* assimp 材质里的贴图引用：外部文件 或 scene.mTextures 里的内嵌项（*N） */
 		struct AssimpTextureRef
 		{
@@ -898,9 +631,10 @@ namespace Helios
 
 		/* 从 assimp 材质登记引擎参数（返回登记完的槽；名字与贴图都空的返回空壳，调用方跳过）。
 		 * 参数名用 u_* 一族（与 GBuffer / PBRStandard 的声明同名）：
-		 *   BASE_COLOR 或 DIFFUSE -> u_AlbedoTexture；NORMALS 或 NORMAL_CAMERA -> u_NormalTexture；
-		 *   EMISSION_COLOR 或 EMISSIVE -> u_EmissiveTexture；METALNESS / DIFFUSE_ROUGHNESS 两条
-		 *   贴图指向同一张时按打包图拆通道（glTF 口径），不同图就各自直挂。 */
+		 *   BASE_COLOR 或 DIFFUSE -> u_AlbedoTexture；NORMALS 或 NORMAL_CAMERA 或 HEIGHT -> u_NormalTexture；
+		 *   EMISSION_COLOR 或 EMISSIVE -> u_EmissiveTexture；AMBIENT / SPECULAR / DISPLACEMENT 对应同名槽；
+		 *   METALNESS / DIFFUSE_ROUGHNESS 两条贴图指向同一张时按打包图拆通道（glTF 口径），
+		 *   不同图就各自直挂。 */
 		ImportedMaterial BuildAssimpMaterial(const aiScene& scene, const aiMaterial& material,
 			const std::filesystem::path& source_dir, const std::string& stem, size_t material_index,
 			ImportedModel& out_model)
@@ -947,13 +681,28 @@ namespace Helios
 			if (resolve(aiTextureType_BASE_COLOR, albedo) || resolve(aiTextureType_DIFFUSE, albedo))
 				attach("u_AlbedoTexture", albedo);
 
+			/* 法线：声明成 NORMALS / NORMAL_CAMERA 优先；只有 Bump（含 obj 的 map_Bump、fbx 的
+			 * Bump 槽）时也按法线贴图用 —— 拿高度图当高度会出怪波动，按法线看反而对得上大头 */
 			AssimpTextureRef normal;
-			if (resolve(aiTextureType_NORMALS, normal) || resolve(aiTextureType_NORMAL_CAMERA, normal))
+			if (resolve(aiTextureType_NORMALS, normal) || resolve(aiTextureType_NORMAL_CAMERA, normal)
+				|| resolve(aiTextureType_HEIGHT, normal))
 				attach("u_NormalTexture", normal);
 
 			AssimpTextureRef emissive;
 			if (resolve(aiTextureType_EMISSION_COLOR, emissive) || resolve(aiTextureType_EMISSIVE, emissive))
 				attach("u_EmissiveTexture", emissive);
+
+			AssimpTextureRef ambient;
+			if (resolve(aiTextureType_AMBIENT, ambient))
+				attach("u_AmbientTexture", ambient);
+
+			AssimpTextureRef specular;
+			if (resolve(aiTextureType_SPECULAR, specular))
+				attach("u_SpecularTexture", specular);
+
+			AssimpTextureRef displacement;
+			if (resolve(aiTextureType_DISPLACEMENT, displacement))
+				attach("u_DisplacementTexture", displacement);
 
 			AssimpTextureRef metallic;
 			AssimpTextureRef roughness;
@@ -993,16 +742,17 @@ namespace Helios
 			return out;
 		}
 
-		/* assimp 支持的交换格式（fbx / gltf / glb / dae / stl）→ 中间结果。
-		 * 统一烘焙成静态网格：节点变换烘进顶点、三角化、补法线与 UV；蒙皮与动画不带。 */
+		/* 交换格式（obj / fbx / gltf / glb / dae / stl）→ 中间结果 —— 全格式统一走这里。
+		 * 统一烘焙成静态网格：节点变换烘进顶点、三角化、补法线与 UV、同属性顶点合并；
+		 * 蒙皮与动画不带（.mesh 是静态格式）。 */
 		bool LoadAssimpModel(const std::filesystem::path& source_path, ImportedModel& out_model)
 		{
 			Assimp::Importer importer;
 			unsigned int flags = aiProcess_Triangulate | aiProcess_PreTransformVertices
 				| aiProcess_GenSmoothNormals | aiProcess_GenUVCoords | aiProcess_FindInvalidData
-				| aiProcess_FlipUVs;
+				| aiProcess_JoinIdenticalVertices | aiProcess_FlipUVs;
 			/* UV 原点：assimp 里 UV 统一是左下原点（glTF 导入器会先自己把 V 翻一道），
-			 * 引擎纹理原点在左上 —— 这里统一翻一次（与 obj 导入的 1-v 同口径） */
+			 * 引擎纹理原点在左上 —— 这里统一翻一次（与 obj 的 1-v 同口径） */
 
 			const aiScene* scene = importer.ReadFile(PathToUtf8(source_path), flags);
 			if (scene == nullptr || scene->mNumMeshes == 0)
@@ -1105,7 +855,8 @@ namespace Helios
 		}
 	}
 
-	/* 导入 Obj 模型（ImportModel 的 obj 分支，也供检查直接调用） */
+	/* 导入 Obj 模型（ImportModel 的 obj 分支，也供检查直接调用）：解析与其它格式同走
+	 * assimp（LoadAssimpModel），只多一步伴生材质避让（见 ArchiveObjMaterials） */
 	std::string ImportObj(const std::string& filepath, const std::string& dest_dir)
 	{
 		if (filepath.empty() || dest_dir.empty())
@@ -1122,7 +873,7 @@ namespace Helios
 		}
 
 		ImportedModel model;
-		if (!LoadObjModel(source_path, model))
+		if (!LoadAssimpModel(source_path, model))
 			return {};
 
 		return FinishImport(source_path, PathFromUtf8(dest_dir), model, /*preserve_obj_materials=*/true);

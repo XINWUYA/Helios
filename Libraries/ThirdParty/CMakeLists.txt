@@ -202,26 +202,6 @@ set_target_properties(xxHash PROPERTIES
     FOLDER "Libraries/ThirdParty"
 )
 
-# tinyobjloader
-project(tinyobjloader CXX)
-
-add_library(tinyobjloader STATIC)
-
-file(GLOB TINYOBJLOADER_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/tinyobjloader/*.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tinyobjloader/*.h"
-)
-
-# Exclude loader_example.cc which contains a main() function
-list(FILTER TINYOBJLOADER_SOURCES EXCLUDE REGEX ".*loader_example\\.cc$")
-
-target_sources(tinyobjloader PRIVATE ${TINYOBJLOADER_SOURCES})
-target_include_directories(tinyobjloader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tinyobjloader)
-set_target_properties(tinyobjloader PROPERTIES 
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
-    FOLDER "Libraries/ThirdParty"
-)
-
 # magic_enum
 project(magic_enum CXX)
 

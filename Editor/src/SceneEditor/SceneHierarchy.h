@@ -116,8 +116,8 @@ namespace Helios
 		void DrawModelEditorCard(const ModelComponent& component);
 		/* 「Model Editor」入口卡的本体（实体属性面板与资源属性面板共用） */
 		void DrawModelEditorEntry(const char* id, const std::string& absolute_path);
-		/* 资源属性面板的模型入口卡：选中的是能打开的模型文件时给同一个按钮
-		 * （.mesh / .obj 才支持，平铺在资源详情卡之后 —— 与 probe 图卡 / 材质卡同路数） */
+		/* 资源属性面板的模型入口卡：选中的是模型资源（Model 类）时给同一个入口按钮，
+		 * 平铺在资源详情卡之后 —— 与 probe 图卡 / 材质卡同路数 */
 		void DrawAssetModelEditorCard(const AssetSelectionEntry& entry);
 		/* 材质卡主体：当前材质的属性行（Shader + 参数，可就地编辑 → 自动实例化） */
 		bool DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index);

@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "ModelEditorLayer.h"
 #include "Helios/Application/Application.h"
+#include "Helios/Scene/ModelImporter.h"
 #include "EditorCommon.h"
 #include "EditorIcons.h"
 #include "PanelChrome.h"
@@ -229,8 +230,11 @@ namespace Helios
 			ImGuiExt::DrawCommonTextUI("Path", m_pModelInfo->m_Path);
 			ImGuiExt::DrawCommonTextUI("AABB Min", FormatVec3(m_pModelInfo->m_AABB.first));
 			ImGuiExt::DrawCommonTextUI("AABB Max", FormatVec3(m_pModelInfo->m_AABB.second));
-			ImGuiExt::DrawCommonTextUI("Vertices",
-				std::to_string(m_pModelInfo->m_Attributes.vertices.size() / 3));
+
+			size_t vertex_count = 0;
+			for (const auto& sub_model_info : m_pModelInfo->m_SubModelInfos)
+				vertex_count += sub_model_info->VertexArray->GetVertexCount();
+			ImGuiExt::DrawCommonTextUI("Vertices", std::to_string(vertex_count));
 			ImGuiExt::DrawCommonTextUI("Mesh Segments",
 				std::to_string(m_pModelInfo->m_SubModelInfos.size()));
 		}
@@ -310,13 +314,9 @@ namespace Helios
 				const SharedPtr<DeviceTexture> previous = texture;
 				ImGuiExt::DrawTextureUI("Texture", texture);
 
-				/* 拖入新贴图：应用到材质。Ambient 另外记下路径 —— 材质导出走这条路径 */
+				/* 拖入新贴图：应用到材质 */
 				if (texture != previous)
-				{
 					material->SetTexture(param_info.Name, texture);
-					if (param_info.Name == "Ambient")
-						sub_model_info->MaterialParams.AmbientTexPath = RELATIVE_PATH(texture->GetPath());
-				}
 
 				const bool flip_changed = ImGuiExt::DrawCheckboxUI("Flip V", load_config.IsFlipV);
 				const bool mips_changed = ImGuiExt::DrawCheckboxUI("Gen Mips", load_config.IsGenMips);
@@ -406,11 +406,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const auto extension = PathToUtf8(path.extension());
-
-		/* 模型文件（与弹窗导入同一条路） */
-		if (extension == ".obj")
-			LoadObjModel(PathToUtf8(path));
+		LoadModelFile(PathToUtf8(path));
 	}
 
 	/* 导入模型：弹窗选文件 */
@@ -418,11 +414,12 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const auto file_path = FileDialog::OpenFile("Obj(*.obj)\0*.obj\0");
+		const auto file_path = FileDialog::OpenFile(
+			"Model(*.mesh;*.obj;*.fbx;*.gltf;*.glb;*.dae;*.stl)\0*.mesh;*.obj;*.fbx;*.gltf;*.glb;*.dae;*.stl\0");
 		if (file_path.empty())
 			return;
 
-		if (!LoadObjModel(file_path))
+		if (!LoadModelFile(file_path))
 			return;
 
 		/* 模型已就绪：层与视口窗口一并唤回，导入结果必然可见 */
@@ -430,21 +427,12 @@ namespace Helios
 		m_IsViewportVisible = true;
 	}
 
-	/* 打开模型（属性面板入口）：按后缀分派到对应加载流程 */
+	/* 打开模型（属性面板 / 资源面板入口） */
 	void ModelEditorLayer::OpenModel(const std::string& path)
 	{
 		PROFILE_FUNCTION();
 
-		const std::string extension = ToLowercase(PathToUtf8(PathFromUtf8(path).extension()).c_str());
-		bool loaded = false;
-		if (extension == ".obj")
-			loaded = LoadObjModel(path);
-		else if (extension == ".mesh")
-			loaded = LoadMeshModel(path);
-		else
-			EDITOR_LOG_WARN("Model editor can not open this file: {}.", path);
-
-		if (!loaded)
+		if (!LoadModelFile(path))
 			return;
 
 		/* 模型已就绪：层与视口窗口一并唤回（同导入） */
@@ -452,27 +440,37 @@ namespace Helios
 		m_IsViewportVisible = true;
 	}
 
-	/* 读取 Obj 模型：原始数据 + 每段一份材质，再重建模型进场景 */
-	bool ModelEditorLayer::LoadObjModel(const std::string& path)
+	/* 打开模型文件：.mesh 直接加载；交换格式（obj / fbx / gltf / glb / dae / stl）先走内核
+	 * 导入链转成 .mesh 再加载 —— 模型编辑器不自己解析格式，与「场景窗口拖入」共用同一条
+	 * 转换链，材质与贴图一并带过来。转换落在资产目录的 Cache 工作区（不进资源树、可重复覆盖）。 */
+	bool ModelEditorLayer::LoadModelFile(const std::string& path)
 	{
 		PROFILE_FUNCTION();
 
-		EDITOR_LOG_DEBUG("Import model file: {}.", path);
-
-		/* 读取模型 */
-		m_pModelInfo->Reset();
-		m_pModelInfo->LoadFromObj(path);
-		if (m_pModelInfo->m_SubModelInfos.empty())
+		if (path.empty())
 			return false;
 
-		/* 初始化材质 */
-		m_pMaterialGroup->ClearAllMaterials();
-		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-			m_pMaterialGroup->EmplaceMaterial(Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/DeferredShaders/GBufferMaterial.glsl")));
+		const std::string extension = ToLowercase(PathToUtf8(PathFromUtf8(path).extension()).c_str());
+		if (extension == ".mesh")
+			return LoadMeshModel(path);
 
-		/* 更新场景模型信息 */
-		UpdateModel();
-		return true;
+		const bool exchange_format = extension == ".obj" || extension == ".fbx" || extension == ".gltf"
+			|| extension == ".glb" || extension == ".dae" || extension == ".stl";
+		if (!exchange_format)
+		{
+			EDITOR_LOG_WARN("Model editor can not open this file: {}.", path);
+			return false;
+		}
+
+		EDITOR_LOG_DEBUG("Import model file: {}.", path);
+
+		const std::filesystem::path workbench =
+			g_AssetsPath / "Cache" / "ModelEditor" / PathFromUtf8(path).stem();
+		const std::string mesh_path = Helios::ImportModel(path, PathToUtf8(workbench));
+		if (mesh_path.empty())
+			return false;
+
+		return LoadMeshModel(mesh_path);
 	}
 
 	/* 加载 .mesh：模型编辑器对"场景里在用的那份资产"打开 —— 网格段与槽表材质都来自资产本身。
@@ -513,7 +511,8 @@ namespace Helios
 
 			auto material = (slot != nullptr && slot->pDefault != nullptr)
 				? slot->pDefault->Clone()
-				: Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/DeferredShaders/GBufferMaterial.glsl"));
+				: Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>(
+					ABSOLUTE_PATH("Shaders/MaterialShaders/PBRStandard.glsl")));
 			m_pMaterialGroup->EmplaceMaterial(std::move(material));
 			if (slot != nullptr)
 				m_pMaterialGroup->SetEntrySlotName(static_cast<int>(i), slot->Name);
@@ -663,38 +662,6 @@ namespace Helios
 		out_mesh_file.close();
 	}
 
-	/* 更新模型：按导入数据重建（导入 / 打开 obj 走这条），再放进场景 */
-	void ModelEditorLayer::UpdateModel()
-	{
-		PROFILE_FUNCTION();
-
-		/* 新建模型 */
-		m_pModel = CreateSharedPtr<Model>(m_pModelInfo->m_Path);
-		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-		{
-			auto& sub_model_info = m_pModelInfo->m_SubModelInfos[i];
-			auto& material = m_pMaterialGroup->GetMaterialByIndex(i);
-
-			/* 更新材质 */
-			UpdateMaterial(material, sub_model_info->MaterialParams);
-
-			/* 槽：每个子模型一个（槽名 = 导入时的材质名，与导出 / 加载链对位） */
-			m_pModel->AddMaterialSlot(
-				sub_model_info->MaterialParams.Name.empty()
-					? ("slot_" + std::to_string(i))
-					: sub_model_info->MaterialParams.Name,
-				material);
-
-			SharedPtr<MeshSegment> mesh_segment = CreateSharedPtr<MeshSegment>(
-				sub_model_info->Name, sub_model_info->VertexArray, static_cast<int>(i));
-			mesh_segment->SetAABB(sub_model_info->AABB.first, sub_model_info->AABB.second);
-
-			m_pModel->AddMeshSegment(mesh_segment);
-		}
-
-		ShowModelInScene();
-	}
-
 	/* 把当前模型放进编辑器场景：旧模型实体全部销毁，只留一个挂当前模型的实体，
 	 * 相机按包围盒自适应 */
 	void ModelEditorLayer::ShowModelInScene()
@@ -719,67 +686,5 @@ namespace Helios
 		const auto distance = (aabb_height) / std::tan(m_pEditorCamera->GetFov() / 2.0f);
 		m_pEditorCamera->SetDistance(distance);
 		m_pEditorCamera->SetFocalPoint((aabb_min + aabb_max) * 0.5f);
-	}
-
-	/* 更新材质：根据材质参数设置材质 */
-	void ModelEditorLayer::UpdateMaterial(const SharedPtr<Material>& material, const MaterialParams& material_params)
-	{
-		PROFILE_FUNCTION();
-
-		TextureLoadConfig load_config;
-		load_config.IsFlipV = false;
-		{
-			/* Ambient */
-			if (!material_params.AmbientTexPath.empty())
-				material->SetTexture("Ambient", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.AmbientTexPath), load_config));
-			else
-				material->SetParameters(ParamType::Vec3, "Ambient", material_params.Ambient);
-
-			/* Diffuse/Albedo */
-			if (!material_params.DiffuseTexPath.empty())
-				material->SetTexture("Albedo", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.DiffuseTexPath), load_config));
-			else
-				material->SetParameters(ParamType::Vec3, "Albedo", material_params.Diffuse);
-
-			/* Specular */
-			if (!material_params.SpecularTexPath.empty())
-				material->SetTexture("Specular", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.SpecularTexPath), load_config));
-			else
-				material->SetParameters(ParamType::Vec3, "Specular", material_params.Specular);
-
-			/* Normal, todo: 处理Bump和Displacement */
-			if (!material_params.BumpTexPath.empty())
-				material->SetTexture("Normal", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.BumpTexPath), load_config));
-			else if (!material_params.DisplacementTexPath.empty())
-				material->SetTexture("Normal", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.DisplacementTexPath), load_config));
-			else
-				material->SetParameters(ParamType::Vec3, "Normal", glm::vec3(0.0f, 0.0f, 1.0f));
-
-			/* Roughness */
-			if (!material_params.RoughnessTexPath.empty())
-				material->SetTexture("Roughness", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.RoughnessTexPath), load_config));
-			else
-				material->SetParameters(ParamType::Float, "Roughness", material_params.Roughness);
-
-			/* Metallic */
-			if (!material_params.MetallicTexPath.empty())
-				material->SetTexture("Metallic", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.MetallicTexPath), load_config));
-			else
-				material->SetParameters(ParamType::Float, "Metallic", material_params.Metallic);
-
-			/* Emission */
-			if (!material_params.EmissionTexPath.empty())
-				material->SetTexture("Emissive", AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(material_params.EmissionTexPath), load_config));
-			else
-				material->SetParameters(ParamType::Vec3, "Emissive", material_params.Emission);
-
-			/* ClearCoat */
-			material->SetParameters(ParamType::Float, "ClearCoatRoughness", material_params.ClearCoatRoughness);
-			material->SetParameters(ParamType::Float, "ClearCoatThickness", material_params.ClearCoatThickness);
-
-			/* Others */
-			material->SetParameters(ParamType::Vec3, "Transmittance", material_params.Transmittance);
-			material->SetParameters(ParamType::Float, "IOR", material_params.IOR);
-		}
 	}
 }

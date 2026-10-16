@@ -2735,16 +2735,13 @@ namespace Helios
 		DrawModelEditorEntry("##ModelEditorCard", model->GetPath());
 	}
 
-	/* 资源属性面板的模型入口卡：.mesh / .obj 才能被模型编辑器打开（fbx 等还没有导入器） */
+	/* 资源属性面板的模型入口卡：Model 类资源都能进模型编辑器（交换格式由编辑器里那条
+	 * 导入链先转成 .mesh 再开） */
 	void SceneHierarchy::DrawAssetModelEditorCard(const AssetSelectionEntry& entry)
 	{
 		PROFILE_FUNCTION();
 
 		if (entry.IsFolder || entry.Kind != AssetFileKind::Model)
-			return;
-
-		const std::string extension = ToLowercase(PathToUtf8(PathFromUtf8(entry.Path).extension()).c_str());
-		if (extension != ".mesh" && extension != ".obj")
 			return;
 
 		DrawModelEditorEntry("##AssetModelEditorCard", PathToUtf8(g_AssetsPath / PathFromUtf8(entry.Path)));

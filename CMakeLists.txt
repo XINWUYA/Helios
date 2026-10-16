@@ -50,7 +50,6 @@ set(INCLUDE_DIRS
     tinyxml2      ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
     ImGuizmo      ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/ImGuizmo
     xxHash        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/xxHash
-    tinyobjloader ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyobjloader
     magic_enum    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
     assimp        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
     tracy         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tracy/public

@@ -70,7 +70,6 @@ target_include_directories(Kernel
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/xxHash
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyobjloader
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tracy/public
@@ -103,7 +102,6 @@ target_link_libraries(Kernel
         Glad
         ImGui
         tinyxml2
-        tinyobjloader
         assimp
         xxHash
         spirv-cross

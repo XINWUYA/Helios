@@ -44,7 +44,6 @@ target_include_directories(Editor
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/ImGuizmo
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyobjloader
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
 )

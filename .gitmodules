@@ -28,9 +28,6 @@
 [submodule "Libraries/ThirdParty/xxHash"]
 	path = Libraries/ThirdParty/xxHash
 	url = https://github.com/Cyan4973/xxHash
-[submodule "Libraries/ThirdParty/tinyobjloader"]
-	path = Libraries/ThirdParty/tinyobjloader
-	url = https://github.com/tinyobjloader/tinyobjloader
 [submodule "Libraries/ThirdParty/magic_enum"]
 	path = Libraries/ThirdParty/magic_enum
 	url = https://github.com/Neargye/magic_enum.git
