@@ -284,11 +284,23 @@ namespace Helios
 
 		glBindTexture(m_TextureTarget, m_TextureId);
 
+		/* 尺寸按该 mip 层的边长取（用 mip0 的尺寸会越界，GL 报错后数据被丢弃）；
+		 * 区域起点由调用方指定，尺寸取该层剩余部分，整层上传时 offset 为 0 */
+		const uint32_t level_width = std::max(1u, m_TextureDesc.Width >> level);
+		const uint32_t level_height = std::max(1u, m_TextureDesc.Height >> level);
+		const uint32_t region_width = level_width > offset_x ? level_width - offset_x : 0;
+		const uint32_t region_height = level_height > offset_y ? level_height - offset_y : 0;
+		if (region_width == 0 || region_height == 0)
+		{
+			CORE_LOG_ERROR("OpenGLTexture::SetData: empty region at level {} ({}, {})", level, offset_x, offset_y);
+			return;
+		}
+
 		/* 设置格式 */
 		switch (m_TextureTarget)
 		{
 		case GL_TEXTURE_2D:
-			glTexSubImage2D(m_TextureTarget, (GLint)level, (GLint)offset_x, (GLint)offset_y, (GLsizei)m_TextureDesc.Width, (GLsizei)m_TextureDesc.Height,
+			glTexSubImage2D(m_TextureTarget, (GLint)level, (GLint)offset_x, (GLint)offset_y, (GLsizei)region_width, (GLsizei)region_height,
 				TranslateToOpenGLPixelFormat(pixel_desc.Format), TranslateToOpenGLPixelType(pixel_desc.Type), data);
 			break;
 		case GL_TEXTURE_CUBE_MAP:
@@ -301,14 +313,26 @@ namespace Helios
 			}
 
 			glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + offset_z, (GLint)level, (GLint)offset_x, (GLint)offset_y,
-				(GLsizei)m_TextureDesc.Width, (GLsizei)m_TextureDesc.Height,
+				(GLsizei)region_width, (GLsizei)region_height,
 				TranslateToOpenGLPixelFormat(pixel_desc.Format), TranslateToOpenGLPixelType(pixel_desc.Type), data);
 			break;
 		case GL_TEXTURE_3D:
 		case GL_TEXTURE_2D_ARRAY:
-			glTexSubImage3D(m_TextureTarget, (GLint)level, (GLint)offset_x, (GLint)offset_y, (GLint)offset_z, (GLsizei)m_TextureDesc.Width, (GLsizei)m_TextureDesc.Height, (GLsizei)m_TextureDesc.Depth,
+		{
+			/* 3D 与 2D 数组的深度同样按层折算 */
+			const uint32_t level_depth = std::max(1u, m_TextureDesc.Depth >> level);
+			const uint32_t region_depth = level_depth > offset_z ? level_depth - offset_z : 0;
+			if (region_depth == 0)
+			{
+				CORE_LOG_ERROR("OpenGLTexture::SetData: empty depth region at level {} ({})", level, offset_z);
+				break;
+			}
+
+			glTexSubImage3D(m_TextureTarget, (GLint)level, (GLint)offset_x, (GLint)offset_y, (GLint)offset_z,
+				(GLsizei)region_width, (GLsizei)region_height, (GLsizei)region_depth,
 				TranslateToOpenGLPixelFormat(pixel_desc.Format), TranslateToOpenGLPixelType(pixel_desc.Type), data);
 			break;
+		}
 		default:
 			break;
 		}
