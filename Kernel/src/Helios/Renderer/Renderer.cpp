@@ -231,32 +231,37 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* Vertices */
-		static constexpr float vertices[3 * 4] = 
+		/* 全屏 VAO 只建一次：原实现每次调用都新建并销毁 VAO 与顶点/索引缓冲 */
+		static const SharedPtr<DeviceVertexArray> s_FullScreenVertexArray = []()
 		{
-			-1.0f, -1.0f, 1.0f, 1.0f,
-			 3.0f, -1.0f, 1.0f, 1.0f,
-			-1.0f,  3.0f, 1.0f, 1.0f,
-		};
-		static const VertexBufferLayout vertex_buffer_layout = 
-		{
-			{ "a_Position", BufferDataType::Float4 }
-		};
-		const auto vertex_buffer = DeviceVertexBuffer::Create("FullScreen_VertexBuffer", vertices, sizeof(vertices));
-		vertex_buffer->SetLayout(vertex_buffer_layout);
+			/* Vertices */
+			static constexpr float vertices[3 * 4] =
+			{
+				-1.0f, -1.0f, 1.0f, 1.0f,
+				 3.0f, -1.0f, 1.0f, 1.0f,
+				-1.0f,  3.0f, 1.0f, 1.0f,
+			};
+			static const VertexBufferLayout vertex_buffer_layout =
+			{
+				{ "a_Position", BufferDataType::Float4 }
+			};
+			const auto vertex_buffer = DeviceVertexBuffer::Create("FullScreen_VertexBuffer", vertices, sizeof(vertices));
+			vertex_buffer->SetLayout(vertex_buffer_layout);
 
-		/* Indices */
-		static constexpr uint16_t indices[3] = 
-		{
-			0, 1, 2
-		};
-		const auto index_buffer = IndexBuffer::Create("FullScreen_IndexBuffer", indices, 3, IndexType::UInt16);
+			/* Indices */
+			static constexpr uint16_t indices[3] =
+			{
+				0, 1, 2
+			};
+			const auto index_buffer = IndexBuffer::Create("FullScreen_IndexBuffer", indices, 3, IndexType::UInt16);
 
-		/* VertexArray */
-		auto vertex_array = DeviceVertexArray::Create("FullScreen_VertexArray");
-		vertex_array->AddVertexBuffer(vertex_buffer);
-		vertex_array->SetIndexBuffer(index_buffer);
-		return vertex_array;
+			/* VertexArray */
+			auto vertex_array = DeviceVertexArray::Create("FullScreen_VertexArray");
+			vertex_array->AddVertexBuffer(vertex_buffer);
+			vertex_array->SetIndexBuffer(index_buffer);
+			return vertex_array;
+		}();
+		return s_FullScreenVertexArray;
 	}
 
 	void Renderer::FillObjectUniformBuffer(const VisibleMeshObject& mesh_object)
