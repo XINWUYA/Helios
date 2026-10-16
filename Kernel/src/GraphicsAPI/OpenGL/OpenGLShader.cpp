@@ -7,6 +7,8 @@
 
 #include "Helios/Scene/SceneCommon.h"
 
+#include <cstring>
+
 namespace Helios
 {
 	static std::filesystem::path GetShaderCacheDirectory()
@@ -547,26 +549,58 @@ namespace Helios
 		}
 #endif
 
-#ifndef PLATFORM_WINDOWS
-		/* 非 Windows 走的是传统 GLSL 编译路径：
-		 * macOS 会剥离 sampler 上的 layout(binding = X)，
-		 * 这里按反射结果显式把每个 sampler 指向声明的 texture unit，
-		 * 使三端行为与 Shader 中写的 binding 完全一致。 */
+		/* link 后统一按反射结果设置每个 sampler 的纹理单元：Windows 驱动导入 SPIR-V 时
+		 * 可能不应用 layout(binding)，macOS/Linux 会剥离 binding，都需要在这里修正；
+		 * 个别驱动不暴露 uniform location 的，用 glGetActiveUniform 枚举补上 */
 		if (!m_Reflection.SamplerBindings.empty())
 		{
 			GLint prev_program = 0;
 			glGetIntegerv(GL_CURRENT_PROGRAM, &prev_program);
 
 			glUseProgram(program);
+
+			GLint num_active = 0;
+			glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &num_active);
+			std::vector<std::pair<GLint, GLint>> active_units;
+			active_units.reserve(static_cast<size_t>(num_active));
+			for (GLint i = 0; i < num_active; ++i)
+			{
+				char name[256] = {0};
+				GLsizei length = 0;
+				GLint size = 0;
+				GLenum type = 0;
+				glGetActiveUniform(program, i, sizeof(name), &length, &size, &type, name);
+
+				const bool is_sampler = (type >= GL_SAMPLER_1D && type <= GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY);
+				if (!is_sampler || size != 1)
+					continue;
+
+				std::string uniform_name(name, static_cast<size_t>(length > 0 ? length : std::strlen(name)));
+				const auto bracket = uniform_name.find('[');
+				if (bracket != std::string::npos)
+					uniform_name = uniform_name.substr(0, bracket);
+
+				const auto it = m_Reflection.SamplerBindings.find(uniform_name);
+				if (it == m_Reflection.SamplerBindings.end())
+					continue;
+				const GLint location = glGetUniformLocation(program, name);
+				if (location < 0)
+					continue;
+				active_units.emplace_back(location, static_cast<GLint>(it->second));
+			}
+
 			for (const auto& [sampler_name, binding] : m_Reflection.SamplerBindings)
 			{
 				const GLint location = glGetUniformLocation(program, sampler_name.c_str());
 				if (location >= 0)
 					glUniform1i(location, static_cast<GLint>(binding));
 			}
+
+			for (const auto& [location, value] : active_units)
+				glUniform1i(location, value);
+
 			glUseProgram(static_cast<GLuint>(prev_program));
 		}
-#endif
 
 		m_IsLinked = true;
 
