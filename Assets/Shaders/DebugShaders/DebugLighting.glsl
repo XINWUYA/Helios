@@ -23,7 +23,7 @@ bool DebugLightingCompose(SGBufferData gbuffer, vec3 world_pos, vec3 n, vec3 v, 
 	if (u_DebugView == 0)
 		return false;
 
-	const vec3 light_factor = u_ColorIntensity.rgb * u_ColorIntensity.a * attenuation * (1.0f - shadow * 0.8f);
+	const vec3 light_factor = LightFactor(attenuation, shadow);
 
 	if (u_DebugView == kDebugDiffuse)
 	{
@@ -76,8 +76,8 @@ bool DebugLightingCompose(SGBufferData gbuffer, vec3 world_pos, vec3 n, vec3 v, 
 		}
 		else
 		{
-			/* 与正常路径的平面环境项同口径（含 0.3 系数，见 Lighting.glsl 合成段） */
-			indirect = max(vec3(0.0f), gbuffer.Ambient * gbuffer.Albedo * gbuffer.AO * 0.3f);
+			/* 与正常路径的平面环境项走同一份合成（见 Builtin/LightCompose.glsl） */
+			indirect = max(vec3(0.0f), ComposeFallbackAmbient(gbuffer.Ambient, gbuffer.Albedo, gbuffer.AO));
 		}
 	}
 	out_color = indirect;

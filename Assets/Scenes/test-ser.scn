@@ -34,7 +34,7 @@
         <Entity ID="7" Name="Ground">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="15.000000 15.000000 15.000000"/>
             <Model ModelPath="BuiltinPlane" CastShadow="true" ReceiveShadow="true">
-                <MaterialOverride Slot="Default" Instance="true" Source="Materials/Ground.mtl" ShaderPath="Shaders/ForwardShaders/BuiltinLit.glsl">
+                <MaterialOverride Slot="Default" Instance="true" Source="Materials/Ground.mtl" ShaderPath="Shaders/MaterialShaders/SimpleLit.glsl">
                     <Parameters>
                         <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.120000 4.000000 0.000000 0.000000"/>
                         <ParamInfo Type="0" Name="u_AlbedoTexture">

@@ -122,7 +122,7 @@ namespace Helios
 	void ShadowMapManager::PrepareForShadowMaps(const SharedPtr<Scene>& scene, const Camera* camera)
 	{
 		if (!m_ShadowCasterShader)
-			m_ShadowCasterShader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Builtin/Shadow.glsl"));
+			m_ShadowCasterShader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Builtin/ShadowCaster.glsl"));
 
 		PrepareRequiredTexture();
 
@@ -712,8 +712,8 @@ namespace Helios
 					}
 				}
 
-				/* 渲染点光 / 聚光阴影层：单面矩阵作为材质参数下发，u_CascadeIndex = -1 让 Shadow.glsl
-				 * 走单矩阵分支。注意：参数名必须跟 Shadow.glsl 的裸 uniform 一致（u_ShadowPassMat），
+				/* 渲染点光 / 聚光阴影层：单面矩阵作为材质参数下发，u_CascadeIndex = -1 让 ShadowCaster.glsl
+				 * 走单矩阵分支。注意：参数名必须跟 ShadowCaster.glsl 的裸 uniform 一致（u_ShadowPassMat），
 				 * 也不能跟 LightUniformBuffer 成员重名（撞名编译不过）。 */
 				for (const auto& punctual_shadow_map : m_PunctualShadowMaps)
 				{

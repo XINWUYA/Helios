@@ -45,7 +45,7 @@ void SampleCSM::OnAttached()
 		auto entity = m_pScene->CreateEntity("Plane");
 		auto& model_component = entity.AddComponent<ModelComponent>();
 
-		const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/ForwardShaders/BuiltinLit.glsl"));
+		const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/MaterialShaders/SimpleLit.glsl"));
 		auto material = Material::Create(shader);
 		auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Grass2.png"));
 		material->SetTexture("u_AlbedoTexture", texture);

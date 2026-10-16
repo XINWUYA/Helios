@@ -121,7 +121,7 @@ void main()
 	}
 	if (u_DebugMode == kDebugAmbientOcclusion)
 	{
-		/* 材质体系里 AO 恒为 1（与 GBufferMaterial 的写入约定一致） */
+		/* 材质体系里 AO 恒为 1（与 GBuffer 的写入约定一致） */
 		OutFragColor = vec4(1.0f, 1.0f, 1.0f, 1.0f);
 		return;
 	}

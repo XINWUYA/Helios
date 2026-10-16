@@ -48,7 +48,7 @@ namespace Helios
 		constexpr uint32_t kVertexStride = 16; /* 每个顶点的 float 数 */
 
 		/* 新材质用的默认着色器（与模型编辑器导入同一份） */
-		constexpr const char* kDefaultMaterialShader = "Shaders/DeferredShaders/GBufferMaterial.glsl";
+		constexpr const char* kDefaultMaterialShader = "Shaders/MaterialShaders/PBRStandard.glsl";
 
 		/* 一个 Obj shape / assimp mesh 的转换结果：对应一个 MeshSegment */
 		struct ShapeImportResult
@@ -897,7 +897,7 @@ namespace Helios
 		}
 
 		/* 从 assimp 材质登记引擎参数（返回登记完的槽；名字与贴图都空的返回空壳，调用方跳过）。
-		 * 参数名用 u_* 一族（与 GBufferMaterial / PBRStandard 的声明同名）：
+		 * 参数名用 u_* 一族（与 GBuffer / PBRStandard 的声明同名）：
 		 *   BASE_COLOR 或 DIFFUSE -> u_AlbedoTexture；NORMALS 或 NORMAL_CAMERA -> u_NormalTexture；
 		 *   EMISSION_COLOR 或 EMISSIVE -> u_EmissiveTexture；METALNESS / DIFFUSE_ROUGHNESS 两条
 		 *   贴图指向同一张时按打包图拆通道（glTF 口径），不同图就各自直挂。 */

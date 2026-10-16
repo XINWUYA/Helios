@@ -59,7 +59,7 @@ namespace Helios
 		 * 不参与阴影投射，由天空背景通道专绘。 */
 		[[nodiscard]] bool IsSkyBox() const;
 		/* 是否支持反射探针的 IBL 着色（着色器声明了 IBL 契约的采样器，
-		 * 见 ReflectionProbe/IBL.glsl）。渲染通道据此决定是否发 per-draw 的探针绑定。 */
+		 * 见 ReflectionProbe/IBLCommon.glsl）。渲染通道据此决定是否发 per-draw 的探针绑定。 */
 		[[nodiscard]] bool SupportsIBL() const;
 		/* 是否参与逐光源的直接光照合成（着色器声明了光照契约的控制 uniform，
 		 * 见 Builtin/DirectLight.glsl）。前向渲染通道据此决定一个对象是否走
@@ -112,14 +112,14 @@ namespace Helios
 
 		/* 收集"Shader 声明了、本材质没写"的值参数和默认值（默认取反射里的源码值、没有就按类型零值；
 		 * Texture 不参与）。块式 uniform 是 per-program 状态，不写会残留上一个对象的取值 —— 材质
-		 * 转换到通用 Shader 绘制时（延迟 GBufferMaterial）用它做 per-draw 补齐。 */
+		 * 转换到通用 Shader 绘制时（延迟 GBuffer）用它做 per-draw 补齐。 */
 		[[nodiscard]] std::vector<MaterialParamInfo> CollectMissingValueParamDefaults() const;
 
 		/* 默认材质 */
 		static SharedPtr<Material>& Default();
 		/* 错误材质 */
 		static SharedPtr<Material>& Error();
-		/* 内置白模材质：GBufferMaterial.glsl + 默认贴图满配（White / normal / Black），零外部依赖。
+		/* 内置白模材质：PBRStandard.glsl + 默认贴图满配（White / normal / Black），零外部依赖。
 		 * "槽未绑定"的兜底与"拖 .mesh 起步"的初始外观都是它 —— 白模 = 正常未配置；
 		 * 紫色 Error 只代表异常。 */
 		static SharedPtr<Material>& BuiltinWhite();

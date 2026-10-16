@@ -1,5 +1,5 @@
-#ifndef MATERIAL_COMMON_GLSL
-#define MATERIAL_COMMON_GLSL
+#ifndef MATERIAL_INPUT_GLSL
+#define MATERIAL_INPUT_GLSL
 
 struct SMaterialInput
 {
@@ -17,4 +17,4 @@ struct SMaterialInput
 	float ClearCoatRoughness;
 };
 
-#endif // MATERIAL_COMMON_GLSL
+#endif // MATERIAL_INPUT_GLSL

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Materials Count="1">
-    <Material ID="0" ShaderPath="Shaders/ForwardShaders/BuiltinLit.glsl">
+    <Material ID="0" ShaderPath="Shaders/MaterialShaders/SimpleLit.glsl">
         <Parameters>
             <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.000000 4.000000 0.000000 0.000000"/>
             <ParamInfo Type="0" Name="u_AlbedoTexture">

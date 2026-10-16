@@ -211,13 +211,13 @@ namespace Helios
 				"</MaterialGraph>\n";
 		}
 
-		/* 单材质资产：与内置白模同一套配置（GBufferMaterial.glsl + 默认贴图满配）——
-		 * 零外部依赖、编辑器延迟与前向两条路径都直接可预览，用户随后改参数 / 换贴图。 */
+		/* 单材质资产：与内置白模同一套配置（PBRStandard.glsl + 默认贴图满配）——
+		 * 零外部依赖、编辑器前向与延迟（经 G-Buffer 转换）都是正确外观，用户随后改参数 / 换贴图。 */
 		if (ext == ".mtl")
 		{
 			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
 				"<Materials Count=\"1\">\n"
-				"    <Material ID=\"0\" ShaderPath=\"Shaders/DeferredShaders/GBufferMaterial.glsl\">\n"
+				"    <Material ID=\"0\" ShaderPath=\"Shaders/MaterialShaders/PBRStandard.glsl\">\n"
 				"        <Parameters>\n"
 				"            <ParamInfo Type=\"0\" Name=\"u_AlbedoTexture\"><Texture Path=\"Textures/White.png\" Slot=\"0\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
 				"            <ParamInfo Type=\"0\" Name=\"u_SpecularTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"1\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"

@@ -1,5 +1,5 @@
-#ifndef GBUFFER_GLSL
-#define GBUFFER_GLSL
+#ifndef GBUFFER_COMMON_GLSL
+#define GBUFFER_COMMON_GLSL
 
 struct SGBufferData
 {
@@ -14,7 +14,7 @@ struct SGBufferData
 	vec3 Ambient;
 	float Anisotropy;
 	vec3 WorldPosition;
-	/* 接受阴影（0/1）：来自 GBufferMaterial.glsl 写入的 GBufferTexture5.a */
+	/* 接受阴影（0/1）：来自 GBuffer.glsl 写入的 GBufferTexture5.a */
 	float ReceiveShadow;
 };
 
@@ -36,7 +36,7 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 
 	gbuffer.Albedo = color0.rgb;
 	gbuffer.Roughness = color0.a;
-	/* 法线解码：GBufferMaterial 以 n * 0.5 + 0.5 编码（RGBA8 无符号格式存不了负值） */
+	/* 法线解码：GBuffer 以 n * 0.5 + 0.5 编码（RGBA8 无符号格式存不了负值） */
 	gbuffer.WorldNormal = color1.rgb * 2.0f - 1.0f;
 	gbuffer.Metallic = color1.a;
 	gbuffer.Specular = color2.rgb;
@@ -49,4 +49,4 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 	gbuffer.ReceiveShadow = color5.a;
 }
 
-#endif // GBUFFER_GLSL
+#endif // GBUFFER_COMMON_GLSL

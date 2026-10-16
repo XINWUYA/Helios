@@ -17,7 +17,7 @@ namespace Helios
 		namespace
 		{
 			/* 几何重绘档位的"主贴图"参数名：与各材质着色器的参数命名同源
-			 * （GBufferMaterial / PBRStandard / BuiltinLit 都是这些名字）。
+			 * （GBuffer / PBRStandard / SimpleLit 都是这些名字）。
 			 * Mipmap 档看主贴图（Albedo）；无对应贴图的档位返回空。 */
 			const char* MainTextureNameFor(DebugViewMode mode)
 			{

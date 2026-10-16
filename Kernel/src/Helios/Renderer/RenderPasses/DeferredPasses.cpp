@@ -117,7 +117,7 @@ namespace Helios
 				}
 			}
 
-			/* 源材质没覆盖到的采样点补默认贴图：GBufferMaterial.glsl 的采样点必须全部有绑定，
+			/* 源材质没覆盖到的采样点补默认贴图：GBuffer.glsl 的采样点必须全部有绑定，
 			 * 缺一张就是未定义输入（Metal 校验层会直接断言）。参数不全的老材质、新建材质
 			 * 都靠这一步在编辑器里兜住 —— 直接遍历目标 shader 的反射列表，与 shader 声明保持同步。 */
 			for (const auto& sampler_entry : gbuffer_shader->GetReflectionData().SamplerBindings)
@@ -138,7 +138,7 @@ namespace Helios
 		namespace
 		{
 			/* GBuffer Pass：可见对象渲染进 MRT（6 张 G-Buffer 纹理 + ObjectId + 深度）。
-			 * 普通材质在提交前转换为 GBufferMaterial.glsl 对应的临时材质。 */
+			 * 普通材质在提交前转换为 GBuffer.glsl 对应的临时材质。 */
 			void AddGBufferPass(RenderView& render_view)
 			{
 				PROFILE_FUNCTION();
@@ -167,9 +167,9 @@ namespace Helios
 				object_id_desc.Height = viewport_region.Height;
 				object_id_desc.TextureFormat = TextureFormat::R32I;
 
-				/* GBuffer Pass 使用 GBufferMaterial.glsl；普通材质在提交前转换为该 shader 对应的临时材质。 */
+				/* GBuffer Pass 使用 GBuffer.glsl；普通材质在提交前转换为该 shader 对应的临时材质。 */
 				const auto gbuffer_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl"));
+					ABSOLUTE_PATH("Shaders/DeferredShaders/GBuffer.glsl"));
 
 				struct GBufferPassData
 				{

@@ -27,6 +27,7 @@ void main()
 #include "../Builtin/BRDF.glsl"
 #include "../Builtin/ShadowUtils.glsl"
 #include "../Builtin/DirectLight.glsl"
+#include "../Builtin/LightCompose.glsl"
 
 struct SVextex2Frag
 {
@@ -36,8 +37,8 @@ struct SVextex2Frag
 layout(location = 0) out vec4 OutFragColor;
 layout(location = 0) in SVextex2Frag vert2frag;
 
-/* 采样器绑定按功能分段：GBuffer 0..5、阴影 6、探针漫反射 7..9、探针镜面 10..12、BRDF LUT 13 */
-layout(binding = 6) uniform sampler2DArray u_ShadowMap;
+/* 采样器绑定按功能分段：GBuffer 0..5、探针漫反射 7..9、探针镜面 10..12、BRDF LUT 13；
+ * 阴影图 15（跨 Pass 统一收尾槽，声明在 ShadowUtils.glsl） */
 
 /* 反射探针 IBL：烘焙结果绑固定采样器组 —— 采样器不能动态索引，按"逐像素选择"用
  * if 链取用；u_ProbeCount = 0 不做 IBL */
@@ -183,14 +184,11 @@ void SampleProbeIBL(int probe, vec3 N, vec3 R, float roughness, out vec3 irradia
 	}
 }
 
-/* 探针 IBL 合成（支持 top2 混合）：漫反射辐照度 + 预滤波镜面 */
+/* 探针 IBL 合成（支持 top2 混合）：取图在这里，合成走公共库（与前向单探针版同一份） */
 vec3 EvaluateProbeIBL(SProbeSelection sel, vec3 N, vec3 V, float roughness, float metallic, vec3 albedo)
 {
 	roughness = clamp(roughness, 0.0f, 1.0f);
 	const float ndv = max(dot(N, V), 0.0f);
-
-	vec3 F = F_Schlick(ndv, metallic, albedo);
-	vec3 kd = (vec3(1.0f) - F) * (1.0f - metallic);
 	vec3 R = reflect(-V, N);
 
 	vec3 irradiance;
@@ -207,8 +205,8 @@ vec3 EvaluateProbeIBL(SProbeSelection sel, vec3 N, vec3 V, float roughness, floa
 	}
 
 	vec2 brdf = texture(u_BRDFLut, vec2(ndv, roughness)).rg;
-	vec3 specular = prefiltered * (F * brdf.x + brdf.y);
-	return kd * irradiance * albedo + specular;
+
+	return ComposeIBL(N, V, metallic, albedo, irradiance, prefiltered, brdf);
 }
 
 /* 调试分流（Diffuse / Specular / Shadow / Indirect / Probe）：须放在上面这些函数之后 */
@@ -240,11 +238,8 @@ void main()
 		return;
 	}
 
-	vec3 direct = max(vec3(0.0f), BRDF(l, v, n, gbuffer.Metallic, gbuffer.Roughness, gbuffer.Albedo));
-	direct *= u_ColorIntensity.rgb * u_ColorIntensity.a * attenuation;
-	direct *= (1.0f - shadow * 0.8f);
-
-	lighting_result = direct;
+	lighting_result = ComposeDirectLight(l, v, n, gbuffer.Metallic, gbuffer.Roughness, gbuffer.Albedo,
+		attenuation, shadow);
 
 	/* 环境项 + 自发光只由负责合成的那一笔光照累加（见 Builtin/DirectLight.glsl） */
 	if (u_ComposeAmbientEmission > 0)
@@ -258,8 +253,8 @@ void main()
 		}
 		else
 		{
-			/* 平面环境项 0.3 系数与前向的无 IBL 回退同口径 */
-			lighting_result += max(vec3(0.0f), gbuffer.Ambient * gbuffer.Albedo * gbuffer.AO * 0.3f);
+			/* 平面环境项与前向的无 IBL 回退走同一份合成 */
+			lighting_result += max(vec3(0.0f), ComposeFallbackAmbient(gbuffer.Ambient, gbuffer.Albedo, gbuffer.AO));
 		}
 		lighting_result += gbuffer.Emission;
 	}

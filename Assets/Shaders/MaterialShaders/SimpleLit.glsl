@@ -41,7 +41,8 @@ void main()
 #include "../Builtin/BRDF.glsl"
 #include "../Builtin/ShadowUtils.glsl"
 #include "../Builtin/DirectLight.glsl"
-#include "../ReflectionProbe/IBL.glsl"
+#include "../Builtin/LightCompose.glsl"
+#include "../ReflectionProbe/IBLCommon.glsl"
 
 struct SVextex2Frag
 {
@@ -60,9 +61,6 @@ layout(binding = 0) uniform sampler2D u_AlbedoTexture;
 /* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）；
  * 非 opaque uniform 必须显式 location（Windows 走 shaderc） */
 layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
-
-/* 级联阴影 */
-layout(binding = 9) uniform sampler2DArray u_ShadowMap;
 
 void main()
 {
@@ -86,20 +84,16 @@ void main()
 	/* 模型关闭「接受阴影」时阴影因子归零 */
 	shadow *= u_ReceiveShadow;
 
-	vec3 direct = max(vec3(0.0f), BRDF(L, V, N, metallic, roughness, albedo));
-	direct *= u_ColorIntensity.rgb * u_ColorIntensity.a * attenuation;
-	direct *= (1.0f - shadow * 0.8f);
-
 	/* 间接光：u_UseIBL = 1 时逐绘制绑定反射探针环境贴图，否则退回简单环境项；
 	 * 只在合成的那一笔（第 0 笔）里累加 —— 其余笔只叠直接光 */
-	vec3 color = direct;
+	vec3 color = ComposeDirectLight(L, V, N, metallic, roughness, albedo, attenuation, shadow);
 	if (u_ComposeAmbientEmission > 0)
 	{
 		vec3 ambient;
 		if (u_UseIBL != 0)
 			ambient = max(vec3(0.0f), EvaluateIBL(N, V, roughness, metallic, albedo));
 		else
-			ambient = albedo * 0.3f;
+			ambient = ComposeFallbackAmbient(vec3(1.0f), albedo, 1.0f); /* 简化档：无 ambient 贴图 / AO */
 
 		color += ambient;
 	}

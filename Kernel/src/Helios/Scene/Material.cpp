@@ -173,7 +173,7 @@ namespace Helios
 		if (!m_pDefaultMaterial->GetShader())
 		{
 			/* 只能在获取时设置Shader，在静态编译期，OpenGL尚未初始化，无法正确创建ShaderProgram */
-			m_pDefaultMaterial->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl")));
+			m_pDefaultMaterial->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/MaterialShaders/PBRStandard.glsl")));
 		}
 
 		return m_pDefaultMaterial;
@@ -194,11 +194,11 @@ namespace Helios
 	{
 		if (!m_pBuiltinWhiteMaterial->GetShader())
 		{
-			/* 跟 Default/Error 一样：只能在获取时初始化（静态期 GL 还没就绪）。GBufferMaterial.glsl
-			 * （延迟 G-Buffer 写入）全贴图驱动，9 个采样点必须全有贴图 —— 白模就用内置默认贴图配满，
-			 * 零外部依赖，编辑器的延迟和前向路径都能用。 */
+			/* 跟 Default/Error 一样：只能在获取时初始化（静态期 GL 还没就绪）。着色器用
+			 * PBRStandard（场景物体的通用默认外观：前向直画，延迟侧由 G-Buffer Pass 自动转换），
+			 * 9 个采样点必须全有贴图 —— 白模就用内置默认贴图配满，零外部依赖。 */
 			m_pBuiltinWhiteMaterial->SetShader(
-				AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/DeferredShaders/GBufferMaterial.glsl")));
+				AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/MaterialShaders/PBRStandard.glsl")));
 
 			auto& white = *m_pBuiltinWhiteMaterial;
 			const auto texture_white = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/White.png"));

@@ -37,7 +37,7 @@ void main()
 #include "../Builtin/Uniforms.glsl"
 #include "../Builtin/Math.glsl"
 #include "../Builtin/BRDF.glsl"
-#include "IBL.glsl"
+#include "IBLCommon.glsl"
 
 struct SVertex2Frag
 {
@@ -56,7 +56,7 @@ layout(binding = 1) uniform sampler2D u_RoughnessTexture;
 layout(binding = 2) uniform sampler2D u_MetalnessTexture;
 layout(binding = 3) uniform sampler2D u_NormalTexture;
 
-/* IBL 环境贴图 / u_UseIBL 来自同目录 IBL.glsl，由渲染通道按最近探针 per-draw 绑定 */
+/* IBL 环境贴图 / u_UseIBL 来自同目录 IBLCommon.glsl，由渲染通道按最近探针 per-draw 绑定 */
 layout(location = 0) uniform float u_EnvironmentStrength;
 
 /* 法线贴图采样，TBN 由插值切线构建 */

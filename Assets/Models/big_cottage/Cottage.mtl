@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Materials Count="1">
-    <Material ID="0" ShaderPath="Shaders/ForwardShaders/PBRStandard.glsl">
+    <Material ID="0" ShaderPath="Shaders/MaterialShaders/PBRStandard.glsl">
         <Parameters>
             <ParamInfo Type="0" Name="u_AmbientTexture">
                 <Texture Path="Textures/White.png">

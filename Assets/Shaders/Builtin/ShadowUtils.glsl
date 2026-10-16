@@ -3,6 +3,10 @@
 
 #include "Uniforms.glsl"
 
+/* 阴影图数组：跨 Pass 统一绑在采样器空间最后一位（GL 每阶段 16 个单元，0..15）。
+ * 由本库声明，用阴影的宿主别再各自声明；渲染端按反射槽位动态绑，改号不用改 C++。 */
+layout(binding = 15) uniform sampler2DArray u_ShadowMap;
+
 /* 3x3 PCF 软阴影采样（级联 / 点光 / 聚光共用）；current_depth 是接收点深度（bias 已含），
  * shadow_uv = 光照空间 xy 重映射到 [0,1]。返回遮挡比例：0 受光，1 被遮挡。 */
 float SampleShadowPCF(sampler2DArray shadowMap, vec2 shadow_uv, float layer, float current_depth)
