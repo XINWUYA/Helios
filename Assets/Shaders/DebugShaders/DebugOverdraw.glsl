@@ -5,7 +5,7 @@
  * （位置 / 法线 / 颜色 / UV / 切线），本 shader 只需位置。 */
 layout(location = 0) in vec3 a_Position;
 
-#include "../builtin/Uniforms.glsl"
+#include "../Builtin/Uniforms.glsl"
 
 void main()
 {

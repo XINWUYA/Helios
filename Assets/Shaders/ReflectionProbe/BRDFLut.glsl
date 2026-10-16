@@ -14,12 +14,14 @@ void main()
 #type fragment
 #version 410 core
 
-#include "../builtin/Math.glsl"
-#include "IBLCommon.glsl"
+#include "../Builtin/Math.glsl"
+#include "BakeCommon.glsl"
 
 layout(location = 0) in vec2 v2f_TexCoord;
-layout(location = 0) out vec4 OutColor;
+layout(location = 0) out vec4 OutFragColor;
 
+/* 环境 BRDF 查找表（Karis split-sum 的第一部分）：按 (NdotV, roughness) 积分出
+ * 菲涅尔缩放系数 A/B，运行期以 textureLod(...).rg 查表。烘焙一次即可，不参与实时帧 */
 float DistributionGGX(float n_dot_h, float roughness)
 {
 	float a = roughness * roughness;
@@ -30,24 +32,24 @@ float DistributionGGX(float n_dot_h, float roughness)
 
 float GeometrySchlickGGX(float NdotV, float roughness)
 {
-    float a = roughness;
-    float k = (a * a) / 2.0;
+	float a = roughness;
+	float k = (a * a) / 2.0;
 
-    float nom   = NdotV;
-    float denom = NdotV * (1.0 - k) + k;
+	float nom   = NdotV;
+	float denom = NdotV * (1.0 - k) + k;
 
-    return nom / denom;
+	return nom / denom;
 }
 
 float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
 {
-    float NdotV = max(dot(N, V), 0.0);
-    float NdotL = max(dot(N, L), 0.0);
-    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
-    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+	float NdotV = max(dot(N, V), 0.0);
+	float NdotL = max(dot(N, L), 0.0);
+	float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+	float ggx1 = GeometrySchlickGGX(NdotL, roughness);
 
-    return ggx1 * ggx2;
-} 
+	return ggx1 * ggx2;
+}
 
 vec2 IntegrateBRDF(float n_dot_v, float roughness)
 {
@@ -62,7 +64,7 @@ vec2 IntegrateBRDF(float n_dot_v, float roughness)
 	{
 		vec2 xi = Hammersley(i, k_SampleCount);
 		vec3 h  = ImportanceSampleGGX(xi, n, roughness);
-        vec3 l  = normalize(2.0f * dot(v, h) * h - v);
+		vec3 l  = normalize(2.0f * dot(v, h) * h - v);
 
 		float n_dot_l = max(l.z, 0.0f);
 		float n_dot_h = max(h.z, 0.0f);
@@ -85,5 +87,5 @@ vec2 IntegrateBRDF(float n_dot_v, float roughness)
 void main()
 {
 	vec2 result = IntegrateBRDF(v2f_TexCoord.x, v2f_TexCoord.y);
-	OutColor = vec4(result, 0.0f, 1.0f);
+	OutFragColor = vec4(result, 0.0f, 1.0f);
 }

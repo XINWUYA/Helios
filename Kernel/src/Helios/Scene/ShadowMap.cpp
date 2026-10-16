@@ -122,7 +122,7 @@ namespace Helios
 	void ShadowMapManager::PrepareForShadowMaps(const SharedPtr<Scene>& scene, const Camera* camera)
 	{
 		if (!m_ShadowCasterShader)
-			m_ShadowCasterShader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Shadow.glsl"));
+			m_ShadowCasterShader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Builtin/Shadow.glsl"));
 
 		PrepareRequiredTexture();
 

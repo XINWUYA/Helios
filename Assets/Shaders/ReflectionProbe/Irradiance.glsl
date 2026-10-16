@@ -14,11 +14,11 @@ void main()
 #type fragment
 #version 410 core
 
-#include "../builtin/Math.glsl"
-#include "IBLCommon.glsl"
+#include "../Builtin/Math.glsl"
+#include "BakeCommon.glsl"
 
 layout(location = 0) in vec3 WorldPosition;
-layout(location = 0) out vec4 OutColor;
+layout(location = 0) out vec4 OutFragColor;
 
 layout(binding = 0) uniform samplerCube u_EnvironmentMap;
 layout(location = 0) uniform int u_FaceId;
@@ -29,7 +29,7 @@ void main()
 {
 	vec3 normal = GetCubeFaceDirection(u_FaceId, WorldPosition.xy);
 
-	// 切空间：以normal为z轴，构造tangent/bitex协调基
+	/* 以法线为 z 轴构造切线基 */
 	vec3 up = abs(normal.z) < 0.999f ? vec3(0.0f, 0.0f, 1.0f) : vec3(1.0f, 0.0f, 0.0f);
 	vec3 tangent = normalize(cross(up, normal));
 	vec3 bitangent = cross(normal, tangent);
@@ -46,13 +46,12 @@ void main()
 	{
 		for (float theta = 0.0f; theta < 0.5f * PI; theta += k_SampleDelta)
 		{
-			// 球坐标 -> 切空间
+			/* 球坐标 → 切空间 → 世界空间 */
 			vec3 tangent_sample = vec3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
-			// 切空间 -> 世界空间
 			vec3 sample_vec = tangent_sample.x * tangent + tangent_sample.y * bitangent + tangent_sample.z * normal;
 
-			/* 按本次采样覆盖的立体角（≈Δθ·Δφ·sinθ）选择源 mip：采样立体角远大于
-			 * texel 时读模糊层级，避免太阳这类极亮 texel 被点采样整颗命中留下白斑。 */
+			/* 按本次采样的立体角（≈Δθ·Δφ·sinθ）选源 mip：避免太阳这类极亮 texel
+			 * 被点采样整颗命中，在辐照度里留下白斑 */
 			float sa_sample = k_SampleDelta * k_SampleDelta * sin(theta);
 			float source_mip = 0.5f * log2(max(sa_sample / sa_texel, 1.0f));
 
@@ -62,5 +61,5 @@ void main()
 	}
 
 	irradiance = PI * irradiance * (1.0f / sample_count);
-	OutColor = vec4(irradiance, 1.0f);
+	OutFragColor = vec4(irradiance, 1.0f);
 }

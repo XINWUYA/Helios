@@ -1,7 +1,7 @@
 #type vertex
 #version 410 core
 
-#include "../builtin/Uniforms.glsl"
+#include "../Builtin/Uniforms.glsl"
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 0) out vec3 WorldPosition;
@@ -16,11 +16,11 @@ void main()
 #type fragment
 #version 410 core
 
-#include "../builtin/Math.glsl"
-#include "IBLCommon.glsl"
+#include "../Builtin/Math.glsl"
+#include "BakeCommon.glsl"
 
 layout(location = 0) in vec3 WorldPosition;
-layout(location = 0) out vec4 OutColor;
+layout(location = 0) out vec4 OutFragColor;
 
 layout(binding = 0) uniform samplerCube u_EnvironmentMap;
 layout(location = 0) uniform int u_FaceId;
@@ -51,17 +51,16 @@ void main()
 	for (uint i = 0u; i < k_SampleCount; ++i)
 	{
 		vec2 xi = Hammersley(i, k_SampleCount);
-        vec3 h  = ImportanceSampleGGX(xi, n, u_Roughness);
-        float v_dot_h = max(dot(v, h), 0.0f);
-        vec3 l  = normalize(2.0f * v_dot_h * h - v);
+		vec3 h  = ImportanceSampleGGX(xi, n, u_Roughness);
+		float v_dot_h = max(dot(v, h), 0.0f);
+		vec3 l  = normalize(2.0f * v_dot_h * h - v);
 
 		float n_dot_l = max(dot(n, l), 0.0f);
 		float n_dot_h = max(dot(n, h), 0.0f);
 		if (n_dot_l > 0.0f)
 		{
-			/* 按采样立体角选择源 mip（Karis 的 split-sum 预滤波做法）：
-			 * 采样覆盖的立体角越小越该读清晰层级；固定读 mip0 会让太阳这类
-			 * 极亮 texel 主导结果，表现为孤立的白色方块（走样）。 */
+			/* 按采样立体角选择源 mip（Karis 的 split-sum 做法）：固定读 mip0 会让
+			 * 太阳这类极亮 texel 主导结果，表现为孤立的白色方块（走样） */
 			float pdf = DistributionGGX(n_dot_h, u_Roughness) * n_dot_h / (4.0f * v_dot_h) + 0.0001f;
 			float sa_sample = 1.0f / (float(k_SampleCount) * pdf + 0.0001f);
 			float source_mip = (u_Roughness == 0.0f) ? 0.0f : 0.5f * log2(max(sa_sample / sa_texel, 1.0f));
@@ -71,5 +70,5 @@ void main()
 		}
 	}
 
-	OutColor = vec4(prefiltered_color / max(total_weight, 0.0001f), 1.0f);
+	OutFragColor = vec4(prefiltered_color / max(total_weight, 0.0001f), 1.0f);
 }

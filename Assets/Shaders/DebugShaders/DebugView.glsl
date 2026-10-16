@@ -12,7 +12,7 @@ layout(location = 0) out SVextex2Frag vert2frag;
 
 void main()
 {
-	/* ZO + Reversed-Z：全屏三角形 z=1 即近平面，恒通过 GEqual 比较 */
+	/* 全屏三角形：z=1 即近平面（Reversed-Z），恒通过 GreaterEqual 深度比较 */
 	gl_Position = a_Position;
 
 	vert2frag.TexCoord = a_Position.xy * 0.5f + 0.5f;
@@ -32,12 +32,12 @@ struct SVextex2Frag
 layout(location = 0) in SVextex2Frag vert2frag;
 layout(location = 0) out vec4 OutFragColor;
 
-/* Overdraw 计数纹理（DebugOverdraw.glsl 的加法累加结果）：
- * 只在 Overdraw 档有效，其余档位由 CPU 补黑 —— 声明的采样器每次绘制都必须有绑定。 */
+/* Overdraw 计数纹理（DebugOverdraw.glsl 的加法累加结果）：只在 Overdraw 档有效，
+ * 其余档位由 CPU 补黑 —— 声明的采样器每次绘制都必须有绑定 */
 layout(binding = 6) uniform sampler2D u_OverdrawTexture;
 
 /* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
- * 本 shader 处理 Surface 档（延迟：G-Buffer 直读）与 Overdraw 热力图。 */
+ * 本 shader 处理 Surface 档（延迟：G-Buffer 直读）与 Overdraw 热力图 */
 layout(location = 0) uniform int u_DebugMode = 0;
 
 const int kDebugAlbedo = 1;
@@ -50,8 +50,7 @@ const int kDebugEmission = 7;
 const int kDebugAmbient = 8;
 const int kDebugOverdraw = 13;
 
-/* Overdraw 热力色：0（背景）近黑 → 绿 → 红（高重叠）。
- * 计数步进 0.1（见 DebugOverdraw.glsl）→ 10 层饱和到红。 */
+/* Overdraw 热力色：0（背景）近黑 → 绿 → 红（高重叠）；计数步进 0.1 → 10 层饱和到红 */
 vec3 OverdrawHeat(float t)
 {
 	t = clamp(t, 0.0f, 1.0f);
@@ -84,7 +83,7 @@ void main()
 	else if (u_DebugMode == kDebugAmbient)
 		debug_color = gbuffer.Ambient;
 	else
-		/* kDebugOverdraw（其余档位不会发到这里）：覆盖全部像素 —— 背景像素计 0、
+		/* kDebugOverdraw（其余档位不会发到这里）：覆盖全部像素，背景计 0、
 		 * 由天空（延迟）或清屏色（前向）在后收尾 */
 		debug_color = OverdrawHeat(texture(u_OverdrawTexture, vert2frag.TexCoord).r);
 

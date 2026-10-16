@@ -1,21 +1,19 @@
 #ifndef IBL_GLSL
 #define IBL_GLSL
 
-#include "BRDF.glsl"
+#include "../Builtin/BRDF.glsl"
 
-/* 反射探针 IBL 的公共契约：支持 IBL 的 Shader 都声明这一组参数，由 ScenePass 按"最近已烘焙
- * 探针"逐绘制覆盖绑定（不写进材质对象）。u_UseIBL = 0 不参与着色；= 1 时必须已经绑定三张贴图。
- * 绑定点 10..12 在所有接入的 Shader 里一致。 */
+/* 反射探针 IBL 的运行期契约：支持 IBL 的 shader 都声明这组参数，由 ScenePass 按"最近已
+ * 烘焙探针"逐绘制绑定（不写进材质）。u_UseIBL = 0 不参与着色；= 1 时必须已绑定三张贴图。
+ * 烘焙半壁在同目录（Irradiance / Prefilter / BRDFLut + BakeCommon）。 */
 layout(binding = 10) uniform samplerCube u_IrradianceMap;
 layout(binding = 11) uniform samplerCube u_PrefilterMap;
 layout(binding = 12) uniform sampler2D   u_BRDFLut;
-/* location 需在全 stage 唯一：宿主 stage 的 0 被材质参数占用（u_AlbedoTilingOffset /
- * u_EnvironmentStrength），固定为 1（u_ComposeAmbientEmission 见 DirectLight.glsl 为 4）。 */
+/* 非 opaque uniform 需全 stage 唯一的 location：宿主 stage 的 0 被材质参数占用，这里固定为 1 */
 layout(location = 1) uniform int u_UseIBL = 0;
 
-/* 间接光（漫反射辐照度 + 粗糙度预滤波镜面）：辐照度图是半球卷积、预滤波图按粗糙度分级
- * （mip m 对应 roughness = m/(层数-1)），采样层级 = roughness × 最大 mip 序号（由尺寸反推）。
- * 直接光和间接光怎么合成由调用方决定。 */
+/* 间接光：辐照度图（半球卷积）+ 粗糙度预滤波镜面（mip m 对应 roughness = m/(层数-1)），
+ * 采样层级 = roughness × 最大 mip 序号；怎么与直接光合成由调用方决定 */
 vec3 EvaluateIBL(vec3 N, vec3 V, float roughness, float metallic, vec3 albedo)
 {
 	roughness = clamp(roughness, 0.0f, 1.0f);

@@ -268,7 +268,7 @@ namespace Helios
                         }
 
                         /* 深度纹理（阴影图 / GBuffer 深度等预览）必须按 depth2d 采样
-                         * （深度格式不能绑到 texture2d<float>，见 ImGuiUIDepth.glsl 与
+                         * （深度格式不能绑到 texture2d<float>，见 Overlay/ImGuiUIDepth.glsl 与
                          * ShaderCompiler 的 @depth-texture 标注）：按纹理格式切着色器 */
                         const bool is_depth = texture != nullptr
                             && IsDepthFormat(texture->GetTextureDesc().Format);
@@ -404,7 +404,7 @@ namespace Helios
 
     void ImGuiRenderer::CreateUIShader()
     {
-        m_UIShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ImGuiUI.glsl"));
+        m_UIShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/Overlay/ImGuiUI.glsl"));
         if (m_UIShader)
         {
             /* 把顶点布局交给着色器：OpenGL 在 VAO 中记录属性位置，Metal 需要据此
@@ -424,7 +424,7 @@ namespace Helios
     {
         /* 深度变体：同一顶点布局，片元按 depth2d<float>（Metal）/ 标准深度采样
          * （OpenGL）读取深度并输出灰度，供 Frame Graph 页显示深度附件预览 */
-        m_UIDepthShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ImGuiUIDepth.glsl"));
+        m_UIDepthShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/Overlay/ImGuiUIDepth.glsl"));
         if (m_UIDepthShader)
         {
             for (int slot = 0; slot < kFramesInFlight; ++slot)

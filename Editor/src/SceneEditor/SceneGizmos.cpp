@@ -521,7 +521,7 @@ namespace Helios
 		SharedPtr<Material> CreateGizmoMaterial(float fade_inner, float fade_outer, float grid_major)
 		{
 			auto material = CreateSharedPtr<Material>();
-			material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Axis.glsl")));
+			material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Overlay/Axis.glsl")));
 
 			auto& raster_state = material->GetRasterState();
 			raster_state.CullMode = CullMode::Cull_None;

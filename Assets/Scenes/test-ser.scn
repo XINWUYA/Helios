@@ -50,7 +50,7 @@
         <Entity ID="8" Name="Sky">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Model ModelPath="BuiltinSphere" CastShadow="false" ReceiveShadow="false">
-                <MaterialOverride Slot="Default" Instance="true" Source="Materials/Sky.mtl" ShaderPath="Shaders/SkyBox.glsl">
+                <MaterialOverride Slot="Default" Instance="true" Source="Materials/Sky.mtl" ShaderPath="Shaders/Sky/SkyBox.glsl">
                     <Parameters>
                         <ParamInfo Type="0" Name="u_SkyTex">
                             <Texture Path="Textures/drakensberg_solitary_mountain_4k.hdr" Slot="0">

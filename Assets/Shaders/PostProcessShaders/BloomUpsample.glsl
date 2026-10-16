@@ -6,6 +6,7 @@ layout(location = 0) out vec2 v_TexCoord;
 
 void main()
 {
+	/* 全屏三角形：z=1 即近平面（Reversed-Z），恒通过深度比较 */
 	gl_Position = a_Position;
 
 	v_TexCoord = a_Position.xy * 0.5f + 0.5f;
@@ -19,16 +20,14 @@ layout(location = 0) out vec4 OutFragColor;
 layout(location = 0) in vec2 v_TexCoord;
 
 layout(binding = 0) uniform sampler2D u_Source;
-
-/* 源纹理纹素尺寸 / 散射系数：非 opaque uniform 必须显式 location（Windows GLSL→SPIR-V）。
- * 本 stage 两个参数，按声明顺序占 0 / 1。 */
+/* 源纹素尺寸 / 散射系数：非 opaque uniform 必须显式 location（Windows 走 shaderc） */
 layout(location = 0) uniform vec2 u_TexelSize = vec2(0.0f);
 layout(location = 1) uniform float u_Scatter = 0.7f;
 
 void main()
 {
 	/* 3×3 tent（权重 1/2/1 双轴外积）：偏移 = 源（下一级）纹素，覆盖范围随级数翻倍；
-	 * 结果 × Scatter 后由加法混合回叠到上一级。 */
+	 * 结果 × Scatter 后由加法混合回叠到上一级 */
 	vec2 t = u_TexelSize;
 
 	vec3 color = texture(u_Source, v_TexCoord + vec2(-t.x, -t.y)).rgb;

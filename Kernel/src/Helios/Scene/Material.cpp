@@ -45,7 +45,7 @@ namespace Helios
 		 * 就是"网格 + SkyBox.glsl 材质"，由顶点着色器折叠成全屏天空。
 		 * AssetManager 按路径缓存，指针比较即可。 */
 		static const SharedPtr<DeviceShader> s_skybox_shader =
-			AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
+			AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Sky/SkyBox.glsl"));
 		return m_pShader != nullptr && m_pShader == s_skybox_shader;
 	}
 
@@ -184,7 +184,7 @@ namespace Helios
 	{
 		if (!m_pErrorMaterial->GetShader())
 		{
-			m_pErrorMaterial->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/error.glsl")));
+			m_pErrorMaterial->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Builtin/Error.glsl")));
 		}
 		return m_pErrorMaterial;
 	}

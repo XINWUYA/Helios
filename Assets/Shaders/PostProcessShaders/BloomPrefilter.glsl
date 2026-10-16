@@ -6,7 +6,7 @@ layout(location = 0) out vec2 v_TexCoord;
 
 void main()
 {
-	/* ZO + Reversed-Z：全屏三角形 z=1 即近平面（深度最大值），恒通过比较 */
+	/* 全屏三角形：z=1 即近平面（Reversed-Z），恒通过深度比较 */
 	gl_Position = a_Position;
 
 	v_TexCoord = a_Position.xy * 0.5f + 0.5f;
@@ -20,17 +20,14 @@ layout(location = 0) out vec4 OutFragColor;
 layout(location = 0) in vec2 v_TexCoord;
 
 layout(binding = 0) uniform sampler2D u_SceneColor;
-
-/* 亮部提取阈值：非 opaque uniform 必须显式 location（Windows 走 GLSL→SPIR-V 的
- * shaderc 路径，裸声明会报 "non-opaque uniform variables need a layout(location=L)"）。
- * 本 stage 无其它非 opaque uniform，独占 0。 */
+/* 亮部提取阈值：非 opaque uniform 必须显式 location（Windows 走 shaderc） */
 layout(location = 0) uniform float u_Threshold = 0.8f;
 
 void main()
 {
 	vec3 color = texture(u_SceneColor, v_TexCoord).rgb;
 
-	/* 软膝阈值（URP 口径；膝宽系数 0.5 硬编码）：亮部平滑提取，阈值边缘不硬切 */
+	/* 软膝阈值（URP 口径，膝宽 0.5×阈值）：亮部平滑提取，阈值边缘不硬切 */
 	float knee = u_Threshold * 0.5f;
 	float brightness = max(color.r, max(color.g, color.b));
 	float soft = clamp(brightness - u_Threshold + knee, 0.0f, 2.0f * knee);

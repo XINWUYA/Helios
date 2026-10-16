@@ -2,14 +2,14 @@
 #version 410 core
 
 /* 调试材质（几何重绘）：Mipmap 档（两管线）+ 前向的 Surface 档。
- * 顶点属性按引擎统一契约（location 0..4 = 位置 / 法线 / 颜色 / UV / 切线）。 */
+ * 顶点属性按引擎统一契约（location 0..4 = 位置 / 法线 / 颜色 / UV / 切线） */
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
 layout(location = 2) in vec4 a_Color;
 layout(location = 3) in vec3 a_TexCoord;
 layout(location = 4) in vec3 a_Tangent;
 
-#include "../builtin/Uniforms.glsl"
+#include "../Builtin/Uniforms.glsl"
 
 struct SVextex2Frag
 {
@@ -28,6 +28,7 @@ void main()
 	vert2frag.BaseColor = a_Color;
 	vert2frag.TexCoord = a_TexCoord.xy;
 
+	/* 法线矩阵：非等比缩放下法线 / 切线按逆转置矩阵变换 */
 	mat3 normal_mat = transpose(inverse(mat3(u_Local2WorldMat)));
 	vert2frag.WorldNormal = normalize(normal_mat * a_Normal);
 	vert2frag.WorldTangent = normalize(normal_mat * a_Tangent);
@@ -37,7 +38,7 @@ void main()
 #type fragment
 #version 410 core
 
-#include "../builtin/Math.glsl"
+#include "../Builtin/Math.glsl"
 
 struct SVextex2Frag
 {
@@ -50,15 +51,14 @@ struct SVextex2Frag
 layout(location = 0) in SVextex2Frag vert2frag;
 layout(location = 0) out vec4 OutFragColor;
 
-/* 主贴图：按调试档位在 CPU 侧从源材质选定的那张贴图（缺省补白）。
- * UV 变换与源材质同源（u_AlbedoTilingOffset，缺省不变换）。 */
+/* 主贴图：按调试档位在 CPU 侧从源材质选定的那张贴图（缺省补白）；
+ * UV 变换与源材质同源（u_AlbedoTilingOffset，缺省不变换） */
 layout(binding = 0) uniform sampler2D u_MainTexture;
 layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
 
 /* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
- * 本 shader 处理 Mipmap（两条管线）与前向的 Surface 档；延迟的 Surface 档走
- * G-Buffer 直读（DebugView.glsl），不经这里。
- * location：本 stage 的 0 已被 u_AlbedoTilingOffset 占用，这里取 1。 */
+ * 本 shader 处理 Mipmap（两条管线）与前向的 Surface 档；延迟的 Surface 档走 G-Buffer
+ * 直读（DebugView.glsl）。location 0 已被 u_AlbedoTilingOffset 占用，这里取 1 */
 layout(location = 1) uniform int u_DebugMode = 0;
 
 const int kDebugAlbedo = 1;
@@ -71,7 +71,7 @@ const int kDebugEmission = 7;
 const int kDebugAmbient = 8;
 const int kDebugMipmap = 14;
 
-/* Mip 层级热力色：mip 0（最清晰）红 → 黄 → 绿 → 蓝（最糊）。t = 采样层级 / 最大层级 */
+/* Mip 层级热力色：mip 0（最清晰）红 → 黄 → 绿 → 蓝（最糊）；t = 采样层级 / 最大层级 */
 vec3 MipLevelHeat(float t)
 {
 	t = clamp(t, 0.0f, 1.0f);

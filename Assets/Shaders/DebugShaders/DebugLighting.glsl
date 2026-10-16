@@ -1,13 +1,11 @@
-/* 延迟光照的调试分流（Lighting 类档位）：Diffuse / Specular / Shadow / Indirect。include 片段
- * （没有 stage / main），由 Lighting.glsl 在"光照分解"处调用。注意：注释里别写出引擎的
- * stage 声明关键字（ShaderCompiler 全文检索会误判）；要在 u_ComposeAmbientEmission / IBL /
- * BRDF 定义之后 include。 */
+/* 延迟光照的调试分流（Diffuse / Specular / Shadow / Indirect）：include 片段（没有自己的
+ * stage / main），由 Lighting.glsl 在函数定义之后调用；注释里别写出 stage 声明关键字
+ * （ShaderCompiler 全文检索会误判） */
 
 #ifndef DEBUG_LIGHTING_GLSL
 #define DEBUG_LIGHTING_GLSL
 
-/* location 需与宿主 stage（Lighting.glsl）的分配联动：0..3 = 探针参数、
- * 4 = u_ComposeAmbientEmission（DirectLight.glsl），这里从 5 起。 */
+/* location 与宿主 stage 联动：0..3 = 探针参数、4 = u_ComposeAmbientEmission，这里从 5 起 */
 layout(location = 5) uniform int u_DebugView = 0;
 layout(location = 6) uniform int u_DebugShadowCompose = 0;
 
@@ -16,9 +14,8 @@ const int kDebugSpecular = 10;
 const int kDebugShadow = 11;
 const int kDebugIndirect = 12;
 
-/* 命中调试档位时把颜色写进 out_color 并返回 true（调用方 OutFragColor = vec4(out_color, 1.0f)）。
- * 正常着色（u_DebugView = 0）返回 false、不受影响；直接光分量跟正常路径一样乘光照参数，
- * 环境分量（Indirect）只由第一笔光照合成。 */
+/* 命中调试档位时把颜色写进 out_color 并返回 true（调用方负责输出）：
+ * u_DebugView = 0（正常着色）返回 false；环境分量（Indirect）只由第一笔光照合成 */
 bool DebugLightingCompose(SGBufferData gbuffer, vec3 world_pos, vec3 n, vec3 v, vec3 l,
 	float attenuation, float shadow, out vec3 out_color)
 {

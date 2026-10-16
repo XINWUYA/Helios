@@ -7,7 +7,7 @@ layout(location = 2) in vec4 a_Color;
 layout(location = 3) in vec3 a_TexCoord;
 layout(location = 4) in vec3 a_Tangent;
 
-#include "../builtin/Uniforms.glsl"
+#include "../Builtin/Uniforms.glsl"
 
 struct SVextex2Frag
 {
@@ -40,13 +40,13 @@ void main()
 #type fragment
 #version 410 core
 
-#include "../builtin/Math.glsl"
-#include "../builtin/Uniforms.glsl"
-#include "../builtin/BRDF.glsl"
-#include "../builtin/IBL.glsl"
-#include "../builtin/MaterialCommon.glsl"
-#include "../builtin/ShadowUtils.glsl"
-#include "../builtin/DirectLight.glsl"
+#include "../Builtin/Math.glsl"
+#include "../Builtin/Uniforms.glsl"
+#include "../Builtin/BRDF.glsl"
+#include "../Builtin/MaterialCommon.glsl"
+#include "../Builtin/ShadowUtils.glsl"
+#include "../Builtin/DirectLight.glsl"
+#include "../ReflectionProbe/IBL.glsl"
 
 struct SVextex2Frag
 {
@@ -74,27 +74,23 @@ layout(binding = 7) uniform sampler2D u_EmissiveTexture;
 layout(binding = 8) uniform sampler2D u_AmbientTexture;
 layout(binding = 9) uniform sampler2DArray u_ShadowMap; /* 级联阴影 */
 
-/* 主贴图 UV 缩放与偏移：xy = 缩放(tiling)，zw = 偏移(offset)
- * 普通 uniform 的 layout(location) 需与上方 sampler 的 layout(binding) 0~9 错开。 */
+/* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）：所有材质贴图采样共用；
+ * 非 opaque uniform 必须显式 location（Windows 走 shaderc） */
 layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
 
-/* -------------------------------------------------------------------------- */
-/* 材质采样                                                                    */
-/* -------------------------------------------------------------------------- */
 void CalculateMaterial(inout SMaterialInput mtl)
 {
 	/* 构建 TBN，用于法线贴图与视差映射 */
 	vec3 T = normalize(vert2frag.WorldTangent);
 	vec3 N = normalize(vert2frag.WorldNormal);
-	/* Gram-Schmidt 正交化 */
+	/* 导入网格的切线不保证与法线垂直，重新正交化（与 GBufferMaterial 同口径） */
 	T = normalize(T - dot(T, N) * N);
 	vec3 B = cross(T, N);
 	mat3 TBN = mat3(T, B, N);
 
-	/* 主贴图 UV 缩放与偏移（统一作用于所有材质贴图采样） */
 	vec2 base_uv = vert2frag.TexCoord * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
 
-	/* 视差映射 */
+	/* 视差映射：按高度图把采样 UV 沿视线方向偏移 */
 	vec3 view_dir = normalize(TBN * (u_ViewPos - vert2frag.WorldPosition));
 	float height = texture(u_BumpTexture, base_uv).x;
 	vec2 uv = base_uv - view_dir.xy / max(view_dir.z, 1e-3f) * height;
@@ -102,7 +98,6 @@ void CalculateMaterial(inout SMaterialInput mtl)
 	/* Albedo 转到线性空间后再做光照 */
 	mtl.Albedo = SrgbToLinear(texture(u_AlbedoTexture, uv).rgb) * vert2frag.BaseColor.rgb;
 
-	/* 法线贴图 */
 	vec3 tangent_normal = texture(u_NormalTexture, uv).xyz * 2.0f - 1.0f;
 	mtl.Normal = normalize(TBN * tangent_normal);
 
@@ -111,6 +106,7 @@ void CalculateMaterial(inout SMaterialInput mtl)
 	mtl.Specular    = texture(u_SpecularTexture, uv).rgb;
 	mtl.Emission    = texture(u_EmissiveTexture, uv).rgb;
 	mtl.Ambient     = texture(u_AmbientTexture, uv).rgb;
+	/* 材质体系暂未接入的通道：填中性值 */
 	mtl.AO          = 1.0f;
 	mtl.Anisotropy  = 0.0f;
 	mtl.IOR         = 0.0f;
@@ -118,15 +114,12 @@ void CalculateMaterial(inout SMaterialInput mtl)
 	mtl.ClearCoatRoughness = 0.0f;
 }
 
-/* -------------------------------------------------------------------------- */
-/* 主函数                                                                      */
-/* -------------------------------------------------------------------------- */
 void main()
 {
 	SMaterialInput mtl;
 	CalculateMaterial(mtl);
 
-	vec3 N = normalize(mtl.Normal);
+	vec3 N = mtl.Normal;
 	vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);
 
 	/* 直接光：按本笔光源的类型（方向光 / 点光 / 聚光）求光向、衰减与阴影 */
@@ -137,13 +130,12 @@ void main()
 	/* 模型关闭「接受阴影」时阴影因子归零 */
 	shadow *= u_ReceiveShadow;
 
-	/* 直接光照 */
 	vec3 direct = max(vec3(0.0f), BRDF(L, V, N, mtl.Metallic, mtl.Roughness, mtl.Albedo));
 	direct *= u_ColorIntensity.rgb * u_ColorIntensity.a * attenuation;
 	direct *= (1.0f - shadow * 0.8f);
 
-	/* 间接光：反射探针 IBL（u_UseIBL = 1 时逐绘制绑定环境贴图）；没有探针就退回平面环境项。
-	 * 环境项和自发光只在合成的那一笔里累加 —— 其余笔只叠直接光。 */
+	/* 间接光：有 IBL 绑定时用反射探针环境贴图，否则退回平面环境项；
+	 * 环境项 + 自发光只在合成的那一笔里累加（其余笔只叠直接光） */
 	vec3 color = direct;
 	if (u_ComposeAmbientEmission > 0)
 	{

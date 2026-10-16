@@ -7,7 +7,7 @@ layout(location = 2) in vec4 a_Color;
 layout(location = 3) in vec3 a_TexCoord;
 layout(location = 4) in vec3 a_Tangent;
 
-#include "../builtin/Uniforms.glsl"
+#include "../Builtin/Uniforms.glsl"
 
 struct SVextex2Frag
 {
@@ -27,24 +27,20 @@ void main()
 	vert2frag.Position = vec3(u_Local2WorldMat * vec4(a_Position, 1.0f));
 	vert2frag.BaseColor = a_Color;
 	vert2frag.TexCoord = a_TexCoord.xy;
-	
+
+	/* 法线矩阵：非等比缩放下法线 / 切线要按逆转置矩阵变换 */
 	mat3 normalMat = transpose(inverse(mat3(u_Local2WorldMat)));
-	vert2frag.Normal = normalize(normalMat *a_Normal);
+	vert2frag.Normal = normalize(normalMat * a_Normal);
 	vert2frag.Tangent = normalize(normalMat * a_Tangent);
-	/* Gram-Schmidt process:
-	 * Re-orthogonalize T with respect to N
-	 */
-//	Output.Tangent = normalize(Output.Tangent - dot(Output.Tangent, Output.Normal) * Output.Normal);
 }
 
 
 #type fragment
 #version 410 core
 
-#include "../common.glsl"
-#include "../builtin/Math.glsl"
-#include "../builtin/Uniforms.glsl"
-#include "../builtin/MaterialCommon.glsl"
+#include "../Builtin/Math.glsl"
+#include "../Builtin/Uniforms.glsl"
+#include "../Builtin/MaterialCommon.glsl"
 
 layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: Roughness */
 layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal; a: Metallic */
@@ -75,45 +71,40 @@ layout(binding = 6) uniform sampler2D u_MetallicTexture;
 layout(binding = 7) uniform sampler2D u_EmissiveTexture;
 layout(binding = 8) uniform sampler2D u_AmbientTexture;
 
-/* 主贴图 UV 缩放与偏移：xy = 缩放(tiling)，zw = 偏移(offset)。
- * 与 ForwardShaders（BuiltinLit / PBRStandard）同名同语义：普通材质在编辑器里
- * 转换为本 shader 渲染，该参数经此生效；缺省 vec4(1,1,0,0) 不变换。 */
+/* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）：与 BuiltinLit / PBRStandard 同名同语义；
+ * 普通材质在编辑器里经本 shader 渲染，缺省 vec4(1,1,0,0) 不变换 */
 layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
 
 void CalculateMaterial(inout SMaterialInput mtl)
 {
-	/* 主贴图 UV 缩放与偏移（与 ForwardShaders 的采样口径一致） */
 	vec2 base_uv = vert2frag.TexCoord * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
 
-	/* Albedo 与 ForwardShaders（PBRStandard / BuiltinLit）同口径：sRGB 解码后再乘顶点色。
-	 * 少了这一步，延迟管线的间接光 / 直接光都会把未解码的 sRGB 值当线性值用 ——
-	 * 与同场景的前向渲染相比整体发白、发灰。 */
+	/* Albedo 与前向同口径：sRGB 解码后再乘顶点色（不解码会比前向整体发白） */
 	mtl.Albedo = SrgbToLinear(texture(u_AlbedoTexture, base_uv).rgb) * vert2frag.BaseColor.rgb;
 
-	/* TBN */
+	/* 导入网格的顶点切线不保证与法线垂直，重新正交化（与 PBRStandard 同口径） */
 	vec3 T = normalize(vert2frag.Tangent);
 	vec3 N = normalize(vert2frag.Normal);
-	/* Gram-Schmidt 正交化（与 PBRStandard 同口径：导入网格的顶点切线并不保证与法线垂直） */
 	T = normalize(T - dot(T, N) * N);
 	vec3 B = cross(T, N);
 	mat3 TBN = mat3(T, B, N);
 
-	/* Calculate Parallax Mapping */
+	/* 视差映射：按高度图把采样 UV 沿视线方向偏移 */
 	vec3 view_dir = u_ViewPos - vert2frag.Position;
 	view_dir = normalize(TBN * view_dir);
 	float height = texture(u_BumpTexture, base_uv).x;
-	/* 除零保护与 PBRStandard 同口径：掠射角下 view_dir.z 趋零，不加钳制会放大成噪声 */
+	/* 掠射角下 view_dir.z 趋零，钳制防止结果被放大成噪声 */
 	vec2 uv = base_uv - view_dir.xy / max(view_dir.z, 1e-3f) * height;
 
 	vec3 normal = texture(u_NormalTexture, uv).xyz * 2.0f - 1.0f;
-	//normal.z = sqrt(max(1.0f - normal.x * normal.x - normal.y * normal.y, 0.0f));
 	mtl.Normal = normalize(TBN * normal);
-	
+
 	mtl.Roughness = texture(u_RoughnessTexture, uv).r;
 	mtl.Metallic = texture(u_MetallicTexture, uv).r;
 	mtl.Specular = texture(u_SpecularTexture, uv).rgb;
 	mtl.Emission = texture(u_EmissiveTexture, uv).rgb;
 	mtl.Ambient = texture(u_AmbientTexture, uv).rgb;
+	/* 材质体系暂未接入的通道：填中性值 */
 	mtl.Anisotropy = 0.0f;
 	mtl.AO = 1.0f;
 	mtl.IOR = 0.0f;
@@ -123,19 +114,17 @@ void CalculateMaterial(inout SMaterialInput mtl)
 
 void main()
 {
-	
 	SMaterialInput mtl;
 	CalculateMaterial(mtl);
-	
+
 	GBufferTexture0 = vec4(mtl.Albedo, mtl.Roughness);
-	/* 世界法线以 n * 0.5 + 0.5 编码进 RGBA8：有符号分量直接写会被无符号格式钳到 0，
-	 * 负向分量全部丢失（屋顶背向坡等大面积失真）；解码在 GBufferCommon.glsl。 */
+	/* 法线按 n*0.5+0.5 编码：RGBA8 存不了负值（解码在 GBufferCommon.glsl） */
 	GBufferTexture1 = vec4(mtl.Normal * 0.5f + 0.5f, mtl.Metallic);
 	GBufferTexture2 = vec4(mtl.Specular, mtl.AO);
 	GBufferTexture3 = vec4(mtl.Emission, mtl.IOR);
 	GBufferTexture4 = vec4(mtl.Ambient, mtl.Anisotropy);
-	/* a 通道承载"接受阴影"标记：延迟光照阶段没有逐对象数据，只能随 G-Buffer 带过去 */
+	/* a 通道 = 接受阴影标记：延迟光照阶段没有逐对象数据，只能随 G-Buffer 带过去 */
 	GBufferTexture5 = vec4(vert2frag.Position, u_ReceiveShadow);
-	
+
 	ObjectId = u_ObjectId;
 }

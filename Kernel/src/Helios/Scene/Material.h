@@ -59,10 +59,10 @@ namespace Helios
 		 * 不参与阴影投射，由天空背景通道专绘。 */
 		[[nodiscard]] bool IsSkyBox() const;
 		/* 是否支持反射探针的 IBL 着色（着色器声明了 IBL 契约的采样器，
-		 * 见 builtin/IBL.glsl）。渲染通道据此决定是否发 per-draw 的探针绑定。 */
+		 * 见 ReflectionProbe/IBL.glsl）。渲染通道据此决定是否发 per-draw 的探针绑定。 */
 		[[nodiscard]] bool SupportsIBL() const;
 		/* 是否参与逐光源的直接光照合成（着色器声明了光照契约的控制 uniform，
-		 * 见 builtin/DirectLight.glsl）。前向渲染通道据此决定一个对象是否走
+		 * 见 Builtin/DirectLight.glsl）。前向渲染通道据此决定一个对象是否走
 		 * "逐光源一笔"循环（天空盒 / Unlit 类材质单笔原样提交）。 */
 		[[nodiscard]] bool SupportsDirectLighting() const;
 		/* 设置参数 */
