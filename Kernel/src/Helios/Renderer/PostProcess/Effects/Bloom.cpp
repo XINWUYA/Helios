@@ -38,6 +38,13 @@ namespace Helios
 				return settings != nullptr && settings->Enabled;
 			}
 
+			/* 离屏 Pass 的渲染区域取输出纹理本身（原点 0,0 + 纹理尺寸）。
+			 * 目标与视图尺寸不同时（半分辨率链等），用视图区域会把内容按比例错位 */
+			ViewportRegion FullTargetRegion(const FrameGraphTexture::Descriptor& desc)
+			{
+				return ViewportRegion{ 0, 0, desc.Width, desc.Height };
+			}
+
 			/* 全屏效果材质：深度关（引擎约定"关深度写 = 连深度测试一起关"）；
 			 * additive = One/One 加法混合（升采样回叠用） */
 			SharedPtr<Material> MakeFullScreenMaterial(const SharedPtr<DeviceShader>& shader, bool additive)
@@ -138,7 +145,7 @@ namespace Helios
 
 							FrameGraphPassInfo::Descriptor pass_desc;
 							pass_desc.Attachments.ColorAttachments(0) = data.Output;
-							pass_desc.ViewportRegion = viewport_region;
+							pass_desc.ViewportRegion = FullTargetRegion(output_desc);
 							builder.CreateRenderPass("BloomPrefilterRenderTarget", pass_desc);
 						},
 						[&render_view, prefilter_shader, bloom](const FrameGraphResources& resources, const PrefilterPassData& data)
@@ -186,7 +193,7 @@ namespace Helios
 
 							FrameGraphPassInfo::Descriptor pass_desc;
 							pass_desc.Attachments.ColorAttachments(0) = data.Output;
-							pass_desc.ViewportRegion = viewport_region;
+							pass_desc.ViewportRegion = FullTargetRegion(output_desc);
 							/* 级号入名：FrameBuffer 缓存按名字复用，重名会导致各级每帧走"同帧重名"
 							 * 的临时分配路径（白建 GPU 对象与日志噪音） */
 							builder.CreateRenderPass(pass_name + "RenderTarget", pass_desc);
@@ -224,9 +231,11 @@ namespace Helios
 					const glm::vec2 texel_size = mip_texel_size(level);
 					const float scatter = settings->Scatter;
 					const std::string pass_name = "BloomUpsample" + std::to_string(level - 1);
+					/* 回叠目标是上一级 mip，其尺寸即本 Pass 的渲染区域 */
+					const auto target_desc = mip_desc(level - 1);
 
 					frame_graph->AddPass<UpsamplePassData>(pass_name,
-						[&, source, target](FrameGraphBuilder& builder, UpsamplePassData& data)
+						[&, source, target, target_desc](FrameGraphBuilder& builder, UpsamplePassData& data)
 						{
 							data.Source = source;
 							data.Target = target;
@@ -238,7 +247,7 @@ namespace Helios
 							FrameGraphPassInfo::Descriptor pass_desc;
 							pass_desc.Attachments.ColorAttachments(0) = data.Target;
 							pass_desc.PreserveContent = true;
-							pass_desc.ViewportRegion = viewport_region;
+							pass_desc.ViewportRegion = FullTargetRegion(target_desc);
 							/* 同上：升采样各级各自一个名字，FrameBuffer 跨帧复用 */
 							builder.CreateRenderPass(pass_name + "RenderTarget", pass_desc);
 
@@ -291,7 +300,7 @@ namespace Helios
 
 						FrameGraphPassInfo::Descriptor pass_desc;
 						pass_desc.Attachments.ColorAttachments(0) = data.Output;
-						pass_desc.ViewportRegion = viewport_region;
+						pass_desc.ViewportRegion = FullTargetRegion(output_desc);
 						builder.CreateRenderPass("BloomCompositeRenderTarget", pass_desc);
 
 						/* 输出供视图显示 / 编辑器叠加（图外消费者）：不能随资源生命周期销毁 */
