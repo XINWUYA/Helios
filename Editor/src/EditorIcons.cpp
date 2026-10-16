@@ -2090,7 +2090,8 @@ namespace Helios::Icons
 		return s_Icons[index < static_cast<size_t>(Id::COUNT) ? index : 0];
 	}
 
-	void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color)
+	void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color,
+		bool apply_optical_scale)
 	{
 		if (draw_list == nullptr || size <= 0.0f)
 			return;
@@ -2100,7 +2101,7 @@ namespace Helios::Icons
 			return;
 
 		std::call_once(s_SvgIconsInit, InitializeSvgIcons);
-		const float optical_size = size * s_OpticalScales[index];
+		const float optical_size = apply_optical_scale ? size * s_OpticalScales[index] : size;
 		if (s_SvgIcons[index].Shapes.empty())
 		{
 			if (s_Icons[index].Draw != nullptr)

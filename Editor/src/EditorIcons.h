@@ -73,8 +73,11 @@ namespace Helios
 		/* 图标元数据表：与 Id 枚举一一对应，Draw 是加载失败时的回退画法 */
 		const IconDesc& Get(Id id);
 
-		/* 绘制图标本体（不进入交互；按钮请用 IconButton） */
-		void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color);
+		/* 绘制图标本体（不进入交互；按钮请用 IconButton）。
+		 * apply_optical_scale = false 时不吃每图的光学尺寸（按给定尺寸原样画）——
+		 * 缩略图这类"要和矢量预览同尺度"的场合用它（光学尺寸是给小尺寸 UI 调视觉重量的）。 */
+		void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color,
+			bool apply_optical_scale = true);
 
 		/* 搜索框前置放大镜；Begin/End 包住对应的 InputText，自动预留图标空间。 */
 		void BeginSearchInput();

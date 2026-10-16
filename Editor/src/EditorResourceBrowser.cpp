@@ -2336,10 +2336,11 @@ namespace Helios
 					else
 					{
 						/* 非图片（或缩略图没加载出来）：画类型图标。
+						 * 0.9 格（不吃光学尺寸）—— 和同格缩略图站在同一档、又留一点呼吸；
 						 * 颜色与树行、文件名一致（Token::Text），图标才不显灰。 */
 						Icons::Draw(ImGui::GetWindowDrawList(), ResolveFileIcon(child_node->Type),
 							ImVec2((cell_min.x + cell_max.x) * 0.5f, (cell_min.y + cell_max.y) * 0.5f),
-							m_ThumbnailSize * 0.6f, ImGui::GetColorU32(EditorTheme::Token::Text));
+							m_ThumbnailSize * 0.9f, ImGui::GetColorU32(EditorTheme::Token::Text), false);
 					}
 
 					/* 选中态：给单元格描一圈强调色（底栏会显示它的路径） */
