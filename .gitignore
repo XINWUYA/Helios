@@ -410,3 +410,5 @@ Tools/reflect_check/
 
 # 编辑器删除资源时的项目回收站（Assets 的兄弟目录，允许撤销删除）
 .helios-trash/
+renderdoc-mcp-export
+.codebuddy
