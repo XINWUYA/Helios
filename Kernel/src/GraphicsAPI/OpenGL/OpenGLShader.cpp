@@ -384,13 +384,11 @@ namespace Helios
 			ReflectFromSPIRV(cached_data);
 		}
 
-		/* 兜底：若SPIR-V中未带调试名（名字被裁剪），退回源码正则反射 */
-		if (m_Reflection.SamplerBindings.empty())
+		/* 材质参数表恒走源码正则反射：SPIR-V 反射不产出裸 uniform 参数，参数表只能由它提供；
+		 * sampler 绑定点仍以 SPIR-V 反射为准，两者互补、不冲突 */
+		for (auto&& [shader_type, source] : m_OpenGLSourceCodes)
 		{
-			for (auto&& [shader_type, source] : m_OpenGLSourceCodes)
-			{
-				ReflectFromGLSLSource(source);
-			}
+			ReflectFromGLSLSource(source);
 		}
 	}
 #endif
