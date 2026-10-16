@@ -58,31 +58,33 @@ namespace Helios
 		}
 
 		/* ---- 渲染阶段标识色（按节点名关键字匹配）----
-		 * 同一阶段的 Pass 和资源共用色相（Shadow / GBuffer / Lighting / Sky / Axis / Debug）：深色同相底 +
-		 * 饱和彩色描边（描边才是类别的主要载体）；Pass 亮一档 / 资源暗一档。 */
+		 * 同一阶段的 Pass 和资源共用色相（Shadow / GBuffer / Lighting / Sky / PostProcess / Axis / Debug）：深色同相底 +
+		 * 饱和彩色描边（描边才是类别的主要载体）；Pass 亮一档 / 资源暗一档。一个阶段最多两个关键字（后处理的名字分 Bloom 和 PostProcess 两类）。 */
 		struct StageFill
 		{
-			const char* Keyword;   /* 节点名包含即命中（按注册顺序，先到先得） */
-			const char* Display;   /* 悬停提示 / 图例里显示的名字 */
-			ImVec4 Stroke;         /* 饱和标识色：节点描边（实线 / 虚线） */
-			ImVec4 Fill;           /* 深色同相底：Pass 节点填充（资源节点 = 同色暗版） */
+			const char* Keywords[2]; /* 节点名包含任一即命中（按注册顺序，先到先得） */
+			const char* Display;     /* 悬停提示 / 图例里显示的名字 */
+			ImVec4 Stroke;           /* 饱和标识色：节点描边（实线 / 虚线） */
+			ImVec4 Fill;             /* 深色同相底：Pass 节点填充（资源节点 = 同色暗版） */
 		};
 
 		const StageFill kStageFills[] =
 		{
-			/*        关键字       显示名       描边（饱和标识色）                            填充（深色同相底） */
-			{ "Shadow",   "Shadow",   ImVec4(155.0f / 255.0f, 138.0f / 255.0f, 224.0f / 255.0f, 1.0f),
-			                          ImVec4(46.0f / 255.0f, 38.0f / 255.0f, 60.0f / 255.0f, 1.0f) }, /* 紫 */
-			{ "GBuffer",  "GBuffer",  ImVec4(63.0f / 255.0f, 191.0f / 255.0f, 176.0f / 255.0f, 1.0f),
-			                          ImVec4(30.0f / 255.0f, 54.0f / 255.0f, 58.0f / 255.0f, 1.0f) }, /* 青 */
-			{ "Lighting", "Lighting", ImVec4(224.0f / 255.0f, 160.0f / 255.0f, 74.0f / 255.0f, 1.0f),
-			                          ImVec4(58.0f / 255.0f, 46.0f / 255.0f, 38.0f / 255.0f, 1.0f) }, /* 琥珀 */
-			{ "Sky",      "Sky",      ImVec4(91.0f / 255.0f, 141.0f / 255.0f, 239.0f / 255.0f, 1.0f),
-			                          ImVec4(30.0f / 255.0f, 44.0f / 255.0f, 72.0f / 255.0f, 1.0f) }, /* 蓝 */
-			{ "Axis",     "Axis",     ImVec4(111.0f / 255.0f, 191.0f / 255.0f, 95.0f / 255.0f, 1.0f),
-			                          ImVec4(37.0f / 255.0f, 57.0f / 255.0f, 47.0f / 255.0f, 1.0f) }, /* 绿 */
-			{ "Debug",    "Debug",    ImVec4(138.0f / 255.0f, 148.0f / 255.0f, 166.0f / 255.0f, 1.0f),
-			                          ImVec4(52.0f / 255.0f, 49.0f / 255.0f, 54.0f / 255.0f, 1.0f) }, /* 中灰 */
+			/*        关键字                           显示名         描边（饱和标识色）                            填充（深色同相底） */
+			{ { "Shadow" },               "Shadow",      ImVec4(155.0f / 255.0f, 138.0f / 255.0f, 224.0f / 255.0f, 1.0f),
+			                                             ImVec4(46.0f / 255.0f, 38.0f / 255.0f, 60.0f / 255.0f, 1.0f) }, /* 紫 */
+			{ { "GBuffer" },              "GBuffer",     ImVec4(63.0f / 255.0f, 191.0f / 255.0f, 176.0f / 255.0f, 1.0f),
+			                                             ImVec4(30.0f / 255.0f, 54.0f / 255.0f, 58.0f / 255.0f, 1.0f) }, /* 青 */
+			{ { "Lighting" },             "Lighting",    ImVec4(224.0f / 255.0f, 160.0f / 255.0f, 74.0f / 255.0f, 1.0f),
+			                                             ImVec4(58.0f / 255.0f, 46.0f / 255.0f, 38.0f / 255.0f, 1.0f) }, /* 琥珀 */
+			{ { "Sky" },                  "Sky",         ImVec4(91.0f / 255.0f, 141.0f / 255.0f, 239.0f / 255.0f, 1.0f),
+			                                             ImVec4(30.0f / 255.0f, 44.0f / 255.0f, 72.0f / 255.0f, 1.0f) }, /* 蓝 */
+			{ { "Bloom", "PostProcess" }, "PostProcess", ImVec4(232.0f / 255.0f, 120.0f / 255.0f, 168.0f / 255.0f, 1.0f),
+			                                             ImVec4(58.0f / 255.0f, 36.0f / 255.0f, 48.0f / 255.0f, 1.0f) }, /* 玫红 */
+			{ { "Axis" },                 "Axis",        ImVec4(111.0f / 255.0f, 191.0f / 255.0f, 95.0f / 255.0f, 1.0f),
+			                                             ImVec4(37.0f / 255.0f, 57.0f / 255.0f, 47.0f / 255.0f, 1.0f) }, /* 绿 */
+			{ { "Debug" },                "Debug",       ImVec4(138.0f / 255.0f, 148.0f / 255.0f, 166.0f / 255.0f, 1.0f),
+			                                             ImVec4(52.0f / 255.0f, 49.0f / 255.0f, 54.0f / 255.0f, 1.0f) }, /* 中灰 */
 		};
 
 		/* 名字命中的阶段（无命中返回 nullptr = 节点用默认卡片 / 面板色与 Border 描边） */
@@ -90,8 +92,11 @@ namespace Helios
 		{
 			for (const StageFill& stage : kStageFills)
 			{
-				if (name.find(stage.Keyword) != std::string::npos)
-					return &stage;
+				for (const char* keyword : stage.Keywords)
+				{
+					if (keyword != nullptr && name.find(keyword) != std::string::npos)
+						return &stage;
+				}
 			}
 			return nullptr;
 		}
