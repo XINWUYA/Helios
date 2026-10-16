@@ -2701,18 +2701,12 @@ namespace Helios
 
 		if (card.Open)
 		{
-			/* 画面尺寸：按相机宽高比铺满卡内容宽，高度封顶（过高的画面挤掉下面的组件卡） */
-			const float kMaxImageHeight = Scaled(200.0f);
-
+			/* 画面宽度铺满卡片，高度按相机宽高比等比缩放，不做高度封顶（封顶会破坏比例）；
+			 * 窄高比相机画面较高时靠面板滚动与渲染尺寸上限保证可用 */
 			const float aspect = camera->GetAspectRatio();
 			const float avail_width = ImGui::GetContentRegionAvail().x;
 			float image_width = avail_width;
 			float image_height = (aspect > 0.0f) ? avail_width / aspect : avail_width;
-			if (aspect > 0.0f && image_height > kMaxImageHeight)
-			{
-				image_height = kMaxImageHeight;
-				image_width = image_height * aspect;
-			}
 
 			/* 渲染尺寸按物理像素（macOS 上不糊，与场景视口同一笔账；Windows 上 ImGui 单位已是物理像素） */
 			const glm::uvec2 render_size = ClampRenderSize(image_width, image_height, ImGuiToPhysicalScale());
