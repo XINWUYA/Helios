@@ -1,9 +1,13 @@
 #type vertex
 #version 410 core
 
+/* 与内建网格的顶点布局对齐（位置、法线、颜色、UV、切线依次占 location 0..4）。
+ * 本 shader 只读位置，声明保持一致以免属性槽类型错位 */
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
-layout(location = 2) in vec2 a_TexCoord;
+layout(location = 2) in vec4 a_Color;
+layout(location = 3) in vec3 a_TexCoord;
+layout(location = 4) in vec3 a_Tangent;
 
 #include "builtin/Uniforms.glsl"
 
