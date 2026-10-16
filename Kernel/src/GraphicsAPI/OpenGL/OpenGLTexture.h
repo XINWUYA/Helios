@@ -33,6 +33,9 @@ namespace Helios
 
 		/* 纹理ID */
 		uint32_t GetTextureID() const override { return m_TextureId; }
+		/* 硬件对象是否是 RenderBuffer：不含 Sampleable 的纯附件资源（离屏深度、模板等）
+		 * 在 GL 后端建的是 RBO，挂 FBO 时与纹理用的 API 不同，消费方需据此区分 */
+		[[nodiscard]] bool IsRenderBuffer() const { return m_TextureTarget == GL_RENDERBUFFER; }
 		/* 纹理是否可用：硬件对象（纹理 / RenderBuffer）已成功创建。
 		 * 注意别退回"仅文件加载才为真"的旧语义（见 m_IsLoaded 的说明）。 */
 		bool IsLoaded() const override { return m_IsLoaded; }

@@ -286,16 +286,38 @@ namespace Helios
 		glGenFramebuffers(1, &draw_fbo);
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fbo);
-		if (src_desc.SamplerType == SamplerType::Sampler2DArray)
-			glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, attachment,
-				open_gl_src->GetTextureID(), 0, static_cast<GLint>(src_layer));
+
+		/* 源和目标都可能是纹理或 RenderBuffer；纹理再按采样类型挂到 2D、单层或立方体面 */
+		if (open_gl_src->IsRenderBuffer())
+		{
+			glFramebufferRenderbuffer(GL_READ_FRAMEBUFFER, attachment, GL_RENDERBUFFER, open_gl_src->GetTextureID());
+		}
 		else
-			glFramebufferTexture2D(GL_READ_FRAMEBUFFER, attachment,
-				GL_TEXTURE_2D, open_gl_src->GetTextureID(), 0);
+		{
+			switch (src_desc.SamplerType)
+			{
+			case SamplerType::Sampler2DArray:
+			case SamplerType::Sampler3D:
+				glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, attachment, open_gl_src->GetTextureID(), 0, static_cast<GLint>(src_layer));
+				break;
+			case SamplerType::SamplerCubeMap:
+				glFramebufferTexture2D(GL_READ_FRAMEBUFFER, attachment, GL_TEXTURE_CUBE_MAP_POSITIVE_X + src_layer, open_gl_src->GetTextureID(), 0);
+				break;
+			default:
+				glFramebufferTexture2D(GL_READ_FRAMEBUFFER, attachment, GL_TEXTURE_2D, open_gl_src->GetTextureID(), 0);
+				break;
+			}
+		}
 
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_fbo);
-		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, attachment,
-			GL_TEXTURE_2D, open_gl_dst->GetTextureID(), 0);
+		if (open_gl_dst->IsRenderBuffer())
+		{
+			glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, attachment, GL_RENDERBUFFER, open_gl_dst->GetTextureID());
+		}
+		else
+		{
+			glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, attachment, GL_TEXTURE_2D, open_gl_dst->GetTextureID(), 0);
+		}
 
 		if (is_depth)
 		{
@@ -318,8 +340,13 @@ namespace Helios
 		}
 		else
 		{
-			CORE_LOG_ERROR("OpenGLRenderAPI::CopyTexture: framebuffer incomplete (read 0x{:X}, draw 0x{:X})",
-				read_status, draw_status);
+			/* 附件不完整时把源资源信息一并打出，便于定位是哪路资源 */
+			CORE_LOG_ERROR("OpenGLRenderAPI::CopyTexture: framebuffer incomplete (read 0x{:X}, draw 0x{:X})"
+				" src='{}' ({}x{}, sampler {}, format {}, mips {}, layer {})",
+				read_status, draw_status,
+				src->GetDebugName(), src_desc.Width, src_desc.Height,
+				static_cast<int>(src_desc.SamplerType), static_cast<int>(src_desc.Format),
+				src_desc.MipLevels, src_layer);
 		}
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(previous_read_fbo));
