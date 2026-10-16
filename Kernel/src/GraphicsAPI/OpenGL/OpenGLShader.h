@@ -42,5 +42,14 @@ namespace Helios
 		std::unordered_map<GLenum, std::vector<uint32_t>> m_OpenGLSPIRVs{};
 #endif
 		std::unordered_map<GLenum, std::string> m_OpenGLSourceCodes{};
+
+		/* 构造时编译并挂载的 shader 句柄，link 完成后统一释放 */
+		std::vector<GLuint> m_AttachedShaders{};
+
+		/* 延迟链接：构造时只编译、挂载，第一次 Bind 时才执行 link。
+		 * link 时驱动会记录当时的 GL 状态，推迟到绘制前可保证与首次绘制一致，
+		 * cull face 等状态差异不会触发驱动重新编译着色器 */
+		bool m_IsLinked{ false };
+		void LazyLink();
 	};
 }

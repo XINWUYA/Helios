@@ -76,6 +76,10 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 第一次绑定才执行 link，保证 link 时 GL 状态与绘制时一致（见 LazyLink） */
+		if (!m_IsLinked)
+			LazyLink();
+
 		glUseProgram(m_ProgramID);
 	}
 
@@ -481,7 +485,22 @@ namespace Helios
 		}
 #endif
 
-		// Link program
+		/* 句柄转由成员保存，link 完成后再释放（见 LazyLink） */
+		m_AttachedShaders = std::move(compiled_shaders);
+
+		/* 这里只编译、挂载，不 link：推迟到第一次 Bind 执行（原因见 LazyLink） */
+		m_ProgramID = program;
+	}
+
+	void OpenGLShader::LazyLink()
+	{
+		PROFILE_FUNCTION();
+
+		if (m_IsLinked)
+			return;
+
+		const GLuint program = m_ProgramID;
+
 		glLinkProgram(program);
 
 		GLint is_linked;
@@ -496,12 +515,9 @@ namespace Helios
 			CORE_LOG_ERROR("Shader linking failed ({0}):\n{1}", m_Path, info_log.data());
 			ASSERT(false);
 
-			// Delete program
 			glDeleteProgram(program);
-
-			// Delete compiled shaders
-			for (const auto shader : compiled_shaders)
-				glDeleteShader(shader);
+			m_ProgramID = 0;
+			return;
 		}
 
 #ifdef __APPLE__
@@ -536,7 +552,7 @@ namespace Helios
 		 * macOS 会剥离 sampler 上的 layout(binding = X)，
 		 * 这里按反射结果显式把每个 sampler 指向声明的 texture unit，
 		 * 使三端行为与 Shader 中写的 binding 完全一致。 */
-		if (is_linked != GL_FALSE && !m_Reflection.SamplerBindings.empty())
+		if (!m_Reflection.SamplerBindings.empty())
 		{
 			GLint prev_program = 0;
 			glGetIntegerv(GL_CURRENT_PROGRAM, &prev_program);
@@ -552,13 +568,13 @@ namespace Helios
 		}
 #endif
 
-		// Always detach shaders after a successful link.
-		for (const auto shader : compiled_shaders)
+		m_IsLinked = true;
+
+		for (const GLuint shader : m_AttachedShaders)
 		{
 			glDetachShader(program, shader);
 			glDeleteShader(shader);
 		}
-
-		m_ProgramID = program;
+		m_AttachedShaders.clear();
 	}
 }

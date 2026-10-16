@@ -185,37 +185,38 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-	/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState */
-	material->GetShader()->BindVertexArray(mesh_primitive.VertexArray);
+		/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState */
+		material->GetShader()->BindVertexArray(mesh_primitive.VertexArray);
 
-	/* 绑定全局UniformBuffer（View/Object/Light），Metal后端需要显式绑定到RenderEncoder */
-	s_RenderData.pViewUniformBuffer->Bind();
-	s_RenderData.pObjectUniformBuffer->Bind();
-	s_RenderData.pLightUniformBuffer->Bind();
+		/* 绑定全局UniformBuffer（View/Object/Light），Metal后端需要显式绑定到RenderEncoder */
+		s_RenderData.pViewUniformBuffer->Bind();
+		s_RenderData.pObjectUniformBuffer->Bind();
+		s_RenderData.pLightUniformBuffer->Bind();
 
-	material->Bind();
-
-	/* per-draw 覆盖：只写当前绑定的 Shader / 纹理，不落材质对象（共享材质保持只读） */
-	if (per_draw != nullptr)
-	{
-		for (const auto& param : per_draw->Overrides)
-			material->ApplyParam(param);
-	}
-
-	/* 按 Shader 声明绑定当前 Pass 的阴影纹理。 */
-	if (m_pCurrentShadowMap != nullptr)
-	{
-		const int shadow_binding = material->GetShader()->GetUniformBinding("u_ShadowMap");
-		if (shadow_binding >= 0)
-			m_pCurrentShadowMap->Bind(static_cast<uint32_t>(shadow_binding));
-	}
-
-	mesh_primitive.VertexArray->Bind();
-
-
+		/* 光栅状态先于材质绑定：着色器在第一次绑定时才 link（见 OpenGLShader::LazyLink），
+		 * 此时 cull face 等状态已设好，link 状态与首次绘制一致，不会被驱动重编译 */
 		m_pRenderAPI->ApplyRasterState((per_draw != nullptr && per_draw->RasterStateOverride.has_value())
 			? per_draw->RasterStateOverride.value()
 			: material->GetRasterState());
+
+		material->Bind();
+
+		/* per-draw 覆盖：只写当前绑定的 Shader / 纹理，不落材质对象（共享材质保持只读） */
+		if (per_draw != nullptr)
+		{
+			for (const auto& param : per_draw->Overrides)
+				material->ApplyParam(param);
+		}
+
+		/* 按 Shader 声明绑定当前 Pass 的阴影纹理。 */
+		if (m_pCurrentShadowMap != nullptr)
+		{
+			const int shadow_binding = material->GetShader()->GetUniformBinding("u_ShadowMap");
+			if (shadow_binding >= 0)
+				m_pCurrentShadowMap->Bind(static_cast<uint32_t>(shadow_binding));
+		}
+
+		mesh_primitive.VertexArray->Bind();
 
 		if (mesh_primitive.VertexArray->GetIndexBuffer())
 			m_pRenderAPI->DrawIndexed(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray, index_count);
