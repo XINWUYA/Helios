@@ -317,7 +317,8 @@ namespace Helios
 	}
 
 	/* 内部格式 -> glGetTexImage 需要的 (外部格式, 像素类型)。
-	 * 只覆盖可整体回读的常规格式；块压缩格式需要按块解压，不走这里。 */
+	 * 只覆盖可整体回读的常规格式；块压缩格式需要按块解压，不走这里。
+	 * 深度族按 texel 宽度取对应类型，供深度预览刷新显示范围时回读。 */
 	static bool ResolveReadbackPixelLayout(GLenum internal_format, GLenum& out_format, GLenum& out_type)
 	{
 		switch (internal_format)
@@ -329,6 +330,11 @@ namespace Helios
 		case GL_RGBA8I:  out_format = GL_RGBA; out_type = GL_BYTE;          return true;
 		case GL_RGBA8UI: out_format = GL_RGBA; out_type = GL_UNSIGNED_BYTE; return true;
 		case GL_R32F:    out_format = GL_RED;  out_type = GL_FLOAT;         return true;
+		case GL_DEPTH_COMPONENT16:  out_format = GL_DEPTH_COMPONENT; out_type = GL_UNSIGNED_SHORT;   return true;
+		case GL_DEPTH_COMPONENT24:  out_format = GL_DEPTH_COMPONENT; out_type = GL_UNSIGNED_INT;     return true;
+		case GL_DEPTH_COMPONENT32:  out_format = GL_DEPTH_COMPONENT; out_type = GL_FLOAT;            return true;
+		case GL_DEPTH_COMPONENT32F: out_format = GL_DEPTH_COMPONENT; out_type = GL_FLOAT;            return true;
+		case GL_DEPTH24_STENCIL8:   out_format = GL_DEPTH_STENCIL;   out_type = GL_UNSIGNED_INT_24_8; return true;
 		default:         return false;
 		}
 	}

@@ -111,6 +111,8 @@ namespace Helios
 				output.DisplayMax = previous->DisplayMax;
 				output.RangeFrame = previous->RangeFrame;
 				output.HasRange = previous->HasRange;
+				/* 空内容重试计数一并接续：否则每帧都按首刷重试，日志逐帧刷屏 */
+				output.EmptyRetries = previous->EmptyRetries;
 				output.RangeReadback = std::move(previous->RangeReadback); /* 回读缓冲随输出迁移复用 */
 				pass_entry.Outputs.push_back(std::move(output));
 			};
