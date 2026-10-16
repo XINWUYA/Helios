@@ -92,14 +92,21 @@ namespace Helios
 #endif
 	}
 
-	/* 保存文件到指定路径 */
-	std::string FileDialog::SaveFile(const char* filter)	{
+	/* 保存文件到指定路径（default_name = 预填的文件名，UTF-8） */
+	std::string FileDialog::SaveFile(const char* filter, const char* default_name)	{
 #ifdef PLATFORM_WINDOWS
 		std::wstring wide_filter = MakeWideFilter(filter);
 		if (wide_filter.empty())
 			return {};
 
 		std::vector<wchar_t> file_path(32768, L'\0');
+		if (default_name != nullptr && *default_name != '\0')
+		{
+			const int wide_length = MultiByteToWideChar(CP_UTF8, 0, default_name, -1,
+				file_path.data(), static_cast<int>(file_path.size()));
+			if (wide_length <= 0)
+				file_path[0] = L'\0';
+		}
 		std::vector<wchar_t> current_dir(32768, L'\0');
 		if (GetCurrentDirectoryW(static_cast<DWORD>(current_dir.size()), current_dir.data()) == 0)
 			current_dir.clear();
@@ -139,7 +146,13 @@ namespace Helios
 		@autoreleasepool {
 			NSSavePanel* savePanel = [NSSavePanel savePanel];
 			[savePanel setCanCreateDirectories:YES];
-			
+			if (default_name != nullptr && *default_name != '\0')
+			{
+				NSString* nsName = [NSString stringWithUTF8String:default_name];
+				if (nsName != nil)
+					[savePanel setNameFieldStringValue:nsName];
+			}
+
 			// Set parent window
 			NSWindow* nsWindow = glfwGetCocoaWindow((GLFWwindow*)Application::Instance()->GetWindow().GetNativeWindow());
 			[savePanel beginSheetModalForWindow:nsWindow completionHandler:nil];

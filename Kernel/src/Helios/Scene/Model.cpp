@@ -444,6 +444,10 @@ namespace Helios
 			/* 关闭文件 */
 			in_mesh_file.close();
 
+			/* 槽表兜底：导入时没有材质的模型（.mtl 缺失 / 条目比段少）也要有槽名，
+			 * 否则属性面板和模型编辑器挂的材质挂不上去 */
+			model->EnsureMaterialSlots();
+
 			return model;
 		}
 		else
@@ -477,6 +481,27 @@ namespace Helios
 		slot.Name = name;
 		slot.pDefault = material;
 		m_MaterialSlots.emplace_back(std::move(slot));
+	}
+
+	/* 槽表兜底：无槽的段分配新槽、索引越界的段把空缺补齐（默认槽没材质，解析时兜底白模） */
+	void Model::EnsureMaterialSlots()
+	{
+		for (const auto& segment : m_MeshSegments)
+		{
+			if (segment == nullptr)
+				continue;
+
+			if (segment->GetSlotIndex() < 0)
+			{
+				const int new_index = static_cast<int>(m_MaterialSlots.size());
+				AddMaterialSlot("slot_" + std::to_string(new_index), nullptr);
+				segment->SetSlotIndex(new_index);
+				continue;
+			}
+
+			for (int i = static_cast<int>(m_MaterialSlots.size()); i <= segment->GetSlotIndex(); ++i)
+				AddMaterialSlot("slot_" + std::to_string(i), nullptr);
+		}
 	}
 
 	/* 按索引取槽 */

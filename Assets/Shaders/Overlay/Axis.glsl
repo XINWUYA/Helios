@@ -66,6 +66,12 @@ layout(location = 0) uniform float u_LineWidth;
 
 /* 网格的格距（世界单位）；0 = 当前绘制不是网格（坐标轴 / 实体 gizmo 不参与分类） */
 layout(location = 4) uniform float u_GridMajor;
+/* 网格坐标系原点（xz，世界单位）与缩放：线身份按"网格坐标 = (世界 - 原点) / 缩放"分类。
+ * 场景网格 = 原点 0 / 缩放 1（与旧口径逐位一致，亮线恒在世界整数格上）；
+ * 模型预览网格 = 以模型为中心、按模型尺寸缩放（补丁不再跟着相机、格距随模型放大）。
+ * 缩放为 0（材质漏设）会让除法爆掉，钳一个下限兜底 */
+layout(location = 5) uniform vec2 u_GridOrigin;
+layout(location = 6) uniform float u_GridScale;
 
 layout (location = 0) out vec4 OutFragColor;
 
@@ -75,12 +81,15 @@ const vec3 kGridMajorColor = vec3(0.30f, 0.30f, 0.32f);
 const vec3 kGridAxisColorX = vec3(0.50f, 0.10f, 0.10f);	/* z = 0 那条（沿 X 方向） */
 const vec3 kGridAxisColorZ = vec3(0.10f, 0.10f, 0.50f);	/* x = 0 那条（沿 Z 方向） */
 
-/* 网格线身份按世界坐标分类（细线 / 每 u_GridMajor 格主线 / 世界轴中线）：按 patch 局部下标
- * 判会让亮线跟着视角滑动，用世界坐标反推（线恒在整数坐标）则与 patch 平移无关 */
+/* 网格线身份按"网格坐标"分类（细线 / 每 u_GridMajor 格主线 / 网格原点中线）：世界坐标先过
+ * (原点, 缩放) 归一 —— 场景网格 0/1 时与旧口径逐位一致；按世界坐标反推（线恒落在网格坐标
+ * 的整数上）则与补丁平移 / 缩放无关，亮线不会跟着视角滑动 */
 vec3 ClassifyGridColor()
 {
 	const bool along_x = abs(v_Dir.x) > 0.5f;
-	const float line_coord = floor((along_x ? v_WorldPos.z : v_WorldPos.x) + 0.5f);
+	const float world_coord = along_x ? v_WorldPos.z : v_WorldPos.x;
+	const float origin_coord = along_x ? u_GridOrigin.y : u_GridOrigin.x;
+	const float line_coord = floor((world_coord - origin_coord) / max(u_GridScale, 1e-6f) + 0.5f);
 
 	if (abs(line_coord) < 0.5f)
 		return along_x ? kGridAxisColorX : kGridAxisColorZ;

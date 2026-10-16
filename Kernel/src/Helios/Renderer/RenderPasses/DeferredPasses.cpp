@@ -247,7 +247,23 @@ namespace Helios
 									continue;
 
 								auto gbuffer_material = material;
-								if (material->GetShader() != gbuffer_shader)
+								/* 声称用 GBuffer shader 但采样点没配全的老材质（head.mtl 这类待迁移
+								 * 资产）也要走转换：直画会带着未绑定的采样点，画面是垃圾输入 */
+								bool needs_conversion = (material->GetShader() != gbuffer_shader);
+								if (!needs_conversion)
+								{
+									const auto& parameters = material->GetAllParameters();
+									for (const auto& sampler_entry : gbuffer_shader->GetReflectionData().SamplerBindings)
+									{
+										const auto iter = parameters.find(ToID(sampler_entry.first));
+										if (iter == parameters.end() || iter->second.Type != ParamType::Texture)
+										{
+											needs_conversion = true;
+											break;
+										}
+									}
+								}
+								if (needs_conversion)
 								{
 									auto [cached, inserted] = gbuffer_materials.try_emplace(material.get());
 									if (inserted)

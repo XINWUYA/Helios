@@ -173,6 +173,9 @@ namespace Helios
 		void EmplaceEntry(MaterialEntry entry) { m_Entries.emplace_back(std::move(entry)); }
 		/* 设置条目槽名（导出前把导入时的材质名写进槽表） */
 		void SetEntrySlotName(int idx, std::string name);
+		/* 设置条目的材质资产引用（空 = 内嵌定义）：带路径的条目序列化只写 Asset，
+		 * 加载方按路径解析材质资产 */
+		void SetEntryAssetPath(int idx, std::string path);
 		/* 根据索引获取条目（越界返回 nullptr） */
 		[[nodiscard]] const MaterialEntry* GetEntryByIndex(int idx) const;
 		/* 根据索引获取内嵌材质（越界回退 Error 材质；引用形态条目返回空指针） */

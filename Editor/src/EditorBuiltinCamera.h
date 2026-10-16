@@ -19,6 +19,32 @@ namespace Helios
 		/* 授权 / 撤销“允许起手新的导航手势”。缺省不允许 —— 没有视口在驱动的相机不接受输入 */
 		void SetNavigationAllowed(bool allowed) { m_IsNavigationAllowed = allowed; }
 
+		/* 聚焦模式（模型预览）：视图锁定绕聚焦点 —— 左键直接起手轨道旋转（无需 Alt），
+		 * 平移 / 右键推拉 / 飞行都不参与，镜头不会离开模型；缩放走滚轮。缺省关闭。 */
+		void SetFocusMode(bool enabled) { m_IsFocusMode = enabled; }
+
+		/* 模型预览的地面网格：启用后网格以给定中心 / 缩放绘制（补丁跟着模型、格距按模型
+		 * 尺寸缩放，见 SceneGizmos::SubmitGridGizmo）；缺省关闭 = 场景口径（跟着相机）。 */
+		void SetPreviewGrid(bool enabled, const glm::vec3& center, float scale)
+		{
+			m_HasPreviewGrid = enabled;
+			m_PreviewGridCenter = center;
+			m_PreviewGridScale = scale;
+		}
+		[[nodiscard]] bool IsPreviewGridEnabled() const { return m_HasPreviewGrid; }
+		[[nodiscard]] const glm::vec3& GetPreviewGridCenter() const { return m_PreviewGridCenter; }
+		[[nodiscard]] float GetPreviewGridScale() const { return m_PreviewGridScale; }
+
+		/* 模型线框叠加（模型预览的调试开关）：AxisPass 末尾把场景里的模型段再画一遍线框
+		 * （见 SceneGizmos::SubmitModelWireframe）。缺省关闭。 */
+		void SetWireframeOverlay(bool enabled) { m_IsWireframeOverlay = enabled; }
+		[[nodiscard]] bool IsWireframeOverlayEnabled() const { return m_IsWireframeOverlay; }
+
+		/* 子网格高亮（模型预览：悬停子模型卡时用）：>= 0 时把场景里模型的该网格段用强调色
+		 * 平铺再画一遍（见 SceneGizmos::SubmitModelSegmentHighlight）。缺省 -1 = 不画。 */
+		void SetHighlightSegment(int segment_index) { m_HighlightSegment = segment_index; }
+		[[nodiscard]] int GetHighlightSegment() const { return m_HighlightSegment; }
+
 		/* 设置视口区域 */
 		void SetViewportRegion(const ViewportRegion& region);
 		[[nodiscard]]
@@ -115,6 +141,16 @@ namespace Helios
 		NavGesture m_ActiveGesture{ NavGesture::None };
 		/* 是否允许起手新的导航手势（由场景层每帧授权） */
 		bool m_IsNavigationAllowed{ false };
+		/* 聚焦模式：只允许轨道旋转与滚轮缩放（见 SetFocusMode） */
+		bool m_IsFocusMode{ false };
+		/* 模型预览网格（见 SetPreviewGrid）：中心与缩放 */
+		bool m_HasPreviewGrid{ false };
+		glm::vec3 m_PreviewGridCenter{ 0.0f };
+		float m_PreviewGridScale{ 1.0f };
+		/* 模型线框叠加开关（见 SetWireframeOverlay） */
+		bool m_IsWireframeOverlay{ false };
+		/* 子网格高亮（见 SetHighlightSegment）：-1 = 不画 */
+		int m_HighlightSegment{ -1 };
 		/* 上一帧按键状态：起手要求“按下沿”，避免按住按键从其他窗口拖进视口时误起手 */
 		bool m_WasAltPressed{ false };
 		bool m_WasLmbPressed{ false };

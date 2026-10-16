@@ -3,6 +3,7 @@
 #include "EditorCommon.h"
 #include "EditorIcons.h"
 #include "Gif.h"
+#include "MaterialParamUI.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Svg.h"
@@ -1321,7 +1322,10 @@ namespace Helios
 		 * 帧末结算 —— 换选中、切资源视图、收起卡片都会让预览自然停掉（见 DrawCameraPreviewCard） */
 		m_CameraPreviewWanted = false;
 
-		ImGui::Begin(Panel::kProperties);
+		/* 常驻竖向滚动条（AlwaysVerticalScrollbar）：滚动条出现会抽走右侧约 10px，内容若按
+		 * "还没滚动条"的旧宽度排过一帧（换选中、展开卡片、拖分栏都会触发），
+		 * 面板就能横向滑一下。常驻 = 宽度恒定预留，属性面板永远不能左右滑。 */
+		ImGui::Begin(Panel::kProperties, nullptr, ImGuiWindowFlags_AlwaysVerticalScrollbar);
 		{
 			/* 句柄非空 ≠ 实体存在（见 Entity::operator bool 的约定）：选中项可能来自
 			 * 撤销后的残留或失效的拾取句柄。组件 GetPtr 对不存在的实体是断言而不是
@@ -1498,47 +1502,6 @@ namespace Helios
 			return "Image";
 		}
 
-		/* 可选 Shader：Assets 下所有 .glsl 源（相对路径，字典序）。
-		 * 跳过 Cache（编译产物目录，里面是 .metal）；.glsl 允许建在任何子目录，所以整树扫 ——
-		 * 与材质编辑缓冲共用同一缓存键，只在选中材质或文件变化时重扫一次。 */
-		std::vector<std::string> CollectShaderOptions()
-		{
-			std::vector<std::string> options;
-
-			std::error_code error;
-			for (std::filesystem::recursive_directory_iterator iter(g_AssetsPath,
-					std::filesystem::directory_options::skip_permission_denied, error), end;
-				iter != end; iter.increment(error))
-			{
-				if (error)
-					break;
-
-				const std::filesystem::directory_entry& item = *iter;
-				if (item.is_directory())
-				{
-					if (item.path().filename() == "Cache")
-						iter.disable_recursion_pending();
-					continue;
-				}
-
-				if (!item.is_regular_file())
-					continue;
-
-				std::string extension = PathToUtf8(item.path().extension());
-				for (char& character : extension)
-				{
-					if (character >= 'A' && character <= 'Z')
-						character = static_cast<char>(character - 'A' + 'a');
-				}
-				if (extension != ".glsl")
-					continue;
-
-				options.emplace_back(RELATIVE_PATH(PathToUtf8(item.path())));
-			}
-
-			std::sort(options.begin(), options.end());
-			return options;
-		}
 	}
 
 	void SceneHierarchy::ShowAssetProperties()
@@ -1928,7 +1891,7 @@ namespace Helios
 				m_AssetDetailRows.emplace_back("Materials", "unreadable");
 			}
 
-			m_AssetMaterialShaderOptions = CollectShaderOptions();
+			m_AssetMaterialShaderOptions = MaterialParamUI::CollectShaderOptions();
 			m_AssetMaterialDirty = false;	/* 刚读上来的缓冲与文件一致（Apply 的禁用依据） */
 		}
 	}
@@ -2135,158 +2098,6 @@ namespace Helios
 
 	namespace
 	{
-		/* 材质没有 Shader 时按钮上的占位文案（菜单照常能开，选一个即可补上） */
-		constexpr const char* kNoShaderOption = "(no shader)";
-
-		/* 反射参数 → 显示行：材质还没有这条时用它撑起一行 ——
-		 * 默认值取 Shader 源码声明的（如 u_AlbedoTilingOffset = vec4(1,1,0,0)），
-		 * 没有就按类型给零值；贴图没有"默认"，显示成空槽（拖入才落材质）。 */
-		MaterialParamInfo MakeDefaultMaterialParamRow(const ReflectedMaterialParam& reflected)
-		{
-			const std::any& declared = reflected.Default;
-			switch (reflected.Type)
-			{
-			case ParamType::Texture:
-				return Material::MakeTextureParam(reflected.Name, nullptr);
-			case ParamType::Int:
-				return { ParamType::Int, reflected.Name, declared.has_value() ? declared : std::any(0) };
-			case ParamType::Float:
-				return { ParamType::Float, reflected.Name, declared.has_value() ? declared : std::any(0.0f) };
-			case ParamType::Vec2:
-				return { ParamType::Vec2, reflected.Name, declared.has_value() ? declared : std::any(glm::vec2(0.0f)) };
-			case ParamType::Vec3:
-				return { ParamType::Vec3, reflected.Name, declared.has_value() ? declared : std::any(glm::vec3(0.0f)) };
-			case ParamType::Vec4:
-				return { ParamType::Vec4, reflected.Name, declared.has_value() ? declared : std::any(glm::vec4(0.0f)) };
-			case ParamType::Mat4:
-				return { ParamType::Mat4, reflected.Name, std::any(glm::mat4(1.0f)) };
-			}
-
-			return { reflected.Type, reflected.Name, std::any{} };
-		}
-
-		/* 材质参数行的显示清单：Shader 反射是参数集合的唯一来源（反射声明什么就列什么，跟材质
-		 * 里残留的旧参数无关）；值优先取材质里已有的，没有的就显示反射默认值。反射不到就返回空、
-		 * 不回退旧参数表（让调用方画报错），免得旧参数被显示成"默认材质"误导人。 */
-		std::vector<MaterialParamInfo> BuildMaterialParamRows(const Material& material)
-		{
-			std::vector<MaterialParamInfo> rows;
-
-			const SharedPtr<DeviceShader> shader = material.GetShader();
-			if (shader == nullptr)
-				return rows;
-
-			const ShaderReflectionData& reflection = shader->GetReflectionData();
-			const auto& parameters = material.GetAllParameters();
-			rows.reserve(reflection.MaterialParams.size());
-			for (const ReflectedMaterialParam& reflected : reflection.MaterialParams)
-			{
-				const auto iter = parameters.find(ToID(reflected.Name));
-				rows.push_back(iter != parameters.end() ? iter->second : MakeDefaultMaterialParamRow(reflected));
-			}
-
-			std::sort(rows.begin(), rows.end(),
-				[](const MaterialParamInfo& lhs, const MaterialParamInfo& rhs) { return lhs.Name < rhs.Name; });
-			return rows;
-		}
-
-		/* 参数无法按 Shader 反射时的报错提示行（Danger 色）：两种状态分开说清 ——
-		 * 没 Shader / 有 Shader 但反射为空（后端不支持或声明识别不出）。 */
-		void DrawMaterialReflectionNotice(const Material& material)
-		{
-			const char* message = (material.GetShader() == nullptr)
-				? "No shader loaded — cannot reflect parameters"
-				: "Shader reflection unavailable — parameters not listed";
-
-			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::Danger);
-			ImGui::TextWrapped("%s", message);
-			ImGui::PopStyleColor();
-		}
-
-		/* Shader 菜单树：按目录分层的节点（文件夹 = Children 非空；文件 = Path 为完整相对路径） */
-		struct ShaderMenuNode
-		{
-			std::string Name;                      /* 显示名（文件 / 文件夹名） */
-			std::string Path;                      /* 文件 = 完整相对路径；文件夹 = 空 */
-			std::vector<ShaderMenuNode> Children;  /* 文件夹的子项 */
-
-			[[nodiscard]] bool IsFolder() const { return Path.empty(); }
-		};
-
-		/* 把"可选 Shader 的相对路径清单"装成一棵按目录分层的菜单树（同名文件夹归并）。
-		 * 清单本身是字典序：同一层级里文件夹与文件各自保持排好的顺序 ——
-		 * 画的时候文件夹先、文件后（见 DrawShaderMenuLevel）。 */
-		std::vector<ShaderMenuNode> BuildShaderMenuTree(const std::vector<std::string>& options)
-		{
-			std::vector<ShaderMenuNode> roots;
-
-			for (const std::string& option : options)
-			{
-				std::vector<ShaderMenuNode>* level = &roots;
-				size_t begin = 0;
-
-				while (true)
-				{
-					const size_t slash = option.find('/', begin);
-					if (slash == std::string::npos)
-						break;
-
-					const std::string folder = option.substr(begin, slash - begin);
-					auto found = std::find_if(level->begin(), level->end(),
-						[&folder](const ShaderMenuNode& node)
-						{
-							return node.IsFolder() && node.Name == folder;
-						});
-
-					if (found == level->end())
-					{
-						level->push_back(ShaderMenuNode{ folder, {}, {} });
-						found = level->end() - 1;
-					}
-
-					level = &found->Children;
-					begin = slash + 1;
-				}
-
-				level->push_back(ShaderMenuNode{ option.substr(begin), option, {} });
-			}
-
-			return roots;
-		}
-
-		/* 画一层 Shader 菜单：文件夹先（悬停展开子菜单）、文件后（点一条 = 选中）。
-		 * 当前 Shader 打一枚对勾（Accent，行右缘）；选中后把整条菜单链收起。 */
-		void DrawShaderMenuLevel(const std::vector<ShaderMenuNode>& nodes, const std::string& current,
-			std::string& out_picked)
-		{
-			for (const ShaderMenuNode& node : nodes)
-			{
-				if (!node.IsFolder())
-					continue;
-
-				if (PanelChrome::BeginMenuWithIcon(Icons::Id::Directory, node.Name.c_str()))
-				{
-					DrawShaderMenuLevel(node.Children, current, out_picked);
-					PanelChrome::EndMenuWithIcon();
-				}
-			}
-
-			for (const ShaderMenuNode& node : nodes)
-			{
-				if (node.IsFolder())
-					continue;
-
-				/* 对勾行的默认行为是"点了不收起"（连点开关用）；单选的场合点完自己收起 ——
-				 * CloseCurrentPopup 会顺着 ChildMenu 链把整个菜单一起带走。 */
-				bool checked = (node.Path == current);
-				if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::FileShader, node.Name.c_str(), &checked))
-				{
-					out_picked = node.Path;
-					ImGui::CloseCurrentPopup();
-				}
-			}
-		}
-
 		/* 把槽的绑定换成"实例"（若已是实例则原样返回）。
 		 * 返回值：可编辑的实例材质；component_changed 标记组件数据被修改（撤销靠它）。 */
 		SharedPtr<Material> EnsureSlotInstance(ModelComponent& component, const Model& model,
@@ -2347,137 +2158,6 @@ namespace Helios
 				return;
 
 			instance->SetRasterState(state);
-		}
-
-		/* 一条材质参数行：值画在临时缓冲上，改动经 write_back 落进目标材质（槽位 → 自动实例化
-		 * 写回；资产编辑缓冲 → 直接写）。行对齐：标签跟 frame 高控件垂直居中。贴图行只画缩略图
-		 * （点击定位、拖入替换、悬停看大图）。 */
-		void DrawMaterialParamRow(const MaterialParamInfo& param_info,
-			const SceneHierarchy::AssetRevealFunc& reveal_asset,
-			const std::function<void(ParamType, const std::string&, const std::any&)>& write_back)
-		{
-			bool edited = false;
-			const std::string& param_name = param_info.Name;
-			const float kLabelWidth = EditorTheme::Token::PropertyLabelWidth;
-
-			switch (param_info.Type)
-			{
-			case ParamType::Texture:
-				{
-					auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(param_info.Value);
-					auto texture = texture_info.first; /* 临时副本 */
-
-					ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
-
-					const auto& show_texture = texture ? texture
-						: AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Default.png"));
-
-					/* 缩略图与行高同高（frame 高含 1px 外框）：逐行对齐、不撑行 */
-					const float thumbnail = ImGui::GetFrameHeight() - 2.0f;
-					const bool clicked = ImGui::ImageButton((ImTextureID)show_texture.get(), ImVec2(thumbnail, thumbnail),
-						ImVec2(0, 1), ImVec2(1, 0), 1, ImVec4(0, 0, 0, 0), ImVec4(1, 1, 1, 1));
-
-					if (ImGui::BeginDragDropTarget())
-					{
-						if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
-						{
-							std::filesystem::path relative_path;
-							if (payload->DataSize > 1 && TryPathFromUtf8Payload(
-								payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
-							{
-								const auto new_texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(
-									PathToUtf8(g_AssetsPath / relative_path));
-								if (new_texture->IsLoaded())
-								{
-									texture = new_texture;
-									edited = true;
-								}
-							}
-						}
-						ImGui::EndDragDropTarget();
-					}
-
-					if (ImGui::IsItemHovered())
-					{
-						ImGui::BeginTooltip();
-						ImGui::Image((ImTextureID)show_texture.get(), ImVec2(200, 200), ImVec2(0, 1), ImVec2(1, 0));
-						ImGui::TextDisabled("Click to reveal in Assets");
-						ImGui::EndTooltip();
-					}
-
-					/* 点击缩略图 = 在资源浏览器里定位这张贴图 */
-					if (clicked && reveal_asset && show_texture != nullptr)
-					{
-						const std::string relative = RELATIVE_PATH(show_texture->GetPath());
-						if (!relative.empty() && relative.rfind("..", 0) != 0)
-							reveal_asset(relative);
-					}
-
-					ImGuiExt::EndPropertyRow();
-
-					if (edited)
-						write_back(ParamType::Texture, param_name, texture);
-				}
-				break;
-			case ParamType::Int:
-				{
-					int value = std::any_cast<int>(param_info.Value);
-					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
-					ImGui::SetNextItemWidth(value_width);
-					edited = ImGui::DragInt("##Value", &value, 0.1f);
-					ImGuiExt::EndPropertyRow();
-					if (edited)
-						write_back(ParamType::Int, param_name, value);
-				}
-				break;
-			case ParamType::Float:
-				{
-					float value = std::any_cast<float>(param_info.Value);
-					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
-					ImGui::SetNextItemWidth(value_width);
-					edited = ImGui::DragFloat("##Value", &value, 0.01f);
-					ImGuiExt::EndPropertyRow();
-					if (edited)
-						write_back(ParamType::Float, param_name, value);
-				}
-				break;
-			case ParamType::Vec2:
-				{
-					glm::vec2 value = std::any_cast<glm::vec2>(param_info.Value);
-					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
-					ImGui::SetNextItemWidth(value_width);
-					edited = ImGui::DragFloat2("##Value", glm::value_ptr(value), 0.01f);
-					ImGuiExt::EndPropertyRow();
-					if (edited)
-						write_back(ParamType::Vec2, param_name, value);
-				}
-				break;
-			case ParamType::Vec3:
-				{
-					glm::vec3 value = std::any_cast<glm::vec3>(param_info.Value);
-					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
-					ImGui::SetNextItemWidth(value_width);
-					edited = ImGui::DragFloat3("##Value", glm::value_ptr(value), 0.01f);
-					ImGuiExt::EndPropertyRow();
-					if (edited)
-						write_back(ParamType::Vec3, param_name, value);
-				}
-				break;
-			case ParamType::Vec4:
-				{
-					glm::vec4 value = std::any_cast<glm::vec4>(param_info.Value);
-					const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
-					ImGui::SetNextItemWidth(value_width);
-					edited = ImGui::DragFloat4("##Value", glm::value_ptr(value), 0.01f);
-					ImGuiExt::EndPropertyRow();
-					if (edited)
-						write_back(ParamType::Vec4, param_name, value);
-				}
-				break;
-			default:
-				/* Mat4 等没做编辑器，跳过（只读展示也省） */
-				break;
-			}
 		}
 
 		/* ---- 光栅化状态（RenderRasterState）的行 ---- */
@@ -2654,9 +2334,9 @@ namespace Helios
 
 		/* 参数行：集合与类型来自 Shader 反射（见 BuildMaterialParamRows）——换 Shader 行集跟着换；
 		 * 值取当前生效材质，反射声明而材质还没有的先显示默认值。每轮重新解析材质（上一轮改动可能已换成实例） */
-		const std::vector<MaterialParamInfo> rows = BuildMaterialParamRows(*current);
+		const std::vector<MaterialParamInfo> rows = MaterialParamUI::BuildMaterialParamRows(*current);
 		if (rows.empty())
-			DrawMaterialReflectionNotice(*current);
+			MaterialParamUI::DrawMaterialReflectionNotice(*current);
 
 		for (const MaterialParamInfo& row : rows)
 		{
@@ -2665,7 +2345,7 @@ namespace Helios
 			const auto iter = parameters.find(ToID(row.Name));
 			const MaterialParamInfo& param_info = (iter != parameters.end()) ? iter->second : row;
 
-			DrawMaterialParamRow(param_info, m_AssetRevealFunc,
+			MaterialParamUI::DrawMaterialParamRow(param_info, m_AssetRevealFunc,
 				[&component, &model, slot_index, &changed](ParamType type, const std::string& name, const std::any& value)
 				{
 					WriteBackMaterialParam(component, model, slot_index, type, name, value, changed);
@@ -2908,103 +2588,19 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* Shader 行：值 = 一枚下拉按钮（显示当前 Shader 的文件名、右缘一枚朝下的箭头；
-		 * 悬停看全路径）；点开的分组菜单按目录做子菜单（文件夹先、文件后），点一条即选中。
-		 * 还没有 Shader 的条目按钮上是占位文案，菜单照常能开、选一个即可补上。 */
-		const SharedPtr<DeviceShader> shader = material.GetShader();
-		const std::string current = (shader != nullptr) ? RELATIVE_PATH(shader->GetPath()) : std::string();
-
-		const float value_width = ImGuiExt::BeginPropertyRow("Shader", EditorTheme::Token::PropertyLabelWidth, true);
-
-		/* 菜单开着的按钮提亮一档（与组合框打开时的状态语言一致） */
-		const bool menu_open = ImGui::IsPopupOpen("##ShaderMenu");
-		if (menu_open)
-			ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-		const bool picker_clicked = ImGui::Button("##ShaderPicker", ImVec2(value_width, 0.0f));
-		if (menu_open)
-			ImGui::PopStyleColor();
-
-		if (picker_clicked)
-			ImGui::OpenPopup("##ShaderMenu");
-
-		/* 按钮的自绘内容：文件名居中、右缘一枚朝下的箭头（与 Button 自身同一套
-		 * RenderTextClipped 画法 —— 长名字按按钮宽度裁剪，不撑破行） */
-		{
-			const ImGuiStyle& style = ImGui::GetStyle();
-			const ImVec2 min = ImGui::GetItemRectMin();
-			const ImVec2 max = ImGui::GetItemRectMax();
-
-			const std::string display = current.empty()
-				? std::string(kNoShaderOption)
-				: PathToUtf8(PathFromUtf8(current).filename());
-
-			const float arrow_size = ImGui::GetFontSize() * 0.55f;
-			const float arrow_zone = arrow_size + style.FramePadding.x * 2.0f;
-
-			const ImVec2 text_size = ImGui::CalcTextSize(display.c_str());
-			const ImRect clip(min, max);
-			ImGui::RenderTextClipped(ImVec2(min.x + style.FramePadding.x, min.y + style.FramePadding.y),
-				ImVec2(max.x - arrow_zone, max.y - style.FramePadding.y),
-				display.c_str(), nullptr, &text_size, ImVec2(0.5f, 0.5f), &clip);
-
-			PanelChrome::DrawDisclosureArrow(ImGui::GetWindowDrawList(),
-				ImVec2(max.x - style.FramePadding.x - arrow_size * 0.5f, (min.y + max.y) * 0.5f),
-				arrow_size, true, ImGui::GetColorU32(EditorTheme::Token::TextDim));
-		}
-
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("%s", current.empty() ? "Pick a shader" : current.c_str());
-
-		/* 分组菜单：清单很小，打开的每帧现拼一棵树（Apply 后面板重载缓冲，树自然跟着新清单走）。
-		 * 弹层给一条最小宽度约束：各行铺满弹层，勾选列因此对齐在同一条纵线上。 */
-		ImGui::SetNextWindowSizeConstraints(ImVec2(Scaled(200.0f), 0.0f), ImVec2(FLT_MAX, FLT_MAX));
-		if (ImGui::BeginPopup("##ShaderMenu"))
-		{
-			/* 菜单打开时重扫一遍可选 Shader：清单平时只在"选中材质 / 材质文件变化"时刷新，
-			 * 新建的 .glsl 不必等这些时机 —— 一开菜单就能选到 */
-			if (ImGui::IsWindowAppearing())
-				m_AssetMaterialShaderOptions = CollectShaderOptions();
-
-			std::vector<ShaderMenuNode> nodes = BuildShaderMenuTree(m_AssetMaterialShaderOptions);
-
-			/* 清单都窝在同一层壳里时（如 Assets/Shaders/…）把空壳脱掉，顶层直接放内容。
-			 * 注意：先搬到局部再赋回 —— children 住在 nodes 自己的缓冲里，直接自引用 move 行为未定义
-			 * （实测会得到空树）。 */
-			if (nodes.size() == 1 && nodes[0].IsFolder())
-			{
-				std::vector<ShaderMenuNode> inner = std::move(nodes[0].Children);
-				nodes = std::move(inner);
-			}
-
-			/* 当前 Shader 不在清单里（资产外路径之类）：树顶补一条，选中态照常能看到 */
-			if (!current.empty()
-				&& std::find(m_AssetMaterialShaderOptions.begin(), m_AssetMaterialShaderOptions.end(), current)
-					== m_AssetMaterialShaderOptions.end())
-				nodes.insert(nodes.begin(), ShaderMenuNode{ current, current, {} });
-
-			std::string picked;
-			DrawShaderMenuLevel(nodes, current, picked);
-			ImGui::EndPopup();
-
-			if (!picked.empty() && picked != current)
-			{
-				material.SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(picked)));
-				on_edit();
-			}
-		}
-
-		ImGuiExt::EndPropertyRow();
-
+		/* Shader 行（与模型编辑器共用同一控件）：点开菜单换 Shader，选中后记脏 + 热更新 */
+		if (MaterialParamUI::DrawMaterialShaderRow(material, m_AssetMaterialShaderOptions))
+			on_edit();
 		/* 参数行：集合来自 Shader 反射（换 Shader 后立即按新 Shader 列行）；值取编辑缓冲，
 		 * 反射声明而缓冲里还没有的先显示反射默认值 —— 编辑时才落进缓冲；
 		 * 反射不到时画报错提示，不回退旧参数表 */
-		const std::vector<MaterialParamInfo> rows = BuildMaterialParamRows(material);
+		const std::vector<MaterialParamInfo> rows = MaterialParamUI::BuildMaterialParamRows(material);
 		if (rows.empty())
-			DrawMaterialReflectionNotice(material);
+			MaterialParamUI::DrawMaterialReflectionNotice(material);
 
 		for (const MaterialParamInfo& param_info : rows)
 		{
-			DrawMaterialParamRow(param_info, m_AssetRevealFunc,
+			MaterialParamUI::DrawMaterialParamRow(param_info, m_AssetRevealFunc,
 				[&material, &on_edit](ParamType type, const std::string& name, const std::any& value)
 				{
 					if (type == ParamType::Texture)

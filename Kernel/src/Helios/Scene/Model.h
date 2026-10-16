@@ -79,6 +79,9 @@ namespace Helios
 	private:
 		/* 加载模型时，读取伴生 .mtl 槽表 */
 		void LoadMaterialSlots(const std::string& path);
+		/* 槽表兜底：段没有可用槽（导入时没材质 / 伴生 .mtl 缺失或条目比段少）时补默认槽。
+		 * 槽名是实体侧材质覆盖的挂载键，缺了它面板挂的材质落不到渲染上 */
+		void EnsureMaterialSlots();
 
 		/* 文件路径 */
 		std::string m_Path{};

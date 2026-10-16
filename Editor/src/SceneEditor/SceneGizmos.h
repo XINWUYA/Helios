@@ -31,5 +31,14 @@ namespace Helios
 		 * 世界轴 / 各类型实体图标（按 ViewportGizmoOptions 过滤）。执行期参数（线宽 / 屏幕展开 /
 		 * 网格对齐）都在内部解决。 */
 		void Submit(RenderView& render_view, const EditorCamera& camera);
+
+		/* 模型线框叠加（模型预览的调试开关）：把场景里的模型段用纯色 + 线框光栅状态再画一遍，
+		 * 关深度测试 = 通看结构（xray）。在 Submit 之后调用、画在最上层。 */
+		void SubmitModelWireframe(RenderView& render_view);
+
+		/* 子网格高亮（模型预览：悬停子模型卡时用）：把场景里模型的指定网格段用强调色
+		 * 平铺再画一遍 —— 深度测试跟场景一致，只染该段看得见的表面，被别的物体挡住的不透出来。
+		 * 在 Submit 之后、线框之前调用（线框画在最上层）；调用方保证 segment_index >= 0。 */
+		void SubmitModelSegmentHighlight(RenderView& render_view, int segment_index);
 	}
 }

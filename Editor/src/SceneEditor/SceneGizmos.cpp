@@ -564,6 +564,11 @@ namespace Helios
 			material->SetParameters(ParamType::Float, "u_FadeOuter", fade_outer);
 			material->SetParameters(ParamType::Float, "u_GridMajor", grid_major);
 
+			/* 网格坐标系（线身份分类用）：缺省 = 场景口径（原点 0 / 缩放 1，逐位等价旧行为）；
+			 * 模型预览的网格每次提交前会覆盖这两个值（见 SubmitGridGizmo） */
+			material->SetParameters(ParamType::Vec2, "u_GridOrigin", glm::vec2(0.0f));
+			material->SetParameters(ParamType::Float, "u_GridScale", 1.0f);
+
 			/* 轴带展开参数：宽度与视口尺寸都在执行期按帧更新（见 SceneGizmos::Submit）；
 			 * 这里给初值兜底 —— u_ViewportSize 为 0 时展开会除以 0 尺寸视口 */
 			material->SetParameters(ParamType::Float, "u_LineWidth", kAxisLineWidth);
@@ -597,6 +602,48 @@ namespace Helios
 			static SharedPtr<Material> material;
 			if (!material)
 				material = CreateGizmoMaterial(1.0e6f, 2.0e6f, 0.0f);
+			return material;
+		}
+
+		/* 模型线框的材质：纯色不参与光照；三角形只画边靠光栅状态的 Wireframe 位。
+		 * 关深度写入 = 连深度测试一起关（引擎约定）—— 线框通看结构，不被自身面片遮挡 */
+		SharedPtr<Material> GetWireframeMaterial()
+		{
+			static SharedPtr<Material> material;
+			if (!material)
+			{
+				material = CreateSharedPtr<Material>();
+				material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(
+					ABSOLUTE_PATH("Shaders/Overlay/Wireframe.glsl")));
+				material->SetParameters(ParamType::Vec4, "u_WireframeColor",
+					glm::vec4(0.62f, 0.94f, 1.0f, 1.0f)); /* 亮青白：深浅模型上都看得清 */
+
+				auto& raster_state = material->GetRasterState();
+				raster_state.CullMode = CullMode::Cull_None;
+				raster_state.EnableDepthWrite = false;
+				raster_state.Wireframe = true;
+			}
+			return material;
+		}
+
+		/* 子网格高亮的材质：平铺纯色（复用线框着色器 —— 那个本来就只吃位置和一个裸色 uniform）。
+		 * 深度测试跟场景一致（GreaterEqual）= 只染该段看得见的表面，被别的物体挡住的部分不染；
+		 * 注意是实心填充不是线框，别把 Wireframe 光栅位打开 */
+		SharedPtr<Material> GetHighlightMaterial()
+		{
+			static SharedPtr<Material> material;
+			if (!material)
+			{
+				material = CreateSharedPtr<Material>();
+				material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(
+					ABSOLUTE_PATH("Shaders/Overlay/Wireframe.glsl")));
+				/* 与编辑器 UI 的强调色同值（#A69EFF 紫）：悬停子模型卡一眼看出对应哪段 */
+				material->SetParameters(ParamType::Vec4, "u_WireframeColor",
+					glm::vec4(0.651f, 0.620f, 1.0f, 1.0f));
+
+				auto& raster_state = material->GetRasterState();
+				raster_state.CullMode = CullMode::Cull_None;
+			}
 			return material;
 		}
 
@@ -653,17 +700,45 @@ namespace Helios
 		 * 网格 / 世界轴各一个函数；实体图标按类型各一个函数 —— 遍历 / 显隐过滤 /
 		 * 放置各自完整，新增类型只需加一个函数并在 SubmitEntityGizmos 里挂一行。 */
 
-		/* 地面网格：patch 跟着相机平移、按格对齐（整数平移 → 线就一直落在世界整数坐标上）；
-		 * 远景淡出按到相机的水平距离在着色器里处理（见 Axis.glsl）。 */
-		void SubmitGridGizmo(const SharedPtr<Material>& material, const glm::vec3& camera_position)
+		/* 地面网格：场景口径 = patch 跟着相机平移、按格对齐（整数平移 → 线就一直落在世界整数
+		 * 坐标上），远景淡出按到相机的水平距离在着色器里处理（见 Axis.glsl）。
+		 * 相机带"模型预览网格"参数时（模型编辑器）：补丁改成以模型为中心、格距按模型缩放，
+		 * 淡出范围也按补丁半径拉开 —— 否则大模型取景距离远，1 格 1 单位的网格根本罩不到模型。 */
+		void SubmitGridGizmo(const SharedPtr<Material>& material, const EditorCamera& camera)
 		{
 			const auto& gizmo_options = GetViewportGizmoOptions();
 			if (!gizmo_options.ShowGrid)
 				return;	/* 分项关：网格不提交 */
 
-			const glm::vec3 grid_origin(std::round(camera_position.x), 0.0f, std::round(camera_position.z));
-			Renderer::FillObjectUniformBuffer(VisibleMeshObject{
-				-1, glm::translate(glm::mat4(1.0f), grid_origin), nullptr, nullptr });
+			const glm::vec3 camera_position = camera.GetPosition();
+			glm::vec3 grid_origin(std::round(camera_position.x), 0.0f, std::round(camera_position.z));
+			float grid_scale = 1.0f;
+			float fade_inner = kGridFadeInner;
+			float fade_outer = kGridFadeOuter;
+
+			if (camera.IsPreviewGridEnabled())
+			{
+				grid_origin = camera.GetPreviewGridCenter();
+				grid_scale = camera.GetPreviewGridScale();
+
+				/* 淡出跟随补丁：到模型中心（相机距离）之间满强度，到补丁边缘前淡完 */
+				const float patch_extent = kGridLineExtent * grid_scale;
+				const float center_distance = glm::length(glm::vec2(
+					camera_position.x - grid_origin.x, camera_position.z - grid_origin.z));
+				fade_inner = center_distance;
+				fade_outer = center_distance + patch_extent * 0.9f;
+			}
+
+			material->SetParameters(ParamType::Float, "u_FadeInner", fade_inner);
+			material->SetParameters(ParamType::Float, "u_FadeOuter", fade_outer);
+			material->SetParameters(ParamType::Vec2, "u_GridOrigin", glm::vec2(grid_origin.x, grid_origin.z));
+			material->SetParameters(ParamType::Float, "u_GridScale", grid_scale);
+
+			/* 网格平面恒在 y = 0：原点给 y 不给都行，这里显式落平 */
+			const glm::mat4 grid_transform = glm::scale(
+				glm::translate(glm::mat4(1.0f), glm::vec3(grid_origin.x, 0.0f, grid_origin.z)),
+				glm::vec3(grid_scale));
+			Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, grid_transform, nullptr, nullptr });
 			Renderer::Submit(material, MeshPrimitive{ GetGridVertexArray(), PrimitiveType::Lines });
 		}
 
@@ -943,8 +1018,10 @@ namespace Helios
 			const auto entity_gizmo_material = GetEntityGizmoMaterial();
 
 			/* 轴带展开参数在执行期给：宽度按内容缩放折算成物理像素（视口 RT 就是物理像素）。视口尺寸
-			 * 跟 RT 实时一致；网格 / 坐标轴 / 实体 gizmo 三份材质都要给一遍。 */
-			const float content_scale = Application::Instance()->GetWindow().GetContentScale();
+			 * 跟 RT 实时一致；网格 / 坐标轴 / 实体 gizmo 三份材质都要给一遍。
+			 * 无窗口环境（headless 检查直跑渲染图）拿不到窗口缩放，按 1 算。 */
+			Application* application = Application::Instance();
+			const float content_scale = (application != nullptr) ? application->GetWindow().GetContentScale() : 1.0f;
 			const auto& viewport_region = camera.GetViewportRegion();
 			const glm::vec2 viewport_size(
 				static_cast<float>(viewport_region.Width),
@@ -956,7 +1033,7 @@ namespace Helios
 			}
 
 			const glm::vec3 camera_position = camera.GetPosition();
-			SubmitGridGizmo(grid_material, camera_position);
+			SubmitGridGizmo(grid_material, camera);
 			SubmitWorldAxisGizmo(axis_material);
 
 			/* 实体 gizmo 的像素→世界系数：每"逻辑像素"在单位距离上对应的世界尺寸
@@ -965,6 +1042,59 @@ namespace Helios
 				2.0f * std::tan(glm::radians(camera.GetFov()) * 0.5f) * content_scale
 				/ static_cast<float>(viewport_region.Height);
 			SubmitEntityGizmos(render_view, entity_gizmo_material, camera_position, gizmo_screen_scale);
+		}
+
+		/* 模型线框叠加（模型预览的调试开关）：遍历场景里的模型段，用线框材质再画一遍
+		 * （纯色 + 线框光栅状态 + 关深度：xray 通看结构）。调用方保证只在开关打开时进来 */
+		void SubmitModelWireframe(RenderView& render_view)
+		{
+			const auto scene = render_view.GetOwnerScene();
+			if (!scene)
+				return;
+
+			const auto wireframe_material = GetWireframeMaterial();
+			auto& registry = scene->GetRegistry();
+			const auto model_view = registry.view<TransformComponent, ModelComponent>();
+			for (const entt::entity entity : model_view)
+			{
+				const auto& model_component = model_view.get<ModelComponent>(entity);
+				if (model_component.m_Model == nullptr || !scene->IsEntityVisible(entity))
+					continue;
+
+				const glm::mat4 world_transform = scene->GetWorldTransform(entity);
+				for (const auto& mesh_segment : model_component.m_Model->GetMeshSegments())
+				{
+					Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, world_transform, nullptr, nullptr });
+					Renderer::Submit(wireframe_material, mesh_segment->GetMeshPrimitive());
+				}
+			}
+		}
+
+		/* 子网格高亮（模型预览：悬停子模型卡时用）：指定网格段 + 强调色平铺再画一遍
+		 * （实心、深度测试跟场景一致：只染可见表面）。调用方保证 segment_index >= 0 */
+		void SubmitModelSegmentHighlight(RenderView& render_view, int segment_index)
+		{
+			const auto scene = render_view.GetOwnerScene();
+			if (!scene || segment_index < 0)
+				return;
+
+			const auto highlight_material = GetHighlightMaterial();
+			auto& registry = scene->GetRegistry();
+			const auto model_view = registry.view<TransformComponent, ModelComponent>();
+			for (const entt::entity entity : model_view)
+			{
+				const auto& model_component = model_view.get<ModelComponent>(entity);
+				if (model_component.m_Model == nullptr || !scene->IsEntityVisible(entity))
+					continue;
+
+				const auto& mesh_segments = model_component.m_Model->GetMeshSegments();
+				if (segment_index >= static_cast<int>(mesh_segments.size()))
+					continue;
+
+				const glm::mat4 world_transform = scene->GetWorldTransform(entity);
+				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, world_transform, nullptr, nullptr });
+				Renderer::Submit(highlight_material, mesh_segments[segment_index]->GetMeshPrimitive());
+			}
 		}
 	}
 }

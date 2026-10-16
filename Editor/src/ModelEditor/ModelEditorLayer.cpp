@@ -1,9 +1,13 @@
 ﻿#include "Pch.h"
 #include "ModelEditorLayer.h"
+#include <glm/gtx/quaternion.hpp>
+#include <limits>
 #include "Helios/Application/Application.h"
+#include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/ModelImporter.h"
 #include "EditorCommon.h"
 #include "EditorIcons.h"
+#include "MaterialParamUI.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 
@@ -11,6 +15,24 @@ namespace Helios
 {
 	namespace
 	{
+		/* === 材质参数面板（右栏） === */
+		constexpr float kParamsPaneWidth = 400.0f;        /* 常态定宽（设计像素，窄窗按比例收） */
+		constexpr float kParamsToggleInsetTop = 10.0f;    /* 角落开关距窗口上缘 */
+		constexpr float kParamsToggleInsetRight = 14.0f;  /* 距右缘，多让一档避开面板滚动条 */
+		/* === 预览工具按钮（左上角） === */
+		constexpr float kPreviewToolsInsetTop = 10.0f;
+		constexpr float kPreviewToolsInsetLeft = 10.0f;
+
+		/* 参数面板开关的屏幕位置：窗口内容区右上角（打开 / 收起两态画在同一处——
+		 * 打开态开关在面板子窗口里画，坐标也得按父窗口的角算） */
+		ImVec2 ParamsTogglePos(const ImGuiWindow* window)
+		{
+			const float button_size = ImGui::GetFrameHeight();
+			return ImVec2(
+				window->ContentRegionRect.Max.x - Scaled(kParamsToggleInsetRight) - button_size,
+				window->ContentRegionRect.Min.y + Scaled(kParamsToggleInsetTop));
+		}
+
 		/* 向量显示成一行紧凑文本：属性行里数字比括号更重要 */
 		std::string FormatVec3(const glm::vec3& value)
 		{
@@ -19,31 +41,27 @@ namespace Helios
 			return buffer;
 		}
 
-		/* 材质参数的类型名：magic_enum 给的名字顺序就是枚举声明顺序，
-		 * 因此下标即 ParamType 的取值 —— 不用再手抄一张数组。 */
-		const std::vector<std::string>& ParamTypeNames()
+		/* 模型预览网格的格距：视线里约 6 格为目标，取 1/2/5 序列里最近的一档
+		 * （格距与补丁半径同乘缩放，淡出范围跟着走 —— 见 EditorCamera::SetPreviewGrid） */
+		float ChoosePreviewGridScale(float model_radius)
 		{
-			static const std::vector<std::string> names = GetEnumNames<ParamType>();
-			return names;
-		}
+			static constexpr float kCandidates[] = {
+				0.05f, 0.1f, 0.25f, 0.5f, 1.0f, 2.5f, 5.0f, 10.0f, 25.0f, 50.0f, 100.0f, 250.0f
+			};
 
-		/* 切换参数类型：按新类型填一个默认值（原先散在面板里的逻辑，抽出来一处定义） */
-		void ApplyParamTypeChange(const SharedPtr<Material>& material,
-		                          const MaterialParamInfo& param_info, ParamType type)
-		{
-			switch (type)
+			const float target = std::max(model_radius, 1.0e-3f) / 6.0f;
+			float best = 1.0f;
+			float best_delta = std::numeric_limits<float>::max();
+			for (const float candidate : kCandidates)
 			{
-			case ParamType::Texture:
-				material->SetTexture(param_info.Name,
-					AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Default.png")));
-				break;
-			case ParamType::Int:   material->SetParameters(ParamType::Int, param_info.Name, 0); break;
-			case ParamType::Float: material->SetParameters(ParamType::Float, param_info.Name, 0.0f); break;
-			case ParamType::Vec2:  material->SetParameters(ParamType::Vec2, param_info.Name, glm::vec2(0.0f)); break;
-			case ParamType::Vec3:  material->SetParameters(ParamType::Vec3, param_info.Name, glm::vec3(0.0f)); break;
-			case ParamType::Vec4:  material->SetParameters(ParamType::Vec4, param_info.Name, glm::vec4(0.0f)); break;
-			case ParamType::Mat4:  material->SetParameters(ParamType::Mat4, param_info.Name, glm::mat4(0.0f)); break;
+				const float delta = std::fabs(std::log(candidate / target));
+				if (delta < best_delta)
+				{
+					best_delta = delta;
+					best = candidate;
+				}
 			}
+			return best;
 		}
 	}
 	ModelEditorLayer::ModelEditorLayer()
@@ -57,6 +75,8 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		m_pEditorCamera = CreateUniquePtr<EditorCamera>();
+		/* 模型预览用聚焦模式：左键直接绕模型旋转 + 滚轮缩放，平移 / 飞行不参与 */
+		m_pEditorCamera->SetFocusMode(true);
 		m_pDefaultScene = CreateSharedPtr<Scene>();
 		/* 编辑器相机登记为外部相机：每帧随场景相机一起收集渲染（见 Scene::AddExternalCamera） */
 		m_pDefaultScene->AddExternalCamera(m_pEditorCamera.get());
@@ -67,9 +87,14 @@ namespace Helios
 		Entity entity = m_pDefaultScene->CreateEntity("DirectionalLight");
 		auto& light_component = entity.AddComponent<LightComponent>(LightType::Directional);
 		light_component.m_Light->SetColor(glm::vec4(1, 1, 1, 1));
-		light_component.m_Light->SetIntensity(1);
+		/* 强度跟场景里的方向光同档（5）：1 在引擎的光照口径下只有 ~50/255 的亮度 */
+		light_component.m_Light->SetIntensity(5);
 		auto& light_transform = entity.GetComponent<TransformComponent>();
-		light_transform.m_Rotation = glm::vec3(0, 0, PI/2);
+		/* 光向 = 旋转作用下的 (0,-1,0)：用四元数把规范朝向对到"前上方偏一侧"的 key light，
+		 * 再写回欧拉旋转 —— 默认视角正对相机的面被照亮（旧值从侧面照，画面几乎全黑） */
+		const glm::vec3 light_direction = glm::normalize(glm::vec3(0.25f, -0.7f, -0.66f));
+		light_transform.m_Rotation = glm::eulerAngles(
+			glm::rotation(glm::vec3(0.0f, -1.0f, 0.0f), light_direction));
 	}
 
 	void ModelEditorLayer::OnDetached()
@@ -100,6 +125,7 @@ namespace Helios
 
 		/* 执行本帧收集到的渲染视图：模型视口的内容在这里产生 */
 		m_pDefaultScene->Render();
+
 	}
 
 	void ModelEditorLayer::OnImGuiRender()
@@ -108,11 +134,9 @@ namespace Helios
 
 		if (!m_IsActivated)
 			return;
-		
-		/* 显示模型编辑UI */
-		ShowModelParamsUI();
-		/* 显示主场景视口 */
-		ShowSceneViewportUI();
+
+		/* 预览与材质参数在同一个窗口（参数是可折叠浮层） */
+		ShowModelWindowUI();
 	}
 
 	void ModelEditorLayer::OnEvent(IEvent* event)
@@ -124,48 +148,108 @@ namespace Helios
 
 		if (!event)
 			return;
+
+		EventDispatcher dispatcher(event);
+		dispatcher.Dispatch<MouseScrolledEvent>(BIND_EVENT_FUNC(ModelEditorLayer::OnMouseScrolled));
 	}
 
-	/* 显示主场景视口 */
-	void ModelEditorLayer::ShowSceneViewportUI()
+	/* 滚轮：指针在视口上时拉近拉远（聚焦模式的缩放通道） */
+	bool ModelEditorLayer::OnMouseScrolled(MouseScrolledEvent* event)
 	{
 		PROFILE_FUNCTION();
 
+		if (!m_IsViewportHovered)
+			return false;
+
+		const float wheel = event->GetYOffset();
+		if (wheel == 0.0f)
+			return false;
+
+		m_pEditorCamera->OnMouseWheelZoom(wheel);
+		return true;
+	}
+
+	/* 模型编辑窗口：左右分栏 —— 左栏预览（预览工具按钮常驻左上角），右栏材质参数面板（可收起）。
+	 * 窗口隐藏时不提交 Begin：本仓 ImGui 的 p_open 只做写回不做隐藏（关了不提交才真的关），
+	 * 恢复入口在 View 菜单，与 Frame Graph / Log 同一约定。 */
+	void ModelEditorLayer::ShowModelWindowUI()
+	{
+		PROFILE_FUNCTION();
+
+		/* 窗口已关闭：不提交也不画；悬停授权与高亮一并清掉，不留指向已关窗口的残影 */
+		if (!m_IsViewportVisible)
+		{
+			m_IsViewportHovered = false;
+			m_pEditorCamera->SetHighlightSegment(-1);
+			return;
+		}
+
+		const bool has_model = (m_pModelInfo != nullptr) && !m_pModelInfo->m_SubModelInfos.empty();
+
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		/* 每帧都必须调用 Begin：窗口被关闭时它返回 false，
-		 * 只有继续调用才可能重新显示（关闭时不画内容即可）。 */
-		if (ImGui::Begin(Panel::kModel, &m_IsViewportVisible))
+		const bool is_open = ImGui::Begin(Panel::kModel, &m_IsViewportVisible);
+		/* 窗口内边距在 Begin 时已取快照；提前弹掉，参数面板的子窗口按默认内边距排卡片 */
+		ImGui::PopStyleVar();
+
+		if (is_open)
 		{
 			/* 获取窗口范围 */
 			const auto viewport_region_min = ImGui::GetWindowContentRegionMin();
 			const auto viewport_region_max = ImGui::GetWindowContentRegionMax();
 			const auto viewport_offset = ImGui::GetWindowPos();
+			const float content_width = viewport_region_max.x - viewport_region_min.x;
+			const float content_height = viewport_region_max.y - viewport_region_min.y;
+
+			/* 右栏宽度：常态定宽一档；窗口太窄时按半宽收，给预览留出至少一半 */
+			const float params_width = (has_model && m_IsParamsPanelOpen)
+				? ImMin(Scaled(kParamsPaneWidth), content_width * 0.5f) : 0.0f;
+			const float preview_width = ImMax(content_width - params_width, 0.0f);
+
+			/* 预览占左栏 */
 			m_ViewportRegion.MinX = viewport_region_min.x + viewport_offset.x;
 			m_ViewportRegion.MinY = viewport_region_min.y + viewport_offset.y;
 			/* 窗口极小时 max 可能小于 min，差值为负；赋给 uint32_t 会回绕成极大值 */
-			m_ViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, viewport_region_max.x - viewport_region_min.x));
-			m_ViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, viewport_region_max.y - viewport_region_min.y));
+			m_ViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, preview_width));
+			m_ViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, content_height));
 
 			/* RenderTarget 按物理像素分配（macOS：ImGui 单位是点、×2 到像素；Windows：已是物理像素、×1，
 			 * 见 ImGuiToPhysicalScale）；ClampRenderSize 负责负值/超大值防护。 */
-			const auto rt_size = ClampRenderSize(
-				static_cast<float>(m_ViewportRegion.Width),
-				static_cast<float>(m_ViewportRegion.Height),
-				ImGuiToPhysicalScale());
+			const auto rt_size = ClampRenderSize(preview_width, content_height, ImGuiToPhysicalScale());
 			m_pEditorCamera->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
 
-			/* 指针悬停在视口上才允许相机起手导航（与场景编辑器同源） */
-			m_IsViewportHovered = ImGui::IsWindowHovered();
-
-			/* 绘制场景 */
-			auto output_rt = m_pEditorCamera->GetRenderView()->GetRenderTarget();
-			if (output_rt)
+			/* 打开模型后的取景：等这里视口尺寸 / 宽高比就绪（FocusOn 按紧的一侧取景） */
+			if (m_AutoFocusPending && m_pModel != nullptr)
 			{
-				const auto viewport_panel_size = ImGui::GetContentRegionAvail();
+				const glm::vec3 aabb_min = m_pModel->GetAABBMin();
+				const glm::vec3 aabb_max = m_pModel->GetAABBMax();
+				m_pEditorCamera->FocusOn((aabb_min + aabb_max) * 0.5f,
+					glm::max(glm::length(aabb_max - aabb_min) * 0.5f, 0.1f));
+				m_AutoFocusPending = false;
+			}
+
+			/* 绘制场景；图像上再叠一个无形输入区（与图像同尺寸，有无渲染目标都提交）——
+			 * 视口因此有了真实的 item：悬停 / 按下都占住命中，ImGui 的"点窗口空白拖窗口"
+			 * 逻辑不再把转模型当成拖标题栏；相机悬停授权也认这一个 item */
+			const ImVec2 image_pos = ImGui::GetCursorScreenPos();
+			const auto viewport_panel_size = ImVec2(preview_width, content_height);
+			bool viewport_hovered = false;
+			if (auto output_rt = m_pEditorCamera->GetRenderView()->GetRenderTarget())
+			{
 				/* ImTextureID 统一存放 DeviceTexture 指针：GetTextureID() 返回的硬件
 				 * 句柄在 Metal 上是 64 位指针被截断后的 32 位，不能当指针使用。 */
 				ImGui::Image((ImTextureID)output_rt.get(), viewport_panel_size, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
 			}
+
+			/* 空状态提示（没有模型时）：画在输入区之前 —— 输入区占满整块视口，
+			 * 画在它之后光标已被挤到区外，文字就落进看不见的地方了 */
+			if (!has_model)
+				ShowEmptyModelHint(image_pos, viewport_panel_size);
+
+			ImGui::SetCursorScreenPos(image_pos);
+			ImGui::InvisibleButton("##ViewportInput", viewport_panel_size);
+			viewport_hovered = ImGui::IsItemHovered();
+			/* 左上角工具按钮与右上角开关压在视口上：允许后画的控件在自己的角上抢走命中 */
+			ImGui::SetItemAllowOverlap();
 
 			/* 拖动资源到主窗口 */
 			if (ImGui::BeginDragDropTarget())
@@ -180,42 +264,153 @@ namespace Helios
 				ImGui::EndDragDropTarget();
 			}
 
-			///* Gizmos */
-			//ShowOperationGizmoUI();
+			/* 预览工具按钮 + 材质参数面板（没打开模型时只有空状态提示，提示已先画） */
+			m_IsParamsToggleHovered = false;
+			m_IsPreviewToolsHovered = false;
+			m_HighlightedSubModel = -1;
+			if (has_model)
+			{
+				ShowPreviewTools();
+				ShowMaterialParamsPane();
+			}
+
+			/* 指针悬停授权：图像本体 hovered（面板是独立子窗口，悬停它时图像不算 hovered），
+			 * 且指针不压在角落悬浮控件上（面板开关 / 预览工具按钮盖在视口角上，会抢走命中） */
+			m_IsViewportHovered = viewport_hovered && !m_IsParamsToggleHovered && !m_IsPreviewToolsHovered;
+
+			/* 子网格高亮推给相机：下个渲染帧生效（见 EditorCamera::SetHighlightSegment） */
+			m_pEditorCamera->SetHighlightSegment(m_HighlightedSubModel);
 		}
 		else
 		{
 			/* 视口窗口不可见：清掉悬停，避免残留的起手授权 */
 			m_IsViewportHovered = false;
+			m_pEditorCamera->SetHighlightSegment(-1);
 		}
 		ImGui::End();
-		ImGui::PopStyleVar();
 	}
 
-	/* 显示模型编辑UI：头部（模型文件名）+ 基本信息卡 + 每个子模型一张卡。
-	 * 材质参数不再各占一层 Tree：参数名是可折叠标题，类型选择器贴右端，
-	 * 值走属性行 —— 与组件字段同一套布局。 */
-	void ModelEditorLayer::ShowModelParamsUI()
+	/* 材质参数面板（右栏）：最上方标题栏显示当前模型名，下面基础信息卡 + 每个子模型一张卡。
+	 * 内容只上下滚（常驻竖向滚动条，滚动条宽度恒定预留）；卡片按可用宽度排，横向恒不可滑。
+	 * 收起时只留右上角开关，开关画在视口上（没有子窗口遮挡，父窗口的控件可点）。 */
+	void ModelEditorLayer::ShowMaterialParamsPane()
 	{
 		PROFILE_FUNCTION();
 
-		const bool has_model = (m_pModelInfo != nullptr) && !m_pModelInfo->m_SubModelInfos.empty();
-
-		ImGui::Begin(Panel::kModelHelper);
+		if (!m_IsParamsPanelOpen)
 		{
-			/* 面板标题由页签承担（"Model Helper"）；当前文件由 Base Info 卡的 Path 给出 */
-
-			if (has_model)
-			{
-				ShowModelBaseInfoCard();
-				ShowSubModelCards();
-			}
-			else
-			{
-				ShowEmptyModelHint();
-			}
+			if (DrawParamsPaneToggle())
+				m_IsParamsPanelOpen = true;
+			return;
 		}
-		ImGui::End();
+
+		const ImVec2 region_min = ImGui::GetWindowContentRegionMin();
+		const ImVec2 region_max = ImGui::GetWindowContentRegionMax();
+		const float content_width = region_max.x - region_min.x;
+		/* 常态定宽一档；窗口太窄时按半宽收，给视口留出至少一半 */
+		const float pane_width = ImMin(Scaled(kParamsPaneWidth), content_width * 0.5f);
+
+		ImGui::SetCursorPos(ImVec2(region_max.x - pane_width, region_min.y));
+		ImGui::PushStyleColor(ImGuiCol_ChildBg,
+			EditorTheme::WithAlpha(EditorTheme::Token::Neutral3, 0.97f));
+		/* 面板本身不滚（滚的是下面的内容区）；标题栏再长也不给面板留出横向滑动区 */
+		ImGui::BeginChild("##ModelParamsPane", ImVec2(pane_width, region_max.y - region_min.y), true,
+			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+		{
+			/* 开关画进面板里（打开态面板盖住父窗口的控件，点不到）：标题行仍从内容区顶格开始 */
+			const ImVec2 content_start = ImGui::GetCursorScreenPos();
+			if (DrawParamsPaneToggle())
+				m_IsParamsPanelOpen = false;
+			ImGui::SetCursorScreenPos(content_start);
+
+			/* 标题栏：当前模型名（右端给开关让位） */
+			{
+				ImGuiWindow* window = ImGui::GetCurrentWindow();
+				if (window->ParentWindow != nullptr)
+					window = window->ParentWindow;
+
+				const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(Icons::Id::Model);
+				const std::string model_name =
+					PathToUtf8(PathFromUtf8(m_pModelInfo->m_Path).filename());
+				const float title_width = ImMax(
+					ParamsTogglePos(window).x - header.TitleX - ImGui::GetStyle().ItemInnerSpacing.x,
+					1.0f);
+				PanelChrome::DrawHeaderTitle(header, model_name, title_width);
+				PanelChrome::EndHeaderRow(header);
+			}
+
+			/* 内容：只上下滚（常驻竖向滚动条 + 卡片按可用宽度排，横向不含可滑区） */
+			ImGui::BeginChild("##ModelParamsContent", ImVec2(0.0f, 0.0f), false,
+				ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_AlwaysVerticalScrollbar);
+			ShowModelBaseInfoCard();
+			ShowSubModelCards();
+			ImGui::EndChild();
+		}
+		ImGui::EndChild();
+		ImGui::PopStyleColor();
+	}
+
+	/* 面板的折叠开关：窗口右上角一枚图标按钮，打开 / 收起两态位置一致。
+	 * 屏幕位置按父窗口内容区算 —— 打开态在面板里画，坐标也得用父窗口的角 */
+	bool ModelEditorLayer::DrawParamsPaneToggle()
+	{
+		PROFILE_FUNCTION();
+
+		ImGuiWindow* window = ImGui::GetCurrentWindow();
+		if (window->ParentWindow != nullptr)
+			window = window->ParentWindow;
+
+		const float button_size = ImGui::GetFrameHeight();
+		ImGui::SetCursorScreenPos(ParamsTogglePos(window));
+
+		const bool clicked = Icons::IconButton(Icons::Id::Sliders, ImVec2(button_size, button_size),
+			m_IsParamsPanelOpen, "Material Parameters");
+		/* 收起态开关盖在视口上（会抢走视口的悬停命中）：供帧末结算视口悬停时排除 */
+		m_IsParamsToggleHovered = ImGui::IsItemHovered();
+		return clicked;
+	}
+
+	/* 预览工具（左上角并排的三个图标按钮）：保存模型 / 线框预览 / 重置视图。
+	 * 位置与参数面板开关同款（按父窗口内容区算屏幕位置）—— 左上角不压任何子窗口、
+	 * 也不随面板收起，始终画在父窗口上；按钮悬停会挡掉视口悬停（见 ShowModelWindowUI 帧末结算） */
+	void ModelEditorLayer::ShowPreviewTools()
+	{
+		PROFILE_FUNCTION();
+
+		ImGuiWindow* window = ImGui::GetCurrentWindow();
+		if (window->ParentWindow != nullptr)
+			window = window->ParentWindow;
+
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float button_size = ImGui::GetFrameHeight();
+		ImGui::SetCursorScreenPos(ImVec2(
+			window->ContentRegionRect.Min.x + Scaled(kPreviewToolsInsetLeft),
+			window->ContentRegionRect.Min.y + Scaled(kPreviewToolsInsetTop)));
+
+		bool hovered = false;
+
+		if (Icons::IconButton(Icons::Id::Save, ImVec2(button_size, button_size),
+			false, "Save Model (.mesh + .mtl)"))
+			ExportMeshAndMtl();
+		hovered |= ImGui::IsItemHovered();
+
+		/* 线框开着时按钮点亮（画面上只剩线框，按钮给个状态反馈） */
+		ImGui::SameLine(0.0f, style.ItemSpacing.x);
+		if (Icons::IconButton(Icons::Id::Grid, ImVec2(button_size, button_size),
+			m_IsWireframeEnabled, "Wireframe"))
+		{
+			m_IsWireframeEnabled = !m_IsWireframeEnabled;
+			m_pEditorCamera->SetWireframeOverlay(m_IsWireframeEnabled);
+		}
+		hovered |= ImGui::IsItemHovered();
+
+		ImGui::SameLine(0.0f, style.ItemSpacing.x);
+		if (Icons::IconButton(Icons::Id::FitView, ImVec2(button_size, button_size),
+			false, "Reset View"))
+			m_AutoFocusPending = true;
+		hovered |= ImGui::IsItemHovered();
+
+		m_IsPreviewToolsHovered = hovered;
 	}
 
 	/* 基本信息：整份模型的路径、包围盒与规模 */
@@ -242,22 +437,29 @@ namespace Helios
 		PanelChrome::EndCard(card);
 	}
 
-	/* 每个子模型一张卡：规模信息 + 它的材质参数 */
+	/* 每个子模型一张卡：规模信息 + 它的材质（Shader 选择 + 按反射列出的参数行）。
+	 * 悬停卡头 = 该子模型的网格段在预览里高亮（多个子网格时才做：单网格没有"哪一段"的歧义）。 */
 	void ModelEditorLayer::ShowSubModelCards()
 	{
 		PROFILE_FUNCTION();
+
+		const bool allow_highlight = m_pModelInfo->m_SubModelInfos.size() > 1;
 
 		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
 		{
 			const auto& sub_model_info = m_pModelInfo->m_SubModelInfos[i];
 			const auto& material = m_pMaterialGroup->GetMaterialByIndex(i);
-			if (sub_model_info == nullptr || material == nullptr)
+			const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(i));
+			if (sub_model_info == nullptr || material == nullptr || entry == nullptr)
 				continue;
 
 			ImGui::PushID(static_cast<int>(i));
 
 			const PanelChrome::Card card = PanelChrome::BeginCard(
 				sub_model_info->Name.empty() ? "Unnamed" : sub_model_info->Name.c_str(), Icons::Id::Model);
+
+			if (allow_highlight && card.HeaderHovered)
+				m_HighlightedSubModel = static_cast<int>(i);
 
 			if (card.Open)
 			{
@@ -266,12 +468,30 @@ namespace Helios
 				ImGuiExt::DrawCommonTextUI("Vertices",
 					std::to_string(sub_model_info->VertexArray->GetVertexCount()));
 
-				/* 参数区：一行的分组标题 + 每个参数一个可折叠块 */
+				/* 材质区：来源引用行 + Shader 选择行 + 参数行（集合与类型都来自 Shader 反射，
+				 * 换 Shader 行集跟着换；值缺的显示反射默认值）。与属性面板的材质卡共用同一套控件。 */
 				ImGui::Separator();
 				ImGui::TextColored(EditorTheme::Token::TextLabel, "Material Parameters");
 
-				for (const auto& param : material->GetAllParameters())
-					ShowMaterialParameter(material, sub_model_info, param.second);
+				DrawSubModelMaterialRefRow(static_cast<int>(i), *entry);
+
+				/* 换 Shader 也是编辑：挂着的资产引用脱钩（导出随条目形态走） */
+				if (MaterialParamUI::DrawMaterialShaderRow(*material, m_ShaderOptions))
+					DetachSubModelMaterialAsset(i);
+
+				const std::vector<MaterialParamInfo> rows = MaterialParamUI::BuildMaterialParamRows(*material);
+				if (rows.empty())
+					MaterialParamUI::DrawMaterialReflectionNotice(*material);
+
+				for (const MaterialParamInfo& param_info : rows)
+				{
+					/* 层里的材质就是编辑缓冲：改动落回材质本体（写回里顺带做脱钩） */
+					MaterialParamUI::DrawMaterialParamRow(param_info, nullptr,
+						[this, i](ParamType type, const std::string& name, const std::any& value)
+						{
+							WriteSubModelMaterialParam(i, type, name, value);
+						});
+				}
 			}
 
 			PanelChrome::EndCard(card);
@@ -279,122 +499,121 @@ namespace Helios
 		}
 	}
 
-	/* 一个材质参数：参数名是可折叠标题，卡身里先是类型选择器、再是值。
-	 * 值按类型走属性行 —— 与组件字段同一套布局。 */
-	void ModelEditorLayer::ShowMaterialParameter(const SharedPtr<Material>& material,
-	                                            const SharedPtr<SubModelInfo>& sub_model_info,
-	                                            const MaterialParamInfo& param_info)
+	/* 子模型卡的材质引用行：显示当前材质来源（资产引用 = 文件名；内嵌 = embedded），
+	 * 拖一个 .mtl 落上来即挂载（或替换）—— 内容反序列化进编辑缓冲，见 AssignSubModelMaterial */
+	void ModelEditorLayer::DrawSubModelMaterialRefRow(int index, const MaterialEntry& entry)
 	{
-		PROFILE_FUNCTION();
+		const bool by_asset = !entry.AssetPath.empty();
+		const std::string display = by_asset
+			? PathToUtf8(PathFromUtf8(entry.AssetPath).filename())
+			: std::string("(embedded)");
 
-		ImGui::PushID(param_info.Name.c_str());
+		const float value_width = ImGuiExt::BeginPropertyRow("Material", EditorTheme::Token::PropertyLabelWidth, true);
 
-		if (ImGui::TreeNodeEx(param_info.Name.c_str(),
-			ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen))
+		/* 只读展示当前来源（文本可选中复制）；拖放目标与 tooltip 挂在输入框上 */
+		char buffer[256] = {};
+		snprintf(buffer, sizeof(buffer), "%s", display.c_str());
+		ImGui::SetNextItemWidth(value_width);
+		ImGui::InputText("##MaterialRef", buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
+
+		if (ImGui::IsItemHovered())
 		{
-			/* 类型选择器放最上面：它是这个参数的"元信息"，值才是内容 */
-			const std::vector<std::string>& type_names = ParamTypeNames();
-			int type_index = static_cast<int>(param_info.Type);
-			if (type_index < 0 || type_index >= static_cast<int>(type_names.size()))
-				type_index = 0;
-
-			ImGuiExt::DrawComboUI("DataType", type_names, type_index,
-				[material, &param_info](int selected)
-				{
-					ApplyParamTypeChange(material, param_info, static_cast<ParamType>(selected));
-				});
-
-			if (param_info.Type == ParamType::Texture)
-			{
-				/* 贴图参数的 Value 是 pair<贴图, 绑定点>：按值取出来，改完再写回材质 */
-				auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(param_info.Value);
-				auto& texture = texture_info.first;
-				TextureLoadConfig load_config = texture->GetTextureLoadConfig();
-
-				const SharedPtr<DeviceTexture> previous = texture;
-				ImGuiExt::DrawTextureUI("Texture", texture);
-
-				/* 拖入新贴图：应用到材质 */
-				if (texture != previous)
-					material->SetTexture(param_info.Name, texture);
-
-				const bool flip_changed = ImGuiExt::DrawCheckboxUI("Flip V", load_config.IsFlipV);
-				const bool mips_changed = ImGuiExt::DrawCheckboxUI("Gen Mips", load_config.IsGenMips);
-
-				/* 加载选项变了就按新选项重新加载贴图 */
-				if (flip_changed || mips_changed)
-				{
-					material->SetTexture(param_info.Name,
-						AssetManager::Instance().GetOrLoad<DeviceTexture>(texture->GetPath(), load_config));
-				}
-			}
+			if (by_asset)
+				ImGui::SetTooltip("%s\n\nDrag a .mtl material asset here to assign or replace it. Editing parameters detaches from the asset.",
+					RELATIVE_PATH(entry.AssetPath).c_str());
 			else
-			{
-				switch (param_info.Type)
-				{
-				case ParamType::Int:
-				{
-					int value = std::any_cast<int>(param_info.Value);
-					ImGuiExt::DrawDragIntUI("Value", value);
-					material->SetParameters(ParamType::Int, param_info.Name, value);
-					break;
-				}
-				case ParamType::Float:
-				{
-					float value = std::any_cast<float>(param_info.Value);
-					ImGuiExt::DrawDragFloatUI("Value", value);
-					material->SetParameters(ParamType::Float, param_info.Name, value);
-					break;
-				}
-				case ParamType::Vec2:
-				{
-					glm::vec2 value = std::any_cast<glm::vec2>(param_info.Value);
-					ImGuiExt::DrawDragFloat2UI("Value", value);
-					material->SetParameters(ParamType::Vec2, param_info.Name, value);
-					break;
-				}
-				case ParamType::Vec3:
-				{
-					glm::vec3 value = std::any_cast<glm::vec3>(param_info.Value);
-					ImGuiExt::DrawVec3ControlUI("Value", value, 0.0f);
-					material->SetParameters(ParamType::Vec3, param_info.Name, value);
-					break;
-				}
-				case ParamType::Vec4:
-				{
-					glm::vec4 value = std::any_cast<glm::vec4>(param_info.Value);
-					ImGuiExt::DrawDragFloat4UI("Value", value);
-					material->SetParameters(ParamType::Vec4, param_info.Name, value);
-					break;
-				}
-				default:
-					/* Mat4 还没有对应的行控件：明确说"没有编辑器"，
-					 * 而不是画一片空白让人以为参数丢了 */
-					ImGuiExt::DrawCommonTextUI("Value", "(no editor)");
-					break;
-				}
-			}
-
-			ImGui::TreePop();
+				ImGui::SetTooltip("Drag a .mtl material asset here to assign it");
 		}
 
-		ImGui::PopID();
+		if (ImGui::BeginDragDropTarget())
+		{
+			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
+			{
+				std::filesystem::path relative_path;
+				if (payload->DataSize > 1 && TryPathFromUtf8Payload(
+					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
+				{
+					const std::string extension = ToLowercase(PathToUtf8(relative_path.extension()).c_str());
+					if (extension == ".mtl")
+						AssignSubModelMaterial(static_cast<size_t>(index), PathToUtf8(g_AssetsPath / relative_path));
+				}
+			}
+			ImGui::EndDragDropTarget();
+		}
+
+		ImGuiExt::EndPropertyRow();
 	}
 
-	/* 未导入模型时的提示：空面板要说清"为什么是空的、该怎么办" */
-	void ModelEditorLayer::ShowEmptyModelHint()
+	/* 当前模型第 index 段的材质来源：资产引用路径（空 = 内嵌定义） */
+	std::string ModelEditorLayer::GetSubModelMaterialAssetPath(size_t index) const
+	{
+		const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(index));
+		return (entry != nullptr) ? entry->AssetPath : std::string();
+	}
+
+	/* 挂材质资产：GetOrLoad 把该 .mtl 反序列化（单条目、内嵌定义的材质资产），内容就地把
+	 * 编辑缓冲那份材质覆盖成资产定义 —— 对象地址不变，预览与参数行立即跟随；条目记下
+	 * 引用路径，导出随条目形态写引用（模型跟随材质资产变化）。 */
+	bool ModelEditorLayer::AssignSubModelMaterial(size_t index, const std::string& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
-		static constexpr const char* kHint = "Drag an .obj file into the viewport to load a model";
+		const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(index));
+		if (entry == nullptr || entry->pMaterial == nullptr)
+			return false;
 
-		const float wrap_width = ImGui::GetContentRegionAvail().x;
+		auto material = AssetManager::Instance().GetOrLoad<Material>(absolute_path);
+		if (material == nullptr)
+		{
+			EDITOR_LOG_WARN("Failed to load material asset: {}.", absolute_path);
+			return false;
+		}
+
+		entry->pMaterial->CopyDefinitionFrom(*material);
+		m_pMaterialGroup->SetEntryAssetPath(static_cast<int>(index), absolute_path);
+		return true;
+	}
+
+	/* 参数写回：改动落编辑缓冲；挂着资产引用的随之转内嵌（导出写全量定义） */
+	void ModelEditorLayer::WriteSubModelMaterialParam(size_t index, ParamType type,
+		const std::string& name, const std::any& value)
+	{
+		const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(index));
+		if (entry == nullptr || entry->pMaterial == nullptr)
+			return;
+
+		if (type == ParamType::Texture)
+			entry->pMaterial->SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
+		else
+			entry->pMaterial->SetParameters(type, name, value);
+
+		DetachSubModelMaterialAsset(index);
+	}
+
+	/* 材质被就地编辑：挂着的资产引用转内嵌 —— 改动塞进下一次导出的全量定义，
+	 * 资产文件本身不动（改资产是资源面板里的事） */
+	void ModelEditorLayer::DetachSubModelMaterialAsset(size_t index)
+	{
+		const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(index));
+		if (entry != nullptr && !entry->AssetPath.empty())
+			m_pMaterialGroup->SetEntryAssetPath(static_cast<int>(index), "");
+	}
+
+	/* 未导入模型时的提示：空窗口要说清"为什么是空的、该怎么办"。
+	 * 按视口区域居中（在视口输入区之前画 —— 输入区占满整块，画在它之后文字会被挤出可见区） */
+	void ModelEditorLayer::ShowEmptyModelHint(const ImVec2& area_min, const ImVec2& area_size)
+	{
+		PROFILE_FUNCTION();
+
+		static constexpr const char* kHint = "Drag a model file into the viewport to open it";
+
 		const float text_width = ImGui::CalcTextSize(kHint).x;
 
-		ImGui::Dummy(ImVec2(0.0f, ImGui::GetContentRegionAvail().y * 0.3f));
+		ImGui::SetCursorScreenPos(ImVec2(
+			area_min.x + ImMax(0.0f, (area_size.x - text_width) * 0.5f),
+			area_min.y + area_size.y * 0.3f));
 
-		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap_width);
-		ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImMax(0.0f, (wrap_width - text_width) * 0.5f));
+		ImGui::PushTextWrapPos(area_min.x + area_size.x);
 		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
 		ImGui::TextUnformatted(kHint);
 		ImGui::PopStyleColor();
@@ -515,7 +734,14 @@ namespace Helios
 					ABSOLUTE_PATH("Shaders/MaterialShaders/PBRStandard.glsl")));
 			m_pMaterialGroup->EmplaceMaterial(std::move(material));
 			if (slot != nullptr)
+			{
 				m_pMaterialGroup->SetEntrySlotName(static_cast<int>(i), slot->Name);
+
+				/* 槽默认材质来自资产引用（GetOrLoad 加载的带路径）：条目保留引用身份 ——
+				 * 不改参数的话导出继续写引用形态（模型与材质资产保持同步） */
+				if (slot->pDefault != nullptr && !slot->pDefault->GetPath().empty())
+					m_pMaterialGroup->SetEntryAssetPath(static_cast<int>(i), slot->pDefault->GetPath());
+			}
 		}
 
 		m_pModelInfo->m_AABB = std::make_pair(model->GetAABBMin(), model->GetAABBMax());
@@ -555,7 +781,7 @@ namespace Helios
 		return true;
 	}
 
-	/* 导出模型 */
+	/* 保存模型（.mesh & .mtl）：弹窗预填当前模型的文件名，选目标后走 SaveModelTo */
 	void ModelEditorLayer::ExportMeshAndMtl()
 	{
 		PROFILE_FUNCTION();
@@ -563,107 +789,76 @@ namespace Helios
 		if (!m_pModelInfo || !m_pModel)
 			return;
 
-		const auto file_path = FileDialog::SaveFile("Mesh(*.mesh)\0*.mesh\0");
-		if (!file_path.empty())
-		{
-			/* 导出模型 */
-			ExportMesh(file_path);
+		const std::string default_name = PathToUtf8(PathFromUtf8(m_pModelInfo->m_Path).filename());
+		const auto file_path = FileDialog::SaveFile("Mesh(*.mesh)\0*.mesh\0", default_name.c_str());
+		if (file_path.empty())
+			return;
 
-			/* 导出材质：把导入时的材质名写进槽表（加载后覆盖表按槽名匹配） */
-			for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-			{
-				m_pMaterialGroup->SetEntrySlotName(static_cast<int>(i),
-					m_pModelInfo->m_SubModelInfos[i]->MaterialParams.Name);
-			}
-			const auto& material_path = ReplaceFileSuffix(file_path, ".mtl");
-			m_pMaterialGroup->Serializer(material_path);
-
-			/* 拷贝贴图文件 */
-			std::filesystem::path current_model_path = PathFromUtf8(m_pModelInfo->m_Path);
-			std::filesystem::path target_path = PathFromUtf8(file_path);
-			const std::regex pattern("^[\s\S]*\.(pdf|png|jpeg|jpg|tga|bmp|dds)$");
-			CopyFileFromTo(current_model_path.parent_path(), target_path.parent_path(), pattern);
-		}
+		SaveModelTo(file_path);
 	}
 
-	/* 导出Mesh */
-	void ModelEditorLayer::ExportMesh(const std::string& path)
+	/* 保存到指定路径：几何不可编辑 —— 当前 .mesh 原样拷贝到目标，再把材质与贴图写到同一
+	 * 目录。材质条目按形态写出：内嵌的收敛参数后全量写、引用形态只写 Asset（模型跟随
+	 * 材质资产）；贴图一并拷到目标目录（内嵌材质的引用是相对路径，导出目录自包含）。 */
+	bool ModelEditorLayer::SaveModelTo(const std::string& mesh_file_path)
 	{
 		PROFILE_FUNCTION();
-		
-		std::ofstream out_mesh_file(PathFromUtf8(path), std::ios::out | std::ios::binary);
 
-		/* 写入子模型数量: size_t * 1 */
-		size_t sub_model_count = m_pModelInfo->m_SubModelInfos.size();
-		out_mesh_file.write((char*)&sub_model_count, sizeof(size_t));
+		if (!m_pModelInfo || !m_pModel)
+			return false;
 
-		/* 逐个写入子模型信息 */
-		for (int i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
+		/* 补后缀：对话框里没带扩展名（或给了别的）时按 .mesh 落盘 —— 模型只写这个格式 */
+		std::string target_path = mesh_file_path;
+		std::filesystem::path target_mesh = PathFromUtf8(target_path);
+		if (ToLowercase(PathToUtf8(target_mesh.extension()).c_str()) != ".mesh")
 		{
-			const auto& sub_model_info = m_pModelInfo->m_SubModelInfos[i];
-
-			/* 写入Name的size: size_t * 1 */
-			size_t name_size = sub_model_info->Name.size();
-			out_mesh_file.write((char*)&name_size, sizeof(size_t));
-
-			/* 写入Name内容：name_size */
-			out_mesh_file.write(sub_model_info->Name.c_str(), name_size);
-
-			/* 写入VertexData的大小: size_t * 1 */
-			size_t data_size = sub_model_info->VertexData.size();
-			out_mesh_file.write((char*)&data_size, sizeof(size_t));
-
-			/* 写入VertexData内容: data_size */
-			out_mesh_file.write((char*)(sub_model_info->VertexData.data()), data_size * sizeof(float));
-
-			/* 写入VertexLayout */
-			auto& vertex_layout = sub_model_info->VertexArray->GetVertexBuffers()[0]->GetLayout();
-			auto& elements = vertex_layout.GetElements();
-
-			/* 写入 VertexLayout的Element数量: size_t * 1 */
-			size_t element_count = elements.size();
-			out_mesh_file.write((char*)&element_count, sizeof(size_t));
-			/* 逐个写入Element信息 */
-			for (auto& element : elements)
-			{
-				/* 写入Name的size: size_t * 1 */
-				size_t element_name_size = element.Name.size();
-				out_mesh_file.write((char*)&element_name_size, sizeof(size_t));
-				/* 写入Name内容：element_name_size */
-				out_mesh_file.write(element.Name.c_str(), element_name_size);
-				/* 写入Element的类型: uint8_t * 1 */
-				out_mesh_file.write((char*)&element.Type, sizeof(uint8_t));
-				/* 写入Element的偏移：size_t * 1 */
-				out_mesh_file.write((char*)&element.Offset, sizeof(size_t));
-				/* 写入Element的Normalized: bool * 1 */
-				out_mesh_file.write((char*)&element.Normalized, sizeof(bool));
-			}
-
-			/* 写入材质索引：int * 1（= 加载侧的槽索引，与 .mtl 条目对位） */
-			auto material = m_pMaterialGroup->GetMaterialByIndex(i);
-			int material_id = -1;
-			for (int j = 0; j < static_cast<int>(m_pMaterialGroup->GetEntries().size()); ++j)
-			{
-				const auto& mtl = m_pMaterialGroup->GetMaterialByIndex(j);
-				if (mtl == material)
-				{
-					material_id = j;
-					break;
-				}
-			}
-			out_mesh_file.write((char*)&material_id, sizeof(int));
-
-			/* 写入aabb: sizeof(glm::vec3) * 2 */
-			out_mesh_file.write((char*)&sub_model_info->AABB.first, sizeof(glm::vec3));
-			out_mesh_file.write((char*)&sub_model_info->AABB.second, sizeof(glm::vec3));
+			target_mesh.replace_extension(".mesh");
+			target_path = PathToUtf8(target_mesh);
 		}
 
-		/* 保存Mesh文件 */
-		out_mesh_file.close();
+		const std::filesystem::path source_mesh = PathFromUtf8(m_pModelInfo->m_Path);
+		if (source_mesh.empty() || target_mesh.empty())
+			return false;
+
+		/* 几何与打开的 .mesh 完全一致：原样拷贝（目标就是自己时跳过） */
+		std::error_code error;
+		if (source_mesh != target_mesh)
+		{
+			std::filesystem::copy_file(source_mesh, target_mesh,
+				std::filesystem::copy_options::overwrite_existing, error);
+			if (error)
+			{
+				EDITOR_LOG_ERROR("Failed to save model mesh to {}: {}.", target_path, error.message());
+				return false;
+			}
+		}
+
+		/* 导出材质：把导入时的材质名写进槽表（加载后覆盖表按槽名匹配）；
+		 * 参数收敛只对内嵌条目做（反射是集合的单一来源，引用条目不写材质体） */
+		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
+		{
+			m_pMaterialGroup->SetEntrySlotName(static_cast<int>(i),
+				m_pModelInfo->m_SubModelInfos[i]->MaterialParams.Name);
+		}
+		for (const MaterialEntry& entry : m_pMaterialGroup->GetEntries())
+		{
+			if (entry.AssetPath.empty() && entry.pMaterial != nullptr)
+				entry.pMaterial->RetainShaderDeclaredParams();
+		}
+
+		std::filesystem::path target_mtl = target_mesh;
+		target_mtl.replace_extension(".mtl");
+		m_pMaterialGroup->Serializer(PathToUtf8(target_mtl));
+
+		/* 拷贝贴图文件（材质里的引用是相对路径，导出目录要自包含） */
+		const std::regex pattern(R"(^.*\.(pdf|png|jpeg|jpg|tga|bmp|dds)$)");
+		CopyFileFromTo(source_mesh.parent_path(), target_mesh.parent_path(), pattern);
+
+		return true;
 	}
 
-	/* 把当前模型放进编辑器场景：旧模型实体全部销毁，只留一个挂当前模型的实体，
-	 * 相机按包围盒自适应 */
+	/* 把当前模型放进编辑器场景：旧模型实体全部销毁，只留一个挂当前模型的实体；
+	 * 取景交给视口尺寸就绪的下一帧（m_AutoFocusPending → FocusOn，见 ShowModelWindowUI） */
 	void ModelEditorLayer::ShowModelInScene()
 	{
 		PROFILE_FUNCTION();
@@ -679,12 +874,30 @@ namespace Helios
 		auto& mesh_component = entity.AddComponent<ModelComponent>();
 		mesh_component.m_Model = m_pModel;
 
-		/* 根据模型大小自适应相机距离 */
-		const auto& aabb_min = m_pModel->GetAABBMin();
-		const auto& aabb_max = m_pModel->GetAABBMax();
-		const auto aabb_height = aabb_max.y - aabb_min.y;
-		const auto distance = (aabb_height) / std::tan(m_pEditorCamera->GetFov() / 2.0f);
-		m_pEditorCamera->SetDistance(distance);
-		m_pEditorCamera->SetFocalPoint((aabb_min + aabb_max) * 0.5f);
+		/* 编辑缓冲接到预览实体上：按段把槽覆盖指向 m_pMaterialGroup 里的材质 ——
+		 * 面板改参数 / 换贴图 / 换 Shader 改的就是这一份，预览下一帧立刻可见；
+		 * 导出写的也是它，两处同源（不接的话预览渲染的会是模型自带的默认材质，改什么都不会动） */
+		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
+		{
+			const std::string& slot_name = m_pModelInfo->m_SubModelInfos[i]->MaterialParams.Name;
+			const auto& material = m_pMaterialGroup->GetMaterialByIndex(static_cast<int>(i));
+			if (slot_name.empty() || material == nullptr)
+				continue;
+
+			MaterialSlotOverride& slot_override = mesh_component.m_SlotOverrides[slot_name];
+			slot_override.pMaterial = material;
+			slot_override.IsInstance = true;
+		}
+
+		/* 预览网格改成以模型为中心、格距按模型尺寸缩放（大模型取景距离远，场景口径的
+		 * 1 格 1 单位网格罩不到模型）；取景本身等下一帧（m_AutoFocusPending） */
+		const glm::vec3 aabb_min = m_pModel->GetAABBMin();
+		const glm::vec3 aabb_max = m_pModel->GetAABBMax();
+		const glm::vec3 aabb_center = (aabb_min + aabb_max) * 0.5f;
+		const float aabb_radius = glm::length(aabb_max - aabb_min) * 0.5f;
+		m_pEditorCamera->SetPreviewGrid(true, aabb_center, ChoosePreviewGridScale(aabb_radius));
+
+		/* FocusOn 要用视口的宽高比（紧的一侧取景），等 UI 帧把尺寸落定后再聚焦 */
+		m_AutoFocusPending = true;
 	}
 }

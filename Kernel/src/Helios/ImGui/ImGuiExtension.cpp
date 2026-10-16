@@ -401,13 +401,13 @@ namespace Helios::ImGuiExt
 
 		/* 分量重置按钮：轴色实心圆角色块（悬停亮 / 按下暗，跟 Button 三档一致），字母用视图指示器
 		 * 同款矢量笔画、白色墨。每枚按钮带起一个「按钮 + 值」小组（左端圆角、右端直角）；点一下把
-		 * 该分量恢复成默认值。命中格 (高+3)×高，行内布局不变。 */
-		bool DrawAxisButton(const AxisStyle& axis, float height)
+		 * 该分量恢复成默认值。命中格 = 给定宽×高：常规是 (高+3)×高；面板极窄时按调用方给的宽度收窄。 */
+		bool DrawAxisButton(const AxisStyle& axis, float width, float height)
 		{
 			/* 命中 id 用 axis.Letter（"X"），绝不能复用 axis.Id（"##X"）—— 那是同行拖拽框的 id。
 			 * 两个控件共 id 时：拖拽框一激活就把 ActiveIdMouseButton 重置成 -1，下一帧本按钮的 ButtonBehavior
 			 * 在 Mouse 分支读到 -1、直接触发 IM_ASSERT 崩（回归见 vec_row_input_check）。 */
-			const bool clicked = ImGui::InvisibleButton(axis.Letter, ImVec2(height + EditorTheme::Scaled(3.0f), height));
+			const bool clicked = ImGui::InvisibleButton(axis.Letter, ImVec2(width, height));
 
 			const bool hovered = ImGui::IsItemHovered();
 			const bool active = ImGui::IsItemActive();
@@ -482,12 +482,14 @@ namespace Helios::ImGuiExt
 			const float frame_height = ImGui::GetFrameHeight();
 			const ImGuiStyle& style = ImGui::GetStyle();
 
-			/* 组间距：按钮与值贴合靠行内 ItemSpacing 归零，组与组之间显式给一档 */
+			/* 每组按钮 + 值框均分值列宽；面板宽裕时按钮正方形、值框吃满余量，窄到放不下时
+			 * 先挤压值框、再收窄按钮 —— 只保 1px 下限，绝不反过来撑破行（横向溢出会让整个面板能左右滑） */
 			const float kGroupGap = EditorTheme::Scaled(4.0f);
-			const float button_width = frame_height + EditorTheme::Scaled(3.0f);
-			const float box_width = ImMax(EditorTheme::Scaled(12.0f),
-				(value_width - static_cast<float>(component_count - 1) * kGroupGap)
-					/ static_cast<float>(component_count) - button_width);
+			const float group_slot = (value_width - static_cast<float>(component_count - 1) * kGroupGap)
+				/ static_cast<float>(component_count);
+			const float button_width = ImMin(frame_height + EditorTheme::Scaled(3.0f),
+				ImMax(group_slot - 1.0f, 1.0f));
+			const float box_width = ImMax(group_slot - button_width, 1.0f);
 
 			/* 按钮和拖拽框贴合：只把横向间距归零，纵向保留行距 —— ItemSize 会把「行高 + ItemSpacing.y」
 			 * 记进光标、EndCard 又按「光标 − ItemSpacing.y」反推卡底；纵向也归零的话，行距和卡底留白就
@@ -501,7 +503,7 @@ namespace Helios::ImGuiExt
 				if (i > 0)
 					ImGui::SameLine(0.0f, kGroupGap);
 
-				if (DrawAxisButton(axis, frame_height))
+				if (DrawAxisButton(axis, button_width, frame_height))
 					values[i] = reset_value;
 
 				ImGui::SameLine();

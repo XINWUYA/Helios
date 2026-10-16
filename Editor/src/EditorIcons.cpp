@@ -1639,6 +1639,23 @@ namespace Helios::Icons
 			dl->AddCircle(center, radius, color, 0, t);
 		}
 
+		/* Sliders：三条滑轨 + 三个旋钮（材质参数浮层的开关） */
+		void DrawSliders(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			for (int i = 0; i < 3; ++i)
+			{
+				const float y = 0.28f + 0.22f * static_cast<float>(i);
+				dl->AddLine(c.At(0.19f, y), c.At(0.81f, y), color, t);
+			}
+
+			dl->AddCircleFilled(c.At(0.34f, 0.28f), c.Len(0.10f), color);
+			dl->AddCircleFilled(c.At(0.62f, 0.50f), c.Len(0.10f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.47f, 0.72f), c.Len(0.10f), color);
+		}
+
 		/* Overdraw：两层半透明方块的叠加计数 */
 		void DrawOverdraw(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
@@ -2078,6 +2095,7 @@ namespace Helios::Icons
 			{ "Overdraw",          &DrawOverdraw },
 			{ "Mipmap",            &DrawMipmap },
 			{ "Probe",             &DrawProbe },
+			{ "Sliders",           &DrawSliders },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),

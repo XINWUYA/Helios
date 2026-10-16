@@ -13,7 +13,6 @@ namespace Helios
 		inline constexpr const char* kProperties      = "Properties";
 		inline constexpr const char* kScene           = "Scene";
 		inline constexpr const char* kModel           = "Model";
-		inline constexpr const char* kModelHelper     = "Model Helper";
 		inline constexpr const char* kStatInfo        = "Stat Info";
 		/* 资源浏览器：目录树 + 目录内容合成一个面板（原先 File List / Resource Browser 是两个页签） */
 		inline constexpr const char* kResourceBrowser = "Resource Browser";
@@ -47,7 +46,6 @@ namespace Helios
 			{ kModel,           DockSlot::Center      },
 			{ kFrameGraph,      DockSlot::Center      },
 			{ kProperties,      DockSlot::RightTop    },
-			{ kModelHelper,     DockSlot::RightTop    },
 			{ kStatInfo,        DockSlot::RightBottom },
 			{ kLog,             DockSlot::CenterBottom },
 		};

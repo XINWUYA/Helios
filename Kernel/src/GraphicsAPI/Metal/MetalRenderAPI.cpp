@@ -50,7 +50,7 @@ namespace Helios
         }
 
         /* 影响编码器级状态的字段哈希。仅用于判断状态是否与上一次下发的一致，
-         * 因此只需覆盖剔除、正面朝向与深度状态——混合与颜色写入属于管线对象。 */
+         * 因此只需覆盖剔除、正面朝向、深度状态与线框填充——混合与颜色写入属于管线对象。 */
         [[nodiscard]] uint64_t HashEncoderRasterState(const RenderRasterState& state)
         {
             uint64_t h = 0;
@@ -58,6 +58,7 @@ namespace Helios
             MetalHashCombine(h, static_cast<uint64_t>(state.FrontFaceType));
             MetalHashCombine(h, state.EnableDepthWrite ? 1u : 0u);
             MetalHashCombine(h, static_cast<uint64_t>(state.DepthCompareFunc));
+            MetalHashCombine(h, state.Wireframe ? 1u : 0u);
             return h;
         }
     }
@@ -302,6 +303,10 @@ namespace Helios
                 m_CurrentRenderEncoder->setDepthStencilState(depth_stencil_state);
             }
         }
+
+        /* 线框填充：三角形只画边（调试线框预览用；普通状态恒为 FILL） */
+        m_CurrentRenderEncoder->setTriangleFillMode(m_CurrentRasterState.Wireframe
+            ? MTL::TriangleFillModeLines : MTL::TriangleFillModeFill);
 
         m_RasterStateEncoder = m_CurrentRenderEncoder;
         m_AppliedRasterStateHash = state_hash;

@@ -64,11 +64,14 @@ namespace Helios
 		const bool is_mmb_pressed = Input::IsMouseButtonPressed(Mouse::ButtonMiddle);
 		const bool is_rmb_pressed = Input::IsMouseButtonPressed(Mouse::ButtonRight);
 
-		/* 手势保持条件：其按键仍按住（Orbit / ZoomDrag 还要求 Alt —— 飞行中按下 Alt 会顺势切换为推拉） */
+		/* 手势保持条件：其按键仍按住（Orbit / ZoomDrag 还要求 Alt —— 飞行中按下 Alt 会顺势切换为推拉；
+		 * 聚焦模式的轨道不配 Alt，左键按住即保持） */
 		bool is_gesture_held = false;
 		switch (m_ActiveGesture)
 		{
-		case NavGesture::Orbit:		is_gesture_held = is_alt_pressed && is_lmb_pressed; break;
+		case NavGesture::Orbit:
+			is_gesture_held = m_IsFocusMode ? is_lmb_pressed : (is_alt_pressed && is_lmb_pressed);
+			break;
 		case NavGesture::Pan:		is_gesture_held = is_mmb_pressed; break;
 		case NavGesture::ZoomDrag:	is_gesture_held = is_alt_pressed && is_rmb_pressed; break;
 		case NavGesture::Fly:		is_gesture_held = is_rmb_pressed && !is_alt_pressed; break;
@@ -87,7 +90,13 @@ namespace Helios
 			const bool is_mmb_edge = is_mmb_pressed && !m_WasMmbPressed;
 			const bool is_rmb_edge = is_rmb_pressed && !m_WasRmbPressed;
 
-			if (is_alt_pressed)
+			if (m_IsFocusMode)
+			{
+				/* 聚焦模式（模型预览）：左键直接起手轨道旋转；平移 / 推拉 / 飞行都不参与 */
+				if (is_lmb_pressed && is_lmb_edge)
+					m_ActiveGesture = NavGesture::Orbit;
+			}
+			else if (is_alt_pressed)
 			{
 				if (is_lmb_pressed && is_lmb_edge)
 					m_ActiveGesture = NavGesture::Orbit;
@@ -253,6 +262,12 @@ namespace Helios
 				{
 					/* 场景 gizmo 叠加层（网格 / 世界轴 / 实体图标）：见 SceneGizmos */
 					SceneGizmos::Submit(render_view, *this);
+					/* 子网格高亮（模型预览：悬停子模型卡）：强调色平铺该段，垫在线框底下 */
+					if (m_HighlightSegment >= 0)
+						SceneGizmos::SubmitModelSegmentHighlight(render_view, m_HighlightSegment);
+					/* 模型线框叠加（模型预览的调试开关）：xray 边线画在最上层 */
+					if (m_IsWireframeOverlay)
+						SceneGizmos::SubmitModelWireframe(render_view);
 				}
 				render_pass_info->Unbind();
 			}

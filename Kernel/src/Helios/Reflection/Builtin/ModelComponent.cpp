@@ -296,7 +296,10 @@ namespace Helios
 			ImGui::Spacing();
 			ImGui::TextColored(EditorTheme::Token::TextLabel, "Materials");
 			ImGui::SameLine();
+			/* 统计文案窄窗里必须能折行：裸文本的布局宽度不受裁剪影响，会撑出横向滚动 */
+			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
 			ImGui::TextDisabled("(%d slots, %d overridden)", static_cast<int>(slots.size()), overridden_count);
+			ImGui::PopTextWrapPos();
 
 			for (int i = 0; i < static_cast<int>(slots.size()); ++i)
 			{

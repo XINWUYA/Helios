@@ -389,6 +389,15 @@ namespace Helios
 		m_Entries[idx].SlotName = std::move(name);
 	}
 
+	/* 设置条目的材质资产引用（空 = 回内嵌定义） */
+	void MaterialGroup::SetEntryAssetPath(int idx, std::string path)
+	{
+		if (idx < 0 || idx >= static_cast<int>(m_Entries.size()))
+			return;
+
+		m_Entries[idx].AssetPath = std::move(path);
+	}
+
 	/* 根据索引获取条目 */
 	const MaterialEntry* MaterialGroup::GetEntryByIndex(int idx) const
 	{

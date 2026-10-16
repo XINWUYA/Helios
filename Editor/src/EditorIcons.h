@@ -58,6 +58,8 @@ namespace Helios
 			 * Analysis = 叠层方块）—— 与 DebugView 卡片同族的小图形 */
 			Albedo, Normal, Roughness, Metallic, SpecularColor, AmbientOcclusion, Emission, Ambient,
 			Diffuse, Specular, Shadow, Indirect, Overdraw, Mipmap, Probe,
+			/* 面板工具动作：材质参数浮层的开关（模型编辑窗口右上角） */
+			Sliders,
 			COUNT
 		};
 

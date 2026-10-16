@@ -156,6 +156,9 @@ namespace Helios
 		/* 设置颜色Mask */
 		glColorMask((GLboolean)raster_state.EnableColorWrite, (GLboolean)raster_state.EnableColorWrite, (GLboolean)raster_state.EnableColorWrite, (GLboolean)raster_state.EnableColorWrite);
 
+		/* 线框填充：三角形只画边（调试线框预览用；桌面 GL 独有，GLES 没有这个状态） */
+		glPolygonMode(GL_FRONT_AND_BACK, raster_state.Wireframe ? GL_LINE : GL_FILL);
+
 	}
 
 	void OpenGLRenderAPI::DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count, uint32_t index_offset)

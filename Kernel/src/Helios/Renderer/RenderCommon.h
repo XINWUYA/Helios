@@ -423,7 +423,9 @@ namespace Helios
 
 		bool EnableColorWrite : 1; /* 启用颜色写入 */
 
-		uint32_t padding : 1;
+		/* 线框填充：三角形只画边（Metal setTriangleFillMode / GL glPolygonMode 的线框档）。
+		 * 只给调试叠加材质用，不参与序列化（材质加载后恒为关） */
+		bool Wireframe : 1;
 
 		/* 默认构造 */
 		RenderRasterState()
@@ -432,7 +434,7 @@ namespace Helios
 			, BlendFuncSrcRGB(BlendFunc::One), BlendFuncSrcA(BlendFunc::One)
 			, BlendFuncDstRGB(BlendFunc::Zero), BlendFuncDstA(BlendFunc::Zero)
 			, EnableDepthWrite(true), DepthCompareFunc(CompareFunc::GreaterEqual)
-			, EnableColorWrite(true), padding(0)
+			, EnableColorWrite(true), Wireframe(false)
 		{
 		}
 	};
