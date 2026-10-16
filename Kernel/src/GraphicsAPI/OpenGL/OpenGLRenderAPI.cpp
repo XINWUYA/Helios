@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "OpenGLRenderAPI.h"
 #include "OpenGLCommon.h"
+#include "OpenGLShader.h"
 #include "OpenGLTexture.h"
 #include <Helios/VirtualDevice/DeviceTexture.h>
 #include <Helios/Renderer/RenderQuery.h>
@@ -17,12 +18,17 @@ namespace Helios
 		const char* message,
 		const void* userParam)
 	{
+		/* 不按消息 id 过滤，驱动性能警告是真实信号（如着色器被按 GL 状态重编译）；
+		 * 消息只带 program 句柄，用登记表把 shader 名补在后面，便于定位 */
+		const std::string annotated = std::string(message != nullptr ? message : "")
+			+ OpenGLShader::AnnotateProgramHandlesInMessage(message);
+
 		switch (severity)
 		{
-		case GL_DEBUG_SEVERITY_HIGH:         CORE_LOG_CRITICAL(message); return;
-		case GL_DEBUG_SEVERITY_MEDIUM:       CORE_LOG_ERROR(message); return;
-		case GL_DEBUG_SEVERITY_LOW:          CORE_LOG_WARN(message); return;
-		case GL_DEBUG_SEVERITY_NOTIFICATION: CORE_LOG_INFO(message); return;
+		case GL_DEBUG_SEVERITY_HIGH:         CORE_LOG_CRITICAL("{}", annotated); return;
+		case GL_DEBUG_SEVERITY_MEDIUM:       CORE_LOG_ERROR("{}", annotated); return;
+		case GL_DEBUG_SEVERITY_LOW:          CORE_LOG_WARN("{}", annotated); return;
+		case GL_DEBUG_SEVERITY_NOTIFICATION: CORE_LOG_INFO("{}", annotated); return;
 		default:
 			CORE_LOG_ERROR("Unknown severity level!");
 		}

@@ -40,6 +40,63 @@ namespace Helios
 		}
 	}
 
+	static const char* GetOpenGLShaderStageName(GLenum shader_type)
+	{
+		switch (shader_type)
+		{
+		case GL_VERTEX_SHADER:
+			return "vertex";
+		case GL_FRAGMENT_SHADER:
+			return "fragment";
+		case GL_COMPUTE_SHADER:
+			return "compute";
+		default:
+			return "unknown";
+		}
+	}
+
+	/* program 句柄到 shader 名的登记表：驱动警告只带句柄。GL 对象只在主线程创建销毁，无需加锁 */
+	static std::unordered_map<GLuint, std::string>& ProgramNameRegistry()
+	{
+		static std::unordered_map<GLuint, std::string> registry;
+		return registry;
+	}
+
+	std::string OpenGLShader::AnnotateProgramHandlesInMessage(const char* message)
+	{
+		if (message == nullptr)
+			return {};
+
+		std::string annotation;
+		const std::string text(message);
+
+		/* 逐个还原消息里的 "program N"（驱动性能警告的固定句式），句柄不在表中则标注已销毁 */
+		std::string::size_type pos = text.find("program ");
+		while (pos != std::string::npos)
+		{
+			const std::string::size_type digits_begin = pos + 8; /* strlen("program ") */
+			std::string::size_type digits_end = digits_begin;
+			while (digits_end < text.size() && text[digits_end] >= '0' && text[digits_end] <= '9')
+				++digits_end;
+
+			if (digits_end > digits_begin)
+			{
+				const std::string handle_text = text.substr(digits_begin, digits_end - digits_begin);
+				const GLuint program = static_cast<GLuint>(std::stoul(handle_text));
+
+				const auto& registry = ProgramNameRegistry();
+				const auto it = registry.find(program);
+
+				annotation += " [program " + handle_text + " = " +
+					(it != registry.end() ? it->second : std::string("not live (destroyed or reused)")) + "]";
+			}
+
+			pos = text.find("program ", digits_end);
+		}
+
+		return annotation;
+	}
+
 	OpenGLShader::OpenGLShader(const std::string& filepath)
 		: DeviceShader(filepath)
 	{
@@ -70,6 +127,13 @@ namespace Helios
 	OpenGLShader::~OpenGLShader()
 	{
 		PROFILE_FUNCTION();
+
+		if (m_ProgramID != 0)
+		{
+			/* 从登记表移除：GL 句柄会复用，留着会反查到已销毁的 shader 名 */
+			ProgramNameRegistry().erase(m_ProgramID);
+			CORE_LOG_DEBUG("[GL] Program #{0} ({1}) destroyed", m_ProgramID, m_DebugName);
+		}
 
 		glDeleteProgram(m_ProgramID);
 	}
@@ -603,6 +667,21 @@ namespace Helios
 		}
 
 		m_IsLinked = true;
+
+		/* 登记句柄到名字，供驱动警告标注用（见 AnnotateProgramHandlesInMessage） */
+		ProgramNameRegistry()[program] = m_DebugName;
+
+		std::string stages;
+		for (const GLenum stage : { GL_VERTEX_SHADER, GL_FRAGMENT_SHADER, GL_COMPUTE_SHADER })
+		{
+			if (m_OpenGLSourceCodes.find(stage) == m_OpenGLSourceCodes.end())
+				continue;
+			if (!stages.empty())
+				stages += ", ";
+			stages += GetOpenGLShaderStageName(stage);
+		}
+
+		CORE_LOG_INFO("[GL] Program #{0} linked: {1} (stages: {2})", program, m_DebugName, stages);
 
 		for (const GLuint shader : m_AttachedShaders)
 		{

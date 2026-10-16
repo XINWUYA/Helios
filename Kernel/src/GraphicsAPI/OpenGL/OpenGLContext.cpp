@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "OpenGLContext.h"
+#include "OpenGLShader.h"
 #include <cstring>
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
@@ -102,19 +103,22 @@ namespace Helios
 					if (id == 131169 || id == 131185 || id == 131218 || id == 131204)  /* ignore these non-significant error codes */
 						return;
 
+					/* 带 program 句柄的消息附上 shader 名（见 OpenGLShader::AnnotateProgramHandlesInMessage） */
+					const std::string program_annotation = OpenGLShader::AnnotateProgramHandlesInMessage(message);
+
 					switch (severity)
 					{
 					case GL_DEBUG_SEVERITY_HIGH:
-						CORE_LOG_CRITICAL("OpenGL DebugOutput: {} from Source({}), Type({}), Id({}).", message, STRINGIFY(source), STRINGIFY(type), id);
+						CORE_LOG_CRITICAL("OpenGL DebugOutput: {}{} from Source({}), Type({}), Id({}).", message, program_annotation, STRINGIFY(source), STRINGIFY(type), id);
 						break;
 					case GL_DEBUG_SEVERITY_MEDIUM:
-						CORE_LOG_ERROR("OpenGL DebugOutput: {} from Source({}), Type({}), Id({}).", message, STRINGIFY(source), STRINGIFY(type), id);
+						CORE_LOG_ERROR("OpenGL DebugOutput: {}{} from Source({}), Type({}), Id({}).", message, program_annotation, STRINGIFY(source), STRINGIFY(type), id);
 						break;
 					case GL_DEBUG_SEVERITY_LOW:
-						CORE_LOG_WARN("OpenGL DebugOutput: {} from Source({}), Type({}), Id({}).", message, STRINGIFY(source), STRINGIFY(type), id);
+						CORE_LOG_WARN("OpenGL DebugOutput: {}{} from Source({}), Type({}), Id({}).", message, program_annotation, STRINGIFY(source), STRINGIFY(type), id);
 						break;
 					case GL_DEBUG_SEVERITY_NOTIFICATION:
-						CORE_LOG_INFO("OpenGL DebugOutput: {} from Source({}), Type({}), Id({}).", message, STRINGIFY(source), STRINGIFY(type), id);
+						CORE_LOG_INFO("OpenGL DebugOutput: {}{} from Source({}), Type({}), Id({}).", message, program_annotation, STRINGIFY(source), STRINGIFY(type), id);
 						break;
 					default:
 						break;
