@@ -411,6 +411,16 @@ namespace Helios
 		return Svg::GetImage(AbsoluteAssetPath(node.FilePath));
 	}
 
+	/* GIF：帧表与图集纹理都在 Gif 模块里（按写入时间缓存）——
+	 * 网格每帧取一次拿"当前该画哪帧"，非 .gif 会立刻返回空 */
+	SharedPtr<const Gif::Clip> EditorResourceBrowser::GifClipOf(FileNode& node)
+	{
+		if (node.Type != FileType::Image)
+			return nullptr;
+
+		return Gif::GetClip(AbsoluteAssetPath(node.FilePath));
+	}
+
 	std::string EditorResourceBrowser::DisplayNodeName(const FileNode& node)
 	{
 		return node.ParentNode.expired() ? AssetsRootName() : node.FileName;
@@ -2288,6 +2298,8 @@ namespace Helios
 					const SharedPtr<DeviceTexture> thumbnail = ThumbnailOf(*child_node);
 					const SharedPtr<const Svg::Image> svg_image = (thumbnail == nullptr)
 						? SvgImageOf(*child_node) : nullptr;
+					const SharedPtr<const Gif::Clip> gif_clip = (thumbnail == nullptr)
+						? nullptr : GifClipOf(*child_node);
 
 					grid_draw->PushClipRect(grid_clip_min, grid_clip_max, false);
 
@@ -2301,7 +2313,16 @@ namespace Helios
 					const ImVec2 cell_min = ImGui::GetItemRectMin();
 					const ImVec2 cell_max = ImGui::GetItemRectMax();
 
-					if (thumbnail != nullptr)
+					if (gif_clip != nullptr && gif_clip->Texture != nullptr)
+					{
+						/* 动图（GIF）：按当前时间取帧，图集里那一帧的取图窗口在模块里算 */
+						ImVec2 uv_min, uv_max;
+						Gif::FrameUv(*gif_clip, Gif::FrameAt(*gif_clip, static_cast<float>(ImGui::GetTime())),
+							uv_min, uv_max);
+						ImGui::GetWindowDrawList()->AddImage((ImTextureID)gif_clip->Texture.get(),
+							cell_min, cell_max, uv_min, uv_max);
+					}
+					else if (thumbnail != nullptr)
 					{
 						/* 图片：自己往这一格里画（上下翻转，贴图 v 轴朝下） */
 						ImGui::GetWindowDrawList()->AddImage((ImTextureID)thumbnail.get(),

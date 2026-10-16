@@ -40,6 +40,7 @@ target_include_directories(Editor
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glad/include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/imgui
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glm
+        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/stb
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/ImGuizmo

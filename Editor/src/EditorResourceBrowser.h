@@ -6,6 +6,7 @@
 #include <vector>
 #include <imgui.h>
 #include "EditorIcons.h"
+#include "Gif.h"
 #include "Svg.h"
 #include "Command/AssetFileOps.h"
 #include "Helios/Command/Command.h"
@@ -193,6 +194,9 @@ namespace Helios
 		/* SVG 的矢量缩略图：解析结果不是纹理，绘制时直接画形状（缓存与失效在 Svg 模块里）。
 		 * 非 SVG 或解析失败返回空 —— 调用方回落到类型图标。 */
 		static SharedPtr<const Svg::Image> SvgImageOf(FileNode& node);
+		/* GIF 动图：帧表 + 图集纹理（缓存与失效在 Gif 模块里）。
+		 * 非 .gif / 解析失败返回空；headless 下纹理为空 —— 两种都回落到静态缩略图。 */
+		static SharedPtr<const Gif::Clip> GifClipOf(FileNode& node);
 
 		/* ---- 浏览位置（右栏当前目录）与它的历史 ----
 		 * 顶栏的「回到上次路径 / 重进路径」走这里：历史按相对 Assets 的路径记

@@ -2,6 +2,7 @@
 #include "SceneHierarchy.h"
 #include "EditorCommon.h"
 #include "EditorIcons.h"
+#include "Gif.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Svg.h"
@@ -1580,15 +1581,15 @@ namespace Helios
 		 * （同一张贴图不会加载两份；headless 下没有图形上下文时贴图为空，跳过即可）。 */
 		if (!entry.IsFolder && entry.Kind == AssetFileKind::Image)
 		{
-			const SharedPtr<DeviceTexture> preview = AssetManager::Instance().GetOrLoad<DeviceTexture>(
-				PathToUtf8(absolute_path));
-			if (preview != nullptr && preview->IsLoaded())
+			/* 动图（GIF）：按当前时间画那一帧（循环播放，时间与浏览器同一个 UI 时钟）；
+			 * 没图集（headless / 太大）回落下面的静态首帧 */
+			const SharedPtr<const Gif::Clip> gif_clip = Gif::GetClip(absolute_path);
+			if (gif_clip != nullptr && gif_clip->Texture != nullptr)
 			{
 				ImGui::Spacing();
 
 				const float max_width = ImMin(ImGui::GetContentRegionAvail().x, kAssetPreviewMaxWidth());
-				const float aspect = static_cast<float>(preview->GetHeight())
-					/ static_cast<float>(ImMax(preview->GetWidth(), 1u));
+				const float aspect = gif_clip->FrameHeight / ImMax(gif_clip->FrameWidth, 1.0f);
 
 				float width = max_width;
 				float height = width * aspect;
@@ -1598,8 +1599,34 @@ namespace Helios
 					width = height / ImMax(aspect, 1.0e-6f);
 				}
 
-				ImGui::Image((ImTextureID)preview.get(), ImVec2(width, height),
-					ImVec2(0, 1), ImVec2(1, 0));
+				ImVec2 uv_min, uv_max;
+				Gif::FrameUv(*gif_clip, Gif::FrameAt(*gif_clip, static_cast<float>(ImGui::GetTime())),
+					uv_min, uv_max);
+				ImGui::Image((ImTextureID)gif_clip->Texture.get(), ImVec2(width, height), uv_min, uv_max);
+			}
+			else
+			{
+				const SharedPtr<DeviceTexture> preview = AssetManager::Instance().GetOrLoad<DeviceTexture>(
+					PathToUtf8(absolute_path));
+				if (preview != nullptr && preview->IsLoaded())
+				{
+					ImGui::Spacing();
+
+					const float max_width = ImMin(ImGui::GetContentRegionAvail().x, kAssetPreviewMaxWidth());
+					const float aspect = static_cast<float>(preview->GetHeight())
+						/ static_cast<float>(ImMax(preview->GetWidth(), 1u));
+
+					float width = max_width;
+					float height = width * aspect;
+					if (height > kAssetPreviewMaxHeight())
+					{
+						height = kAssetPreviewMaxHeight();
+						width = height / ImMax(aspect, 1.0e-6f);
+					}
+
+					ImGui::Image((ImTextureID)preview.get(), ImVec2(width, height),
+						ImVec2(0, 1), ImVec2(1, 0));
+				}
 			}
 		}
 		/* SVG：按原色画形状（不走纹理），比例照 viewBox 装进预览框 */
