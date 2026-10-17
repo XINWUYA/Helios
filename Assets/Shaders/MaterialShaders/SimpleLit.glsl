@@ -56,11 +56,11 @@ layout(location = 0) in SVextex2Frag vert2frag;
 layout(location = 0) out vec4 OutFragColor;
 layout(location = 1) out int  ObjectId;
 
-layout(binding = 0) uniform sampler2D u_AlbedoTexture;
+layout(binding = 0) uniform sampler2D u_AlbedoTexture; // @property
 
 /* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）；
  * 非 opaque uniform 必须显式 location（Windows 走 shaderc） */
-layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
+layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @property
 
 void main()
 {

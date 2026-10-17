@@ -105,9 +105,9 @@ namespace Helios
 		 * （材质资产保存后的缓存同步走这里，见 AssetManager::Refresh<Material>）。 */
 		void CopyDefinitionFrom(const Material& source);
 
-		/* 只保留当前 Shader 声明的参数（反射是参数集合的单一来源）：
-		 * 保存材质资产前调用 —— 反射没声明的不再留在参数表里、不会写进文件。
-		 * Shader 为空、或反射为空（后端不反射材质参数）时不做任何事。 */
+		/* 只保留当前 Shader 声明、且标了 @property 的参数（反射是参数集合的单一来源）：
+		 * 保存材质资产前调用 —— 反射没声明的、以及引擎逐绘制给的值都不留在参数表里、
+		 * 不会写进文件。Shader 为空、或反射为空（后端不反射材质参数）时不做任何事。 */
 		void RetainShaderDeclaredParams();
 
 		/* 收集"Shader 声明了、本材质没写"的值参数和默认值（默认取反射里的源码值、没有就按类型零值；

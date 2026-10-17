@@ -9,6 +9,27 @@
 
 namespace Helios
 {
+	/* 一条材质属性的面板规范：全部写在声明行尾的注释里（跟在 @property 后面），
+	 *   @property            进面板，显示名默认就是参数名
+	 *   @property(显示名)     同上 + 换显示名（可以带空格）
+	 *   @type(color)         vec3 / vec4 用取色器
+	 *   @type(bool)          int 用复选框（0 / 1）
+	 *   @type(slider)        float / int 用滑条，配合 @range
+	 *   @range(min, max, step)  数值范围（step 可省，当作拖拽步进）
+	 *   @showif(u_X, 值)      仅当 u_X 的当前值等于该值时显示（true / false 也可写）
+	 * 没写的项用默认：显示名 = 参数名、控件按参数类型、无范围、无条件。 */
+	struct MaterialPropertySpec
+	{
+		std::string	Label{};       /* 面板显示名（空 = 用参数名） */
+		std::string	Widget{};      /* 控件类型（空 = 按参数类型来） */
+		bool		HasRange{false};
+		float		Min{0.0f};
+		float		Max{1.0f};
+		float		Step{0.0f};     /* 0 = 没指定 */
+		std::string	ShowIfParam{}; /* 空 = 无条件显示 */
+		float		ShowIfValue{0.0f};
+	};
+
 	/* 反射出的一条材质参数：名字 + 类型 + 源码默认值（可空，空就按类型零值兜底）。材质属性面板
 	 * 按它列行 —— 参数集合 / 类型 / 默认值的唯一来源。 */
 	struct ReflectedMaterialParam
@@ -16,6 +37,11 @@ namespace Helios
 		ParamType	Type{};
 		std::string	Name;
 		std::any	Default{};
+		/* 声明行带 @property 标记 = 材质自己的参数（面板列、存盘留）。没标的归引擎
+		 * （逐绘制绑的贴图、管线设的开关）或库内部，面板看不到、也不会写进材质文件。 */
+		bool		Property{false};
+		/* 面板规范（显示名 / 控件类型 / 范围 / 条件显示），见 MaterialPropertySpec */
+		MaterialPropertySpec PropertySpec{};
 	};
 
 	/* Shader反射数据：从Shader中`layout(binding = X) uniform sampler2D u_xxx; ` 反射出真实的绑定点  */
@@ -25,8 +51,9 @@ namespace Helios
 		std::unordered_map<std::string, uint32_t> SamplerBindings{};
 		/* Sampler变量名->MetalSamplerState索引（[[sampler(N)]]），仅Metal后端使用 */
 		std::unordered_map<std::string, uint32_t> SamplerStateBindings{};
-		/* 材质参数表（声明顺序）：采样器（Texture）+ 裸 uniform（int/float/vec2-4/mat4）。
-		 * 空 = 拿不到声明的场合（如 SPIR-V 反射路径），调用方自行回退。 */
+		/* 反射到的全部材质候选参数（声明顺序）：采样器（Texture）+ 裸 uniform（int/float/vec2-4/mat4）。
+		 * 只有带 @property 标记的才归材质（见 ReflectedMaterialParam::Property），其余是引擎逐绘制
+		 * 给的值或库内部声明。空 = 拿不到声明的场合（如 SPIR-V 反射路径），调用方自行回退。 */
 		std::vector<ReflectedMaterialParam> MaterialParams{};
 
 		void Clear()

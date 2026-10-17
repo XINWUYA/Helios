@@ -6,20 +6,22 @@
 #include "Uniforms.glsl"
 
 /* 标准 lit 材质的贴图契约：9 个采样器固定绑定 0..8（材质转换 / 调试视图都按名字找）。
- * 声明随本库走，前向材质着色器与延迟 GBuffer 自动同源。 */
-layout(binding = 0) uniform sampler2D u_AlbedoTexture;
-layout(binding = 1) uniform sampler2D u_SpecularTexture;
-layout(binding = 2) uniform sampler2D u_NormalTexture;
-layout(binding = 3) uniform sampler2D u_BumpTexture;
-layout(binding = 4) uniform sampler2D u_DisplacementTexture;
-layout(binding = 5) uniform sampler2D u_RoughnessTexture;
-layout(binding = 6) uniform sampler2D u_MetallicTexture;
-layout(binding = 7) uniform sampler2D u_EmissiveTexture;
-layout(binding = 8) uniform sampler2D u_AmbientTexture;
+ * 声明随本库走，前向材质着色器与延迟 GBuffer 自动同源。
+ * @property = 归材质管的参数：材质面板列、写进 .mtl；引擎逐绘制给的不标。
+ * 显示名 / 控件类型 / 范围 / 条件显示写在同一条注释里，写法见 DeviceShader.h 的 MaterialPropertySpec。 */
+layout(binding = 0) uniform sampler2D u_AlbedoTexture; // @property
+layout(binding = 1) uniform sampler2D u_SpecularTexture; // @property
+layout(binding = 2) uniform sampler2D u_NormalTexture; // @property
+layout(binding = 3) uniform sampler2D u_BumpTexture; // @property
+layout(binding = 4) uniform sampler2D u_DisplacementTexture; // @property
+layout(binding = 5) uniform sampler2D u_RoughnessTexture; // @property
+layout(binding = 6) uniform sampler2D u_MetallicTexture; // @property
+layout(binding = 7) uniform sampler2D u_EmissiveTexture; // @property
+layout(binding = 8) uniform sampler2D u_AmbientTexture; // @property
 
 /* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）：所有材质贴图采样共用、缺省不变换；
  * 非 opaque uniform 必须显式 location（Windows 走 shaderc） */
-layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
+layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @property
 
 /* 标准 lit 材质的采样装配：输入世界位置 / 主 UV / 顶点色 / 世界法线 / 世界切线，
  * 输出填好的 SMaterialInput。前向与延迟共用这唯一一份实现。 */

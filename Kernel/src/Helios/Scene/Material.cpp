@@ -295,12 +295,14 @@ namespace Helios
 
 		for (auto iter = m_Parameters.begin(); iter != m_Parameters.end();)
 		{
-			if (reflection->FindMaterialParam(iter->second.Name) != nullptr)
+			const ReflectedMaterialParam* declared = reflection->FindMaterialParam(iter->second.Name);
+			if (declared != nullptr && declared->Property)
 			{
 				++iter;
 				continue;
 			}
 
+			/* 没标 @property 的也不留：引擎逐绘制给的值存进材质只会过期 */
 			iter = m_Parameters.erase(iter);
 		}
 	}

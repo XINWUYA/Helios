@@ -2334,18 +2334,18 @@ namespace Helios
 
 		/* 参数行：集合与类型来自 Shader 反射（见 BuildMaterialParamRows）——换 Shader 行集跟着换；
 		 * 值取当前生效材质，反射声明而材质还没有的先显示默认值。每轮重新解析材质（上一轮改动可能已换成实例） */
-		const std::vector<MaterialParamInfo> rows = MaterialParamUI::BuildMaterialParamRows(*current);
+		const std::vector<MaterialParamUI::MaterialParamRow> rows = MaterialParamUI::BuildMaterialParamRows(*current);
 		if (rows.empty())
 			MaterialParamUI::DrawMaterialReflectionNotice(*current);
 
-		for (const MaterialParamInfo& row : rows)
+		for (const MaterialParamUI::MaterialParamRow& row : rows)
 		{
 			const SharedPtr<Material> live = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
 			const auto& parameters = live->GetAllParameters();
-			const auto iter = parameters.find(ToID(row.Name));
-			const MaterialParamInfo& param_info = (iter != parameters.end()) ? iter->second : row;
+			const auto iter = parameters.find(ToID(row.Param.Name));
+			const MaterialParamInfo& param_info = (iter != parameters.end()) ? iter->second : row.Param;
 
-			MaterialParamUI::DrawMaterialParamRow(param_info, m_AssetRevealFunc,
+			MaterialParamUI::DrawMaterialParamRow(param_info, row.Spec, m_AssetRevealFunc,
 				[&component, &model, slot_index, &changed](ParamType type, const std::string& name, const std::any& value)
 				{
 					WriteBackMaterialParam(component, model, slot_index, type, name, value, changed);
@@ -2594,13 +2594,13 @@ namespace Helios
 		/* 参数行：集合来自 Shader 反射（换 Shader 后立即按新 Shader 列行）；值取编辑缓冲，
 		 * 反射声明而缓冲里还没有的先显示反射默认值 —— 编辑时才落进缓冲；
 		 * 反射不到时画报错提示，不回退旧参数表 */
-		const std::vector<MaterialParamInfo> rows = MaterialParamUI::BuildMaterialParamRows(material);
+		const std::vector<MaterialParamUI::MaterialParamRow> rows = MaterialParamUI::BuildMaterialParamRows(material);
 		if (rows.empty())
 			MaterialParamUI::DrawMaterialReflectionNotice(material);
 
-		for (const MaterialParamInfo& param_info : rows)
+		for (const MaterialParamUI::MaterialParamRow& row : rows)
 		{
-			MaterialParamUI::DrawMaterialParamRow(param_info, m_AssetRevealFunc,
+			MaterialParamUI::DrawMaterialParamRow(row.Param, row.Spec, m_AssetRevealFunc,
 				[&material, &on_edit](ParamType type, const std::string& name, const std::any& value)
 				{
 					if (type == ParamType::Texture)

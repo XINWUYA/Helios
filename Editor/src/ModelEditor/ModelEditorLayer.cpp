@@ -479,14 +479,14 @@ namespace Helios
 				if (MaterialParamUI::DrawMaterialShaderRow(*material, m_ShaderOptions))
 					DetachSubModelMaterialAsset(i);
 
-				const std::vector<MaterialParamInfo> rows = MaterialParamUI::BuildMaterialParamRows(*material);
+				const std::vector<MaterialParamUI::MaterialParamRow> rows = MaterialParamUI::BuildMaterialParamRows(*material);
 				if (rows.empty())
 					MaterialParamUI::DrawMaterialReflectionNotice(*material);
 
-				for (const MaterialParamInfo& param_info : rows)
+				for (const MaterialParamUI::MaterialParamRow& row : rows)
 				{
 					/* 层里的材质就是编辑缓冲：改动落回材质本体（写回里顺带做脱钩） */
-					MaterialParamUI::DrawMaterialParamRow(param_info, nullptr,
+					MaterialParamUI::DrawMaterialParamRow(row.Param, row.Spec, nullptr,
 						[this, i](ParamType type, const std::string& name, const std::any& value)
 						{
 							WriteSubModelMaterialParam(i, type, name, value);

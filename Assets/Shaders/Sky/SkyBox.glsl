@@ -41,7 +41,7 @@ struct SVextex2Frag
 
 layout (location = 0) in SVextex2Frag Input;
 
-uniform sampler2D u_SkyTex;
+uniform sampler2D u_SkyTex; // @property 天空环境贴图，挂在天空盒材质上
 
 /* 方向 → 等距柱状贴图 UV：与 ReflectionProbe/EquirectToCube.glsl 是同一映射
  * （改一处要同步另一处，否则天空盒与探针烘焙的环境对不上） */

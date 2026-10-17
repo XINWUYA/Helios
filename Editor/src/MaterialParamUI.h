@@ -54,12 +54,42 @@ namespace Helios::MaterialParamUI
 		return { reflected.Type, reflected.Name, std::any{} };
 	}
 
-	/* 材质参数行的显示清单：Shader 反射是参数集合的唯一来源（反射声明什么就列什么，跟材质
-	 * 里残留的旧参数无关）；值优先取材质里已有的，没有的就显示反射默认值。反射不到就返回空、
-	 * 不回退旧参数表（让调用方画报错），免得旧参数被显示成"默认材质"误导人。 */
-	inline std::vector<MaterialParamInfo> BuildMaterialParamRows(const Material& material)
+	/* 一行 = 当前值 + 这条属性的面板规范（显示名 / 控件类型 / 范围 / 条件） */
+	struct MaterialParamRow
 	{
-		std::vector<MaterialParamInfo> rows;
+		MaterialParamInfo Param;
+		MaterialPropertySpec Spec;
+	};
+
+	/* @showif 求值：拿材质里的当前值比（没有就用反射默认值）。开关不是 int / float、
+	 * 或者那个参数压根没声明时按可见处理 —— 别把行藏没了。 */
+	inline bool IsPropertyVisible(const Material& material, const ShaderReflectionData& reflection,
+		const MaterialPropertySpec& spec)
+	{
+		if (spec.ShowIfParam.empty())
+			return true;
+
+		std::any value;
+		const auto& parameters = material.GetAllParameters();
+		const auto iter = parameters.find(ToID(spec.ShowIfParam));
+		if (iter != parameters.end())
+			value = iter->second.Value;
+		else if (const ReflectedMaterialParam* declared = reflection.FindMaterialParam(spec.ShowIfParam))
+			value = declared->Default;
+
+		if (value.type() == typeid(int))
+			return static_cast<float>(std::any_cast<int>(value)) == spec.ShowIfValue;
+		if (value.type() == typeid(float))
+			return std::any_cast<float>(value) == spec.ShowIfValue;
+		return true;
+	}
+
+	/* 材质参数行的显示清单：Shader 反射声明里标了 @property 的才列（反射是参数集合的单一来源；
+	 * 没标的是引擎逐绘制给的值或库内部声明），再按 @showif 过滤掉当前不该露面的；值优先取材质里
+	 * 已有的，没有的就显示反射默认值。反射不到就返回空、不回退旧参数表（让调用方画报错）。 */
+	inline std::vector<MaterialParamRow> BuildMaterialParamRows(const Material& material)
+	{
+		std::vector<MaterialParamRow> rows;
 
 		const SharedPtr<DeviceShader> shader = material.GetShader();
 		if (shader == nullptr)
@@ -70,22 +100,35 @@ namespace Helios::MaterialParamUI
 		rows.reserve(reflection.MaterialParams.size());
 		for (const ReflectedMaterialParam& reflected : reflection.MaterialParams)
 		{
+			/* 引擎自己绑的参数（如 u_ShadowMap / u_BRDFLut）没标 @property，不列：
+			 * 贴图由渲染通道逐绘制给，面板改了也会被覆盖 */
+			if (!reflected.Property)
+				continue;
+			if (!IsPropertyVisible(material, reflection, reflected.PropertySpec))
+				continue;
+
 			const auto iter = parameters.find(ToID(reflected.Name));
-			rows.push_back(iter != parameters.end() ? iter->second : MakeDefaultMaterialParamRow(reflected));
+			rows.push_back({ iter != parameters.end() ? iter->second : MakeDefaultMaterialParamRow(reflected),
+				reflected.PropertySpec });
 		}
 
 		std::sort(rows.begin(), rows.end(),
-			[](const MaterialParamInfo& lhs, const MaterialParamInfo& rhs) { return lhs.Name < rhs.Name; });
+			[](const MaterialParamRow& lhs, const MaterialParamRow& rhs) { return lhs.Param.Name < rhs.Param.Name; });
 		return rows;
 	}
 
-	/* 参数无法按 Shader 反射时的报错提示行（Danger 色）：两种状态分开说清 ——
-	 * 没 Shader / 有 Shader 但反射为空（后端不支持或声明识别不出）。 */
+	/* 参数行空时的提示行（Danger 色）：三种状态分开说清 —— 没 Shader / 有 Shader 但反射为空
+	 * （后端不支持或声明识别不出）/ 反射到了但没有一条标 @property（材质没东西可改）。 */
 	inline void DrawMaterialReflectionNotice(const Material& material)
 	{
-		const char* message = (material.GetShader() == nullptr)
-			? "No shader loaded — cannot reflect parameters"
-			: "Shader reflection unavailable — parameters not listed";
+		const SharedPtr<DeviceShader> shader = material.GetShader();
+		const char* message = nullptr;
+		if (shader == nullptr)
+			message = "No shader loaded — cannot reflect parameters";
+		else if (shader->GetReflectionData().MaterialParams.empty())
+			message = "Shader reflection unavailable — parameters not listed";
+		else
+			message = "No @property params — nothing to edit in this shader";
 
 		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::Danger);
 		ImGui::TextWrapped("%s", message);
@@ -332,14 +375,19 @@ namespace Helios::MaterialParamUI
 
 	/* 一条材质参数行：值画在临时缓冲上，改动经 write_back 落进目标材质（槽位 → 自动实例化
 	 * 写回；资产编辑缓冲 / 模型编辑器 → 直接写）。行对齐：标签跟 frame 高控件垂直居中。
-	 * 贴图行只画缩略图（点击定位、拖入替换、悬停看大图）。 */
-	inline void DrawMaterialParamRow(const MaterialParamInfo& param_info,
+	 * 贴图行只画缩略图（点击定位、拖入替换、悬停看大图）。
+	 * spec 决定标签文案与控件形态（@property 显示名 / @type / @range）。 */
+	inline void DrawMaterialParamRow(const MaterialParamInfo& param_info, const MaterialPropertySpec& spec,
 		const std::function<void(const std::string&)>& reveal_asset,
 		const std::function<void(ParamType, const std::string&, const std::any&)>& write_back)
 	{
 		bool edited = false;
 		const std::string& param_name = param_info.Name;
+		const char* label = spec.Label.empty() ? param_name.c_str() : spec.Label.c_str();
 		const float kLabelWidth = EditorTheme::Token::PropertyLabelWidth;
+
+		/* 显示名可以重复、参数名不会：行 ID 按参数名压栈，换标签不影响控件身份 */
+		ImGui::PushID(param_name.c_str());
 
 		switch (param_info.Type)
 		{
@@ -348,7 +396,7 @@ namespace Helios::MaterialParamUI
 				auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(param_info.Value);
 				auto texture = texture_info.first; /* 临时副本 */
 
-				ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+				ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 
 				const auto& show_texture = texture ? texture
 					: AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Default.png"));
@@ -403,9 +451,25 @@ namespace Helios::MaterialParamUI
 		case ParamType::Int:
 			{
 				int value = std::any_cast<int>(param_info.Value);
-				const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
-				edited = ImGui::DragInt("##Value", &value, 0.1f);
+				if (spec.Widget == "bool")
+				{
+					bool checked = value != 0;
+					edited = ImGui::Checkbox("##Value", &checked);
+					value = checked ? 1 : 0;
+				}
+				else if (spec.Widget == "slider" && spec.HasRange)
+				{
+					edited = ImGui::SliderInt("##Value", &value,
+						static_cast<int>(spec.Min), static_cast<int>(spec.Max));
+				}
+				else
+				{
+					edited = ImGui::DragInt("##Value", &value, spec.Step > 0.0f ? spec.Step : 0.1f,
+						spec.HasRange ? static_cast<int>(spec.Min) : 0,
+						spec.HasRange ? static_cast<int>(spec.Max) : 0);
+				}
 				ImGuiExt::EndPropertyRow();
 				if (edited)
 					write_back(ParamType::Int, param_name, value);
@@ -414,9 +478,13 @@ namespace Helios::MaterialParamUI
 		case ParamType::Float:
 			{
 				float value = std::any_cast<float>(param_info.Value);
-				const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
-				edited = ImGui::DragFloat("##Value", &value, 0.01f);
+				if (spec.Widget == "slider" && spec.HasRange)
+					edited = ImGui::SliderFloat("##Value", &value, spec.Min, spec.Max);
+				else
+					edited = ImGui::DragFloat("##Value", &value, spec.Step > 0.0f ? spec.Step : 0.01f,
+						spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);
 				ImGuiExt::EndPropertyRow();
 				if (edited)
 					write_back(ParamType::Float, param_name, value);
@@ -425,9 +493,10 @@ namespace Helios::MaterialParamUI
 		case ParamType::Vec2:
 			{
 				glm::vec2 value = std::any_cast<glm::vec2>(param_info.Value);
-				const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
-				edited = ImGui::DragFloat2("##Value", glm::value_ptr(value), 0.01f);
+				edited = ImGui::DragFloat2("##Value", glm::value_ptr(value), spec.Step > 0.0f ? spec.Step : 0.01f,
+					spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);
 				ImGuiExt::EndPropertyRow();
 				if (edited)
 					write_back(ParamType::Vec2, param_name, value);
@@ -436,9 +505,13 @@ namespace Helios::MaterialParamUI
 		case ParamType::Vec3:
 			{
 				glm::vec3 value = std::any_cast<glm::vec3>(param_info.Value);
-				const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
-				edited = ImGui::DragFloat3("##Value", glm::value_ptr(value), 0.01f);
+				if (spec.Widget == "color")
+					edited = ImGui::ColorEdit3("##Value", glm::value_ptr(value));
+				else
+					edited = ImGui::DragFloat3("##Value", glm::value_ptr(value), spec.Step > 0.0f ? spec.Step : 0.01f,
+						spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);
 				ImGuiExt::EndPropertyRow();
 				if (edited)
 					write_back(ParamType::Vec3, param_name, value);
@@ -447,9 +520,13 @@ namespace Helios::MaterialParamUI
 		case ParamType::Vec4:
 			{
 				glm::vec4 value = std::any_cast<glm::vec4>(param_info.Value);
-				const float value_width = ImGuiExt::BeginPropertyRow(param_name.c_str(), kLabelWidth, true);
+				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
-				edited = ImGui::DragFloat4("##Value", glm::value_ptr(value), 0.01f);
+				if (spec.Widget == "color")
+					edited = ImGui::ColorEdit4("##Value", glm::value_ptr(value));
+				else
+					edited = ImGui::DragFloat4("##Value", glm::value_ptr(value), spec.Step > 0.0f ? spec.Step : 0.01f,
+						spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);
 				ImGuiExt::EndPropertyRow();
 				if (edited)
 					write_back(ParamType::Vec4, param_name, value);
@@ -459,5 +536,7 @@ namespace Helios::MaterialParamUI
 			/* Mat4 等没做编辑器，跳过（只读展示也省） */
 			break;
 		}
+
+		ImGui::PopID();
 	}
 }

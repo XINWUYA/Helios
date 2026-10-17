@@ -6,6 +6,8 @@
 #include "GraphicsAPI/Metal/MetalShader.h"
 #endif
 #include <regex>
+#include <cctype>
+#include <cstring>
 #include <spirv_cross.hpp>
 
 namespace Helios
@@ -57,6 +59,10 @@ namespace Helios
 
 	namespace
 	{
+		/* 声明行尾的"这是材质参数"标记：只有带标记的才进材质面板、才写进材质文件。
+		 * 不标 = 引擎逐绘制绑的贴图（u_ShadowMap / u_BRDFLut 这类）、管线设的开关，或库内部声明。 */
+		constexpr const char* kPropertyMarker = "@property";
+
 		/* 解析 GLSL 字面量：`1.5f` / `0` / `-2`（去空白与 f 后缀；失败返回 false） */
 		bool ParseFloatLiteral(const std::string& token, float& out)
 		{
@@ -163,6 +169,124 @@ namespace Helios
 			default: return std::any{};
 			}
 		}
+
+		/* 去掉首尾空白 */
+		std::string Trim(const std::string& text)
+		{
+			size_t begin = 0;
+			size_t end = text.size();
+			while (begin < end && std::isspace(static_cast<unsigned char>(text[begin])))
+				++begin;
+			while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])))
+				--end;
+			return text.substr(begin, end - begin);
+		}
+
+		/* 注释里有没有这条指令：@range 不会命中 @range2（后面必须是括号 / 空白 / 结尾） */
+		bool HasDirective(const std::string& comment, const char* directive)
+		{
+			size_t pos = comment.find(directive);
+			while (pos != std::string::npos)
+			{
+				const size_t after = pos + std::strlen(directive);
+				if (after >= comment.size() || comment[after] == '('
+					|| std::isspace(static_cast<unsigned char>(comment[after])))
+					return true;
+				pos = comment.find(directive, after);
+			}
+			return false;
+		}
+
+		/* 取 `@名字(...)` 括号里的文本；没这条指令、或后面没括号时返回空 */
+		std::string DirectiveArg(const std::string& comment, const char* directive)
+		{
+			size_t pos = comment.find(directive);
+			while (pos != std::string::npos)
+			{
+				const size_t after = pos + std::strlen(directive);
+				if (after >= comment.size())
+					return {};
+
+				/* 紧跟空白 = 光秃秃一条指令（如 @property），没有括号参数 */
+				if (std::isspace(static_cast<unsigned char>(comment[after])))
+					return {};
+
+				if (comment[after] == '(')
+				{
+					const size_t close = comment.find(')', after);
+					if (close == std::string::npos)
+						return {};
+					return Trim(comment.substr(after + 1, close - after - 1));
+				}
+
+				pos = comment.find(directive, after);
+			}
+			return {};
+		}
+
+		/* 按逗号拆参数（保留空项，交给调用方判长度） */
+		std::vector<std::string> SplitArgs(const std::string& text)
+		{
+			std::vector<std::string> args;
+			size_t begin = 0;
+			while (true)
+			{
+				const size_t comma = text.find(',', begin);
+				args.push_back(Trim(text.substr(begin,
+					comma == std::string::npos ? std::string::npos : comma - begin)));
+				if (comma == std::string::npos)
+					break;
+				begin = comma + 1;
+			}
+			return args;
+		}
+
+		/* 把声明行尾注释解析成面板规范（认不出的指令就当普通注释，不影响参数本身） */
+		MaterialPropertySpec ParsePropertySpec(const std::string& comment)
+		{
+			MaterialPropertySpec spec;
+			spec.Label = DirectiveArg(comment, kPropertyMarker);
+
+			spec.Widget = DirectiveArg(comment, "@type");
+			for (char& character : spec.Widget)
+				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+
+			const std::vector<std::string> range = SplitArgs(DirectiveArg(comment, "@range"));
+			float min_value = 0.0f;
+			float max_value = 0.0f;
+			if (range.size() >= 2 && ParseFloatLiteral(range[0], min_value)
+				&& ParseFloatLiteral(range[1], max_value) && min_value < max_value)
+			{
+				spec.HasRange = true;
+				spec.Min = min_value;
+				spec.Max = max_value;
+				if (range.size() >= 3)
+					ParseFloatLiteral(range[2], spec.Step);
+			}
+
+			const std::vector<std::string> show_if = SplitArgs(DirectiveArg(comment, "@showif"));
+			if (show_if.size() == 2 && !show_if[0].empty())
+			{
+				float value = 0.0f;
+				if (show_if[1] == "true")
+				{
+					spec.ShowIfParam = show_if[0];
+					spec.ShowIfValue = 1.0f;
+				}
+				else if (show_if[1] == "false")
+				{
+					spec.ShowIfParam = show_if[0];
+					spec.ShowIfValue = 0.0f;
+				}
+				else if (ParseFloatLiteral(show_if[1], value))
+				{
+					spec.ShowIfParam = show_if[0];
+					spec.ShowIfValue = value;
+				}
+			}
+
+			return spec;
+		}
 	}
 
 	void DeviceShader::ReflectFromSPIRV(const std::vector<uint32_t>& spirv)
@@ -224,8 +348,9 @@ namespace Helios
 			return;
 
 		/* 材质参数表按名去重（顶点 / 片元各调用一次）：先到者定类型，
-		 * 后到的默认值只在前者没有时补上。 */
-		const auto add_material_param = [this](ParamType type, const std::string& name, std::any default_value)
+		 * 后到的默认值只在前者没有时补上，材质标记取或、面板规范取有内容的那份。 */
+		const auto add_material_param = [this](ParamType type, const std::string& name, std::any default_value,
+			bool property, const MaterialPropertySpec& spec)
 		{
 			for (ReflectedMaterialParam& declared : m_Reflection.MaterialParams)
 			{
@@ -233,15 +358,18 @@ namespace Helios
 					continue;
 				if (!declared.Default.has_value() && default_value.has_value())
 					declared.Default = std::move(default_value);
+				declared.Property = declared.Property || property;
+				if (!spec.Label.empty() || !spec.Widget.empty() || spec.HasRange || !spec.ShowIfParam.empty())
+					declared.PropertySpec = spec;
 				return;
 			}
-			m_Reflection.MaterialParams.push_back({ type, name, std::move(default_value) });
+			m_Reflection.MaterialParams.push_back({ type, name, std::move(default_value), property, spec });
 		};
 
-		/* 匹配：可选的 layout(binding = N) + uniform <type> <name>[数组]?;（裸 sampler 也是正经材质
-		 * 参数，漏掉它就会进不了面板）；binding 拿不到时就不填 SamplerBindings，交给后端另行解析
-		 * （Metal 从 MSL 的 [[texture(N)]] 拿）。 */
-		static const std::regex sampler_regex(R"((?:layout\s*\(\s*binding\s*=\s*([0-9]+)\s*\)\s*)?uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*;)");
+		/* 匹配：可选的 layout(binding = N) + uniform <type> <name>[数组]?;（裸 sampler 也要进反射表，
+		 * 绑定点 / 面板可见性另按标记定）；binding 拿不到时就不填 SamplerBindings，交给后端另行解析
+		 * （Metal 从 MSL 的 [[texture(N)]] 拿）。行尾注释的第 4 组用来认 @property 标记。 */
+		static const std::regex sampler_regex(R"((?:layout\s*\(\s*binding\s*=\s*([0-9]+)\s*\)\s*)?uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*;[\r\t ]*(?://([^\n]*))?)");
 
 		for (auto it = std::sregex_iterator(source.begin(), source.end(), sampler_regex); it != std::sregex_iterator(); ++it)
 		{
@@ -262,13 +390,14 @@ namespace Helios
 			/* 有 layout(binding) 才填绑定点；裸 sampler 不臆造绑定点 */
 			if (match.str(1).size() > 0)
 				m_Reflection.SamplerBindings[name] = static_cast<uint32_t>(std::stoul(match.str(1)));
-			add_material_param(ParamType::Texture, name, std::any{});
+			add_material_param(ParamType::Texture, name, std::any{},
+				HasDirective(match.str(4), kPropertyMarker), ParsePropertySpec(match.str(4)));
 		}
 
 		/* 非纹理材质参数：裸 uniform（int / float / vec2-4 / mat4，可选 layout 限定与源码默认值）。
 		 * uniform block 的块头（`uniform Xxx {`）与块内成员都不带 `uniform` 关键字，不会命中。 */
 		static const std::regex material_regex(
-			R"((?:layout\s*\([^)]*\)\s*)?uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(int|float|vec[234]|mat4)\s+([A-Za-z_]\w*)\s*(?:=\s*([^;]+?))?\s*;)");
+			R"((?:layout\s*\([^)]*\)\s*)?uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(int|float|vec[234]|mat4)\s+([A-Za-z_]\w*)\s*(?:=\s*([^;]+?))?\s*;[\r\t ]*(?://([^\n]*))?)");
 
 		for (auto it = std::sregex_iterator(source.begin(), source.end(), material_regex); it != std::sregex_iterator(); ++it)
 		{
@@ -288,7 +417,8 @@ namespace Helios
 			if (match.str(3).size() > 0 && param_type != ParamType::Mat4)
 				default_value = ParseMaterialParamDefault(param_type, match.str(3));
 
-			add_material_param(param_type, name, std::move(default_value));
+			add_material_param(param_type, name, std::move(default_value),
+				HasDirective(match.str(4), kPropertyMarker), ParsePropertySpec(match.str(4)));
 		}
 	}
 }
