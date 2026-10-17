@@ -13,6 +13,7 @@
 #include "Helios/Common/Utils.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/Scene/ReflectionProbe.h"	/* .probe 详情的烘焙结果预览（BuildPreviewTexture） */
+#include "Helios/Scene/AnimationClip.h"
 #include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
@@ -260,6 +261,7 @@ namespace Helios
 			if (type == typeid(ReflectionProbeComponent)) return Icons::Id::ReflectionProbe;
 			if (type == typeid(PostProcessComponent))     return Icons::Id::Emission;
 			if (type == typeid(BloomComponent))           return Icons::Id::Emission;
+			if (type == typeid(AnimatorComponent))        return Icons::Id::Animation;
 
 			/* 光源是一个组件块但造型分三种：图标跟着「当前光源类型」走，
 			 * 这样把 Type 从点光改成聚光时，卡头图标会立刻跟着变。
@@ -1461,6 +1463,7 @@ namespace Helios
 			case AssetFileKind::Model:    return Icons::Id::FileModel;
 			case AssetFileKind::Material: return Icons::Id::FileMaterial;
 			case AssetFileKind::Probe:    return Icons::Id::FileProbe;
+			case AssetFileKind::Animation: return Icons::Id::AnimationClip;
 			case AssetFileKind::Other:    return Icons::Id::File;
 			}
 
@@ -1484,6 +1487,7 @@ namespace Helios
 			case AssetFileKind::Model:    return "Model";
 			case AssetFileKind::Material: return "Material";
 			case AssetFileKind::Probe:    return "Reflection Probe";
+			case AssetFileKind::Animation: return "Animation Clip";
 			}
 
 			return "File";
@@ -1841,6 +1845,19 @@ namespace Helios
 				m_AssetDetailRows.emplace_back("Cameras", std::to_string(camera_count));
 			if (probe_count > 0)
 				m_AssetDetailRows.emplace_back("Probes", std::to_string(probe_count));
+		}
+		else if (entry.Kind == AssetFileKind::Animation)
+		{
+			/* 动画片段：直接解析文件拿时长 / 轨道数（不走资源缓存，选中即时可见） */
+			AnimationClip clip;
+			if (clip.Deserializer(PathToUtf8(absolute_path)))
+			{
+				char duration_text[32];
+				std::snprintf(duration_text, sizeof(duration_text), "%.2f s", clip.GetDuration());
+				m_AssetDetailRows.emplace_back("Duration", duration_text);
+				m_AssetDetailRows.emplace_back("Tracks", std::to_string(clip.GetTracks().size()));
+				m_AssetDetailRows.emplace_back("Loop", clip.IsLoop() ? "Yes" : "No");
+			}
 		}
 		else if (entry.Kind == AssetFileKind::Probe)
 		{

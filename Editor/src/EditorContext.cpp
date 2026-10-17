@@ -46,6 +46,18 @@ namespace Helios
 			layer->OpenScene(path);
 	}
 
+	void EditorContext::OpenAnimationClip(const std::string& path)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->OpenAnimationClip(path);
+	}
+
+	bool EditorContext::WantsTimelineArrowKeys()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->WantsTimelineArrowKeys();
+	}
+
 	void EditorContext::SaveScene()
 	{
 		if (auto* layer = GetSceneLayer())
@@ -206,6 +218,18 @@ namespace Helios
 	{
 		if (auto* layer = GetSceneLayer())
 			layer->SetFrameGraphVisible(visible);
+	}
+
+	bool EditorContext::IsTimelineVisible()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->IsTimelineVisible();
+	}
+
+	void EditorContext::SetTimelineVisible(bool visible)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->SetTimelineVisible(visible);
 	}
 
 	void EditorContext::ImportModel()

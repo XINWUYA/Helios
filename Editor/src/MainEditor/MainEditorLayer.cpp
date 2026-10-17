@@ -31,6 +31,11 @@ namespace Helios
 		EditorResourceBrowser::SceneOpenSink scene_open;
 		scene_open.Open = [this](const std::string& path) { m_Context.OpenScene(path); };
 		m_ResourceBrowser.SetSceneOpenSink(std::move(scene_open));
+
+		/* 双击 .anim → 时间轴独立编辑（不需要先找一个挂着这个片段的实体） */
+		EditorResourceBrowser::AnimationClipOpenSink clip_open;
+		clip_open.Open = [this](const std::string& path) { m_Context.OpenAnimationClip(path); };
+		m_ResourceBrowser.SetAnimationClipOpenSink(std::move(clip_open));
 	}
 
 	void MainEditorLayer::OnDetached()
@@ -46,6 +51,17 @@ namespace Helios
 
 		/* 还原上次关闭时的停靠前台页签：须在任何窗口提交之前（节点回写读当前焦点窗口） */
 		m_LayoutRestore.Update();
+
+		/* 时间轴里方向键用于微调：鼠标停在时刻区时，把这一帧的导航移动请求在提交任何控件之前吃掉，
+		 * 方向键就只做微调、不会把焦点挪到别的面板；其它位置方向键和 Tab 仍然归导航 */
+		if (m_Context.WantsTimelineArrowKeys())
+		{
+			ImGuiContext& context = *ImGui::GetCurrentContext();
+			context.NavMoveScoringItems = false;
+			context.NavMoveSubmitted = false;
+			context.NavMoveForwardToNextFrame = false;
+			context.NavMoveDir = ImGuiDir_None;
+		}
 
 		/* 菜单（含 DockSpace 宿主） */
 		ShowMenuUI();
@@ -423,6 +439,10 @@ namespace Helios
 					bool frame_graph_visible = m_Context.IsFrameGraphVisible();
 					if (ImGui::MenuItem("Frame Graph", nullptr, &frame_graph_visible))
 						m_Context.SetFrameGraphVisible(frame_graph_visible);
+
+					bool timeline_visible = m_Context.IsTimelineVisible();
+					if (ImGui::MenuItem("Timeline", nullptr, &timeline_visible))
+						m_Context.SetTimelineVisible(timeline_visible);
 
 					/* 日志窗口：显隐状态在本层（窗口由本层提交） */
 					ImGui::MenuItem("Log", nullptr, &m_IsLogVisible);

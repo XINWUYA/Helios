@@ -92,6 +92,7 @@ namespace Helios
 			{ "Scene",          ".scn",      "New Scene",          Icons::Id::FileScene },
 			{ "Material Graph", ".mtlgraph", "New Material Graph", Icons::Id::FileMtlGraph },
 			{ "Material",       ".mtl",      "New Material",       Icons::Id::FileMaterial },
+			{ "Animation Clip", ".anim",     "New Animation",      Icons::Id::AnimationClip },
 			{ "File...",        "",          "New File",           Icons::Id::File },
 		};
 
@@ -290,6 +291,7 @@ namespace Helios
 		case FileType::Model:    return Icons::Id::FileModel;
 		case FileType::Material: return Icons::Id::FileMaterial;
 		case FileType::Probe:    return Icons::Id::FileProbe;
+		case FileType::Animation: return Icons::Id::AnimationClip;
 		}
 
 		return Icons::Id::File;
@@ -310,6 +312,7 @@ namespace Helios
 		case AssetFileKind::Model:    return FileType::Model;
 		case AssetFileKind::Material: return FileType::Material;
 		case AssetFileKind::Probe:    return FileType::Probe;
+		case AssetFileKind::Animation: return FileType::Animation;
 		}
 
 		return FileType::Default;
@@ -329,6 +332,7 @@ namespace Helios
 		case FileType::Model:    return AssetFileKind::Model;
 		case FileType::Material: return AssetFileKind::Material;
 		case FileType::Probe:    return AssetFileKind::Probe;
+		case FileType::Animation: return AssetFileKind::Animation;
 		case FileType::Folder:   return AssetFileKind::Other;   /* 文件夹不看大类（看 IsFolder） */
 		}
 
@@ -351,6 +355,7 @@ namespace Helios
 		case TypeFilter::Model:    return "Models";
 		case TypeFilter::Material: return "Materials";
 		case TypeFilter::Probe:    return "Reflection Probes";
+		case TypeFilter::Animation: return "Animations";
 		}
 
 		return "All types";
@@ -370,6 +375,7 @@ namespace Helios
 		case TypeFilter::Model:    return type == FileType::Model;
 		case TypeFilter::Material: return type == FileType::Material;
 		case TypeFilter::Probe:    return type == FileType::Probe;
+		case TypeFilter::Animation: return type == FileType::Animation;
 		}
 
 		return true;
@@ -1460,6 +1466,7 @@ namespace Helios
 		case TypeFilter::Model:    return Icons::Id::FileModel;
 		case TypeFilter::Material: return Icons::Id::FileMaterial;
 		case TypeFilter::Probe:    return Icons::Id::FileProbe;
+		case TypeFilter::Animation: return Icons::Id::AnimationClip;
 		}
 
 		return Icons::Id::File;
@@ -2400,6 +2407,12 @@ namespace Helios
 								ClearRenameCandidate();
 								m_SceneOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
 							}
+							else if (child_node->Type == FileType::Animation && m_AnimationClipOpenSink.Open)
+							{
+								/* 双击 .anim：交给时间轴独立编辑，不需要先找挂了这个片段的实体 */
+								ClearRenameCandidate();
+								m_AnimationClipOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
+							}
 							else
 							{
 								BeginInlineRename(child_node);
@@ -2628,6 +2641,12 @@ namespace Helios
 						/* 双击是"用"：打开场景；.scn 的改名留给慢双击 / 右键菜单 */
 						ClearRenameCandidate();
 						m_SceneOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
+					}
+					else if (child_node->Type == FileType::Animation && m_AnimationClipOpenSink.Open)
+					{
+						/* 双击 .anim：交给时间轴独立编辑 */
+						ClearRenameCandidate();
+						m_AnimationClipOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
 					}
 					else
 					{

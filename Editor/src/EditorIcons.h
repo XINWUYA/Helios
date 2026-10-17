@@ -30,7 +30,7 @@ namespace Helios
 			/* CPU 录制选项：同时写追踪文本（chrome://tracing 时间线 JSON） */
 			TraceText,
 			/* 通用 */
-			Menu, Add, Remove, Return, ReturnRoot, Filter, Search, Visible, Hidden,
+			Menu, Add, Remove, Delete, Return, ReturnRoot, Filter, Search, Visible, Hidden,
 			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
 			Scene, Entity, Model, Cube, Sphere, Plane, Shape3D, Camera, Light, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Sprite,
 			Audio, Particle, Terrain,
@@ -46,6 +46,8 @@ namespace Helios
 			FitView, FlipVertical,
 			/* 弹窗窗口控制（CPU 图表弹窗的行尾按钮）：最大化铺满主视口 / 还原为浮动窗 */
 			Maximize, Restore,
+			/* 侧边栏展开 / 收起（时间轴右侧属性栏开关） */
+			ExpandSidebar, CollapseSidebar,
 			/* 抓取当前帧（实时视图：冻结数据供分析） */
 			Capture,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
@@ -60,6 +62,8 @@ namespace Helios
 			Diffuse, Specular, Shadow, Indirect, Overdraw, Mipmap, Probe,
 			/* 面板工具动作：材质参数浮层的开关（模型编辑窗口右上角） */
 			Sliders,
+			/* 动画：片段 / 轨道 / 暂停 / 曲线 / 预览 / 循环播放（播放与停止在运行组） */
+			AnimationClip, Animation, Pause, Curve, Preview, Loop,
 			COUNT
 		};
 
@@ -74,6 +78,9 @@ namespace Helios
 
 		/* 图标元数据表：与 Id 枚举一一对应，Draw 是加载失败时的回退画法 */
 		const IconDesc& Get(Id id);
+
+		/* 这张图标的 SVG 是否真的从 EditorRes/icons 加载到了（自检用：文件名写错会静默走回退） */
+		[[nodiscard]] bool HasSvg(Id id);
 
 		/* 绘制图标本体（不进入交互；按钮请用 IconButton）。
 		 * apply_optical_scale = false 时不吃每图的光学尺寸（按给定尺寸原样画）——

@@ -55,6 +55,14 @@ namespace Helios
 
 		void SetSceneOpenSink(SceneOpenSink sink) { m_SceneOpenSink = std::move(sink); }
 
+		/* 双击 .anim → 交给时间轴独立编辑（同 SceneOpenSink，由主壳层注入） */
+		struct AnimationClipOpenSink
+		{
+			std::function<void(const std::string&)> Open;
+		};
+
+		void SetAnimationClipOpenSink(AnimationClipOpenSink sink) { m_AnimationClipOpenSink = std::move(sink); }
+
 		/* 在浏览器里定位一个资源（跨面板能力：属性面板点贴图 → 跳到这里）：
 		 * 切到它所在目录并选中它。路径按相对 Assets 的口径给；
 		 * 找不到（外部新增、轮询未到）就记为待选中并触发一次重建。 */
@@ -79,6 +87,7 @@ namespace Helios
 			Model,
 			Material,
 			Probe,
+			Animation,
 		};
 
 		/* 内容筛选里的「按类型」（工具行下拉）：All = 不按类型筛。
@@ -96,6 +105,7 @@ namespace Helios
 			Model,
 			Material,
 			Probe,
+			Animation,
 			COUNT
 		};
 
@@ -355,6 +365,8 @@ namespace Helios
 		AssetSelectionSink m_AssetSelectionSink;
 		/* 双击 .scn → 场景层（见 SceneOpenSink，由主壳层注入） */
 		SceneOpenSink m_SceneOpenSink;
+		/* 双击 .anim → 时间轴（见 AnimationClipOpenSink） */
+		AnimationClipOpenSink m_AnimationClipOpenSink;
 		/* 本帧有"选择动作"（点选 / 清空）—— 同一项被再次点选也要重新通知一次，
 		 * 否则"点资源 → 点实体 → 再点同一资源"的第三次点击不会把属性面板切回来。
 		 * 切目录的静默清空把它也一并吞掉（那次清空不通知面板，见 ApplyCurrentNode）。 */

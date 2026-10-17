@@ -22,6 +22,10 @@ namespace Helios
 		void ImportScene();
 		/* 打开指定场景文件（资源浏览器双击 .scn）；path 为绝对路径 */
 		void OpenScene(const std::string& path);
+		/* 双击 .anim：让时间轴独立编辑这个片段（不需要实体） */
+		void OpenAnimationClip(const std::string& path);
+		/* 方向键是否归时间轴微调（鼠标在时刻区）：主壳层据此压掉这一帧的导航移动 */
+		[[nodiscard]] bool WantsTimelineArrowKeys();
 		void SaveScene();
 		void SaveSceneAs();
 
@@ -73,6 +77,10 @@ namespace Helios
 		/* ---- 渲染图可视化页（Frame Graph）窗口显隐 ---- */
 		[[nodiscard]] bool IsFrameGraphVisible();
 		void SetFrameGraphVisible(bool visible);
+
+		/* ---- 时间轴窗口显隐 ---- */
+		[[nodiscard]] bool IsTimelineVisible();
+		void SetTimelineVisible(bool visible);
 
 		/* 模型导入（ModelEditor 面板） */
 		void ImportModel();

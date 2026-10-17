@@ -93,6 +93,18 @@ namespace Helios
 		/* 场景管理及属性窗口 */
 		m_SceneHierarchy.OnImGuiRender();
 
+		/* 时间轴：读当前选中实体（或其最近的 Animator 祖先）的片段；
+		 * 放在属性面板之后 —— 录制要看到这一帧的属性改动 */
+		m_TimelinePanel.OnImGuiRender(m_pMainScene.get(), m_SceneHierarchy.GetSelectedEntity(),
+			&m_CommandStack, m_IsTimelineVisible);
+
+		/* 双击 .anim 打开：面板提交过之后再切页签，停在别的页签上的时间轴才会跳到前台 */
+		if (m_FocusTimelineRequested)
+		{
+			m_FocusTimelineRequested = false;
+			ImGui::SetWindowFocus(Panel::kTimeline);
+		}
+
 		/* 渲染图可视化页（依赖图 + 各 Pass 的中间渲染结果）：
 		 * 窗口隐藏时由面板自身跳过提交（恢复入口在 View 菜单），但仍逐帧调用，
 		 * 抓取请求的置位 / 清零都在面板内部结算 */
@@ -100,6 +112,9 @@ namespace Helios
 
 		/* 主窗口，需要最后再画，以确保能够得到正确的窗口宽高 */
 		ShowSceneViewportUI();
+
+		/* 录制放在视口之后：gizmo 在同一帧里改的变换也能被抓到 */
+		m_TimelinePanel.TickRecording(m_pMainScene.get(), m_SceneHierarchy.GetSelectedEntity());
 	}
 
 	void SceneEditorLayer::OnEvent(IEvent* event)
@@ -509,6 +524,28 @@ namespace Helios
 
 		EDITOR_LOG_INFO("Open scene: {}.", path);
 		SetActiveScene(scene, path);
+	}
+
+	bool SceneEditorLayer::WantsTimelineArrowKeys() const
+	{
+		return m_IsTimelineVisible && m_TimelinePanel.WantsArrowKeys();
+	}
+
+	void SceneEditorLayer::OpenAnimationClip(const std::string& path)
+	{
+		PROFILE_FUNCTION();
+
+		auto clip = AssetManager::Instance().GetOrLoad<AnimationClip>(path);
+		if (clip == nullptr)
+		{
+			EDITOR_LOG_WARN("Open animation clip failed: {}.", path);
+			return;
+		}
+
+		EDITOR_LOG_INFO("Edit animation clip: {}.", path);
+		m_TimelinePanel.OpenClip(clip);
+		m_IsTimelineVisible = true;
+		m_FocusTimelineRequested = true;
 	}
 
 	void SceneEditorLayer::ImportScene()

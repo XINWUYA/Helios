@@ -498,6 +498,21 @@ namespace Helios::Icons
 			dl->AddLine(c.At(0.30f, 0.50f), c.At(0.70f, 0.50f), color, t);
 		}
 
+		/* 删除垃圾桶：红盖 + 桶身 + 两条竖线（与 Remove 的减号区分） */
+		void DrawDelete(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 red = PaletteColor(color, kRed);
+
+			dl->AddLine(c.At(0.18f, 0.27f), c.At(0.82f, 0.27f), red, t);
+			dl->AddLine(c.At(0.38f, 0.17f), c.At(0.62f, 0.17f), red, t);
+			dl->AddRectFilled(c.At(0.25f, 0.31f), c.At(0.75f, 0.85f), Soften(color, 0.16f), c.Len(0.05f));
+			dl->AddRect(c.At(0.25f, 0.31f), c.At(0.75f, 0.85f), red, c.Len(0.05f), 0, t);
+			dl->AddLine(c.At(0.41f, 0.43f), c.At(0.41f, 0.73f), color, t);
+			dl->AddLine(c.At(0.59f, 0.43f), c.At(0.59f, 0.73f), color, t);
+		}
+
 		void DrawReturn(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -1134,6 +1149,32 @@ namespace Helios::Icons
 			dl->AddRectFilled(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), PaletteColor(color, kViolet, 0.16f), c.Len(0.056f));
 			dl->AddRect(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), color, c.Len(0.056f), 0, t);
 			dl->AddLine(c.At(0.172f, 0.531f), c.At(0.641f, 0.531f), PaletteColor(color, kViolet), t);
+		}
+
+		/* 侧边栏：外框 + 侧栏分隔线 + 指向内容的箭头 */
+		void DrawExpandSidebar(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 arrow = PaletteColor(color, kMint);
+
+			dl->AddRect(c.At(0.12f, 0.16f), c.At(0.88f, 0.84f), color, c.Len(0.06f), 0, t);
+			dl->AddLine(c.At(0.62f, 0.16f), c.At(0.62f, 0.84f), color, t);
+			dl->AddLine(c.At(0.52f, 0.50f), c.At(0.28f, 0.50f), arrow, t);
+			dl->AddLine(c.At(0.28f, 0.50f), c.At(0.37f, 0.39f), arrow, t);
+			dl->AddLine(c.At(0.28f, 0.50f), c.At(0.37f, 0.61f), arrow, t);
+		}
+
+		void DrawCollapseSidebar(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddRect(c.At(0.12f, 0.16f), c.At(0.88f, 0.84f), color, c.Len(0.06f), 0, t);
+			dl->AddLine(c.At(0.38f, 0.16f), c.At(0.38f, 0.84f), color, t);
+			dl->AddLine(c.At(0.48f, 0.50f), c.At(0.72f, 0.50f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.72f, 0.50f), c.At(0.63f, 0.39f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.72f, 0.50f), c.At(0.63f, 0.61f), PaletteColor(color, kViolet), t);
 		}
 
 		/* 抓取当前帧（相机）：机身（软紫底 + 描边）+ 顶部取景凸起 + 镜头（紫环 + 薄荷芯） */
@@ -2006,6 +2047,96 @@ namespace Helios::Icons
 		}
 
 		/* 元数据表：Id 与表项一一对应（顺序必须与 Id 枚举一致）*/
+		/* ---- 动画 ---- */
+
+		/* AnimationClip：上下齿孔带 + 中间的播放三角（与 SVG 同构的后备画法） */
+		void DrawAnimationClip(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddRectFilled(c.At(0.13f, 0.16f), c.At(0.87f, 0.84f), Soften(color, 0.18f), c.Len(0.06f));
+			dl->AddRect(c.At(0.13f, 0.16f), c.At(0.87f, 0.84f), color, c.Len(0.06f), 0, t);
+			for (int i = 0; i < 4; ++i)
+			{
+				const float x = 0.21f + 0.18f * static_cast<float>(i);
+				dl->AddLine(c.At(x, 0.16f), c.At(x, 0.28f), color, t);
+				dl->AddLine(c.At(x, 0.72f), c.At(x, 0.84f), color, t);
+			}
+			dl->AddTriangleFilled(c.At(0.43f, 0.40f), c.At(0.43f, 0.60f), c.At(0.61f, 0.50f), PaletteColor(color, kMint));
+		}
+
+		/* Animation：三条轨道 + 错开的关键帧 + 播放方向 */
+		void DrawAnimation(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			const float ys[3] = { 0.24f, 0.50f, 0.76f };
+			for (int i = 0; i < 3; ++i)
+			{
+				dl->AddLine(c.At(0.18f, ys[i]), c.At(0.82f, ys[i]), color, t);
+				dl->AddCircleFilled(c.At(i == 1 ? 0.40f : 0.50f, ys[i]), c.Len(0.09f),
+					i == 1 ? color : PaletteColor(color, kMint));
+			}
+			dl->AddTriangleFilled(c.At(0.66f, 0.40f), c.At(0.66f, 0.60f), c.At(0.82f, 0.50f), color);
+		}
+
+		void DrawPause(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			dl->AddRectFilled(c.At(0.32f, 0.28f), c.At(0.44f, 0.72f), color, c.Len(0.04f));
+			dl->AddRectFilled(c.At(0.56f, 0.28f), c.At(0.68f, 0.72f), PaletteColor(color, kMint), c.Len(0.04f));
+		}
+
+		/* 循环播放：开口圆 + 箭头，中间一个小播放三角（与设计稿的 loop 同形） */
+		void DrawLoop(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 ring = PaletteColor(color, kViolet);
+			const ImU32 glyph = PaletteColor(color, kMint);
+
+			/* 开口在右上：从 -60° 扫到 280°，箭头落在起点上 */
+			dl->PathArcTo(c.At(0.5f, 0.5f), c.Len(0.3125f), -1.0472f, 4.8869f, 40);
+			dl->PathStroke(ring, 0, t);
+
+			const ImVec2 arrow[] = { c.At(0.656f, 0.229f), c.At(0.541f, 0.266f), c.At(0.567f, 0.104f) };
+			dl->AddTriangleFilled(arrow[0], arrow[1], arrow[2], ring);
+
+			const ImVec2 play[] = { c.At(0.406f, 0.375f), c.At(0.656f, 0.5f), c.At(0.406f, 0.625f) };
+			dl->AddTriangleFilled(play[0], play[1], play[2], glyph);
+		}
+
+		void DrawCurve(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddLine(c.At(0.14f, 0.12f), c.At(0.14f, 0.86f), color, t);
+			dl->AddLine(c.At(0.14f, 0.86f), c.At(0.88f, 0.86f), color, t);
+
+			const ImVec2 points[] = {
+				c.At(0.22f, 0.72f), c.At(0.44f, 0.66f), c.At(0.64f, 0.32f), c.At(0.84f, 0.48f),
+			};
+			dl->AddPolyline(points, IM_ARRAYSIZE(points), color, 0, t);
+			for (const ImVec2& point : points)
+				dl->AddCircleFilled(point, c.Len(0.055f), PaletteColor(color, kMint));
+		}
+
+		void DrawPreview(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddRect(c.At(0.12f, 0.20f), c.At(0.88f, 0.80f), color, c.Len(0.06f), 0, t);
+			const ImVec2 points[] = {
+				c.At(0.20f, 0.70f), c.At(0.38f, 0.46f), c.At(0.52f, 0.58f), c.At(0.68f, 0.38f), c.At(0.82f, 0.70f),
+			};
+			dl->AddPolyline(points, IM_ARRAYSIZE(points), PaletteColor(color, kMint), 0, t);
+			dl->AddCircleFilled(c.At(0.70f, 0.32f), c.Len(0.055f), PaletteColor(color, kMint));
+		}
+
 		constexpr IconDesc s_Icons[] = {
 			{ "None",              nullptr },
 			{ "NewScene",          &DrawNewScene },
@@ -2033,6 +2164,7 @@ namespace Helios::Icons
 			{ "Menu",              &DrawMenu },
 			{ "Add",               &DrawAdd },
 			{ "Remove",            &DrawRemove },
+			{ "Delete",            &DrawDelete },
 			{ "Return",            &DrawReturn },
 			{ "ReturnRoot",        &DrawReturnRoot },
 			{ "Filter",            &DrawFilter },
@@ -2065,6 +2197,8 @@ namespace Helios::Icons
 			{ "FlipVertical",      &DrawFlipVertical },
 			{ "Maximize",          &DrawMaximize },
 			{ "Restore",           &DrawRestore },
+			{ "ExpandSidebar",     &DrawExpandSidebar },
+			{ "CollapseSidebar",   &DrawCollapseSidebar },
 			{ "Capture",           &DrawCapture },
 			{ "Directory",         &DrawDirectory },
 			{ "File",              &DrawFile },
@@ -2096,6 +2230,12 @@ namespace Helios::Icons
 			{ "Mipmap",            &DrawMipmap },
 			{ "Probe",             &DrawProbe },
 			{ "Sliders",           &DrawSliders },
+			{ "AnimationClip",     &DrawAnimationClip },
+			{ "Animation",         &DrawAnimation },
+			{ "Pause",             &DrawPause },
+			{ "Curve",             &DrawCurve },
+			{ "Preview",           &DrawPreview },
+			{ "Loop",              &DrawLoop },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),
@@ -2106,6 +2246,16 @@ namespace Helios::Icons
 	{
 		const auto index = static_cast<size_t>(id);
 		return s_Icons[index < static_cast<size_t>(Id::COUNT) ? index : 0];
+	}
+
+	bool HasSvg(Id id)
+	{
+		const auto index = static_cast<size_t>(id);
+		if (index >= static_cast<size_t>(Id::COUNT))
+			return false;
+
+		std::call_once(s_SvgIconsInit, InitializeSvgIcons);
+		return !s_SvgIcons[index].Shapes.empty();
 	}
 
 	void Draw(ImDrawList* draw_list, Id id, const ImVec2& center, float size, ImU32 color,

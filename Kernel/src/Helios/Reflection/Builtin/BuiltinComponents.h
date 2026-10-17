@@ -12,6 +12,7 @@ namespace Helios
 	void RegisterModelComponent();
 	void RegisterLightComponent();
 	void RegisterReflectionProbeComponent();
+	void RegisterAnimatorComponent();
 	void RegisterPostProcessComponents();    /* PostProcess / Bloom */
 
 	/* 按清单顺序注册全部内置组件（由 ComponentRegistry 启动时调用一次） */

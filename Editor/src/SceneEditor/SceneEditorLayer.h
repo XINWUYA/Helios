@@ -3,6 +3,7 @@
 #include "FrameGraphPanel.h"
 #include "RenderStatsPanel.h"
 #include "SceneHierarchy.h"
+#include "TimelinePanel.h"
 #include "EditorBuiltinCamera.h"
 #include "EditorCommon.h"
 #include "Helios/Command/CommandStack.h"
@@ -29,6 +30,11 @@ namespace Helios
 		/* 打开场景文件：加载进一个新场景，成功才切换 ——
 		 * 导入对话框 / 拖入 / 资源浏览器双击三条入口共用这一处。 */
 		void OpenScene(const std::string& path);
+		/* 双击 .anim：加载片段并让时间轴独立编辑它（自动打开时间轴面板并切到前台） */
+		void OpenAnimationClip(const std::string& path);
+
+		/* 方向键此刻归不归时间轴（鼠标停在时刻区）：主壳层据此压掉 ImGui 的导航移动 */
+		[[nodiscard]] bool WantsTimelineArrowKeys() const;
 		/* 保存场景 */
 		void SaveScene();
 		/* 保存场景到指定路径 */
@@ -62,6 +68,10 @@ namespace Helios
 		/* 渲染图可视化页（Frame Graph）窗口显隐（与视口同一套模式：窗口关闭按钮 / View 菜单） */
 		void SetFrameGraphVisible(bool visible) { m_IsFrameGraphVisible = visible; }
 		[[nodiscard]] bool IsFrameGraphVisible() const { return m_IsFrameGraphVisible; }
+
+		/* 时间轴窗口显隐（同上） */
+		void SetTimelineVisible(bool visible) { m_IsTimelineVisible = visible; }
+		[[nodiscard]] bool IsTimelineVisible() const { return m_IsTimelineVisible; }
 
 		void SetGizmoType(int type) { m_GizmoType = type; }
 		void SetPlayMode(PlayMode mode) { m_PlayMode = mode; }
@@ -182,6 +192,11 @@ namespace Helios
 		FrameGraphPanel m_FrameGraphPanel;
 		/* 渲染图可视化页窗口是否显示 */
 		bool m_IsFrameGraphVisible{ true };
+		/* 时间轴面板与窗口显隐 */
+		TimelinePanel m_TimelinePanel;
+		bool m_IsTimelineVisible{ true };
+		/* 打开片段后要求把时间轴页签切到前台（下一帧 SetWindowFocus） */
+		bool m_FocusTimelineRequested{ false };
 		/* 本帧可视化可选的相机（渲染图与相机同生命周期，指针跨帧稳定） */
 		std::vector<FrameGraphPanel::CameraEntry> m_CameraEntries;
 		/* 渲染统计面板（每帧 CPU / GPU 耗时；绘制逻辑在面板自身） */

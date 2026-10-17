@@ -13,6 +13,7 @@ namespace Helios
 	class DeviceShader;
 	class Model;
 	class Material;
+	class AnimationClip;
 
 	/* 无加载配置的占位类型: 用于无需加载配置的资源 */
 	struct NoConfig {};
@@ -58,6 +59,14 @@ namespace Helios
 		using LoadConfig = NoConfig;
 		static SharedPtr<Material> Create(const std::string& path);
 		static void Refresh(const SharedPtr<Material>& cached, const SharedPtr<Material>& incoming);
+	};
+
+	/* 动画片段: 无加载配置, 从 .anim 文件加载 */
+	template<>
+	struct AssetFactory<AnimationClip>
+	{
+		using LoadConfig = NoConfig;
+		static SharedPtr<AnimationClip> Create(const std::string& path);
 	};
 
 	/* 资源缓存(每种资源类型一个单例实例)
@@ -116,6 +125,7 @@ namespace Helios
 	extern template class AssetStore<DeviceTexture, TextureLoadConfig>;
 	extern template class AssetStore<Model, NoConfig>;
 	extern template class AssetStore<Material, NoConfig>;
+	extern template class AssetStore<AnimationClip, NoConfig>;
 
 	/* 统一管理所有资源, 通过模板参数指定资源类型:
 	 * - auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/a.glsl");

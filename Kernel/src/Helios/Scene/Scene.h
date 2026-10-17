@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
+#include "AnimationRuntime.h"
 
 namespace tinyxml2
 {
@@ -84,6 +85,9 @@ namespace Helios
 		/* 获取反射探针管理器（统一管理需要烘焙的反射探针） */
 		const SharedPtr<ReflectionProbeManager>& GetReflectionProbeManager() const { return m_pReflectionProbeManager; }
 
+		/* 获取动画播放器（保存 / 清空场景时会先停掉播放并还原姿势） */
+		AnimationRuntime& GetAnimationRuntime() { return m_AnimationRuntime; }
+
 		/* 序列化场景 */
 		void Serializer(const std::string& path);
 		bool Deserializer(const std::string& path);
@@ -114,5 +118,8 @@ namespace Helios
 
         /* 反射探针管理器，统一管理需要烘焙的反射探针 */
         SharedPtr<ReflectionProbeManager> m_pReflectionProbeManager;
+
+		/* 动画播放器：每帧在变换推送之前推进 */
+		AnimationRuntime m_AnimationRuntime;
     };
 }

@@ -88,6 +88,8 @@ namespace Helios
 			{ ".MTL", AssetFileKind::Material },
 			/* 反射探针的烘焙缓存（保存场景时落盘，加载时直接恢复） */
 			{ ".PROBE", AssetFileKind::Probe },
+			/* 动画片段（属性面板的 Animator 卡拖进去就能播） */
+			{ ".ANIM", AssetFileKind::Animation },
 		};
 
 		for (const auto& entry : kByExtension)
@@ -231,6 +233,14 @@ namespace Helios
 				"        </Parameters>\n"
 				"    </Material>\n"
 				"</Materials>\n";
+		}
+
+		/* 空动画：时长 1 秒、循环，没有轨道（挂到 Animator 上不报错，先给个可播的壳） */
+		if (ext == ".anim")
+		{
+			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+				"<Animation Duration=\"1\" Loop=\"1\">\n"
+				"</Animation>\n";
 		}
 
 		/* 认不出的（.glsl / .txt / .mat …）：空文件。模板内容不该由我们凭空发明，

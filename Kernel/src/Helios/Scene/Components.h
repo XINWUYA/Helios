@@ -10,6 +10,7 @@
 #include "Model.h"
 #include "Light.h"
 #include "ReflectionProbe.h"
+#include "AnimationClip.h"
 
 namespace Helios
 {
@@ -233,6 +234,34 @@ namespace Helios
 		void OnRemoved(const Scene& scene, Entity& entity) override;
 	};
 
+	/* 动画播放器：Clip 是资产引用，其余是作者数据；Playing / Time 只在运行期有意义
+	 * （不序列化、不进字段表）。Loop 是实例级开关，覆盖 clip 文件里的默认值。 */
+	struct AnimatorComponent : ComponentBase
+	{
+		SharedPtr<AnimationClip> m_Clip{ nullptr };
+		float m_Speed{ 1.0f };
+		float m_Time{ 0.0f };
+		bool m_Loop{ true };
+		bool m_AutoPlay{ false };
+		bool m_Playing{ false };
+		bool m_Scrubbing{ false };  /* 拖播放头：定格在 m_Time，不推进 */
+
+		/* 过渡请求：Play() 只写这两个字段，运行时接住后开两层混合；运行期状态，不存盘 */
+		SharedPtr<AnimationClip> m_PendingClip{ nullptr };
+		float m_PendingFade{ 0.0f };
+
+		/* 切到新片段：fade_seconds > 0 时旧片段按权重淡出，两层每帧混合 */
+		void Play(SharedPtr<AnimationClip> clip, float fade_seconds = 0.0f)
+		{
+			m_PendingClip = std::move(clip);
+			m_PendingFade = (fade_seconds > 0.0f) ? fade_seconds : 0.0f;
+		}
+
+		AnimatorComponent() = default;
+		AnimatorComponent(const AnimatorComponent&) = default;
+		AnimatorComponent& operator=(const AnimatorComponent&) = default;
+	};
+
 	/* 后处理对象（场景级总开关）：挂在实体上表示「这是后处理配置对象」——
 	 * 各效果的设置组件（BloomComponent 等）挂在同一实体上，由 Scene 每帧解析分发；
 	 * 总开关关闭 = 整个对象不参与解析（效果设置原样保留，与实体隐藏同源）。 */
@@ -252,6 +281,7 @@ namespace Helios
 		CameraComponent,
 		ModelComponent,
 		LightComponent,
-		ReflectionProbeComponent
+		ReflectionProbeComponent,
+		AnimatorComponent
 	>;
 }

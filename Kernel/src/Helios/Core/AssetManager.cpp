@@ -4,6 +4,7 @@
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/Scene/Model.h>
 #include <Helios/Scene/Material.h>
+#include <Helios/Scene/AnimationClip.h>
 #include <Helios/Scene/SceneCommon.h>
 #include <Helios/Common/Utils.h>
 
@@ -50,6 +51,12 @@ namespace Helios
 	void AssetFactory<Material>::Refresh(const SharedPtr<Material>& cached, const SharedPtr<Material>& incoming)
 	{
 		cached->CopyDefinitionFrom(*incoming);
+	}
+
+	/* 动画片段: 从 .anim 文件加载 */
+	SharedPtr<AnimationClip> AssetFactory<AnimationClip>::Create(const std::string& path)
+	{
+		return AnimationClip::Create(path);
 	}
 
 
@@ -172,6 +179,7 @@ namespace Helios
 	template class AssetStore<DeviceTexture, TextureLoadConfig>;
 	template class AssetStore<Model, NoConfig>;
 	template class AssetStore<Material, NoConfig>;
+	template class AssetStore<AnimationClip, NoConfig>;
 
 
 	AssetManager& AssetManager::Instance()

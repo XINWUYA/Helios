@@ -19,7 +19,9 @@ namespace Helios
 		/* 渲染图可视化页：依赖图 + 各 Pass 的中间渲染结果 */
 		inline constexpr const char* kFrameGraph      = "Frame Graph";
 		/* 日志窗口：Kernel / Editor 两个 logger 的输出（捕获 sink 实时填充） */
-		inline constexpr const char* kLog             = "Log";
+		inline constexpr const char* kLog            = "Log";
+		/* 时间轴：选中实体的动画片段编辑（播放头 / 关键帧 / 录制） */
+		inline constexpr const char* kTimeline       = "Timeline";
 
 		/* 默认停靠的语义槽位，与 BuildDefaultLayout 里的 DockNode 划分一一对应 */
 		enum class DockSlot : uint8_t
@@ -48,6 +50,7 @@ namespace Helios
 			{ kProperties,      DockSlot::RightTop    },
 			{ kStatInfo,        DockSlot::RightBottom },
 			{ kLog,             DockSlot::CenterBottom },
+			{ kTimeline,        DockSlot::CenterBottom },
 		};
 	}
 }

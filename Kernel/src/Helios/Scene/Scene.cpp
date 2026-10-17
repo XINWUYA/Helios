@@ -195,6 +195,9 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 实体即将销毁，动画会话不再需要还原 */
+		m_AnimationRuntime.Clear();
+
 		/* 实体销毁会触发组件的 OnRemoved（反射探针随之从管理器注销），
 		 * 但管理器仍可能持有引用，一并清空以保证不留上一份场景的残留。 */
 		m_Registry.clear();
@@ -229,6 +232,9 @@ namespace Helios
 	void Scene::OnUpdate(float delta_time)
 	{
 		PROFILE_FUNCTION();
+
+		/* 动画先推进：属性轨道写组件，下面的变换推送才能当帧看到新姿势 */
+		m_AnimationRuntime.Tick(*this, delta_time);
 
 		/* 统一将 TransformComponent 同步给所有 SceneObject（Model / Light / Camera）。
 		 * 传下去的是世界变换（沿父链累积），SceneObject 只认识世界空间。
@@ -353,6 +359,9 @@ namespace Helios
 	void Scene::Serializer(const std::string& path)
 	{
 		PROFILE_FUNCTION();
+
+		/* 存的是作者数据：先停播并还原姿势，别把当前帧的采样值写进场景 */
+		m_AnimationRuntime.StopAll(*this);
 
 		std::filesystem::path scene_path;
 		if (!TryPathFromUtf8(path, scene_path))

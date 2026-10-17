@@ -18,6 +18,7 @@ namespace Helios
 		Model,       /* .obj（引擎自己导的） / .mesh（网格缓存） / .fbx / .dae / .stl */
 		Material,    /* .mtl（材质资产：独立单条目 / 模型伴生的槽表） */
 		Probe,       /* .probe（反射探针的烘焙缓存：属性面板里直接预览烘焙结果） */
+		Animation,   /* .anim（动画片段：轨道 + 关键帧） */
 	};
 
 	/* 后缀 -> 大类。extension 形如 ".glsl"，大小写不敏感（内部转大写再比）。
