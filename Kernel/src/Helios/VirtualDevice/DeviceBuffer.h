@@ -65,6 +65,8 @@ namespace Helios
 		uint32_t m_Stride{ 0 };
 	};
 
+	class DeviceStorageBuffer;
+
 	// Vertex Buffer
 	class DeviceVertexBuffer
 	{
@@ -87,10 +89,32 @@ namespace Helios
 		[[nodiscard]] virtual uint32_t GetVertexCount() const = 0;
 
 		static SharedPtr<DeviceVertexBuffer> Create(const std::string& name, uint32_t size);
+		/* 和一块读写缓冲共用同一份显存（计算着色器写它、绘制读它）。
+		 * 后端不支持时返回 nullptr，调用方退回 CPU 蒙皮。 */
+		static SharedPtr<DeviceVertexBuffer> CreateShared(const std::string& name,
+			const SharedPtr<DeviceStorageBuffer>& storage, uint32_t size);
 		static SharedPtr<DeviceVertexBuffer> Create(const std::string& name, const void* vertices, uint32_t size);
 	};
 
 	// Index Buffer
+	/* 通用读写缓冲：计算着色器的输入 / 输出（Metal 上就是 storage buffer）。
+	 * 引擎这块内存是 CPU 可见的（shared），读回结果也走它。 */
+	class DeviceStorageBuffer
+	{
+	public:
+		DeviceStorageBuffer() = default;
+		virtual ~DeviceStorageBuffer() = default;
+
+		/* 整块覆盖数据（size 不能超过创建时的容量） */
+		virtual void SetData(const void* data, uint32_t size) = 0;
+		/* CPU 侧直接读写这块内存（Metal shared buffer 的 contents） */
+		[[nodiscard]] virtual void* GetMappedData() = 0;
+		[[nodiscard]] virtual uint32_t GetDataSize() const = 0;
+
+		static SharedPtr<DeviceStorageBuffer> Create(const std::string& name, const void* data, uint32_t size);
+		static SharedPtr<DeviceStorageBuffer> Create(const std::string& name, uint32_t size);
+	};
+
 	class IndexBuffer
 	{
 	public:

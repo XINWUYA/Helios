@@ -12,6 +12,8 @@ namespace Helios
     public:
         MetalVertexBuffer(const std::string& name, uint32_t size);
         MetalVertexBuffer(const std::string& name, const void* vertices, uint32_t size);
+        /* 复用已有 MTL 缓冲（计算着色器写它、绘制读它，省一次拷贝） */
+        MetalVertexBuffer(const std::string& name, MTL::Buffer* buffer, uint32_t size);
         ~MetalVertexBuffer() override;
 
         void Bind() const override;
@@ -31,6 +33,24 @@ namespace Helios
         MTL::Buffer* m_Buffer{ nullptr };
         uint32_t m_Size{ 0 };
         VertexBufferLayout m_Layout;
+    };
+
+    /* 计算着色器用的读写缓冲（storage buffer）：CPU 可见，读回结果也走它 */
+    class MetalStorageBuffer : public DeviceStorageBuffer
+    {
+    public:
+        MetalStorageBuffer(const std::string& name, const void* data, uint32_t size);
+        ~MetalStorageBuffer() override;
+
+        void SetData(const void* data, uint32_t size) override;
+        [[nodiscard]] void* GetMappedData() override;
+        [[nodiscard]] uint32_t GetDataSize() const override { return m_Size; }
+
+        MTL::Buffer* GetMetalBuffer() const { return m_Buffer; }
+
+    private:
+        MTL::Buffer* m_Buffer{ nullptr };
+        uint32_t m_Size{ 0 };
     };
 
     class MetalIndexBuffer : public IndexBuffer

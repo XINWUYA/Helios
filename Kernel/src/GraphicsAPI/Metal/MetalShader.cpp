@@ -294,15 +294,43 @@ namespace Helios
 
         std::unordered_map<ShaderCompiler::ShaderStage, std::string> shader_sources;
         ShaderCompiler::PreProcessShaderSrc(source, shader_sources);
-        if (shader_sources.find(ShaderCompiler::ShaderStage::Vertex) == shader_sources.end() ||
-            shader_sources.find(ShaderCompiler::ShaderStage::Fragment) == shader_sources.end())
+
+        /* 计算着色器：只有 #type compute 一段 */
+        const auto compute_source = shader_sources.find(ShaderCompiler::ShaderStage::Compute);
+        const auto vertex_source = shader_sources.find(ShaderCompiler::ShaderStage::Vertex);
+        const auto fragment_source = shader_sources.find(ShaderCompiler::ShaderStage::Fragment);
+        if (compute_source != shader_sources.end()
+            && vertex_source == shader_sources.end() && fragment_source == shader_sources.end())
+        {
+            m_IsCompute = true;
+            m_ComputeMSL = ShaderCompiler::Compile(compute_source->second,
+                ShaderCompiler::ShaderStage::Compute, ShaderCompiler::ShaderTarget::Metal, m_DebugName);
+
+            /* 线程组尺寸：读 local_size_x（缺省 64） */
+            const std::string& glsl = compute_source->second;
+            const size_t size_pos = glsl.find("local_size_x");
+            if (size_pos != std::string::npos)
+            {
+                const size_t equals = glsl.find('=', size_pos);
+                if (equals != std::string::npos)
+                {
+                    const int parsed = std::atoi(glsl.c_str() + equals + 1);
+                    if (parsed > 0 && parsed <= 1024)
+                        m_ThreadGroupSize = static_cast<uint32_t>(parsed);
+                }
+            }
+
+            CORE_LOG_INFO("Metal compute shader created: {}", m_DebugName);
+            return;
+        }
+
+        if (vertex_source == shader_sources.end() || fragment_source == shader_sources.end())
         {
             CORE_LOG_ERROR("Invalid shader format: missing #type vertex/#type fragment in {}", filepath);
             return;
         }
 
-        CompileAndReflect(shader_sources[ShaderCompiler::ShaderStage::Vertex],
-            shader_sources[ShaderCompiler::ShaderStage::Fragment]);
+        CompileAndReflect(vertex_source->second, fragment_source->second);
     }
 
     MetalShader::MetalShader(std::string name, const std::string& vertex_src, const std::string& pixel_src)
@@ -335,6 +363,49 @@ namespace Helios
         ParseShaderResources(m_FragmentMSL, false);
 
         CORE_LOG_INFO("Metal shader created: {}", m_DebugName);
+    }
+
+    MTL::ComputePipelineState* MetalShader::GetComputePipelineState()
+    {
+        if (!m_IsCompute || m_ComputeMSL.empty())
+            return nullptr;
+
+        if (m_ComputePipeline != nullptr)
+            return m_ComputePipeline;
+
+        MTL::Device* device = MetalRuntime::Device();
+        if (device == nullptr)
+            return nullptr;
+
+        if (m_ComputeLibrary == nullptr)
+        {
+            NS::Error* error = nullptr;
+            m_ComputeLibrary = device->newLibrary(
+                NS::String::string(m_ComputeMSL.c_str(), NS::UTF8StringEncoding), nullptr, &error);
+            if (m_ComputeLibrary == nullptr)
+            {
+                METAL_CHECK_ERROR(error, "Failed to create compute library");
+                return nullptr;
+            }
+        }
+
+        MTL::Function* function = m_ComputeLibrary->newFunction(
+            NS::String::string("compute_main", NS::UTF8StringEncoding));
+        if (function == nullptr)
+        {
+            CORE_LOG_ERROR("Failed to locate compute_main in shader: {}", m_DebugName);
+            return nullptr;
+        }
+
+        NS::Error* pipeline_error = nullptr;
+        m_ComputePipeline = device->newComputePipelineState(function, &pipeline_error);
+        if (m_ComputePipeline == nullptr)
+            METAL_CHECK_ERROR(pipeline_error, "Failed to create compute pipeline state");
+        function->release();
+        if (m_ComputePipeline == nullptr)
+            CORE_LOG_ERROR("Failed to create compute pipeline state: {}", m_DebugName);
+
+        return m_ComputePipeline;
     }
 
     MetalShader::~MetalShader()

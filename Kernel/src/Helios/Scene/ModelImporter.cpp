@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "ModelImporter.h"
 #include "SkeletonModel.h"
+#include "AnimationClip.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -84,6 +85,10 @@ namespace Helios
 			std::vector<ImportedTexture> Textures;
 			/* 有骨骼才会填（静态模型为空） */
 			SkeletonData Skin;
+			/* 源文件自带的动画（glTF 的 Take 001 等），导入时转成引擎片段 */
+			std::vector<AnimationClip> Animations;
+			/* 每个动画的文件名（不含扩展名，写盘时用） */
+			std::vector<std::string> AnimationNames;
 		};
 
 		constexpr size_t kInvalidTextureIndex = static_cast<size_t>(-1);
@@ -525,6 +530,17 @@ namespace Helios
 
 			if (!model.Materials.empty())
 				WriteMaterialFile(dest_dir / PathFromUtf8(stem + ".mtl"), dest_dir, model);
+
+			/* 有动画就跟着写 .anim（和 .mesh 同目录，文件名带来源动画名） */
+			for (size_t animation_index = 0; animation_index < model.Animations.size(); ++animation_index)
+			{
+				const std::string animation_name = (animation_index < model.AnimationNames.size())
+					? model.AnimationNames[animation_index] : ("Take" + std::to_string(animation_index + 1));
+				const std::filesystem::path animation_path =
+					dest_dir / PathFromUtf8(stem + "_" + animation_name + ".anim");
+				model.Animations[animation_index].SetPath(PathToUtf8(animation_path));
+				model.Animations[animation_index].Serializer(PathToUtf8(animation_path));
+			}
 
 			return PathToUtf8(mesh_path);
 		}
@@ -1012,6 +1028,34 @@ namespace Helios
 				out_model.Shapes.push_back(std::move(result));
 			}
 
+			/* assimp 会把场景根节点的旋转（glTF 常见 Y-up 适配）算进骨骼空间，
+			 * 但蒙皮顶点是原始空间（不能烘），两边差一个 R 会让角色整体躺倒。
+			 * 把根节点的旋转乘回绑定矩阵：新 bind world = R × 旧 bind world，即 IB' = R⁻¹ × IB。 */
+			if (!out_model.Skin.IsEmpty() && scene->mRootNode != nullptr)
+			{
+				const glm::mat4 root_transform = AiToGlm(scene->mRootNode->mTransformation);
+				const glm::mat4 identity(1.0f);
+				bool is_identity = true;
+				for (int column = 0; column < 4 && is_identity; ++column)
+				{
+					for (int row = 0; row < 4; ++row)
+					{
+						if (std::fabs(root_transform[column][row] - identity[column][row]) > 1.0e-5f)
+						{
+							is_identity = false;
+							break;
+						}
+					}
+				}
+
+				if (!is_identity)
+				{
+					const glm::mat4 root_inverse = glm::inverse(root_transform);
+					for (SkinJoint& joint : out_model.Skin.GetJoints())
+						joint.InverseBind = root_inverse * joint.InverseBind;
+				}
+			}
+
 			/* 关节父级：骨骼在 assimp 里就是节点，按名字关系补下标 */
 			if (!out_model.Skin.IsEmpty())
 			{
@@ -1029,6 +1073,117 @@ namespace Helios
 					const auto parent_joint = joint_by_name.find(parent_name->second);
 					if (parent_joint != joint_by_name.end())
 						joint.Parent = parent_joint->second;
+				}
+			}
+
+			/* 源文件自带的动画：轨道指向关节实体的层级路径，值和引擎一样按 TRS 存 */
+			if (skinned_source && !out_model.Skin.IsEmpty() && scene->mNumAnimations > 0)
+			{
+				/* 关节名 → 从模型实体出发的相对路径（逐级父名用 '/' 连起来） */
+				const std::vector<SkinJoint>& joints = out_model.Skin.GetJoints();
+				std::unordered_map<std::string, std::string> joint_paths;
+				for (size_t index = 0; index < joints.size(); ++index)
+				{
+					std::vector<const std::string*> chain;
+					int cursor = static_cast<int>(index);
+					while (cursor >= 0 && cursor < static_cast<int>(joints.size()) && chain.size() <= joints.size())
+					{
+						chain.push_back(&joints[cursor].Name);
+						cursor = joints[cursor].Parent;
+					}
+
+					std::string path;
+					for (auto iter = chain.rbegin(); iter != chain.rend(); ++iter)
+					{
+						if (!path.empty())
+							path += '/';
+						path += **iter;
+					}
+					joint_paths[joints[index].Name] = path;
+				}
+
+				for (unsigned animation_index = 0; animation_index < scene->mNumAnimations; ++animation_index)
+				{
+					const aiAnimation* animation = scene->mAnimations[animation_index];
+					if (animation == nullptr || animation->mNumChannels == 0)
+						continue;
+
+					/* 每秒多少个时间单位（glTF 是秒，fbx 常见 24/30 帧）：统一折成秒 */
+					const double ticks_per_second = (animation->mTicksPerSecond > 1.0e-6)
+						? animation->mTicksPerSecond : 1.0;
+
+					AnimationClip clip;
+					for (unsigned channel_index = 0; channel_index < animation->mNumChannels; ++channel_index)
+					{
+						const aiNodeAnim* channel = animation->mChannels[channel_index];
+						if (channel == nullptr || channel->mNodeName.length == 0)
+							continue;
+
+						const auto path_iter = joint_paths.find(channel->mNodeName.C_Str());
+						if (path_iter == joint_paths.end())
+							continue;
+
+						const auto make_track = [&](const char* property, TrackValueType value_type,
+							size_t key_count, const auto& fetch)
+						{
+							if (key_count == 0)
+								return;
+
+							AnimationTrack track;
+							track.Path = path_iter->second;
+							track.Component = "Transform";
+							track.Property = property;
+							track.ValueType = value_type;
+							track.Interp = KeyInterp::Linear;
+							track.Keys.reserve(key_count);
+							for (size_t key_index = 0; key_index < key_count; ++key_index)
+							{
+								AnimationKey key;
+								fetch(key_index, key);
+								track.Keys.push_back(key);
+							}
+							clip.AddTrack(std::move(track));
+						};
+
+						/* 位置 / 旋转（四元数按 x,y,z,w 存，运行时转成组件里的欧拉角） / 缩放 */
+						make_track("Position", TrackValueType::Vec3, channel->mNumPositionKeys,
+							[&](size_t key_index, AnimationKey& key)
+						{
+							const auto& source = channel->mPositionKeys[key_index];
+							key.Time = static_cast<float>(source.mTime / ticks_per_second);
+							key.Value = glm::vec4(source.mValue.x, source.mValue.y, source.mValue.z, 0.0f);
+						});
+						make_track("Rotation", TrackValueType::Quat, channel->mNumRotationKeys,
+							[&](size_t key_index, AnimationKey& key)
+						{
+							const auto& source = channel->mRotationKeys[key_index];
+							key.Time = static_cast<float>(source.mTime / ticks_per_second);
+							key.Value = glm::vec4(source.mValue.x, source.mValue.y, source.mValue.z, source.mValue.w);
+						});
+						make_track("Scale", TrackValueType::Vec3, channel->mNumScalingKeys,
+							[&](size_t key_index, AnimationKey& key)
+						{
+							const auto& source = channel->mScalingKeys[key_index];
+							key.Time = static_cast<float>(source.mTime / ticks_per_second);
+							key.Value = glm::vec4(source.mValue.x, source.mValue.y, source.mValue.z, 0.0f);
+						});
+					}
+
+					if (clip.GetTracks().empty())
+						continue;
+
+					clip.RefreshDuration();
+
+					std::string animation_name = (animation->mName.length > 0)
+						? std::string(animation->mName.C_Str()) : ("Take" + std::to_string(animation_index + 1));
+					for (char& character : animation_name)
+					{
+						if (!std::isalnum(static_cast<unsigned char>(character)))
+							character = '_';
+					}
+
+					out_model.Animations.push_back(std::move(clip));
+					out_model.AnimationNames.push_back(animation_name);
 				}
 			}
 

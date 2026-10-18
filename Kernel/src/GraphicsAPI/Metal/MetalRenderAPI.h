@@ -1,4 +1,6 @@
 ﻿#pragma once
+#include <vector>
+#include <utility>
 
 #ifdef PLATFORM_MACOS
 
@@ -48,6 +50,9 @@ namespace Helios
         /* 等待最近提交的命令缓冲区执行完成（见 RenderAPI 的说明） */
         void WaitForGPU() override;
 
+        /* 立刻提交当前命令缓冲区并等它执行完（检查 / 需要 CPU 读回计算结果的场合） */
+        bool SubmitAndWait();
+
         /* 呈现当前帧 */
         void Present();
 
@@ -66,6 +71,13 @@ namespace Helios
         CA::MetalLayer* GetMetalLayer() const { return m_MetalLayer; }
         MTL::RenderPassDescriptor* GetRenderPassDescriptor() const { return m_RenderPassDescriptor; }
         MTL::RenderPassDescriptor* GetActiveRenderPassDescriptor() const { return m_ActiveRenderPassDescriptor; }
+
+        /* 计算派发：先收掉当前渲染编码器（与 blit 同套路），开 compute encoder → 绑缓冲 → dispatch。
+         * 下一个绘制会自己重开渲染编码器。buffers 是 (索引, Metal 缓冲) 列表，param_data 走 setBytes。 */
+        bool DispatchCompute(class MetalShader* shader,
+            const std::vector<std::pair<uint32_t, MTL::Buffer*>>& buffers,
+            const void* param_data, uint32_t param_size,
+            uint32_t group_count);
 
         /* 渲染通道管理 */
         void BeginRenderPass(MTL::RenderPassDescriptor* renderPassDescriptor);

@@ -64,7 +64,21 @@ namespace Helios
          * 独立缓冲区。 */
         void CommitMaterialUniforms(MTL::RenderCommandEncoder* encoder);
 
+        /* 计算着色器（#type compute）：惰性建管线，线程组尺寸从 local_size_x 读 */
+        MTL::ComputePipelineState* GetComputePipelineState();
+        [[nodiscard]] bool IsCompute() const { return m_IsCompute; }
+        [[nodiscard]] uint32_t GetThreadGroupSize() const { return m_ThreadGroupSize; }
+
     private:
+        /* 计算着色器状态 */
+        bool m_IsCompute{ false };
+        uint32_t m_ThreadGroupSize{ 64 };
+        std::string m_ComputeMSL;
+        MTL::Library* m_ComputeLibrary{ nullptr };
+        MTL::ComputePipelineState* m_ComputePipeline{ nullptr };
+
+    public:
+
         /* 着色器内嵌的一块材质参数（由 SPIRV-Cross 生成为单个 constant buffer） */
         struct MaterialBlock
         {

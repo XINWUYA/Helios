@@ -48,6 +48,14 @@ namespace Helios
 
 		static void FillObjectUniformBuffer(const VisibleMeshObject& mesh_object);
 
+		/* GPU 蒙皮：一次 dispatch 把绑定顶点按调色板写进上屏缓冲。
+		 * 只有 Metal 后端支持；返回 false 时调用方退回 CPU 蒙皮。 */
+		static bool DispatchSkin(const SharedPtr<class DeviceStorageBuffer>& palette,
+			const SharedPtr<class DeviceStorageBuffer>& bind_vertices,
+			const SharedPtr<class DeviceStorageBuffer>& weights,
+			const SharedPtr<class DeviceStorageBuffer>& skinned,
+			uint32_t vertex_count);
+
 		/* 填充光照 UniformBuffer：light_vp_mats = 级联的光照视图投影矩阵数组，cascade_splits = 各级联
 		 * 的视图空间分割距离（远边界），cascade_depth_spans = 深度跨度（折算阴影偏移用，可空）。
 		 * 供阴影 Pass 渲染级联前调用。 */

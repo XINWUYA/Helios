@@ -31,6 +31,15 @@ namespace Helios
         }
     }
 
+    MetalVertexBuffer::MetalVertexBuffer(const std::string& name, MTL::Buffer* buffer, uint32_t size)
+        : m_Size(size)
+    {
+        (void)name;
+        m_Buffer = buffer;
+        if (m_Buffer != nullptr)
+            m_Buffer->retain();
+    }
+
     MetalVertexBuffer::~MetalVertexBuffer()
     {
         if (m_Buffer)
@@ -151,3 +160,46 @@ namespace Helios
 }
 
 #endif /* PLATFORM_MACOS */
+
+namespace Helios
+{
+    MetalStorageBuffer::MetalStorageBuffer(const std::string& name, const void* data, uint32_t size)
+        : m_Size(size)
+    {
+        (void)name;
+        auto* render_api = dynamic_cast<MetalRenderAPI*>(Renderer::GetRenderAPI().get());
+        if (render_api == nullptr || render_api->GetDevice() == nullptr)
+        {
+            CORE_LOG_ERROR("Metal device is not ready for storage buffer!");
+            return;
+        }
+
+        m_Buffer = data != nullptr
+            ? render_api->GetDevice()->newBuffer(data, size, MTL::ResourceStorageModeShared)
+            : render_api->GetDevice()->newBuffer(size, MTL::ResourceStorageModeShared);
+        if (m_Buffer == nullptr)
+            CORE_LOG_ERROR("Failed to create Metal storage buffer!");
+    }
+
+    MetalStorageBuffer::~MetalStorageBuffer()
+    {
+        if (m_Buffer != nullptr)
+        {
+            m_Buffer->release();
+            m_Buffer = nullptr;
+        }
+    }
+
+    void MetalStorageBuffer::SetData(const void* data, uint32_t size)
+    {
+        if (m_Buffer == nullptr || data == nullptr || size > m_Size)
+            return;
+
+        std::memcpy(m_Buffer->contents(), data, size);
+    }
+
+    void* MetalStorageBuffer::GetMappedData()
+    {
+        return m_Buffer != nullptr ? m_Buffer->contents() : nullptr;
+    }
+}

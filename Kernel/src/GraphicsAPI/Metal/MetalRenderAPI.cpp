@@ -607,6 +607,29 @@ namespace Helios
         return m_DefaultTargetSnapshot;
     }
 
+    bool MetalRenderAPI::SubmitAndWait()
+    {
+        if (m_CurrentCommandBuffer == nullptr)
+            return false;
+
+        /* 计算 / 拷贝可能还挂在当前命令缓冲上：提交它，等执行完，CPU 才能安全读回 */
+        if (m_CurrentRenderEncoder)
+        {
+            m_CurrentRenderEncoder->endEncoding();
+            m_CurrentRenderEncoder = nullptr;
+            MetalRuntime::SetEncoder(nullptr);
+            m_ActiveRenderPassDescriptor = nullptr;
+            m_ActivePipelineState = nullptr;
+            m_RasterStateEncoder = nullptr;
+        }
+
+        m_CurrentCommandBuffer->commit();
+        m_CurrentCommandBuffer->waitUntilCompleted();
+        m_LastSubmittedCommandBuffer = m_CurrentCommandBuffer;
+        m_CurrentCommandBuffer = nullptr;
+        return true;
+    }
+
     void MetalRenderAPI::WaitForGPU()
     {
         PROFILE_FUNCTION();
@@ -852,6 +875,57 @@ namespace Helios
         {
             m_CurrentRenderEncoder->popDebugGroup();
         }
+    }
+
+    bool MetalRenderAPI::DispatchCompute(MetalShader* shader,
+        const std::vector<std::pair<uint32_t, MTL::Buffer*>>& buffers,
+        const void* param_data, uint32_t param_size,
+        uint32_t group_count)
+    {
+        if (shader == nullptr || !shader->IsCompute())
+            return false;
+
+        /* 帧还没开始（Scene 更新阶段）就先借一帧的命令缓冲：整帧共用，最后由 Present 提交 */
+        if (m_CurrentCommandBuffer == nullptr && m_CommandQueue != nullptr)
+            m_CurrentCommandBuffer = m_CommandQueue->commandBuffer();
+        if (m_CurrentCommandBuffer == nullptr)
+            return false;
+
+        MTL::ComputePipelineState* pipeline = shader->GetComputePipelineState();
+        if (pipeline == nullptr)
+            return false;
+
+        /* 计算编码器不能和渲染编码器并存：先把当前的收掉（与 AcquireDefaultTargetSnapshot 同套路） */
+        if (m_CurrentRenderEncoder)
+        {
+            m_CurrentRenderEncoder->endEncoding();
+            RenderQueryProfiler::Instance().OnRenderPassEnd();
+            m_CurrentRenderEncoder = nullptr;
+            MetalRuntime::SetEncoder(nullptr);
+            m_ActiveRenderPassDescriptor = nullptr;
+            m_ActivePipelineState = nullptr;
+            m_RasterStateEncoder = nullptr;
+        }
+
+        MTL::ComputeCommandEncoder* encoder = m_CurrentCommandBuffer->computeCommandEncoder();
+        if (encoder == nullptr)
+            return false;
+
+        encoder->setComputePipelineState(pipeline);
+        for (const auto& [index, buffer] : buffers)
+        {
+            if (buffer != nullptr)
+                encoder->setBuffer(buffer, 0, index);
+        }
+        /* 注意：编译器的 MSL 把 uniform 块排在 [[buffer(16)]] 起（SSBO 从 1 起），
+         * 参数块这里是 20 号，和 GPUSkin.glsl 的绑定不是一一对应 */
+        if (param_data != nullptr && param_size > 0)
+            encoder->setBytes(param_data, param_size, 20);
+
+        encoder->dispatchThreadgroups(MTL::Size(group_count, 1, 1),
+            MTL::Size(shader->GetThreadGroupSize(), 1, 1));
+        encoder->endEncoding();
+        return true;
     }
 
     void MetalRenderAPI::BeginRenderPass(MTL::RenderPassDescriptor* renderPassDescriptor)

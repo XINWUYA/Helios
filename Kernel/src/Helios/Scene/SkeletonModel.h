@@ -12,9 +12,13 @@ namespace Helios
 {
 	class MeshSegment;
 	class Scene;
+	class DeviceStorageBuffer;
 
 	/* .mesh 末尾骨骼段的魔数（SkeletonData 的读写与模型类型探测共用） */
 	inline constexpr char kSkeletonFileMagic[4] = { 'H', 'S', 'K', 'N' };
+
+	/* GPU 蒙皮调色板的数组长度（与着色器里的 u_SkinMatrices[64] 对齐） */
+	inline constexpr size_t kMaxGpuJoints = 64;
 
 	/* 一根骨骼：名字 + 绑定姿态的逆矩阵（把顶点从模型空间换到骨骼空间）。
 	 * 名字与场景里的关节节点对应，运行时靠它找回每个关节的世界变换。 */
@@ -100,6 +104,18 @@ namespace Helios
 		[[nodiscard]] std::vector<entt::entity>& GetJointEntities() { return m_Joints; }
 		[[nodiscard]] std::vector<glm::mat4>& GetPalette() { return m_Palette; }
 
+		/* GPU 蒙皮是否就绪（Metal 才可能为真；不成立时走 CPU） */
+		[[nodiscard]] bool IsGpuSkinned() const { return m_GpuReady; }
+		/* 开关 GPU 蒙皮（默认开；检查里可以关掉跑 CPU 路径做对照） */
+		void SetGpuSkinningEnabled(bool enabled) { m_GpuSkinningEnabled = enabled; }
+		[[nodiscard]] bool IsGpuSkinningEnabled() const { return m_GpuSkinningEnabled; }
+
+		/* 全局开关（编辑器菜单）：关掉后所有骨骼模型都走 CPU 蒙皮 */
+		static void SetGlobalGpuSkinningEnabled(bool enabled);
+		[[nodiscard]] static bool IsGlobalGpuSkinningEnabled();
+		/* 读回 GPU 蒙皮的结果（检查用；读之前要 WaitForGPU） */
+		[[nodiscard]] void* GetGpuSkinnedData(size_t segment) const;
+
 		/* 按关节表在 root 下建一套关节实体（名字 / 父子关系 / 绑定姿态的局部变换），
 		 * 返回与关节表同下标的实体列表 */
 		static std::vector<entt::entity> CreateJointEntities(Scene& scene, entt::entity root, const SkeletonData& data);
@@ -129,5 +145,22 @@ namespace Helios
 		std::vector<entt::entity> m_Joints;
 		/* 上一帧的调色板：没变就不重算顶点 */
 		std::vector<glm::mat4> m_Palette;
+		/* 自动建关节只尝试一次（用户删掉关节后不再偷偷建回来） */
+		bool m_AutoBindTried{ false };
+
+		/* GPU 蒙皮的一整套缓冲：绑定顶点 / 权重（8 float 每顶点）/ 上屏顶点 / 调色板 */
+		struct GpuSegment
+		{
+			SharedPtr<DeviceStorageBuffer> BindVertices;
+			SharedPtr<DeviceStorageBuffer> Weights;
+			SharedPtr<DeviceStorageBuffer> Skinned;
+			uint32_t VertexCount{ 0 };
+		};
+		std::vector<GpuSegment> m_GpuSegments;
+		SharedPtr<DeviceStorageBuffer> m_GpuPalette;
+		bool m_GpuReady{ false };
+		bool m_GpuSkinningEnabled{ true };
+		/* 上一帧走的哪条路径：切换全局开关时据此让调色板缓存失效、重新算一遍 */
+		bool m_LastGpuActive{ false };
 	};
 }

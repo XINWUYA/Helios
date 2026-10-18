@@ -54,13 +54,19 @@ namespace Helios
 
 		/* 时间轴里方向键用于微调：鼠标停在时刻区时，把这一帧的导航移动请求在提交任何控件之前吃掉，
 		 * 方向键就只做微调、不会把焦点挪到别的面板；其它位置方向键和 Tab 仍然归导航 */
-		if (m_Context.WantsTimelineArrowKeys())
+		if (m_Context.WantsTimelineArrowKeys()
+			&& (KeyDown(ImGuiKey_LeftArrow) || KeyDown(ImGuiKey_RightArrow)))
 		{
+			/* 只吃方向键的移动请求：Tab 的请求（NavMoveDir == None）原样保留 */
 			ImGuiContext& context = *ImGui::GetCurrentContext();
-			context.NavMoveScoringItems = false;
-			context.NavMoveSubmitted = false;
-			context.NavMoveForwardToNextFrame = false;
-			context.NavMoveDir = ImGuiDir_None;
+			if (context.NavMoveDir != ImGuiDir_None)
+			{
+				context.NavMoveScoringItems = false;
+				context.NavMoveSubmitted = false;
+				context.NavMoveForwardToNextFrame = false;
+				context.NavMoveDir = ImGuiDir_None;
+				context.NavMoveFlags = ImGuiNavMoveFlags_None;
+			}
 		}
 
 		/* 菜单（含 DockSpace 宿主） */
@@ -477,6 +483,18 @@ namespace Helios
 
 					if (ImGui::MenuItem("Reset Layout"))
 						m_ResetLayoutRequested = true;
+
+					ImGui::EndMenu();
+				}
+
+				/* Settings：全局设置（对所有骨骼模型生效） */
+				if (ImGui::BeginMenu("Settings"))
+				{
+					bool gpu_skinning = SkeletonModel::IsGlobalGpuSkinningEnabled();
+					if (ImGui::MenuItem("GPU Skinning", nullptr, &gpu_skinning))
+						SkeletonModel::SetGlobalGpuSkinningEnabled(gpu_skinning);
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("开：顶点由计算着色器算；关：退回 CPU 蒙皮");
 
 					ImGui::EndMenu();
 				}

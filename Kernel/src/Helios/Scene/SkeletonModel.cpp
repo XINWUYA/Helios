@@ -5,6 +5,7 @@
 #include "Components.h"
 #include "Mesh.h"
 #include "Model.h"
+#include "Helios/Renderer/Renderer.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 #include <fstream>
@@ -196,6 +197,22 @@ namespace Helios
 
 	/* ==================== SkeletonModel：实例数据 + 骨骼操作 ==================== */
 
+	namespace
+	{
+		/* 全局蒙皮开关：默认走 GPU，编辑器菜单可切到 CPU */
+		bool g_GlobalGpuSkinningEnabled = true;
+	}
+
+	void SkeletonModel::SetGlobalGpuSkinningEnabled(bool enabled)
+	{
+		g_GlobalGpuSkinningEnabled = enabled;
+	}
+
+	bool SkeletonModel::IsGlobalGpuSkinningEnabled()
+	{
+		return g_GlobalGpuSkinningEnabled;
+	}
+
 	SkeletonModel::SkeletonModel(std::string path)
 		: Model(std::move(path))
 	{
@@ -224,23 +241,84 @@ namespace Helios
 
 		m_SkinnedSegments.clear();
 		m_SkinnedVertices.clear();
+		m_GpuSegments.clear();
+		m_GpuReady = false;
 		m_SkinnedSegments.reserve(segments.size());
 		m_SkinnedVertices.reserve(segments.size());
 
-		for (const SharedPtr<MeshSegment>& source : segments)
+		const SkeletonData& data = GetSkin();
+		const auto& skin_segments = data.GetSegments();
+
+		/* 调色板：最多 64 根（着色器数组长度） */
+		bool gpu_possible = data.GetJoints().size() <= kMaxGpuJoints;
+		SharedPtr<DeviceStorageBuffer> palette_buffer;
+		if (gpu_possible)
 		{
+			palette_buffer = DeviceStorageBuffer::Create("SkinPalette", kMaxGpuJoints * sizeof(glm::mat4));
+			gpu_possible = palette_buffer != nullptr;
+		}
+
+		for (size_t segment_index = 0; segment_index < segments.size(); ++segment_index)
+		{
+			const SharedPtr<MeshSegment>& source = segments[segment_index];
 			const MeshPrimitive& primitive = source->GetMeshPrimitive();
 			const auto& source_buffers = primitive.VertexArray->GetVertexBuffers();
 			if (source_buffers.empty())
 				continue;
 
-			/* 共用索引缓冲，顶点缓冲换成可写的；初始内容就是绑定姿态 */
-			const SharedPtr<DeviceVertexBuffer>& source_buffer = source_buffers.front();
-			SharedPtr<DeviceVertexBuffer> skinned_buffer = DeviceVertexBuffer::Create(
-				source->GetDebugName() + "_Skinned", source_buffer->GetDataSize());
-			skinned_buffer->SetLayout(source_buffer->GetLayout());
-			skinned_buffer->SetData(source->GetSourceVertices().data(),
-				static_cast<uint32_t>(source->GetSourceVertices().size() * sizeof(float)));
+			const uint32_t vertex_count = static_cast<uint32_t>(source->GetSourceVertices().size() / 16);
+			const uint32_t vertex_bytes = vertex_count * 16 * sizeof(float);
+
+			/* 先准备 GPU 那套：上屏缓冲和顶点缓冲共用同一块显存，省一次拷贝 */
+			SharedPtr<DeviceStorageBuffer> bind_buffer;
+			SharedPtr<DeviceStorageBuffer> weight_buffer;
+			SharedPtr<DeviceStorageBuffer> skinned_storage;
+			SharedPtr<DeviceVertexBuffer> skinned_buffer;
+
+			if (gpu_possible && vertex_count > 0 && segment_index < skin_segments.size())
+			{
+				bind_buffer = DeviceStorageBuffer::Create(source->GetDebugName() + "_BindVerts",
+					source->GetSourceVertices().data(), vertex_bytes);
+				skinned_storage = DeviceStorageBuffer::Create(source->GetDebugName() + "_SkinnedVerts", vertex_bytes);
+
+				/* 权重：每顶点 4 关节下标 + 4 权重的 float 数组 */
+				std::vector<float> packed(vertex_count * 8, 0.0f);
+				const SkinSegment& skin_segment = skin_segments[segment_index];
+				for (uint32_t vertex_index = 0; vertex_index < vertex_count
+					&& vertex_index < skin_segment.Vertices.size(); ++vertex_index)
+				{
+					const SkinWeight& weight = skin_segment.Vertices[vertex_index];
+					float* target = packed.data() + vertex_index * 8;
+					for (int influence = 0; influence < 4; ++influence)
+					{
+						target[influence] = static_cast<float>(weight.Joints[influence]);
+						target[4 + influence] = weight.Weights[influence];
+					}
+				}
+				weight_buffer = DeviceStorageBuffer::Create(source->GetDebugName() + "_SkinWeights",
+					packed.data(), static_cast<uint32_t>(packed.size() * sizeof(float)));
+
+				if (bind_buffer != nullptr && weight_buffer != nullptr && skinned_storage != nullptr)
+					skinned_buffer = DeviceVertexBuffer::CreateShared(source->GetDebugName() + "_Skinned",
+						skinned_storage, vertex_bytes);
+			}
+
+			if (skinned_buffer != nullptr)
+			{
+				/* GPU 缓冲初始是空的：如果计算派发没生效，读回来就是 0（检查据此判断） */
+				skinned_buffer->SetLayout(source_buffers.front()->GetLayout());
+				m_GpuSegments.push_back(GpuSegment{ bind_buffer, weight_buffer, skinned_storage, vertex_count });
+			}
+			else
+			{
+				/* CPU 兜底：普通可写顶点缓冲 */
+				skinned_buffer = DeviceVertexBuffer::Create(source->GetDebugName() + "_Skinned",
+					source_buffers.front()->GetDataSize());
+				skinned_buffer->SetLayout(source_buffers.front()->GetLayout());
+				skinned_buffer->SetData(source->GetSourceVertices().data(),
+					static_cast<uint32_t>(source->GetSourceVertices().size() * sizeof(float)));
+				m_GpuSegments.push_back(GpuSegment{});
+			}
 
 			SharedPtr<DeviceVertexArray> skinned_array = DeviceVertexArray::Create(
 				source->GetDebugName() + "_SkinnedVA");
@@ -252,6 +330,25 @@ namespace Helios
 				source->GetSlotIndex()));
 			m_SkinnedVertices.push_back(source->GetSourceVertices());
 		}
+
+		/* 所有段都建好 GPU 缓冲才算就绪 */
+		m_GpuPalette = palette_buffer;
+		m_GpuReady = palette_buffer != nullptr && !m_GpuSegments.empty();
+		for (const GpuSegment& segment : m_GpuSegments)
+		{
+			if (segment.Skinned == nullptr)
+			{
+				m_GpuReady = false;
+				break;
+			}
+		}
+	}
+
+	void* SkeletonModel::GetGpuSkinnedData(size_t segment) const
+	{
+		if (segment >= m_GpuSegments.size() || m_GpuSegments[segment].Skinned == nullptr)
+			return nullptr;
+		return m_GpuSegments[segment].Skinned->GetMappedData();
 	}
 
 	std::vector<entt::entity> SkeletonModel::CreateJointEntities(Scene& scene, entt::entity root,
@@ -376,13 +473,65 @@ namespace Helios
 			return;
 
 		m_Joints = ResolveJoints(scene, owner);
-		const std::vector<glm::mat4> joint_world = CollectJointTransforms(scene, m_Joints, owner);
+
+		/* 一个关节都没绑上（刚把模型挂给实体 / 场景里没存关节树）：自动按关节表建一次，
+		 * 编辑器和视口打开就能看到正确的蒙皮，不用额外操作 */
+		bool any_bound = false;
+		for (entt::entity joint : m_Joints)
+		{
+			if (scene.IsEntityValid(joint))
+			{
+				any_bound = true;
+				break;
+			}
+		}
+		if (!any_bound && !m_AutoBindTried)
+		{
+			m_AutoBindTried = true;
+			CreateJointEntities(scene, owner, data);
+			m_Joints = ResolveJoints(scene, owner);
+		}
+
+		std::vector<glm::mat4> joint_world = CollectJointTransforms(scene, m_Joints, owner);
+
+		/* 没绑上的关节按绑定姿态补：调色板是单位阵，顶点保持原位（不至于被逆绑定矩阵拉成一团） */
+		for (size_t index = 0; index < m_Joints.size() && index < joint_world.size(); ++index)
+		{
+			if (!scene.IsEntityValid(m_Joints[index]))
+				joint_world[index] = glm::inverse(data.GetJoints()[index].InverseBind);
+		}
+
 		std::vector<glm::mat4> palette = data.BuildPalette(joint_world);
 
-		/* 姿势没变就不重算顶点、也不重传缓冲 */
-		if (PaletteEqual(palette, m_Palette))
+		/* 姿势没变就不重算顶点、也不重传缓冲；刚切换过 GPU/CPU 则强制重算一次 */
+		const bool gpu_active = m_GpuSkinningEnabled && IsGlobalGpuSkinningEnabled();
+		if (PaletteEqual(palette, m_Palette) && gpu_active == m_LastGpuActive)
 			return;
+		m_LastGpuActive = gpu_active;
 		m_Palette = std::move(palette);
+
+		/* GPU 蒙皮：同一份数据（绑定顶点 + 权重 + 调色板）交给计算着色器，成功就不用跑 CPU 循环 */
+		if (gpu_active && m_GpuReady && m_GpuPalette != nullptr
+			&& m_Palette.size() <= kMaxGpuJoints && m_GpuSegments.size() == m_SkinnedSegments.size())
+		{
+			std::vector<glm::mat4> padded(kMaxGpuJoints, glm::mat4(1.0f));
+			std::copy(m_Palette.begin(), m_Palette.end(), padded.begin());
+			m_GpuPalette->SetData(padded.data(), static_cast<uint32_t>(padded.size() * sizeof(glm::mat4)));
+
+			bool dispatched = true;
+			for (const GpuSegment& segment : m_GpuSegments)
+			{
+				if (!Renderer::DispatchSkin(m_GpuPalette, segment.BindVertices, segment.Weights,
+					segment.Skinned, segment.VertexCount))
+				{
+					dispatched = false;
+					break;
+				}
+			}
+
+			if (dispatched)
+				return;
+		}
 
 		const auto& skin_segments = data.GetSegments();
 		const auto& source_segments = GetMeshSegments();

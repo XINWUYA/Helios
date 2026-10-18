@@ -99,6 +99,20 @@ namespace Helios
 		}
 	}
 
+	SharedPtr<DeviceVertexBuffer> DeviceVertexBuffer::CreateShared(const std::string& name,
+		const SharedPtr<DeviceStorageBuffer>& storage, uint32_t size)
+	{
+#ifdef PLATFORM_MACOS
+		if (Renderer::CurrentAPI() == RenderAPI::Metal)
+		{
+			auto metal_storage = std::dynamic_pointer_cast<MetalStorageBuffer>(storage);
+			if (metal_storage != nullptr && metal_storage->GetMetalBuffer() != nullptr)
+				return CreateSharedPtr<MetalVertexBuffer>(name, metal_storage->GetMetalBuffer(), size);
+		}
+#endif
+		return nullptr;
+	}
+
 	SharedPtr<DeviceVertexBuffer> DeviceVertexBuffer::Create(const std::string& name, const void* vertices, uint32_t size)
 	{
 		switch (Renderer::CurrentAPI())
@@ -154,5 +168,30 @@ namespace Helios
 			CORE_LOG_ERROR("Unknown RenderAPI is unsupported!");
 			return nullptr;
 		}
+	}
+}
+
+namespace Helios
+{
+	SharedPtr<DeviceStorageBuffer> DeviceStorageBuffer::Create(const std::string& name, const void* data, uint32_t size)
+	{
+		switch (Renderer::CurrentAPI())
+		{
+		case RenderAPI::None:
+			CORE_LOG_ERROR("RenderAPI can't be None!");
+			return nullptr;
+#ifdef PLATFORM_MACOS
+		case RenderAPI::Metal:
+			return CreateSharedPtr<MetalStorageBuffer>(name, data, size);
+#endif
+		default:
+			CORE_LOG_ERROR("Storage buffer is not supported by this render API!");
+			return nullptr;
+		}
+	}
+
+	SharedPtr<DeviceStorageBuffer> DeviceStorageBuffer::Create(const std::string& name, uint32_t size)
+	{
+		return Create(name, nullptr, size);
 	}
 }
