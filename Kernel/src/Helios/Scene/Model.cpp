@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "Model.h"
+#include "SkeletonModel.h"
 #include "Mesh.h"
 #include "SceneCommon.h"
 #include "Helios/Core/AssetManager.h"
@@ -311,6 +312,100 @@ namespace Helios
 		m_AABBMax.z = std::max(m_AABBMax.z, mesh_segment->m_AABBMax.z);
 	}
 
+	namespace
+	{
+		/* 顺着 .mesh 的结构走一遍，看末尾有没有骨骼段（只读文件、不建 GPU 对象）。
+		 * 骨骼模型和静态模型共用 Model::Create 这一个入口，靠它决定造哪个子类。 */
+		bool ReadLengthPrefixedString(std::istream& stream, std::string& out_text)
+		{
+			size_t length = 0;
+			stream.read(reinterpret_cast<char*>(&length), sizeof(length));
+			if (!stream || length > (1u << 20))
+				return false;
+
+			out_text.resize(length);
+			stream.read(out_text.data(), static_cast<std::streamsize>(length));
+			return static_cast<bool>(stream);
+		}
+
+		bool MeshFileHasSkeleton(const std::string& mesh_path)
+		{
+			std::ifstream stream(PathFromUtf8(mesh_path), std::ios::in | std::ios::binary);
+			if (!stream)
+				return false;
+
+			size_t segment_count = 0;
+			stream.read(reinterpret_cast<char*>(&segment_count), sizeof(segment_count));
+			if (!stream || segment_count > (1u << 16))
+				return false;
+
+			for (size_t segment_index = 0; segment_index < segment_count; ++segment_index)
+			{
+				std::string name;
+				if (!ReadLengthPrefixedString(stream, name))
+					return false;
+
+				uint32_t vertex_count = 0;
+				stream.read(reinterpret_cast<char*>(&vertex_count), sizeof(vertex_count));
+				size_t index_count = 0;
+				stream.read(reinterpret_cast<char*>(&index_count), sizeof(index_count));
+				if (!stream)
+					return false;
+				stream.seekg(static_cast<std::streamoff>(index_count * sizeof(uint32_t)), std::ios::cur);
+
+				size_t buffer_count = 0;
+				stream.read(reinterpret_cast<char*>(&buffer_count), sizeof(buffer_count));
+				if (!stream)
+					return false;
+
+				for (size_t buffer_index = 0; buffer_index < buffer_count; ++buffer_index)
+				{
+					uint32_t stride = 0;
+					stream.read(reinterpret_cast<char*>(&stride), sizeof(stride));
+					stream.seekg(static_cast<std::streamoff>(vertex_count) * stride * sizeof(float), std::ios::cur);
+
+					size_t element_count = 0;
+					stream.read(reinterpret_cast<char*>(&element_count), sizeof(element_count));
+					if (!stream)
+						return false;
+
+					for (size_t element_index = 0; element_index < element_count; ++element_index)
+					{
+						std::string element_name;
+						if (!ReadLengthPrefixedString(stream, element_name))
+							return false;
+
+						uint8_t element_type = 0;
+						size_t element_offset = 0;
+						bool element_normalized = false;
+						stream.read(reinterpret_cast<char*>(&element_type), sizeof(element_type));
+						stream.read(reinterpret_cast<char*>(&element_offset), sizeof(element_offset));
+						stream.read(reinterpret_cast<char*>(&element_normalized), sizeof(element_normalized));
+						if (!stream)
+							return false;
+					}
+				}
+
+				int material_index = 0;
+				glm::vec3 aabb_min, aabb_max;
+				stream.read(reinterpret_cast<char*>(&material_index), sizeof(material_index));
+				stream.read(reinterpret_cast<char*>(&aabb_min), sizeof(glm::vec3));
+				stream.read(reinterpret_cast<char*>(&aabb_max), sizeof(glm::vec3));
+				if (!stream)
+					return false;
+			}
+
+			char magic[4]{};
+			stream.read(magic, sizeof(magic));
+			return stream && std::memcmp(magic, kSkeletonFileMagic, sizeof(magic)) == 0;
+		}
+	}
+
+	bool Model::HasSkin() const
+	{
+		return m_SkinData != nullptr && !m_SkinData->IsEmpty();
+	}
+
 	/* 从路径加载一个模型 */
 	SharedPtr<Model> Model::Create(const std::string& path)
 	{
@@ -331,7 +426,10 @@ namespace Helios
 		/* 加载Mesh模型数据 */
 		if (suffix == "mesh")
 		{
-			SharedPtr<Model> model = CreateSharedPtr<Model>(model_path);
+			/* 有骨骼段的 .mesh 交给 SkeletonModel（同一个入口、同一个模型装载流程） */
+			SharedPtr<Model> model = MeshFileHasSkeleton(model_path)
+				? std::static_pointer_cast<Model>(CreateSharedPtr<SkeletonModel>(model_path))
+				: CreateSharedPtr<Model>(model_path);
 
 			/* 读取伴生 .mtl 槽表（缺失 = 空槽表 → 解析时全部兜底白模） */
 			const std::string mtl_filepath = ReplaceFileSuffix(model_path, ".mtl");
@@ -349,6 +447,10 @@ namespace Helios
 			/* 读取子模型数量 */
 			size_t mesh_segment_cnt;
 			in_mesh_file.read((char*)&mesh_segment_cnt, sizeof(size_t));
+
+			/* 蒙皮模型要留着 CPU 侧的绑定顶点（构建动态网格、CPU 蒙皮都用它）。
+			 * 先收在临时表里，读到末尾的蒙皮段再决定要不要落到段上。 */
+			std::vector<std::vector<float>> segment_sources;
 
 			for (size_t mesh_segment_idx = 0; mesh_segment_idx < mesh_segment_cnt; ++mesh_segment_idx)
 			{
@@ -418,6 +520,10 @@ namespace Helios
 						vertex_buffer_layout.EmplaceElement({ element_name, static_cast<BufferDataType>(element_type), element_normalized });
 					}
 
+					/* 第一个顶点缓冲的 CPU 副本（蒙皮模型还会用到） */
+					if (i == 0)
+						segment_sources.emplace_back(buffer_data, buffer_data + vertex_count * stride);
+
 					/* Vertex Buffer */
 					auto vertex_buffer = DeviceVertexBuffer::Create(name + "_VertexBuffer", buffer_data, vertex_count * stride * sizeof(float));
 					vertex_buffer->SetLayout(vertex_buffer_layout);
@@ -439,6 +545,19 @@ namespace Helios
 				mesh_segment->SetAABB(aabb_min, aabb_max);
 
 				model->AddMeshSegment(mesh_segment);
+			}
+
+			/* .mesh 末尾可选的蒙皮段：老文件没有这一段，读不到就按静态模型处理（先读再关文件） */
+			model->m_SkinData = CreateSharedPtr<SkeletonData>();
+			if (!model->m_SkinData->Read(in_mesh_file))
+				model->m_SkinData.reset();
+
+			/* 带蒙皮：把绑定顶点挂到各段上（顺序与段一致） */
+			if (model->HasSkin())
+			{
+				const auto& segments = model->GetMeshSegments();
+				for (size_t index = 0; index < segments.size() && index < segment_sources.size(); ++index)
+					segments[index]->SetSourceVertices(std::move(segment_sources[index]));
 			}
 
 			/* 关闭文件 */
@@ -561,17 +680,4 @@ namespace Helios
 		}
 	}
 
-	SkeletonModel::SkeletonModel(const std::string& path)
-		: Model(path)
-	{
-	}
-
-	/* 从路径加载一个骨骼模型 */
-	SharedPtr<SkeletonModel> SkeletonModel::Create(const std::string& path)
-	{
-		auto [basedir, basename] = ExtractFileBaseDirAndBaseName(path);
-
-		/* todo: */
-		return CreateSharedPtr<SkeletonModel>(basename);
-	}
 }

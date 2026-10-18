@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "ModelImporter.h"
+#include "SkeletonModel.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
@@ -81,6 +82,8 @@ namespace Helios
 			std::vector<ShapeImportResult> Shapes;
 			std::vector<ImportedMaterial> Materials;
 			std::vector<ImportedTexture> Textures;
+			/* 有骨骼才会填（静态模型为空） */
+			SkeletonData Skin;
 		};
 
 		constexpr size_t kInvalidTextureIndex = static_cast<size_t>(-1);
@@ -149,7 +152,8 @@ namespace Helios
 		}
 
 		/* 写出 .mesh：布局与 Model::Create 的读取一一对应 */
-		bool WriteMeshFile(const std::filesystem::path& mesh_path, const std::vector<ShapeImportResult>& shapes)
+		bool WriteMeshFile(const std::filesystem::path& mesh_path, const std::vector<ShapeImportResult>& shapes,
+			const SkeletonData& skin)
 		{
 			std::ofstream mesh_file(mesh_path, std::ios::out | std::ios::binary);
 			if (!mesh_file)
@@ -205,6 +209,10 @@ namespace Helios
 				mesh_file.write((char*)&shape.AabbMin, sizeof(glm::vec3));
 				mesh_file.write((char*)&shape.AabbMax, sizeof(glm::vec3));
 			}
+
+			/* 有骨骼：蒙皮段直接接在 .mesh 末尾（导入一个带动画的模型只产出一个文件） */
+			if (!skin.IsEmpty())
+				skin.Write(mesh_file);
 
 			mesh_file.close();
 			return true;
@@ -512,7 +520,7 @@ namespace Helios
 
 			const std::string stem = PathToUtf8(source_path.stem());
 			const std::filesystem::path mesh_path = dest_dir / PathFromUtf8(stem + ".mesh");
-			if (!WriteMeshFile(mesh_path, model.Shapes))
+			if (!WriteMeshFile(mesh_path, model.Shapes, model.Skin))
 				return {};
 
 			if (!model.Materials.empty())
@@ -745,12 +753,45 @@ namespace Helios
 		/* 交换格式（obj / fbx / gltf / glb / dae / stl）→ 中间结果 —— 全格式统一走这里。
 		 * 统一烘焙成静态网格：节点变换烘进顶点、三角化、补法线与 UV、同属性顶点合并；
 		 * 蒙皮与动画不带（.mesh 是静态格式）。 */
+		/* 先便宜地读一遍看有没有骨骼：有骨骼要保留节点层级与顶点绑定，不能烘进顶点 */
+		bool SourceHasBones(const std::filesystem::path& source_path)
+		{
+			Assimp::Importer probe;
+			const aiScene* scene = probe.ReadFile(PathToUtf8(source_path), aiProcess_Triangulate);
+			if (scene == nullptr)
+				return false;
+
+			for (unsigned mesh_index = 0; mesh_index < scene->mNumMeshes; ++mesh_index)
+			{
+				if (scene->mMeshes[mesh_index] != nullptr && scene->mMeshes[mesh_index]->mNumBones > 0)
+					return true;
+			}
+			return false;
+		}
+
+		glm::mat4 AiToGlm(const aiMatrix4x4& matrix)
+		{
+			/* assimp 行主序、glm 列主序：转置着填 */
+			return glm::mat4(
+				matrix.a1, matrix.b1, matrix.c1, matrix.d1,
+				matrix.a2, matrix.b2, matrix.c2, matrix.d2,
+				matrix.a3, matrix.b3, matrix.c3, matrix.d3,
+				matrix.a4, matrix.b4, matrix.c4, matrix.d4);
+		}
+
 		bool LoadAssimpModel(const std::filesystem::path& source_path, ImportedModel& out_model)
 		{
 			Assimp::Importer importer;
-			unsigned int flags = aiProcess_Triangulate | aiProcess_PreTransformVertices
+			const bool skinned_source = SourceHasBones(source_path);
+
+			unsigned int flags = aiProcess_Triangulate
 				| aiProcess_GenSmoothNormals | aiProcess_GenUVCoords | aiProcess_FindInvalidData
-				| aiProcess_JoinIdenticalVertices | aiProcess_FlipUVs;
+				| aiProcess_FlipUVs;
+			/* 蒙皮模型：顶点留在绑定空间（不烘节点变换），也不合并顶点（合并会把不同权重的顶点并掉） */
+			if (!skinned_source)
+			{
+				flags |= aiProcess_PreTransformVertices | aiProcess_JoinIdenticalVertices;
+			}
 			/* UV 原点：assimp 里 UV 统一是左下原点（glTF 导入器会先自己把 V 翻一道），
 			 * 引擎纹理原点在左上 —— 这里统一翻一次（与 obj 的 1-v 同口径） */
 
@@ -763,6 +804,29 @@ namespace Helios
 
 			const std::string stem = PathToUtf8(source_path.stem());
 			const std::filesystem::path source_dir = source_path.parent_path();
+
+			/* 蒙皮场景不烘节点变换：静态网格自己按节点世界矩阵补一下（蒙皮网格留在绑定空间） */
+			std::vector<glm::mat4> mesh_world(scene->mNumMeshes, glm::mat4(1.0f));
+			/* 节点名 → 父节点名：关节实体的父子关系从这里来 */
+			std::unordered_map<std::string, std::string> node_parents;
+			if (skinned_source && scene->mRootNode != nullptr)
+			{
+				std::function<void(const aiNode*, const glm::mat4&)> walk =
+					[&](const aiNode* node, const glm::mat4& parent_world)
+				{
+					const glm::mat4 world = parent_world * AiToGlm(node->mTransformation);
+					for (unsigned index = 0; index < node->mNumMeshes; ++index)
+						mesh_world[node->mMeshes[index]] = world;
+					for (unsigned index = 0; index < node->mNumChildren; ++index)
+					{
+						const aiNode* child = node->mChildren[index];
+						if (child->mName.length > 0 && node->mName.length > 0)
+							node_parents[child->mName.C_Str()] = node->mName.C_Str();
+						walk(child, world);
+					}
+				};
+				walk(scene->mRootNode, glm::mat4(1.0f));
+			}
 
 			/* 材质：没有贴图、名字为空或就是 assimp 的兜底名字的，不落进 .mtl
 			 * （如 stl 这类没有材质的格式不生成槽表），段里的索引跟着重映射 */
@@ -821,6 +885,22 @@ namespace Helios
 					result.AabbMax = glm::max(result.AabbMax, vertex.Position);
 				}
 
+				/* 蒙皮场景里的静态网格：节点变换手工烘进顶点（蒙皮网格不能烘） */
+				if (skinned_source && mesh->mNumBones == 0)
+				{
+					const glm::mat4& world = mesh_world[mesh_index];
+					const glm::mat3 normal_matrix = glm::transpose(glm::inverse(glm::mat3(world)));
+					result.AabbMin = glm::vec3(std::numeric_limits<float>::max());
+					result.AabbMax = glm::vec3(-std::numeric_limits<float>::max());
+					for (ImportedVertex& vertex : vertices)
+					{
+						vertex.Position = glm::vec3(world * glm::vec4(vertex.Position, 1.0f));
+						vertex.Normal = normal_matrix * vertex.Normal;
+						result.AabbMin = glm::min(result.AabbMin, vertex.Position);
+						result.AabbMax = glm::max(result.AabbMax, vertex.Position);
+					}
+				}
+
 				for (unsigned face_index = 0; face_index < mesh->mNumFaces; ++face_index)
 				{
 					const aiFace& face = mesh->mFaces[face_index];
@@ -848,7 +928,108 @@ namespace Helios
 				FinalizeVertices(vertices, result.VertexData);
 				result.MaterialIndex = (mesh->mMaterialIndex < material_remap.size())
 					? material_remap[mesh->mMaterialIndex] : -1;
+
+				/* 有骨骼：关节表与逐顶点权重收进蒙皮数据（关节按名字跨网格统一） */
+				if (skinned_source && mesh->mNumBones > 0)
+				{
+					std::vector<SkinJoint>& joints = out_model.Skin.GetJoints();
+					std::unordered_map<std::string, uint16_t> joint_lookup;
+					for (size_t index = 0; index < joints.size(); ++index)
+						joint_lookup[joints[index].Name] = static_cast<uint16_t>(index);
+
+					struct Influence
+					{
+						uint16_t Joint{ 0 };
+						float Weight{ 0.0f };
+					};
+					std::vector<std::vector<Influence>> influences(mesh->mNumVertices);
+
+					for (unsigned bone_index = 0; bone_index < mesh->mNumBones; ++bone_index)
+					{
+						const aiBone* bone = mesh->mBones[bone_index];
+						if (bone == nullptr)
+							continue;
+
+						const std::string joint_name = (bone->mName.length > 0)
+							? std::string(bone->mName.C_Str()) : ("bone_" + std::to_string(bone_index));
+
+						uint16_t joint = 0;
+						const auto found = joint_lookup.find(joint_name);
+						if (found == joint_lookup.end())
+						{
+							joint = static_cast<uint16_t>(joints.size());
+							SkinJoint entry;
+							entry.Name = joint_name;
+							entry.InverseBind = AiToGlm(bone->mOffsetMatrix);
+							joints.push_back(std::move(entry));
+							joint_lookup.emplace(joint_name, joint);
+						}
+						else
+						{
+							joint = found->second;
+						}
+
+						for (unsigned weight_index = 0; weight_index < bone->mNumWeights; ++weight_index)
+						{
+							const aiVertexWeight& weight = bone->mWeights[weight_index];
+							if (weight.mVertexId >= mesh->mNumVertices || weight.mWeight <= 0.0f)
+								continue;
+							influences[weight.mVertexId].push_back({ joint, weight.mWeight });
+						}
+					}
+
+					SkinSegment segment;
+					segment.Name = result.Name;
+					segment.Vertices.resize(mesh->mNumVertices);
+					for (size_t vertex_index = 0; vertex_index < influences.size(); ++vertex_index)
+					{
+						std::vector<Influence>& list = influences[vertex_index];
+						std::sort(list.begin(), list.end(), [](const Influence& lhs, const Influence& rhs)
+						{
+							return lhs.Weight > rhs.Weight;
+						});
+
+						SkinWeight& weight_entry = segment.Vertices[vertex_index];
+						float total = 0.0f;
+						for (int slot = 0; slot < 4 && slot < static_cast<int>(list.size()); ++slot)
+						{
+							weight_entry.Joints[slot] = list[slot].Joint;
+							weight_entry.Weights[slot] = list[slot].Weight;
+							total += list[slot].Weight;
+						}
+
+						/* 截断到 4 个影响后归一化，权重和仍约等于 1 */
+						if (total > 1.0e-6f)
+						{
+							for (float& weight : weight_entry.Weights)
+								weight /= total;
+						}
+					}
+
+					out_model.Skin.GetSegments().push_back(std::move(segment));
+				}
+
 				out_model.Shapes.push_back(std::move(result));
+			}
+
+			/* 关节父级：骨骼在 assimp 里就是节点，按名字关系补下标 */
+			if (!out_model.Skin.IsEmpty())
+			{
+				std::vector<SkinJoint>& joints = out_model.Skin.GetJoints();
+				std::unordered_map<std::string, int> joint_by_name;
+				for (size_t index = 0; index < joints.size(); ++index)
+					joint_by_name[joints[index].Name] = static_cast<int>(index);
+
+				for (SkinJoint& joint : joints)
+				{
+					const auto parent_name = node_parents.find(joint.Name);
+					if (parent_name == node_parents.end())
+						continue;
+
+					const auto parent_joint = joint_by_name.find(parent_name->second);
+					if (parent_joint != joint_by_name.end())
+						joint.Parent = parent_joint->second;
+				}
 			}
 
 			return !out_model.Shapes.empty();

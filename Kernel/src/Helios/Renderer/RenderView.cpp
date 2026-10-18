@@ -157,7 +157,16 @@ namespace Helios
 			/* 组件里存的是相对父节点的局部变换，画到世界里的必须是沿父链累积的结果 */
 			const glm::mat4 local_2_world = owner_scene->GetWorldTransform(entity);
 
-			for (const auto& mesh_segment : model_component.m_Model->GetMeshSegments())
+			/* 开了蒙皮且是骨骼模型：画 CPU 算好的动态段；否则用模型自己的静态段 */
+			const SkeletonModel* skeleton = (model_component.m_EnableSkinning
+				&& model_component.m_Model != nullptr && !model_component.m_Model->IsStaticModel())
+				? static_cast<const SkeletonModel*>(model_component.m_Model.get()) : nullptr;
+			const std::vector<SharedPtr<MeshSegment>>* skinned_segments = (skeleton != nullptr)
+				? &skeleton->GetSkinnedSegments() : nullptr;
+			const auto& mesh_segments = (skinned_segments != nullptr && !skinned_segments->empty())
+				? *skinned_segments : model_component.m_Model->GetMeshSegments();
+
+			for (const auto& mesh_segment : mesh_segments)
 			{
 				// todo: 执行剔除
 				//if ()

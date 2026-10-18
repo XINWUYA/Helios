@@ -7,7 +7,9 @@
 #include <unordered_map>
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Camera.h"
+#include "Mesh.h"
 #include "Model.h"
+#include "SkeletonModel.h"
 #include "Light.h"
 #include "ReflectionProbe.h"
 #include "AnimationClip.h"
@@ -151,6 +153,10 @@ namespace Helios
 		bool m_CastShadow{ true };
 		bool m_ReceiveShadow{ true };
 
+		/* 骨骼蒙皮开关（存盘）：关掉就按绑定姿态画静态网格。
+		 * 模型本身是 SkeletonModel 时才有意义（模型从 Model::Create 出来，按 .mesh 有没有骨骼段定类型） */
+		bool m_EnableSkinning{ true };
+
 		ModelComponent() = default;
 
 		/* 值语义：拷贝组件时，实例材质必须深拷贝 ——
@@ -158,7 +164,8 @@ namespace Helios
 		 * "覆盖 / 默认"是共享资产，SharedPtr 浅拷贝保持共享。 */
 		ModelComponent(const ModelComponent& other)
 			: ComponentBase(other), m_Model(other.m_Model), m_SlotOverrides(other.m_SlotOverrides),
-			  m_CastShadow(other.m_CastShadow), m_ReceiveShadow(other.m_ReceiveShadow)
+			  m_CastShadow(other.m_CastShadow), m_ReceiveShadow(other.m_ReceiveShadow),
+			  m_EnableSkinning(other.m_EnableSkinning)
 		{
 			for (auto& entry : m_SlotOverrides)
 			{

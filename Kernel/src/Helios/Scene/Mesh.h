@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include <glm/glm.hpp>
+#include <string>
+#include <vector>
 
 #include "Helios/Renderer/RenderCommon.h"
 
@@ -41,6 +43,12 @@ namespace Helios
 		[[nodiscard]] const glm::vec3& GetAABBMax() const { return m_AABBMax; }
 		void SetAABB(const glm::vec3& min, const glm::vec3& max) { m_AABBMin = min; m_AABBMax = max; }
 
+		/* 蒙皮用：CPU 侧的绑定顶点（只在带蒙皮数据的模型上保留，静态模型为空） */
+		[[nodiscard]] const std::vector<float>& GetSourceVertices() const { return m_SourceVertices; }
+		void SetSourceVertices(std::vector<float> vertices) { m_SourceVertices = std::move(vertices); }
+		/* 顶点步长（float 个数，从顶点布局推） */
+		[[nodiscard]] uint32_t GetVertexStrideFloats() const;
+
 		/* 创建网格数据对象 */
 		static SharedPtr<MeshSegment> Create(const std::string& name, const MeshPrimitive& mesh_primitive, int slot_index);
 
@@ -51,6 +59,8 @@ namespace Helios
 		MeshPrimitive m_MeshPrimitive;
 		/* 材质槽索引 */
 		int m_SlotIndex{ -1 };
+		/* 蒙皮用的绑定顶点（CPU 镜像；没有蒙皮时为空） */
+		std::vector<float> m_SourceVertices;
 		/* AABB */
 		glm::vec3 m_AABBMin{};
 		glm::vec3 m_AABBMax{};

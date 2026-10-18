@@ -35,6 +35,8 @@ namespace Helios
 			/* 投影 / 接受阴影：与光源 IsCastShadow 同一口径，默认值也写出 */
 			element->SetAttribute("CastShadow", model_component.m_CastShadow);
 			element->SetAttribute("ReceiveShadow", model_component.m_ReceiveShadow);
+			/* 骨骼蒙皮开关：模型没有蒙皮数据时写了也不起作用 */
+			element->SetAttribute("EnableSkinning", model_component.m_EnableSkinning);
 
 			/* 槽的实体级绑定：引用形态只写路径；实例形态全量内嵌（不依赖来源资产存活） */
 			for (const auto& entry : model_component.m_SlotOverrides)
@@ -75,6 +77,7 @@ namespace Helios
 			/* 旧场景没有这两个属性：缺省即可见设定（投影 / 接受阴影都开） */
 			model_component.m_CastShadow = element->BoolAttribute("CastShadow", true);
 			model_component.m_ReceiveShadow = element->BoolAttribute("ReceiveShadow", true);
+			model_component.m_EnableSkinning = element->BoolAttribute("EnableSkinning", true);
 
 			/* 槽绑定：引用形态走 AssetManager；实例形态读内嵌定义 */
 			model_component.m_SlotOverrides.clear();
@@ -406,6 +409,13 @@ namespace Helios
 				changed = true;
 			if (ImGuiExt::DrawCheckboxUI("ReceiveShadow", component.m_ReceiveShadow))
 				changed = true;
+
+			/* 带骨骼的模型才给这个开关：关掉按绑定姿态画（排查 / 省性能） */
+			if (model != nullptr && model->HasSkin())
+			{
+				if (ImGuiExt::DrawCheckboxUI("Skinning", component.m_EnableSkinning))
+					changed = true;
+			}
 
 			/* 材质槽区块：每槽一行 + 当前材质属性（可就地编辑） */
 			if (model != nullptr)

@@ -1,11 +1,13 @@
 ﻿#pragma once
 #include <glm/glm.hpp>
 #include "Material.h"
+#include <memory>
 #include "SceneObject.h"
 
 namespace Helios
 {
 	class MeshSegment;
+	class SkeletonData;
 
 	/* 内建模型类型 */
 	enum class BuiltinModelType : uint8_t
@@ -48,6 +50,11 @@ namespace Helios
 		/* 内建模型类型（无资产文件、程序化生成）；非内建模型返回 false。
 		 * UI（属性面板 / 场景树图标）与序列化判断"要不要当路径处理"都走它。 */
 		[[nodiscard]] bool TryGetBuiltinType(BuiltinModelType& out_type) const;
+		/* 蒙皮数据：.mesh 末尾带骨骼段才有（定义在 SkeletonModel.h，骨骼模型和它放一起） */
+		[[nodiscard]] bool HasSkin() const;
+		[[nodiscard]] const SkeletonData& GetSkin() const { return *m_SkinData; }
+		[[nodiscard]] SkeletonData& GetSkin() { return *m_SkinData; }
+
 		/* 模型的AABB */
 		[[nodiscard]] const glm::vec3& GetAABBMin() const { return m_AABBMin; }
 		[[nodiscard]] const glm::vec3& GetAABBMax() const { return m_AABBMax; }
@@ -94,21 +101,8 @@ namespace Helios
 		glm::vec3 m_AABBMax;
 		/* 缩放 */
 		glm::vec3 m_Scale{ 1.0f };
+		/* 蒙皮数据（.mesh 末尾的骨骼段；没有就是静态模型） */
+		SharedPtr<SkeletonData> m_SkinData;
 
-		friend class SkeletonModel;
-	};
-
-	/* 骨骼模型类 */
-	class SkeletonModel final : public Model
-	{
-	public:
-		explicit SkeletonModel(const std::string& path);
-		~SkeletonModel() override = default;
-
-		/* 标记是否为静态模型 */
-		[[nodiscard]] bool IsStaticModel() const override { return false; }
-
-		/* 从路径加载一个骨骼模型 */
-		static SharedPtr<SkeletonModel> Create(const std::string& path);
 	};
 }

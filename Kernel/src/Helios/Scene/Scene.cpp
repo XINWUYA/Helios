@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "Scene.h"
+#include "SkeletonModel.h"
 #include <tinyxml2.h>
 #include <algorithm>
 #include <unordered_map>
@@ -59,6 +60,9 @@ namespace Helios
 	void Scene::DestroyEntity(Entity& entity)
 	{
 		PROFILE_FUNCTION();
+
+		/* 骨骼模型：先把它的关节实体一起清掉，别在场景里留孤儿 */
+		SkeletonModel::Clear(*this, static_cast<entt::entity>(entity));
 
 		/* 子节点先脱离并保持世界位置：父实体的句柄马上会失效，
 		 * 子节点若继续指向它就会从层级树里消失，空间位置也会跟着跳变。 */
@@ -235,6 +239,9 @@ namespace Helios
 
 		/* 动画先推进：属性轨道写组件，下面的变换推送才能当帧看到新姿势 */
 		m_AnimationRuntime.Tick(*this, delta_time);
+
+		/* 骨骼蒙皮：关节姿势已经定下来，这里把蒙皮模型的顶点重算一遍 */
+		SkeletonModel::UpdateScene(*this);
 
 		/* 统一将 TransformComponent 同步给所有 SceneObject（Model / Light / Camera）。
 		 * 传下去的是世界变换（沿父链累积），SceneObject 只认识世界空间。
