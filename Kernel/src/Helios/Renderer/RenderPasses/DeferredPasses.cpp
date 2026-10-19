@@ -1,6 +1,8 @@
 #include "Pch.h"
 #include "DeferredPasses.h"
 #include "DebugViewPasses.h"
+#include "ObjectSorting.h"
+#include "ScenePass.h"
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/PostProcess/PostProcessPasses.h>
@@ -27,15 +29,16 @@ namespace Helios
 		constexpr size_t kMaxDeferredIBLProbes = 3;
 
 		/* 光照阶段认识的调试档位（Lighting 类）：只对它们下发档位号，
-		 * 其余档位（Surface / Analysis 类）统一下发 0 = 正常着色。 */
+		 * 其余档位（Surface / Analysis / Shadow 类）统一下发 0 = 正常着色。
+		 * Shadow 档要叠加多盏灯，走自己的累加 Pass（见 DebugViewPasses）。 */
 		int LightingDebugViewValue(DebugViewMode mode)
 		{
 			switch (mode)
 			{
 			case DebugViewMode::Diffuse:
 			case DebugViewMode::Specular:
-			case DebugViewMode::Shadow:
-			case DebugViewMode::Indirect:
+			case DebugViewMode::IndirectDiffuse:
+			case DebugViewMode::IndirectSpecular:
 			case DebugViewMode::Probe:
 				return static_cast<int>(mode);
 			case DebugViewMode::None:
@@ -47,6 +50,7 @@ namespace Helios
 			case DebugViewMode::AmbientOcclusion:
 			case DebugViewMode::Emission:
 			case DebugViewMode::Ambient:
+			case DebugViewMode::Shadow:
 			case DebugViewMode::Overdraw:
 			case DebugViewMode::Mipmap:
 			case DebugViewMode::Skeleton:
@@ -54,50 +58,6 @@ namespace Helios
 				return 0;
 			}
 			return 0;
-		}
-
-		/* Shadow 档的合成光源：首个携带阴影数据的光源（判定与 FillLightUniformBuffer
-		 * 的级联 / 点光匹配一致 —— 只有它采样了阴影）；没有带阴影的光源时退化为
-		 * 首个光源 —— 输出全白（"无阴影数据"读作全受光，而不是全黑）。 */
-		size_t FindShadowDebugLightIndex(RenderView& render_view)
-		{
-			const auto& lights = render_view.GetValidLights();
-			if (lights.empty())
-				return 0;
-
-			const auto& shadow_maps = render_view.GetShadowMapManager();
-			if (shadow_maps != nullptr)
-			{
-				for (size_t light_index = 0; light_index < lights.size(); ++light_index)
-				{
-					const auto& light = lights[light_index];
-					if (light->GetLightType() == LightType::Directional)
-					{
-						const auto& cascade_maps = shadow_maps->GetCascadeShadowMaps();
-						if (!cascade_maps.empty() && cascade_maps[0]->GetLight().get() == light.get())
-							return light_index;
-					}
-					else if (shadow_maps->GetPunctualShadowData(light.get()).Valid)
-					{
-						return light_index;
-					}
-				}
-			}
-			return 0;
-		}
-
-		/* G-Buffer 采样点缺省时补的默认贴图：法线图按名字认；乘法类（Albedo / Roughness / Ambient）
-		 * 用白，其余用黑。注意：Ambient 不能用黑 —— 缺贴图的材质走 "albedo × 0.3" 回退环境项，
-		 * 黑贴图会让延迟端在没有探针时把这个环境项丢掉。 */
-		SharedPtr<DeviceTexture> DefaultTextureForSampler(const std::string& sampler_name)
-		{
-			if (sampler_name.find("Normal") != std::string::npos)
-				return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/normal.png"));
-			if (sampler_name.find("Albedo") != std::string::npos
-				|| sampler_name.find("Roughness") != std::string::npos
-				|| sampler_name.find("Ambient") != std::string::npos)
-				return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/White.png"));
-			return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Black.png"));
 		}
 
 		SharedPtr<Material> CreateGBufferMaterial(
@@ -127,7 +87,7 @@ namespace Helios
 				const std::string& sampler_name = sampler_entry.first;
 				if (material->GetAllParameters().find(ToID(sampler_name)) != material->GetAllParameters().end())
 					continue;
-				material->SetTexture(sampler_name, DefaultTextureForSampler(sampler_name));
+				material->SetTexture(sampler_name, Material::DefaultTextureForSampler(sampler_name));
 			}
 
 			material->SetRasterState(source->GetRasterState());
@@ -244,8 +204,10 @@ namespace Helios
 
 								/* 天空盒不进 G-Buffer：它输出的是最终颜色、顶点着色器把网格
 								 * 折叠成全屏天空，转成 G-Buffer 材质只会得到一颗实心球。
-								 * 由 SkyPass 在光照之后专绘背景。 */
-								if (material->IsSkyBox())
+								 * 由 SkyPass 在光照之后专绘背景。
+								 * 透明物体也不进：G-Buffer 只存单层表面，叠不出半透明，
+								 * 统一放到光照之后的前向透明 Pass 里画。 */
+								if (material->IsSkyBox() || material->IsTransparent())
 									continue;
 
 								auto gbuffer_material = material;
@@ -295,6 +257,7 @@ namespace Helios
 				frame_graph->GetBlackboard()["GBufferTexture3"] = gbuffer_pass->GetData().GBufferTexture3;
 				frame_graph->GetBlackboard()["GBufferTexture4"] = gbuffer_pass->GetData().GBufferTexture4;
 				frame_graph->GetBlackboard()["GBufferTexture5"] = gbuffer_pass->GetData().GBufferTexture5;
+				frame_graph->GetBlackboard()["GBufferObjectId"] = gbuffer_pass->GetData().ObjectId;
 				frame_graph->GetBlackboard()["GBufferDepth"] = gbuffer_pass->GetData().Depth;
 			}
 
@@ -379,31 +342,40 @@ namespace Helios
 									if (ibl_brdf_lut != nullptr)
 									{
 										ibl_probes = probe_manager->CollectClosestBakedProbes(
-											render_view.GetCullingCamera()->GetPosition(), kMaxDeferredIBLProbes);
-										ibl_blend_enabled = probe_manager->IsProbeBlendingEnabled();
+											render_view.GetCullingCamera()->GetPosition(), kMaxDeferredIBLProbes,
+											render_view.GetCullingMask());
+										ibl_blend_enabled = probe_manager->IsProbeBlendingEnabled(
+											render_view.GetCullingMask());
 									}
 								}
 							}
 
 							const auto& lights = render_view.GetValidLights();
 
-							/* 调试视图（光照分量档位）：只对 Lighting 类档位下发；Shadow 档先解析
-							 * "首个携带阴影数据的光源"（合成者），每笔光照都完整重设两个调试
-							 * uniform（裸 uniform 是 per-program 状态，漏设会残留上一笔取值） */
+							/* 主阴影光源：环境项只在它的那一笔合成 —— 其它笔没有阴影数据，
+							 * 环境项跟着它们会收不到阴影 */
+							size_t primary_shadow_light = 0;
+							if (const auto& shadow_maps = render_view.GetShadowMapManager())
+								primary_shadow_light = shadow_maps->FindPrimaryShadowLightIndex(lights);
+
 							const int debug_view_value = LightingDebugViewValue(render_view.GetDebugViewMode());
-							size_t shadow_debug_light = 0;
-							if (debug_view_value == static_cast<int>(DebugViewMode::Shadow))
-								shadow_debug_light = FindShadowDebugLightIndex(render_view);
 
-							for (size_t light_index = 0; light_index < lights.size(); ++light_index)
+							/* 单笔光照：light 为空时按"无光源"填 UBO（只合成环境光 + IBL） */
+							const auto draw_light = [&](const SharedPtr<Light>& light, size_t light_index)
 							{
-								const auto& light = lights[light_index];
-
-								/* 完整光照数据：光源参数 + 该光源的阴影（级联 / 点光 / 聚光，来自本视图阴影管理器） */
-								Renderer::FillLightUniformBuffer(light, render_view.GetShadowMapManager().get());
+								if (light != nullptr)
+								{
+									/* 完整光照数据：光源参数 + 该光源的阴影（级联 / 点光 / 聚光，来自本视图阴影管理器） */
+									Renderer::FillLightUniformBuffer(light, render_view.GetShadowMapManager().get());
+								}
+								else
+								{
+									Renderer::FillEmptyLightUniformBuffer();
+								}
 
 								SharedPtr<Material> material = CreateSharedPtr<Material>();
 								auto& raster_state = material->GetRasterState();
+								raster_state.EnableDepthTest = false;
 								raster_state.EnableDepthWrite = false;
 								raster_state.EnableBlend = true;
 								raster_state.BlendEquationRGB = BlendEquation::Add;
@@ -421,13 +393,11 @@ namespace Helios
 								material->SetTexture("u_GBufferTexture3", resources.Get(data.GBufferTexture3).Texture);
 								material->SetTexture("u_GBufferTexture4", resources.Get(data.GBufferTexture4).Texture);
 								material->SetTexture("u_GBufferTexture5", resources.Get(data.GBufferTexture5).Texture);
-								/* 环境光 / 自发光与光源无关，只由第一笔光照合成（多光源逐笔加法叠加） */
+								/* 环境光 / 自发光与光源无关，只在主阴影光源那一笔合成（多光源逐笔加法叠加） */
 								material->SetParameters(ParamType::Int, "u_ComposeAmbientEmission",
-									light_index == 0 ? 1 : 0);
-								/* 调试视图：u_DebugShadowCompose 只在 Shadow 档被着色器读取 */
+									light_index == primary_shadow_light ? 1 : 0);
+								/* 调试视图：光照分量档位（Diffuse / Specular / 环境项 / Probe） */
 								material->SetParameters(ParamType::Int, "u_DebugView", debug_view_value);
-								material->SetParameters(ParamType::Int, "u_DebugShadowCompose",
-									light_index == shadow_debug_light ? 1 : 0);
 
 								/* 探针 IBL 的参数和贴图每笔光照都完整设一遍（裸 uniform 是 per-program 状态，漏设就残留
 								 * 上一笔）；采样槽位不管有没有效都必须有绑定（缺绑定会被 Metal 校验断言），无效槽位用中性兜底。 */
@@ -457,7 +427,13 @@ namespace Helios
 									ibl_brdf_lut != nullptr ? ibl_brdf_lut : DeviceTexture::Black());
 
 								Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
-							}
+							};
+
+							/* 光源全被层剔掉：补一笔无光源的环境 / IBL 合成，别让画面空掉 */
+							if (lights.empty())
+								draw_light(nullptr, 0);
+							for (size_t light_index = 0; light_index < lights.size(); ++light_index)
+								draw_light(lights[light_index], light_index);
 						}
 						render_pass_info->Unbind();
 					}
@@ -465,6 +441,68 @@ namespace Helios
 				frame_graph->GetBlackboard()["LightingPassOutput"] = lighting_pass->GetData().LightingResult;
 
 				return lighting_pass->GetData().LightingResult;
+			}
+
+			/* 前向透明 Pass：G-Buffer 只存得住单层表面，透明物体在这里用自身着色器直画 ——
+			 * 颜色叠在光照结果（已含天空）上，深度取 G-Buffer 的场景深度（只测不写），
+			 * ObjectId 一并写入，像素拾取跟前向管线一致。 */
+			void AddForwardTransparentPass(RenderView& render_view)
+			{
+				PROFILE_FUNCTION();
+
+				auto& frame_graph = render_view.GetFrameGraph();
+				const auto& viewport_region = render_view.GetViewportRegion();
+
+				struct TransparentPassData
+				{
+					FrameGraphResourceHandleTyped<FrameGraphTexture> Output;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> ObjectId;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> Depth;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle;
+				};
+
+				frame_graph->AddPass<TransparentPassData>("ForwardTransparentPass",
+					[&](FrameGraphBuilder& builder, TransparentPassData& data)
+					{
+						data.Output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("LightingPassOutput");
+						data.ObjectId = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferObjectId");
+						data.Depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
+						data.ShadowMapHandle = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ShadowMapHandle");
+
+						builder.BindInputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment);
+						builder.BindInputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment);
+						builder.BindInputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
+						builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
+
+						FrameGraphPassInfo::Descriptor pass_desc;
+						pass_desc.Attachments.ColorAttachments(0) = data.Output;
+						pass_desc.Attachments.ColorAttachments(1) = data.ObjectId;
+						pass_desc.Attachments.DepthAttachment() = data.Depth;
+						/* 颜色、ObjectId 与场景深度都保留：这个 Pass 只往上叠透明层 */
+						pass_desc.PreserveContent = true;
+						pass_desc.ViewportRegion = viewport_region;
+						builder.CreateRenderPass("ForwardTransparentRenderTarget", pass_desc);
+
+						/* 产物是"写进已有资源"，不声明为目标会被图裁剪剔除 */
+						builder.AsSideEffect();
+					},
+					[&render_view](const FrameGraphResources& resources, const TransparentPassData& data)
+					{
+						auto scene = render_view.GetOwnerScene();
+						if (scene == nullptr)
+							return;
+
+						const auto render_pass_info = resources.GetPassRenderTarget();
+						render_view.EmplacePassFrameBuffer("ForwardTransparentPass", render_pass_info);
+
+						render_pass_info->Bind();
+						{
+							ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
+							Forward::SubmitSceneObjects(render_view, *scene, true);
+						}
+						render_pass_info->Unbind();
+					}
+					);
 			}
 
 			/* 天空背景 Pass：天空盒材质按原样画进光照结果。顶点着色器折叠成全屏天空、深度恒为远平面
@@ -551,6 +589,14 @@ namespace Helios
 			/* 线框档要的是纯结构视图：背景停在调试 Pass 的清空色，不画天空 */
 			if (render_view->GetDebugViewMode() != DebugViewMode::Wireframe)
 				AddSkyPass(*render_view);
+
+			/* 透明物体最后画（天空之后）：调试档位下由调试 Pass 统一重绘，这里跳过，
+			 * 免得半透明层盖住调试读数；场景里没有透明物体时整趟都不挂 */
+			if (render_view->GetDebugViewMode() == DebugViewMode::None
+				&& RenderSorting::HasTransparentObjects(render_view->GetVisibleMeshObjects()))
+			{
+				AddForwardTransparentPass(*render_view);
+			}
 
 			/* 后处理链（效果注册表驱动）：天空之后、输出之前；无效果 / 未启用 = 恒直通 */
 			const auto final_output = PostProcess::AddPostProcessPasses(*render_view, lighting_output);

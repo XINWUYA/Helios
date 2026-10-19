@@ -7,6 +7,7 @@
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -269,6 +270,7 @@ namespace Helios
 		clone->m_pShader = m_pShader;
 		clone->m_Parameters = m_Parameters; /* 参数表逐条拷贝；纹理的 SharedPtr 共享 */
 		clone->m_RasterState = m_RasterState;
+		clone->m_RenderQueue = m_RenderQueue;
 		return clone;
 	}
 
@@ -281,6 +283,7 @@ namespace Helios
 		m_pShader = source.m_pShader;
 		m_Parameters = source.m_Parameters; /* 参数表逐条拷贝；纹理的 SharedPtr 共享 */
 		m_RasterState = source.m_RasterState;
+		m_RenderQueue = source.m_RenderQueue;
 
 		/* Shader 与参数都可能换了：纹理参数的绑定点统一按新 Shader 重解析 */
 		RefreshTextureBindings();
@@ -352,6 +355,43 @@ namespace Helios
 		return fills;
 	}
 
+	/* 收集"Shader 已声明、本材质没有写"的贴图参数及其默认贴图 */
+	std::vector<MaterialParamInfo> Material::CollectMissingTextureParamDefaults() const
+	{
+		PROFILE_FUNCTION();
+
+		std::vector<MaterialParamInfo> fills;
+		if (m_pShader == nullptr)
+			return fills;
+
+		for (const ReflectedMaterialParam& reflected : m_pShader->GetReflectionData().MaterialParams)
+		{
+			/* 只补材质该管的采样器；引擎逐绘制绑的（阴影图 / 探针贴图）不拦 */
+			if (reflected.Type != ParamType::Texture || !reflected.Property)
+				continue;
+			if (m_Parameters.find(ToID(reflected.Name)) != m_Parameters.end())
+				continue;
+
+			fills.push_back(MakeTextureParam(reflected.Name, DefaultTextureForSampler(reflected.Name)));
+		}
+		return fills;
+	}
+
+	SharedPtr<DeviceTexture> Material::DefaultTextureForSampler(const std::string& sampler_name)
+	{
+		PROFILE_FUNCTION();
+
+		/* 注意：Ambient 不能用黑 —— 缺贴图的材质走 "albedo × 0.3" 回退环境项，
+		 * 黑贴图会让延迟端在没有探针时把这个环境项丢掉。 */
+		if (sampler_name.find("Normal") != std::string::npos)
+			return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/normal.png"));
+		if (sampler_name.find("Albedo") != std::string::npos
+			|| sampler_name.find("Roughness") != std::string::npos
+			|| sampler_name.find("Ambient") != std::string::npos)
+			return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/White.png"));
+		return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Black.png"));
+	}
+
 	uint32_t Material::ResolveTextureBinding(const std::string& name) const
 	{
 		if (!m_pShader)
@@ -403,6 +443,10 @@ namespace Helios
 			const auto& shader = material.GetShader();
 			material_element->SetAttribute("ShaderPath",
 				shader != nullptr ? RELATIVE_PATH(shader->GetPath()).c_str() : "");
+
+			/* 渲染队列：与 RasterState 同属可选定义 —— 只写参数的覆盖条目沿用基材质的队列 */
+			if (write_raster_state)
+				material_element->SetAttribute("RenderQueue", material.GetRenderQueue());
 
 			/* Parameters */
 			auto* params_root = material_element->InsertNewChildElement("Parameters");
@@ -465,6 +509,7 @@ namespace Helios
 			raster_state_doc->SetAttribute("BlendFuncSrcA", static_cast<uint32_t>(raster_state.BlendFuncSrcA));
 			raster_state_doc->SetAttribute("BlendFuncDstRGB", static_cast<uint32_t>(raster_state.BlendFuncDstRGB));
 			raster_state_doc->SetAttribute("BlendFuncDstA", static_cast<uint32_t>(raster_state.BlendFuncDstA));
+			raster_state_doc->SetAttribute("EnableDepthTest", raster_state.EnableDepthTest);
 			raster_state_doc->SetAttribute("EnableDepthWrite", raster_state.EnableDepthWrite);
 			raster_state_doc->SetAttribute("DepthCompareFunc", static_cast<uint32_t>(raster_state.DepthCompareFunc));
 			raster_state_doc->SetAttribute("EnableColorWrite", raster_state.EnableColorWrite);
@@ -480,6 +525,10 @@ namespace Helios
 			if (shader_path == nullptr || *shader_path == '\0')
 				return false;
 			material.SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(shader_path)));
+
+			/* 渲染队列：老资产没有这个属性时保持默认（不透明档） */
+			if (const auto* render_queue = material_element->Attribute("RenderQueue"))
+				material.SetRenderQueue(render_queue[0] != '\0' ? std::atoi(render_queue) : RENDER_QUEUE_GEOMETRY);
 
 			/* Parameters */
 			if (const auto* params_root = material_element->FirstChildElement("Parameters"))
@@ -549,6 +598,9 @@ namespace Helios
 				raster_state.BlendFuncSrcA = static_cast<BlendFunc>(raster_state_doc->IntAttribute("BlendFuncSrcA"));
 				raster_state.BlendFuncDstRGB = static_cast<BlendFunc>(raster_state_doc->IntAttribute("BlendFuncDstRGB"));
 				raster_state.BlendFuncDstA = static_cast<BlendFunc>(raster_state_doc->IntAttribute("BlendFuncDstA"));
+				raster_state.EnableDepthTest = (raster_state_doc->FindAttribute("EnableDepthTest") != nullptr)
+					? raster_state_doc->BoolAttribute("EnableDepthTest")
+					: true;
 				raster_state.EnableDepthWrite = raster_state_doc->BoolAttribute("EnableDepthWrite");
 				raster_state.DepthCompareFunc = static_cast<CompareFunc>(raster_state_doc->IntAttribute("DepthCompareFunc"));
 				raster_state.EnableColorWrite = raster_state_doc->BoolAttribute("EnableColorWrite");

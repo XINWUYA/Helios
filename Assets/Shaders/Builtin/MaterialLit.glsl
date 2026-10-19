@@ -42,7 +42,9 @@ void CalculateLitMaterial(inout SMaterialInput mtl,
 	vec2 parallax_uv = base_uv - view_dir.xy / max(view_dir.z, 1e-3f) * height;
 
 	/* Albedo 转线性空间后再乘顶点色（sRGB 解码漏了会整片发白，是历史漂移点） */
-	mtl.Albedo = SrgbToLinear(texture(u_AlbedoTexture, parallax_uv).rgb) * base_color.rgb;
+	const vec4 albedo_sample = texture(u_AlbedoTexture, parallax_uv);
+	mtl.Albedo = SrgbToLinear(albedo_sample.rgb) * base_color.rgb;
+	mtl.Opacity = albedo_sample.a * base_color.a;
 
 	vec3 tangent_normal = texture(u_NormalTexture, parallax_uv).xyz * 2.0f - 1.0f;
 	mtl.Normal = normalize(TBN * tangent_normal);

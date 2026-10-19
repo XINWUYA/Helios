@@ -12,6 +12,8 @@ struct SMaterialInput
 	vec3 Emission;
 	vec3 Ambient;
 	float AO;
+	/* 不透明度：albedo 贴图 alpha × 顶点色 alpha（不透明材质不参与混合） */
+	float Opacity;
 	float IOR;
 	float ClearCoatThickness;
 	float ClearCoatRoughness;

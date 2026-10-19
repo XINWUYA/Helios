@@ -45,12 +45,12 @@ namespace Helios
 				return ViewportRegion{ 0, 0, desc.Width, desc.Height };
 			}
 
-			/* 全屏效果材质：深度关（引擎约定"关深度写 = 连深度测试一起关"）；
-			 * additive = One/One 加法混合（升采样回叠用） */
+			/* 全屏效果材质：不测深度也不写；additive = One/One 加法混合（升采样回叠用） */
 			SharedPtr<Material> MakeFullScreenMaterial(const SharedPtr<DeviceShader>& shader, bool additive)
 			{
 				auto material = CreateSharedPtr<Material>();
 				auto& raster_state = material->GetRasterState();
+				raster_state.EnableDepthTest = false;
 				raster_state.EnableDepthWrite = false;
 				if (additive)
 				{

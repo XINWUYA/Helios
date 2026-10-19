@@ -377,6 +377,23 @@ namespace Helios::MaterialParamUI
 		return true;
 	}
 
+	/* 渲染队列行：小于 2500 走不透明批次，2500 起走透明批次（与引擎的判据同源）。
+	 * 返回 true = 有改动（新值写回传入的引用）。 */
+	inline bool DrawMaterialRenderQueueRow(int32_t& render_queue)
+	{
+		const float value_width = ImGuiExt::BeginPropertyRow("Render Queue", EditorTheme::Token::PropertyLabelWidth, true);
+		int value = render_queue;
+		ImGui::SetNextItemWidth(value_width);
+		const bool edited = ImGui::DragInt("##RenderQueue", &value, 10.0f, 0, 5000);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Below 2500 draws opaque, 2500 and above draws transparent");
+		ImGuiExt::EndPropertyRow();
+
+		if (edited)
+			render_queue = value;
+		return edited;
+	}
+
 	/* 一条材质参数行：值画在临时缓冲上，改动经 write_back 落进目标材质（槽位 → 自动实例化
 	 * 写回；资产编辑缓冲 / 模型编辑器 → 直接写）。行对齐：标签跟 frame 高控件垂直居中。
 	 * 贴图行只画缩略图（点击定位、拖入替换、悬停看大图）。

@@ -34,5 +34,9 @@ namespace Helios
 		void WriteRasterState(const Model& model,
 			std::unordered_map<std::string, MaterialSlotOverride>& overrides,
 			const std::string& slot_name, const RenderRasterState& state, bool& changed);
+
+		void WriteRenderQueue(const Model& model,
+			std::unordered_map<std::string, MaterialSlotOverride>& overrides,
+			const std::string& slot_name, int32_t render_queue, bool& changed);
 	}
 }

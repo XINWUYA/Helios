@@ -411,7 +411,7 @@ namespace Helios
 	namespace
 	{
 		/* 把条目的参数覆盖叠到已克隆的材质上：只覆盖写过的参数；
-		 * RasterState 只有在覆盖里显式带了才替换 */
+		 * RasterState 与渲染队列只有在覆盖里显式带了才替换 */
 		void ApplyMaterialOverride(Material& target, const MaterialSlot& entry)
 		{
 			if (entry.pOverride == nullptr)
@@ -431,7 +431,10 @@ namespace Helios
 			}
 
 			if (entry.HasRasterOverride)
+			{
 				target.SetRasterState(entry.pOverride->GetRasterState());
+				target.SetRenderQueue(entry.pOverride->GetRenderQueue());
+			}
 		}
 
 		/* 清单条目 -> 模型槽：引用条目在这里解析成默认材质（覆盖叠在克隆体上），

@@ -62,6 +62,9 @@ layout(binding = 0) uniform sampler2D u_AlbedoTexture; // @property
  * 非 opaque uniform 必须显式 location（Windows 走 shaderc） */
 layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @property
 
+/* 不透明度乘数：透明队列的材质靠它整体调淡；不透明队列不混合，改了看不见 */
+layout(location = 1) uniform float u_Opacity = 1.0f; // @property
+
 void main()
 {
 	/* 本 shader 无切线数据，直接用插值后的世界法线 */
@@ -70,7 +73,8 @@ void main()
 
 	/* Albedo 转到线性空间后再做光照（主贴图 UV 缩放与偏移在此生效） */
 	vec2 albedo_uv = vert2frag.TexCoord * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
-	vec3 albedo = SrgbToLinear(texture(u_AlbedoTexture, albedo_uv).rgb);
+	const vec4 albedo_sample = texture(u_AlbedoTexture, albedo_uv);
+	vec3 albedo = SrgbToLinear(albedo_sample.rgb);
 
 	/* 简单光照模型：金属度 / 粗糙度用默认值 */
 	float metallic  = 0.0f;
@@ -95,9 +99,9 @@ void main()
 		else
 			ambient = ComposeFallbackAmbient(vec3(1.0f), albedo, 1.0f); /* 简化档：无 ambient 贴图 / AO */
 
-		color += ambient;
+		color += ambient * AmbientShadowVisibility(N, L, shadow);
 	}
 
-	OutFragColor = vec4(color, 1.0f);
+	OutFragColor = vec4(color, albedo_sample.a * u_Opacity);
 	ObjectId = u_ObjectId;
 }

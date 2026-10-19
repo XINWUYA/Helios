@@ -65,6 +65,11 @@ namespace Helios
 		 * 见 Builtin/DirectLight.glsl）。前向渲染通道据此决定一个对象是否走
 		 * "逐光源一笔"循环（天空盒 / Unlit 类材质单笔原样提交）。 */
 		[[nodiscard]] bool SupportsDirectLighting() const;
+		/* 渲染队列：小于 2500 不透明（先画、写深度），大于等于 2500 透明
+		 * （后画、从远到近、只测不写深度）。见 RenderCommon 的队列常量。 */
+		void SetRenderQueue(int32_t render_queue) { m_RenderQueue = render_queue; }
+		[[nodiscard]] int32_t GetRenderQueue() const { return m_RenderQueue; }
+		[[nodiscard]] bool IsTransparent() const { return IsTransparentRenderQueue(m_RenderQueue); }
 		/* 设置参数 */
 		void SetParameters(ParamType type, const std::string& name, const std::any& param);
 		[[nodiscard]] const ParameterMap& GetAllParameters() const { return m_Parameters; }
@@ -115,6 +120,14 @@ namespace Helios
 		 * 转换到通用 Shader 绘制时（延迟 GBuffer）用它做 per-draw 补齐。 */
 		[[nodiscard]] std::vector<MaterialParamInfo> CollectMissingValueParamDefaults() const;
 
+		/* 收集"Shader 声明了、本材质没写"的贴图参数，值取内置默认贴图 —— 前向直画用材质自身
+		 * shader，声明过的采样器必须每个都有绑定（Metal 校验会直接断言）。 */
+		[[nodiscard]] std::vector<MaterialParamInfo> CollectMissingTextureParamDefaults() const;
+
+		/* 采样点缺省时补的默认贴图：法线图按名字认；乘法类（Albedo / Roughness / Ambient）
+		 * 用白，其余用黑。GBuffer 材质转换与材质参数补齐共用这一份判据。 */
+		static SharedPtr<DeviceTexture> DefaultTextureForSampler(const std::string& sampler_name);
+
 		/* 默认材质 */
 		static SharedPtr<Material>& Default();
 		/* 错误材质 */
@@ -141,6 +154,8 @@ namespace Helios
 		ParameterMap m_Parameters{};
 		/* 光栅化状态配置 */
 		RenderRasterState m_RasterState{};
+		/* 渲染队列（缺省不透明档） */
+		int32_t m_RenderQueue{ RENDER_QUEUE_GEOMETRY };
 
 		/* 默认材质和错误材质 */
 		static SharedPtr<Material> m_pDefaultMaterial;

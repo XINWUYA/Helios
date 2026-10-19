@@ -58,6 +58,7 @@ namespace Helios
             uint64_t h = 0;
             MetalHashCombine(h, static_cast<uint64_t>(state.CullMode));
             MetalHashCombine(h, static_cast<uint64_t>(state.FrontFaceType));
+            MetalHashCombine(h, state.EnableDepthTest ? 1u : 0u);
             MetalHashCombine(h, state.EnableDepthWrite ? 1u : 0u);
             MetalHashCombine(h, static_cast<uint64_t>(state.DepthCompareFunc));
             MetalHashCombine(h, state.Wireframe ? 1u : 0u);
@@ -243,7 +244,8 @@ namespace Helios
 
     MTL::DepthStencilState* MetalRenderAPI::GetOrCreateDepthStencilState(CompareFunc compare_func, bool depth_write_enabled)
     {
-        const uint32_t key = (static_cast<uint32_t>(compare_func) << 1) | (depth_write_enabled ? 1u : 0u);
+        const uint32_t key = (static_cast<uint32_t>(compare_func) << 2)
+            | (depth_write_enabled ? 1u : 0u);
 
         auto it = m_DepthStencilStates.find(key);
         if (it != m_DepthStencilStates.end())
@@ -290,17 +292,19 @@ namespace Helios
             : m_CurrentRasterState.FrontFaceType;
         m_CurrentRenderEncoder->setFrontFacingWinding(ToMetalWinding(front_face));
 
-        /* 深度测试 / 写入：跟 OpenGL 后端一致 —— EnableDepthWrite 同时管测试和写入，关了 = 不测试。
-         * 引擎是 Reversed-Z，默认比较 GreaterEqual。只在 RenderPass 有深度附件时才设置（ImGui 叠加层
-         * 没有，硬设会被 Metal 校验判错）。 */
+        /* 深度测试 / 写入分开下发：透明物体保留测试、关掉写入 —— 否则后画的近处片元
+         * 会被先前写入的深度挡住，透明叠层就丢了。只在 RenderPass 有深度附件时才设置
+         * （ImGui 叠加层没有，硬设会被 Metal 校验判错）。 */
         if (ActiveRenderPassHasDepthAttachment())
         {
-            const CompareFunc compare_func = m_CurrentRasterState.EnableDepthWrite
+            const CompareFunc compare_func = m_CurrentRasterState.EnableDepthTest
                 ? m_CurrentRasterState.DepthCompareFunc
                 : CompareFunc::Always;
+            const bool depth_write = m_CurrentRasterState.EnableDepthTest
+                && m_CurrentRasterState.EnableDepthWrite;
 
             if (MTL::DepthStencilState* depth_stencil_state =
-                GetOrCreateDepthStencilState(compare_func, m_CurrentRasterState.EnableDepthWrite))
+                GetOrCreateDepthStencilState(compare_func, depth_write))
             {
                 m_CurrentRenderEncoder->setDepthStencilState(depth_stencil_state);
             }

@@ -80,9 +80,10 @@ namespace Helios
 					const auto present_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
 						ABSOLUTE_PATH("Shaders/PostProcessShaders/PostProcessPresent.glsl"));
 
-					/* 全屏直出：深度写关（引擎约定 = 连深度测试一起关），不混合 */
+					/* 全屏直出：不测深度、不写，不混合 */
 					auto material = CreateSharedPtr<Material>();
 					material->SetShader(present_shader);
+					material->GetRasterState().EnableDepthTest = false;
 					material->GetRasterState().EnableDepthWrite = false;
 					material->SetTexture("u_Source", resources.Get(data.Source).Texture);
 					Renderer::Submit(material, Renderer::GetFullScreenVertexArray());

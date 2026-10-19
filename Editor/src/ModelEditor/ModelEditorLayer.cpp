@@ -828,6 +828,16 @@ namespace Helios
 							WriteSubModelMaterialParam(i, type, name, value);
 						});
 				}
+
+				/* 渲染队列：小于 2500 不透明，2500 起透明 */
+				int32_t render_queue = material->GetRenderQueue();
+				if (MaterialParamUI::DrawMaterialRenderQueueRow(render_queue))
+				{
+					bool queue_changed = false;
+					MaterialSlotEditing::WriteRenderQueue(*m_pModel, m_SlotOverrides, slot->Name,
+						render_queue, queue_changed);
+					MarkSlotOverridesDirty();
+				}
 			}
 
 			PanelChrome::EndCard(card);

@@ -185,12 +185,12 @@ namespace Helios
 			glDisable(GL_BLEND);
 		}
 
-		/* 设置深度测试 */
-		if (raster_state.EnableDepthWrite)
+		/* 设置深度测试：测试与写入分开 —— 透明物体要测遮挡但不写深度 */
+		if (raster_state.EnableDepthTest)
 		{
 			glEnable(GL_DEPTH_TEST);
 			glDepthFunc(TranslateToOpenGLCompareFunc(raster_state.DepthCompareFunc));
-			glDepthMask(GL_TRUE);
+			glDepthMask(raster_state.EnableDepthWrite ? GL_TRUE : GL_FALSE);
 		}
 		else
 		{

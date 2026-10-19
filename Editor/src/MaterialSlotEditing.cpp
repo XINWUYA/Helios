@@ -116,4 +116,16 @@ namespace Helios::MaterialSlotEditing
 		instance->SetRasterState(state);
 		changed = true;
 	}
+
+	void WriteRenderQueue(const Model& model,
+		std::unordered_map<std::string, MaterialSlotOverride>& overrides,
+		const std::string& slot_name, int32_t render_queue, bool& changed)
+	{
+		const SharedPtr<Material> instance = MakeInstance(model, overrides, slot_name, changed);
+		if (instance == nullptr)
+			return;
+
+		instance->SetRenderQueue(render_queue);
+		changed = true;
+	}
 }

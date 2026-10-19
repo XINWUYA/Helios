@@ -50,6 +50,9 @@ void main()
 #include "../Builtin/LightCompose.glsl"
 #include "../ReflectionProbe/IBLCommon.glsl"
 
+/* 不透明度乘数：透明队列的材质靠它整体调淡；不透明队列不混合，改了看不见 */
+layout(location = 1) uniform float u_Opacity = 1.0f; // @property
+
 struct SVextex2Frag
 {
 	vec3 WorldPosition;
@@ -93,9 +96,9 @@ void main()
 		else
 			ambient = max(vec3(0.0f), ComposeFallbackAmbient(mtl.Ambient, mtl.Albedo, mtl.AO));
 
-		color += ambient + mtl.Emission;
+		color += ambient * AmbientShadowVisibility(N, L, shadow) + mtl.Emission;
 	}
 
-	OutFragColor = vec4(color, 1.0f);
+	OutFragColor = vec4(color, mtl.Opacity * u_Opacity);
 	ObjectId = u_ObjectId;
 }

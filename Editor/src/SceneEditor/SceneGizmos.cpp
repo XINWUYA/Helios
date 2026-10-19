@@ -596,8 +596,8 @@ namespace Helios
 			return vertex_array;
 		}
 
-		/* gizmo 材质：纯色、不参与光照、线 / 锥不剔面、深度写入开启（引擎约定"关闭写入 =
-		 * 连深度测试一起关"）。混合用 SrcAlpha / OneMinusSrcAlpha（网格远景靠 alpha 渐隐）。
+		/* gizmo 材质：纯色、不参与光照、线 / 锥不剔面、默认测深度并写深度（跟场景互相遮挡）。
+		 * 混合用 SrcAlpha / OneMinusSrcAlpha（网格远景靠 alpha 渐隐）。
 		 * grid_major > 0 表示画的是地面网格；其余 gizmo 要显式写 0。 */
 		SharedPtr<Material> CreateGizmoMaterial(float fade_inner, float fade_outer, float grid_major)
 		{
@@ -656,14 +656,15 @@ namespace Helios
 			return material;
 		}
 
-		/* 骨骼节点材质：同样吃坐标轴 shader（屏幕空间等宽线 + 顶点色），关深度写
-		 * = 连深度测试一起关，骨骼才透得过网格 */
+		/* 骨骼节点材质：同样吃坐标轴 shader（屏幕空间等宽线 + 顶点色），不测深度、不写，
+		 * 骨骼才透得过网格 */
 		SharedPtr<Material> GetSkeletonMaterial()
 		{
 			static SharedPtr<Material> material;
 			if (!material)
 			{
 				material = CreateGizmoMaterial(kGizmoNoFadeInner, kGizmoNoFadeOuter, 0.0f);
+				material->GetRasterState().EnableDepthTest = false;
 				material->GetRasterState().EnableDepthWrite = false;
 			}
 			return material;

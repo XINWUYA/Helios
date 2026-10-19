@@ -341,6 +341,16 @@ namespace Helios
 	static constexpr uint32_t MAX_COLOR_ATTACHMENT_NUM = 8;
 	static constexpr uint32_t MAX_TEXTURE_UNIT_NUM = 32;
 
+	/* 渲染队列：材质按队列分批绘制。小于 2500 的走不透明批次（先画、写深度），
+	 * 大于等于 2500 的走透明批次（后画、从远到近、只测不写深度）。 */
+	inline constexpr int32_t RENDER_QUEUE_GEOMETRY = 2000;    /* 常规不透明 */
+	inline constexpr int32_t RENDER_QUEUE_TRANSPARENT = 2500; /* 透明起点 */
+
+	[[nodiscard]] constexpr bool IsTransparentRenderQueue(int32_t render_queue) noexcept
+	{
+		return render_queue >= RENDER_QUEUE_TRANSPARENT;
+	}
+
 	/* 渲染管线：一个视图的成像路径。Forward = 材质各自的着色器直画（渲染到默认目标）；
 	 * Deferred = G-Buffer → 延迟光照 → 天空（输出到视图纹理）。状态挂在 RenderView 上；
 	 * Camera 上也有同名的转发读写。 */
@@ -368,24 +378,25 @@ namespace Helios
 		Emission = 7,
 		Ambient = 8,
 
-		/* Lighting：光照阶段分量（延迟管线） */
+		/* Lighting：光照阶段分量（延迟管线）。环境项拆成漫反射 / 镜面两档 */
 		Diffuse = 9,
 		Specular = 10,
 		Shadow = 11,
-		Indirect = 12,
+		IndirectDiffuse = 12,
+		IndirectSpecular = 13,
 
 		/* Analysis：逐片元统计 */
-		Overdraw = 13,
-		Mipmap = 14,
+		Overdraw = 14,
+		Mipmap = 15,
 
 		/* 反射探针选择可视化（Lighting 类；值追加在尾部，不动既有序号） */
-		Probe = 15,
+		Probe = 16,
 
 		/* Animation：骨骼节点预览（叠加层；渲染由编辑器视口的 gizmo 承担） */
-		Skeleton = 16,
+		Skeleton = 17,
 
 		/* Analysis：线框结构（纯色画三角形的边，通看几何；值追加在尾部，不动既有序号） */
-		Wireframe = 17,
+		Wireframe = 18,
 	};
 
 	/* 视口区域信息 */
@@ -425,6 +436,7 @@ namespace Helios
 		BlendFunc BlendFuncDstRGB : 4; /* 混合方式DstRGB */
 		BlendFunc BlendFuncDstA : 4; /* 混合方式DstA */
 
+		bool EnableDepthTest : 1; /* 启用深度测试（关 = 整段跳过；透明物体测试开、写关） */
 		bool EnableDepthWrite : 1; /* 启用写入深度 */
 		CompareFunc DepthCompareFunc : 3; /* 深度测试比较方式 */
 
@@ -440,7 +452,7 @@ namespace Helios
 			, EnableBlend(true), BlendEquationRGB(BlendEquation::Add), BlendEquationA(BlendEquation::Add)
 			, BlendFuncSrcRGB(BlendFunc::One), BlendFuncSrcA(BlendFunc::One)
 			, BlendFuncDstRGB(BlendFunc::Zero), BlendFuncDstA(BlendFunc::Zero)
-			, EnableDepthWrite(true), DepthCompareFunc(CompareFunc::GreaterEqual)
+			, EnableDepthTest(true), EnableDepthWrite(true), DepthCompareFunc(CompareFunc::GreaterEqual)
 			, EnableColorWrite(true), Wireframe(false)
 		{
 		}

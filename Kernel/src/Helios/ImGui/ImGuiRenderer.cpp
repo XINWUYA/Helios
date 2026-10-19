@@ -157,6 +157,7 @@ namespace Helios
         raster_state.BlendFuncSrcA = BlendFunc::One;
         raster_state.BlendFuncDstRGB = BlendFunc::OneMinusSrcAlpha;
         raster_state.BlendFuncDstA = BlendFunc::OneMinusSrcAlpha;
+        raster_state.EnableDepthTest = false;
         raster_state.EnableDepthWrite = false;
         raster_state.EnableColorWrite = true;
         renderAPI->ApplyRasterState(raster_state);
