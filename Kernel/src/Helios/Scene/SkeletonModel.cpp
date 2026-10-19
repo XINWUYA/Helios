@@ -6,6 +6,8 @@
 #include "Mesh.h"
 #include "Model.h"
 #include "Helios/Renderer/Renderer.h"
+#include "Helios/Renderer/RenderView.h"
+#include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 #include <fstream>
@@ -78,7 +80,7 @@ namespace Helios
 		for (size_t index = 0; index < m_Joints.size(); ++index)
 		{
 			const glm::mat4 world = (index < joint_world.size()) ? joint_world[index] : glm::mat4(1.0f);
-			palette[index] = world * m_Joints[index].InverseBind;
+			palette[index] = m_MeshBindMatrix * world * m_Joints[index].InverseBind;
 		}
 		return palette;
 	}
@@ -111,6 +113,7 @@ namespace Helios
 	bool SkeletonData::Write(std::ostream& stream) const
 	{
 		stream.write(kSkeletonFileMagic, sizeof(kSkeletonFileMagic));
+		stream.write(reinterpret_cast<const char*>(&m_MeshBindMatrix), sizeof(glm::mat4));
 
 		const uint32_t joint_count = static_cast<uint32_t>(m_Joints.size());
 		stream.write(reinterpret_cast<const char*>(&joint_count), sizeof(joint_count));
@@ -119,6 +122,7 @@ namespace Helios
 			WriteString(stream, joint.Name);
 			stream.write(reinterpret_cast<const char*>(&joint.InverseBind), sizeof(glm::mat4));
 			stream.write(reinterpret_cast<const char*>(&joint.Parent), sizeof(joint.Parent));
+			stream.write(reinterpret_cast<const char*>(&joint.RestLocal), sizeof(glm::mat4));
 		}
 
 		const uint32_t segment_count = static_cast<uint32_t>(m_Segments.size());
@@ -145,6 +149,10 @@ namespace Helios
 		if (!stream || std::memcmp(magic, kSkeletonFileMagic, sizeof(magic)) != 0)
 			return false;
 
+		stream.read(reinterpret_cast<char*>(&m_MeshBindMatrix), sizeof(glm::mat4));
+		if (!stream)
+			return false;
+
 		uint32_t joint_count = 0;
 		stream.read(reinterpret_cast<char*>(&joint_count), sizeof(joint_count));
 		if (!stream || joint_count > (1u << 20))
@@ -161,6 +169,10 @@ namespace Helios
 				return false;
 
 			stream.read(reinterpret_cast<char*>(&joint.Parent), sizeof(joint.Parent));
+			if (!stream)
+				return false;
+
+			stream.read(reinterpret_cast<char*>(&joint.RestLocal), sizeof(glm::mat4));
 			if (!stream)
 				return false;
 		}
@@ -361,10 +373,15 @@ namespace Helios
 
 		joints.reserve(table.size());
 
-		/* 绑定姿态的世界变换：关节自己的 inverse bind 求逆 */
-		std::vector<glm::mat4> bind_world(table.size(), glm::mat4(1.0f));
+		/* 静置姿态的世界矩阵：从根的静置局部逐级累乘（根相对模型实体） */
+		std::vector<glm::mat4> rest_world(table.size(), glm::mat4(1.0f));
 		for (size_t index = 0; index < table.size(); ++index)
-			bind_world[index] = glm::inverse(table[index].InverseBind);
+		{
+			const int parent = table[index].Parent;
+			const glm::mat4 parent_world = (parent >= 0 && parent < static_cast<int>(index))
+				? rest_world[parent] : glm::mat4(1.0f);
+			rest_world[index] = parent_world * table[index].RestLocal;
+		}
 
 		/* 1. 建实体（变换先留单位阵） */
 		for (size_t index = 0; index < table.size(); ++index)
@@ -388,13 +405,10 @@ namespace Helios
 			scene.SetParent(child, parent_handle);
 		}
 
-		/* 3. 绑定姿态的局部变换 = 父绑定世界矩阵的逆 * 自己的绑定世界矩阵 */
+		/* 3. 局部变换直接用静置局部（动画写的也是它所在的空间） */
 		for (size_t index = 0; index < table.size(); ++index)
 		{
-			const int parent = table[index].Parent;
-			const glm::mat4 parent_bind_world = (parent >= 0 && parent < static_cast<int>(table.size()))
-				? bind_world[parent] : glm::mat4(1.0f);
-			const glm::mat4 local = glm::inverse(parent_bind_world) * bind_world[index];
+			const glm::mat4 local = table[index].RestLocal;
 
 			glm::vec3 scale(1.0f);
 			glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
@@ -464,33 +478,50 @@ namespace Helios
 		return joints;
 	}
 
+	void SkeletonModel::Rebind(Scene& scene, entt::entity owner)
+	{
+		/* 先把实体下面现有的关节实体都销毁：可能是上一个模型、或重新导入前的旧绑定数据 */
+		std::vector<entt::entity> stale = ResolveJoints(scene, owner);
+		for (entt::entity joint : m_Joints)
+			stale.push_back(joint);
+
+		for (entt::entity joint : stale)
+		{
+			if (!scene.IsEntityValid(joint))
+				continue;
+
+			Entity joint_entity{ joint, scene.shared_from_this() };
+			scene.DestroyEntity(joint_entity);
+		}
+
+		/* 旧的动态网格、调色板都作废，下一帧按新数据重建 */
+		m_SkinnedSegments.clear();
+		m_SkinnedVertices.clear();
+		m_GpuSegments.clear();
+		m_GpuPalette.reset();
+		m_GpuReady = false;
+		m_Palette.clear();
+
+		m_Joints = CreateJointEntities(scene, owner, GetSkin());
+	}
+
 	void SkeletonModel::UpdatePose(Scene& scene, entt::entity owner)
 	{
 		const SkeletonData& data = GetSkin();
+
+		/* 第一次用到这个模型（刚挂上 / 刚重新导入）：按当前关节表重建一遍骨骼树，
+		 * 保证实体里的关节和这次导入的绑定数据、权重是同一份 */
+		if (!m_AutoBindTried)
+		{
+			m_AutoBindTried = true;
+			Rebind(scene, owner);
+		}
 
 		EnsureSkinnedSegments();
 		if (m_SkinnedSegments.empty())
 			return;
 
 		m_Joints = ResolveJoints(scene, owner);
-
-		/* 一个关节都没绑上（刚把模型挂给实体 / 场景里没存关节树）：自动按关节表建一次，
-		 * 编辑器和视口打开就能看到正确的蒙皮，不用额外操作 */
-		bool any_bound = false;
-		for (entt::entity joint : m_Joints)
-		{
-			if (scene.IsEntityValid(joint))
-			{
-				any_bound = true;
-				break;
-			}
-		}
-		if (!any_bound && !m_AutoBindTried)
-		{
-			m_AutoBindTried = true;
-			CreateJointEntities(scene, owner, data);
-			m_Joints = ResolveJoints(scene, owner);
-		}
 
 		std::vector<glm::mat4> joint_world = CollectJointTransforms(scene, m_Joints, owner);
 
@@ -510,30 +541,54 @@ namespace Helios
 		m_LastGpuActive = gpu_active;
 		m_Palette = std::move(palette);
 
-		/* GPU 蒙皮：同一份数据（绑定顶点 + 权重 + 调色板）交给计算着色器，成功就不用跑 CPU 循环 */
+		/* GPU 蒙皮：调色板先传上去，顶点留给渲染图的蒙皮 Pass 算（绘制前一定跑过）；
+		 * 派发不成立时那一趟会退回 CPU，所以这里不用等结果 */
 		if (gpu_active && m_GpuReady && m_GpuPalette != nullptr
 			&& m_Palette.size() <= kMaxGpuJoints && m_GpuSegments.size() == m_SkinnedSegments.size())
 		{
 			std::vector<glm::mat4> padded(kMaxGpuJoints, glm::mat4(1.0f));
 			std::copy(m_Palette.begin(), m_Palette.end(), padded.begin());
 			m_GpuPalette->SetData(padded.data(), static_cast<uint32_t>(padded.size() * sizeof(glm::mat4)));
-
-			bool dispatched = true;
-			for (const GpuSegment& segment : m_GpuSegments)
-			{
-				if (!Renderer::DispatchSkin(m_GpuPalette, segment.BindVertices, segment.Weights,
-					segment.Skinned, segment.VertexCount))
-				{
-					dispatched = false;
-					break;
-				}
-			}
-
-			if (dispatched)
-				return;
+			m_GpuSkinPending = true;
+			return;
 		}
 
-		const auto& skin_segments = data.GetSegments();
+		SkinOnCpu();
+	}
+
+	/* 派发这一帧的 GPU 蒙皮：渲染图的蒙皮 Pass 每帧跑一次，没有待算的直接跳过 */
+	bool SkeletonModel::DispatchGpuSkin()
+	{
+		if (!m_GpuSkinPending)
+			return false;
+
+		m_GpuSkinPending = false;
+
+		/* 缓冲在两帧之间重建过（换网格 / 换模型）：这一帧先按 CPU 算 */
+		if (!m_GpuReady || m_GpuPalette == nullptr || m_GpuSegments.size() != m_SkinnedSegments.size())
+		{
+			SkinOnCpu();
+			return false;
+		}
+
+		for (const GpuSegment& segment : m_GpuSegments)
+		{
+			if (!Renderer::DispatchSkin(m_GpuPalette, segment.BindVertices, segment.Weights,
+				segment.Skinned, segment.VertexCount))
+			{
+				/* 后端不支持 / 着色器没编过：这一帧退回 CPU，顶点不至于停在旧姿势 */
+				SkinOnCpu();
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/* CPU 蒙皮：按当前调色板把每个顶点算回模型空间，再上传到动态顶点缓冲 */
+	void SkeletonModel::SkinOnCpu()
+	{
+		const auto& skin_segments = GetSkin().GetSegments();
 		const auto& source_segments = GetMeshSegments();
 		for (size_t segment_index = 0; segment_index < m_SkinnedSegments.size(); ++segment_index)
 		{
@@ -630,6 +685,59 @@ namespace Helios
 
 			static_cast<SkeletonModel*>(component.m_Model.get())->UpdatePose(scene, entity);
 		}
+	}
+
+	namespace
+	{
+		/* 场景里有没有走 GPU 蒙皮的模型：决定渲染图里要不要挂蒙皮这一趟 */
+		bool HasGpuSkinnedModel(Scene& scene)
+		{
+			auto view = scene.GetRegistry().view<ModelComponent>();
+			for (auto entity : view)
+			{
+				ModelComponent& component = view.get<ModelComponent>(entity);
+				if (component.m_Model == nullptr || !component.m_EnableSkinning || component.m_Model->IsStaticModel())
+					continue;
+
+				const auto* skeleton = static_cast<const SkeletonModel*>(component.m_Model.get());
+				if (skeleton->IsGpuSkinned() && skeleton->IsGpuSkinningEnabled())
+					return true;
+			}
+			return false;
+		}
+	}
+
+	void SkeletonModel::AddGpuSkinPass(RenderView& render_view)
+	{
+		if (!IsGlobalGpuSkinningEnabled() || Renderer::CurrentAPI() != RenderAPI::Metal)
+			return;
+
+		const SharedPtr<Scene> scene = render_view.GetOwnerScene();
+		if (scene == nullptr || !HasGpuSkinnedModel(*scene))
+			return;
+
+		struct GpuSkinPassData {};
+
+		render_view.GetFrameGraph()->AddPass<GpuSkinPassData>("GPUSkinPass",
+			[](FrameGraphBuilder& builder, GpuSkinPassData&)
+			{
+				/* 结果写在蒙皮缓冲里，图里没有资源可绑：显式保活，按计算 Pass 收尾 */
+				builder.AsSideEffect();
+				builder.AsComputePass();
+			},
+			[scene](const FrameGraphResources&, const GpuSkinPassData&)
+			{
+				auto& registry = scene->GetRegistry();
+				auto view = registry.view<ModelComponent>();
+				for (auto entity : view)
+				{
+					ModelComponent& component = view.get<ModelComponent>(entity);
+					if (component.m_Model == nullptr || !component.m_EnableSkinning || component.m_Model->IsStaticModel())
+						continue;
+
+					static_cast<SkeletonModel*>(component.m_Model.get())->DispatchGpuSkin();
+				}
+			});
 	}
 
 	void SkeletonModel::Clear(Scene& scene, entt::entity entity)

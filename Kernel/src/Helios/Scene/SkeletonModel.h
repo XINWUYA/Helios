@@ -26,8 +26,11 @@ namespace Helios
 	{
 		std::string Name;
 		glm::mat4 InverseBind{ 1.0f };
-		/* 父关节在关节表里的下标；-1 = 根。建关节实体与算局部绑定变换要用 */
+		/* 父关节在关节表里的下标；-1 = 根 */
 		int Parent{ -1 };
+		/* 静置姿态的局部变换（相对最近的关节祖先）：关节实体按它建，
+		 * 动画通道写的也是这个空间的局部值 —— 全程不做任何坐标系转换 */
+		glm::mat4 RestLocal{ 1.0f };
 	};
 
 	/* 每个顶点最多 4 个骨骼影响（与 glTF 的 JOINTS_0 / WEIGHTS_0 一致） */
@@ -60,6 +63,11 @@ namespace Helios
 		[[nodiscard]] const std::vector<SkinJoint>& GetJoints() const { return m_Joints; }
 		std::vector<SkinJoint>& GetJoints() { return m_Joints; }
 
+		/* 网格节点世界矩阵的逆：顶点在网格空间，调色板要先换到网格节点空间
+		 * （glTF 规范 / three.js / glTF-Sample-Viewer 都是这个式子：Inverse(meshNodeWorld) * jointWorld * IB） */
+		[[nodiscard]] const glm::mat4& GetMeshBindMatrix() const { return m_MeshBindMatrix; }
+		void SetMeshBindMatrix(const glm::mat4& matrix) { m_MeshBindMatrix = matrix; }
+
 		[[nodiscard]] const std::vector<SkinSegment>& GetSegments() const { return m_Segments; }
 		std::vector<SkinSegment>& GetSegments() { return m_Segments; }
 
@@ -80,6 +88,7 @@ namespace Helios
 	private:
 		std::vector<SkinJoint> m_Joints;
 		std::vector<SkinSegment> m_Segments;
+		glm::mat4 m_MeshBindMatrix{ 1.0f };
 	};
 
 	/* 骨骼模型的实例数据：每个挂了蒙皮模型的实体一份（实体自己的动态网格与调色板）。
@@ -100,8 +109,14 @@ namespace Helios
 		void EnsureSkinnedSegments();
 
 		[[nodiscard]] const std::vector<SharedPtr<MeshSegment>>& GetSkinnedSegments() const { return m_SkinnedSegments; }
+		/* 上屏段就是当前姿势的动态段；场景还没跑过一帧（动态段没建）时回落到源段 */
+		[[nodiscard]] const std::vector<SharedPtr<MeshSegment>>& GetRenderSegments() const override
+		{
+			return m_SkinnedSegments.empty() ? Model::GetMeshSegments() : m_SkinnedSegments;
+		}
 		[[nodiscard]] std::vector<std::vector<float>>& GetSkinnedVertices() { return m_SkinnedVertices; }
 		[[nodiscard]] std::vector<entt::entity>& GetJointEntities() { return m_Joints; }
+		[[nodiscard]] const std::vector<entt::entity>& GetJointEntities() const { return m_Joints; }
 		[[nodiscard]] std::vector<glm::mat4>& GetPalette() { return m_Palette; }
 
 		/* GPU 蒙皮是否就绪（Metal 才可能为真；不成立时走 CPU） */
@@ -124,8 +139,18 @@ namespace Helios
 		static std::vector<glm::mat4> CollectJointTransforms(const Scene& scene,
 			const std::vector<entt::entity>& joints, entt::entity root);
 
+		/* 重新导入骨骼：销毁实体下现有的关节子实体，按当前模型的关节表重建（换模型 / 重新导入后用） */
+		void Rebind(Scene& scene, entt::entity owner);
+
 		/* 场景每帧调用：所有挂蒙皮模型的实体重算上屏顶点（开关关了跳过；调色板没变跳过） */
 		static void UpdateScene(Scene& scene);
+
+		/* 把这一帧改过姿势的骨骼顶点交给渲染图的蒙皮 Pass（排在所有绘制 Pass 之前） */
+		static void AddGpuSkinPass(class RenderView& render_view);
+
+		/* 派发这一帧的 GPU 蒙皮：渲染图的蒙皮 Pass 每帧调一次，
+		 * 没有待算的直接返回 false（多视图时后面的 Pass 就是空跑） */
+		bool DispatchGpuSkin();
 
 		/* 丢掉某个实体的运行时数据（换模型 / 手工解绑时用） */
 		static void Clear(Scene& scene, entt::entity entity);
@@ -133,6 +158,9 @@ namespace Helios
 	private:
 		/* 单个实体：解析关节、算调色板、重写动态顶点 */
 		void UpdatePose(Scene& scene, entt::entity owner);
+
+		/* CPU 蒙皮：按当前调色板重算一遍动态顶点并上传 */
+		void SkinOnCpu();
 
 		/* 关节：从模型实体往下整棵子树按名字对上关节表 */
 		[[nodiscard]] std::vector<entt::entity> ResolveJoints(Scene& scene, entt::entity owner) const;
@@ -160,6 +188,8 @@ namespace Helios
 		SharedPtr<DeviceStorageBuffer> m_GpuPalette;
 		bool m_GpuReady{ false };
 		bool m_GpuSkinningEnabled{ true };
+		/* 这一帧的姿势还没算到 GPU 缓冲里（等渲染图的蒙皮 Pass 派发） */
+		bool m_GpuSkinPending{ false };
 		/* 上一帧走的哪条路径：切换全局开关时据此让调色板缓存失效、重新算一遍 */
 		bool m_LastGpuActive{ false };
 	};

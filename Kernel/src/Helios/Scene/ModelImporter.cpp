@@ -825,12 +825,16 @@ namespace Helios
 			std::vector<glm::mat4> mesh_world(scene->mNumMeshes, glm::mat4(1.0f));
 			/* 节点名 → 父节点名：关节实体的父子关系从这里来 */
 			std::unordered_map<std::string, std::string> node_parents;
+			/* 节点名 → 静置世界矩阵（关节的静置局部从它推） */
+			std::unordered_map<std::string, glm::mat4> node_world;
 			if (skinned_source && scene->mRootNode != nullptr)
 			{
 				std::function<void(const aiNode*, const glm::mat4&)> walk =
 					[&](const aiNode* node, const glm::mat4& parent_world)
 				{
 					const glm::mat4 world = parent_world * AiToGlm(node->mTransformation);
+					if (node->mName.length > 0)
+						node_world[node->mName.C_Str()] = world;
 					for (unsigned index = 0; index < node->mNumMeshes; ++index)
 						mesh_world[node->mMeshes[index]] = world;
 					for (unsigned index = 0; index < node->mNumChildren; ++index)
@@ -1028,34 +1032,6 @@ namespace Helios
 				out_model.Shapes.push_back(std::move(result));
 			}
 
-			/* assimp 会把场景根节点的旋转（glTF 常见 Y-up 适配）算进骨骼空间，
-			 * 但蒙皮顶点是原始空间（不能烘），两边差一个 R 会让角色整体躺倒。
-			 * 把根节点的旋转乘回绑定矩阵：新 bind world = R × 旧 bind world，即 IB' = R⁻¹ × IB。 */
-			if (!out_model.Skin.IsEmpty() && scene->mRootNode != nullptr)
-			{
-				const glm::mat4 root_transform = AiToGlm(scene->mRootNode->mTransformation);
-				const glm::mat4 identity(1.0f);
-				bool is_identity = true;
-				for (int column = 0; column < 4 && is_identity; ++column)
-				{
-					for (int row = 0; row < 4; ++row)
-					{
-						if (std::fabs(root_transform[column][row] - identity[column][row]) > 1.0e-5f)
-						{
-							is_identity = false;
-							break;
-						}
-					}
-				}
-
-				if (!is_identity)
-				{
-					const glm::mat4 root_inverse = glm::inverse(root_transform);
-					for (SkinJoint& joint : out_model.Skin.GetJoints())
-						joint.InverseBind = root_inverse * joint.InverseBind;
-				}
-			}
-
 			/* 关节父级：骨骼在 assimp 里就是节点，按名字关系补下标 */
 			if (!out_model.Skin.IsEmpty())
 			{
@@ -1184,6 +1160,46 @@ namespace Helios
 
 					out_model.Animations.push_back(std::move(clip));
 					out_model.AnimationNames.push_back(animation_name);
+				}
+			}
+
+			/* 关节的静置局部：相对最近的关节祖先（中间夹着的非关节节点烘进来），
+			 * 这样关节实体、动画通道、palette 全在同一个空间，不需要任何坐标转换 */
+			if (!out_model.Skin.IsEmpty())
+			{
+				std::vector<SkinJoint>& joints = out_model.Skin.GetJoints();
+				for (size_t index = 0; index < joints.size(); ++index)
+				{
+					const auto world_iter = node_world.find(joints[index].Name);
+					const glm::mat4 world = (world_iter != node_world.end())
+						? world_iter->second : glm::inverse(joints[index].InverseBind);
+
+					const int parent = joints[index].Parent;
+					if (parent >= 0 && parent < static_cast<int>(index))
+					{
+						const auto parent_iter = node_world.find(joints[parent].Name);
+						const glm::mat4 parent_world = (parent_iter != node_world.end())
+							? parent_iter->second : glm::inverse(joints[parent].InverseBind);
+						joints[index].RestLocal = glm::inverse(parent_world) * world;
+					}
+					else
+					{
+						joints[index].RestLocal = world;
+					}
+				}
+			}
+
+			/* 网格节点世界矩阵的逆：调色板要先把关节换到网格节点空间（glTF 规范的
+			 * skinMatrix = inverse(meshNodeWorld) * jointWorld * inverseBind） */
+			if (!out_model.Skin.IsEmpty())
+			{
+				for (unsigned mesh_index = 0; mesh_index < scene->mNumMeshes; ++mesh_index)
+				{
+					if (scene->mMeshes[mesh_index] == nullptr || scene->mMeshes[mesh_index]->mNumBones == 0)
+						continue;
+
+					out_model.Skin.SetMeshBindMatrix(glm::inverse(mesh_world[mesh_index]));
+					break;
 				}
 			}
 
