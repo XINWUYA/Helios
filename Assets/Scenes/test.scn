@@ -1,13 +1,204 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scene>
     <Entities>
-        <Entity ID="1" Name="Cottage">
-            <Transform Position="0.000000 -0.500000 0.000000" Rotation="3.141592 -0.942284 -3.141592" Scale="0.500000 0.500000 0.500000"/>
-            <Model ModelPath="Models/big_cottage/Cottage.mesh"/>
+        <Entity ID="0" Name="Cottage">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
         </Entity>
-        <Entity ID="0" Name="New Directional Light">
-            <Transform Position="0.000000 0.000000 0.000000" Rotation="1.570796 -1.425934 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="1" IsCastShadow="false"/>
+        <Entity ID="1" Name="New Directional Light">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="1.241414 0.550165 -0.000001" Scale="1.000000 1.000000 1.000000"/>
+            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="11" IsCastShadow="true" ShadowSize="1024" ShadowBias="0.0099999998" CascadeCount="1" ShadowFar="0"/>
+        </Entity>
+        <Entity ID="2" Name="cat" CardOrder="Transform,Animator,Model">
+            <Transform Position="-1.032111 0.501755 5.147819" Rotation="0.000000 0.000000 0.000000" Scale="0.020000 0.020000 0.020000"/>
+            <Model ModelPath="Models/animated-cat/cat.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+            <Animator Clip="Models/animated-cat/scene_Take_001.anim" Speed="1" Loop="true" AutoPlay="true"/>
+        </Entity>
+        <Entity ID="3" Name="j_camera_060" Parent="63">
+            <Transform Position="-7.167682 0.000000 13.791937" Rotation="0.000000 -0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="4" Name="j_r_toe_059" Parent="5">
+            <Transform Position="0.000000 -0.000000 1.181467" Rotation="-3.141593 -0.000000 3.141593" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="5" Name="j_r_ball_058" Parent="6">
+            <Transform Position="3.704848 0.000000 1.686319" Rotation="0.153165 -0.883264 2.995892" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="6" Name="j_r_ankle_057" Parent="7">
+            <Transform Position="-0.000000 -0.000000 5.742595" Rotation="3.132384 1.296379 3.048837" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="7" Name="j_r_knee_056" Parent="8">
+            <Transform Position="-0.000000 0.000000 4.571426" Rotation="-3.141593 -0.490123 -3.141593" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="8" Name="j_r_femur_055" Parent="14">
+            <Transform Position="-2.291212 -2.348172 -1.203096" Rotation="2.978758 -0.114524 -0.045551" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="9" Name="j_l_toe_054" Parent="10">
+            <Transform Position="0.000000 0.000000 1.181467" Rotation="0.000000 -0.000000 -3.141593" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="10" Name="j_l_ball_053" Parent="11">
+            <Transform Position="-3.704845 0.000000 1.686318" Rotation="-0.018963 1.025603 -3.113311" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="11" Name="j_l_ankle_052" Parent="12">
+            <Transform Position="0.000001 0.000000 5.742595" Rotation="3.129786 -1.336991 -3.020830" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="12" Name="j_l_knee_051" Parent="13">
+            <Transform Position="0.000000 -0.000000 4.571427" Rotation="-3.141593 0.495379 -3.141593" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="13" Name="j_l_femur_050" Parent="14">
+            <Transform Position="-2.291220 2.348171 -1.203119" Rotation="2.906411 0.079008 3.096541" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="14" Name="j_hips_049" Parent="62">
+            <Transform Position="-0.000000 0.000000 0.000000" Rotation="-0.000000 -0.507394 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="15" Name="j_tail_6_048" Parent="16">
+            <Transform Position="0.000000 0.828849 3.246933" Rotation="-0.425333 0.007465 0.029362" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="16" Name="j_tail_5_047" Parent="17">
+            <Transform Position="0.015379 0.594533 4.346942" Rotation="-0.791653 0.000404 -0.202010" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="17" Name="j_tail_4_046" Parent="18">
+            <Transform Position="-0.082958 -0.258577 4.460718" Rotation="-0.824071 0.058239 0.078471" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="18" Name="j_tail_3_045" Parent="19">
+            <Transform Position="-0.221241 -0.449637 3.685005" Rotation="-0.852393 0.203666 0.257597" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="19" Name="j_tail_2_044" Parent="20">
+            <Transform Position="-0.017276 0.061356 2.400589" Rotation="-0.514606 0.412077 -0.033572" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="20" Name="j_tail_1_043" Parent="61">
+            <Transform Position="-0.081979 -0.012153 -2.359296" Rotation="2.878071 -0.467897 2.956680" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="21" Name="j_r_forearm_042" Parent="25">
+            <Transform Position="-0.000002 0.000000 2.425201" Rotation="-3.141593 -0.000000 3.141593" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="22" Name="j_r_finger_041" Parent="23">
+            <Transform Position="-0.000000 -0.000000 0.960717" Rotation="3.141584 -0.224405 0.108513" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="23" Name="j_r_palm_040" Parent="24">
+            <Transform Position="-0.583210 -0.000000 2.172686" Rotation="-0.983426 1.386702 2.354149" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="24" Name="j_r_wrist_039" Parent="25">
+            <Transform Position="0.000000 0.000000 4.850379" Rotation="-0.000000 0.129550 -0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="25" Name="j_r_elbow_038" Parent="26">
+            <Transform Position="-0.000001 -0.000000 4.641220" Rotation="0.000000 -0.768753 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="26" Name="j_r_humerous_037" Parent="58">
+            <Transform Position="2.119400 -2.149554 1.682653" Rotation="3.083541 0.272450 -3.111029" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="27" Name="j_l_forearm_036" Parent="31">
+            <Transform Position="0.000000 -0.000005 2.425193" Rotation="0.000000 -0.000000 -3.141593" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="28" Name="j_l_finger_035" Parent="29">
+            <Transform Position="-0.000000 0.000000 0.960718" Rotation="-0.000118 -0.224353 -3.036356" Scale="1.000001 1.000001 1.000000"/>
+        </Entity>
+        <Entity ID="29" Name="j_l_palm_034" Parent="30">
+            <Transform Position="0.583210 -0.000000 2.172686" Rotation="-0.519208 1.415481 -0.699800" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="30" Name="j_l_wrist_033" Parent="31">
+            <Transform Position="-0.000000 -0.000000 4.850378" Rotation="-0.000000 -0.169458 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="31" Name="j_l_elbow_032" Parent="32">
+            <Transform Position="0.000000 0.000000 4.641222" Rotation="-0.000000 0.877319 -0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="32" Name="j_l_humerous_031" Parent="58">
+            <Transform Position="2.490766 2.168041 2.001037" Rotation="3.136862 -0.229027 -0.046485" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="33" Name="j_r_scap_030" Parent="58">
+            <Transform Position="-0.904454 -1.908757 1.359418" Rotation="0.936035 0.946984 2.440952" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="34" Name="j_l_scap_029" Parent="58">
+            <Transform Position="-0.540064 2.037748 1.683854" Rotation="2.174257 -1.037467 -0.341383" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="35" Name="j_chest_028" Parent="58">
+            <Transform Position="4.189863 0.017617 0.197758" Rotation="0.014957 -1.050862 -0.012412" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="36" Name="j_r_ear_027" Parent="55">
+            <Transform Position="1.732576 -0.866297 2.610402" Rotation="-3.141593 0.000000 -1.570796" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="37" Name="j_r_outer_eyebrow_026" Parent="55">
+            <Transform Position="3.247791 -1.890628 1.016068" Rotation="-2.703251 -0.309138 -0.815659" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="38" Name="j_r_mid_eyebrow_025" Parent="55">
+            <Transform Position="3.759377 -1.322001 1.204179" Rotation="-3.133341 -0.273402 -0.486714" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="39" Name="j_r_inner_eyebrow_024" Parent="55">
+            <Transform Position="3.996984 -0.608868 1.168199" Rotation="2.956716 -0.124172 -0.324587" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="40" Name="j_r_lower_eyelid_023" Parent="55">
+            <Transform Position="3.343750 -1.177708 0.457454" Rotation="-3.141409 0.027063 -3.141590" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="41" Name="j_r_upper_eyelid_022" Parent="55">
+            <Transform Position="3.343750 -1.177708 0.457454" Rotation="3.141409 0.069880 3.141586" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="42" Name="j_r_eye_021" Parent="55">
+            <Transform Position="3.343750 -1.177708 0.457454" Rotation="3.130378 0.171566 3.141547" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="43" Name="j_l_ear_020" Parent="55">
+            <Transform Position="1.732591 0.866297 2.610412" Rotation="-0.000000 -0.000000 1.570730" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="44" Name="j_l_outer_eyebrow_019" Parent="55">
+            <Transform Position="3.247802 1.890628 1.016081" Rotation="-0.437990 -0.309287 0.815614" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="45" Name="j_l_mid_eyebrow_018" Parent="55">
+            <Transform Position="3.759390 1.322001 1.204193" Rotation="-0.010381 -0.272882 0.486989" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="46" Name="j_l_inner_eyebrow_017" Parent="55">
+            <Transform Position="3.997000 0.608868 1.168212" Rotation="0.184498 -0.124110 0.324610" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="47" Name="j_l_lower_eyelid_016" Parent="55">
+            <Transform Position="3.343765 1.177708 0.457467" Rotation="0.000183 -0.025636 -0.000002" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="48" Name="j_l_upper_eyelid_015" Parent="55">
+            <Transform Position="3.343765 1.177708 0.457467" Rotation="-0.000183 -0.068558 0.000006" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="49" Name="j_l_eye_014" Parent="55">
+            <Transform Position="3.343765 1.177708 0.457467" Rotation="-0.011214 -0.170992 0.000042" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="50" Name="j_mid_eyebrow_013" Parent="55">
+            <Transform Position="4.101851 0.000000 1.027567" Rotation="-0.000000 -0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="51" Name="j_tongue_tip_012" Parent="52">
+            <Transform Position="0.585074 -0.000000 -0.080322" Rotation="-0.000000 -0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="52" Name="j_tongue_mid_011" Parent="53">
+            <Transform Position="0.715304 -0.000000 -0.071462" Rotation="-0.000000 -0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="53" Name="j_tongue_back_010" Parent="54">
+            <Transform Position="0.968532 -0.000000 -0.923708" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="54" Name="j_jaw_09" Parent="55">
+            <Transform Position="1.336496 -0.000000 -0.310072" Rotation="-0.000000 -0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="55" Name="j_head_08" Parent="56">
+            <Transform Position="-0.891592 0.005933 2.096132" Rotation="0.001161 -0.231355 -0.007877" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="56" Name="j_neck_1_07" Parent="57">
+            <Transform Position="0.531858 0.043383 1.170450" Rotation="0.000000 0.196612 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="57" Name="j_neck_base_06" Parent="58">
+            <Transform Position="-0.364627 0.030426 1.309276" Rotation="-0.000000 0.858885 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="58" Name="j_spine_4_05" Parent="59">
+            <Transform Position="0.000002 0.000000 3.832997" Rotation="0.005808 -0.239597 0.000776" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="59" Name="j_spine_3_04" Parent="60">
+            <Transform Position="0.000000 0.000000 4.246587" Rotation="-0.023252 0.441364 -0.005217" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="60" Name="j_spine_2_03" Parent="61">
+            <Transform Position="-0.000001 0.000000 3.092259" Rotation="0.005865 0.403187 0.001261" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="61" Name="j_spine_1_02" Parent="62">
+            <Transform Position="-0.000000 0.000000 0.000000" Rotation="0.002102 1.182337 -0.003220" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="62" Name="j_body_00" Parent="63">
+            <Transform Position="-5.265856 0.055869 5.337222" Rotation="0.000000 -0.766251 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="63" Name="j_root_01" Parent="64">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="-1.570796 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+        </Entity>
+        <Entity ID="64" Name="_rootJoint" Parent="2">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 -0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
         </Entity>
     </Entities>
 </Scene>

@@ -182,6 +182,9 @@ namespace Helios
 		/* 使当前节点不会被优化掉，即使没有没使用到 */
 		void AsSideEffect(bool value = true);
 
+		/* 标记成计算 Pass：只派发、不画附件 —— 不绑默认渲染目标，也不参与附件抓取 */
+		void AsComputePass(bool value = true);
+
 		/* 根据资源Handle在FrameGraph中获取资源名 */
 		[[nodiscard]] const std::string& GetResourceName(FrameGraphResourceHandle handle) const;
 

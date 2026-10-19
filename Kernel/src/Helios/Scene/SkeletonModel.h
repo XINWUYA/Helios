@@ -165,6 +165,10 @@ namespace Helios
 		/* 关节：从模型实体往下整棵子树按名字对上关节表 */
 		[[nodiscard]] std::vector<entt::entity> ResolveJoints(Scene& scene, entt::entity owner) const;
 
+		/* 找到的关节是不是本来就跟当前关节表配套（数量 / 父链都对得上） */
+		[[nodiscard]] bool JointTreeMatches(Scene& scene, entt::entity owner,
+			const std::vector<entt::entity>& joints) const;
+
 		/* 上屏用的动态网格段（顶点缓冲可写） */
 		std::vector<SharedPtr<MeshSegment>> m_SkinnedSegments;
 		/* 每段的 CPU 顶点镜像（上传源，也是检查读取处） */
@@ -193,4 +197,9 @@ namespace Helios
 		/* 上一帧走的哪条路径：切换全局开关时据此让调色板缓存失效、重新算一遍 */
 		bool m_LastGpuActive{ false };
 	};
+
+	/* 非静态模型按约定就是骨骼模型（Model::Create 按 .mesh 有没有骨骼段定类型）：
+	 * 转换统一收在这里，调用方不用到处 static_cast。 */
+	[[nodiscard]] SkeletonModel* AsSkeletonModel(Model* model);
+	[[nodiscard]] const SkeletonModel* AsSkeletonModel(const Model* model);
 }

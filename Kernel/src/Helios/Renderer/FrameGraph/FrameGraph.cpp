@@ -27,6 +27,12 @@ namespace Helios
 		m_pRenderPassNode->IsTarget = value;
 	}
 
+	/* 标记成计算 Pass */
+	void FrameGraphBuilder::AsComputePass(bool value)
+	{
+		m_pRenderPassNode->IsComputePass = value;
+	}
+
 	/* 根据资源Handle在FrameGraph中获取资源名 */
 	const std::string& FrameGraphBuilder::GetResourceName(FrameGraphResourceHandle handle) const
 	{
@@ -274,6 +280,10 @@ namespace Helios
 		 * 无窗口时拿到 nullptr，静默跳过（面板里该车道保持只有标题） */
 		if (outputs.empty())
 		{
+			/* 计算 Pass 没有画面：别拿默认目标冒充它的输出 */
+			if (pass_node.IsComputePass)
+				return;
+
 			const SharedPtr<RenderAPI>& render_api = Renderer::GetRenderAPI();
 			if (render_api != nullptr)
 			{

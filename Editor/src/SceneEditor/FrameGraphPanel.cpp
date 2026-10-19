@@ -58,7 +58,7 @@ namespace Helios
 		}
 
 		/* ---- 渲染阶段标识色（按节点名关键字匹配）----
-		 * 同一阶段的 Pass 和资源共用色相（Shadow / GBuffer / Lighting / Sky / PostProcess / Axis / Debug）：深色同相底 +
+		 * 同一阶段的 Pass 和资源共用色相（Skin / Shadow / GBuffer / Lighting / Sky / PostProcess / Axis / Debug）：深色同相底 +
 		 * 饱和彩色描边（描边才是类别的主要载体）；Pass 亮一档 / 资源暗一档。一个阶段最多两个关键字（后处理的名字分 Bloom 和 PostProcess 两类）。 */
 		struct StageFill
 		{
@@ -71,6 +71,8 @@ namespace Helios
 		const StageFill kStageFills[] =
 		{
 			/*        关键字                           显示名         描边（饱和标识色）                            填充（深色同相底） */
+			{ { "Skin" },                 "Skin",        ImVec4(236.0f / 255.0f, 118.0f / 255.0f, 88.0f / 255.0f, 1.0f),
+			                                             ImVec4(58.0f / 255.0f, 34.0f / 255.0f, 30.0f / 255.0f, 1.0f) }, /* 橙红 */
 			{ { "Shadow" },               "Shadow",      ImVec4(155.0f / 255.0f, 138.0f / 255.0f, 224.0f / 255.0f, 1.0f),
 			                                             ImVec4(46.0f / 255.0f, 38.0f / 255.0f, 60.0f / 255.0f, 1.0f) }, /* 紫 */
 			{ { "GBuffer" },              "GBuffer",     ImVec4(63.0f / 255.0f, 191.0f / 255.0f, 176.0f / 255.0f, 1.0f),

@@ -152,10 +152,11 @@ namespace Helios
 	}
 
 	/* 对于没有附件的Pass，需要由后端绑定默认RenderTarget（如Metal的drawable），
-	 * 否则Metal等显式RenderPass后端会因没有active render encoder而无法绘制。 */
-	const bool need_default_render_pass = m_RenderPassDatas.empty() ||
+	 * 否则Metal等显式RenderPass后端会因没有active render encoder而无法绘制。
+	 * 计算 Pass 例外：它不画附件，由 Pass 自己开计算编码器。 */
+	const bool need_default_render_pass = !IsComputePass && (m_RenderPassDatas.empty() ||
 		std::any_of(m_RenderPassDatas.begin(), m_RenderPassDatas.end(),
-		[](const SharedPtr<RenderPassData>& data) { return data->RenderBufferUsage == RenderBufferUsage::None; });
+		[](const SharedPtr<RenderPassData>& data) { return data->RenderBufferUsage == RenderBufferUsage::None; }));
 
 	if (need_default_render_pass)
 		Renderer::GetRenderAPI()->BeginDefaultRenderPass();

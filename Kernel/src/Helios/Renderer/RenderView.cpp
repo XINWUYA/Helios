@@ -7,6 +7,7 @@
 #include <Helios/Scene/ShadowMap.h>
 #include <Helios/Scene/Light.h>
 #include <Helios/Scene/ReflectionProbe.h>
+#include <Helios/Scene/SkeletonModel.h>
 #include <Helios/Renderer/RenderPasses/DeferredPasses.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
 
@@ -157,14 +158,10 @@ namespace Helios
 			/* 组件里存的是相对父节点的局部变换，画到世界里的必须是沿父链累积的结果 */
 			const glm::mat4 local_2_world = owner_scene->GetWorldTransform(entity);
 
-			/* 开了蒙皮且是骨骼模型：画 CPU 算好的动态段；否则用模型自己的静态段 */
-			const SkeletonModel* skeleton = (model_component.m_EnableSkinning
-				&& model_component.m_Model != nullptr && !model_component.m_Model->IsStaticModel())
-				? static_cast<const SkeletonModel*>(model_component.m_Model.get()) : nullptr;
-			const std::vector<SharedPtr<MeshSegment>>* skinned_segments = (skeleton != nullptr)
-				? &skeleton->GetSkinnedSegments() : nullptr;
-			const auto& mesh_segments = (skinned_segments != nullptr && !skinned_segments->empty())
-				? *skinned_segments : model_component.m_Model->GetMeshSegments();
+			/* 开了蒙皮画当前姿势的动态段；关掉就回到绑定姿态的源段（口径见 Model::GetRenderSegments） */
+			const auto& mesh_segments = model_component.m_EnableSkinning
+				? model_component.m_Model->GetRenderSegments()
+				: model_component.m_Model->GetMeshSegments();
 
 			for (const auto& mesh_segment : mesh_segments)
 			{
@@ -238,6 +235,10 @@ namespace Helios
 
 		/* 重置FrameGraph */
 		m_pFrameGraph->Reset();
+
+		/* GPU 蒙皮排在最前：这一帧改过姿势的骨骼顶点先算出来，
+		 * 后面的阴影 / 场景 / 延迟 Pass 拿到的都是新顶点 */
+		SkeletonModel::AddGpuSkinPass(*this);
 
 		/* 渲染图已销毁，旧的输出句柄随之失效。
 		 * 重置它，未重新指定输出的渲染图（如相机在视口尺寸无效时不组织渲染图）不会读到悬垂资源。 */

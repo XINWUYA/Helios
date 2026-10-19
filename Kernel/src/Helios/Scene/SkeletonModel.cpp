@@ -18,6 +18,17 @@
 
 namespace Helios
 {
+	SkeletonModel* AsSkeletonModel(Model* model)
+	{
+		return (model != nullptr && !model->IsStaticModel()) ? static_cast<SkeletonModel*>(model) : nullptr;
+	}
+
+	const SkeletonModel* AsSkeletonModel(const Model* model)
+	{
+		return (model != nullptr && !model->IsStaticModel())
+			? static_cast<const SkeletonModel*>(model) : nullptr;
+	}
+
 	namespace
 	{
 
@@ -478,6 +489,35 @@ namespace Helios
 		return joints;
 	}
 
+	bool SkeletonModel::JointTreeMatches(Scene& scene, entt::entity owner,
+		const std::vector<entt::entity>& joints) const
+	{
+		const std::vector<SkinJoint>& table = GetSkin().GetJoints();
+		if (table.empty() || joints.size() != table.size())
+			return false;
+
+		const entt::registry& registry = scene.GetRegistry();
+		for (size_t index = 0; index < table.size(); ++index)
+		{
+			if (!scene.IsEntityValid(joints[index]))
+				return false;
+
+			/* 根关节挂在模型实体下，其余挂在表里的父关节下。
+			 * 只看结构不看变换：这一帧动画可能已经写进采样值了 */
+			const int parent_index = table[index].Parent;
+			if (parent_index >= static_cast<int>(joints.size()))
+				return false;
+
+			const entt::entity parent = (parent_index >= 0)
+				? joints[static_cast<size_t>(parent_index)] : owner;
+			const auto* link = registry.try_get<ParentComponent>(joints[index]);
+			if (link == nullptr || link->m_Parent != parent)
+				return false;
+		}
+
+		return true;
+	}
+
 	void SkeletonModel::Rebind(Scene& scene, entt::entity owner)
 	{
 		/* 先把实体下面现有的关节实体都销毁：可能是上一个模型、或重新导入前的旧绑定数据 */
@@ -509,12 +549,14 @@ namespace Helios
 	{
 		const SkeletonData& data = GetSkin();
 
-		/* 第一次用到这个模型（刚挂上 / 刚重新导入）：按当前关节表重建一遍骨骼树，
-		 * 保证实体里的关节和这次导入的绑定数据、权重是同一份 */
+		/* 第一次用到这个模型（刚挂上 / 刚重新导入）：校正一遍骨骼树。
+		 * 场景里已经存着配套的关节树（打开已保存的场景）就别重建，
+		 * 重建会让动画手里的关节句柄失效，播放中的模型僵在原地。 */
 		if (!m_AutoBindTried)
 		{
 			m_AutoBindTried = true;
-			Rebind(scene, owner);
+			if (!JointTreeMatches(scene, owner, ResolveJoints(scene, owner)))
+				Rebind(scene, owner);
 		}
 
 		EnsureSkinnedSegments();
@@ -683,7 +725,7 @@ namespace Helios
 			if (component.m_Model == nullptr || !component.m_EnableSkinning || component.m_Model->IsStaticModel())
 				continue;
 
-			static_cast<SkeletonModel*>(component.m_Model.get())->UpdatePose(scene, entity);
+			AsSkeletonModel(component.m_Model.get())->UpdatePose(scene, entity);
 		}
 	}
 
@@ -699,7 +741,7 @@ namespace Helios
 				if (component.m_Model == nullptr || !component.m_EnableSkinning || component.m_Model->IsStaticModel())
 					continue;
 
-				const auto* skeleton = static_cast<const SkeletonModel*>(component.m_Model.get());
+				const auto* skeleton = AsSkeletonModel(component.m_Model.get());
 				if (skeleton->IsGpuSkinned() && skeleton->IsGpuSkinningEnabled())
 					return true;
 			}
@@ -735,7 +777,7 @@ namespace Helios
 					if (component.m_Model == nullptr || !component.m_EnableSkinning || component.m_Model->IsStaticModel())
 						continue;
 
-					static_cast<SkeletonModel*>(component.m_Model.get())->DispatchGpuSkin();
+					AsSkeletonModel(component.m_Model.get())->DispatchGpuSkin();
 				}
 			});
 	}
@@ -746,7 +788,7 @@ namespace Helios
 		if (component == nullptr || component->m_Model == nullptr || component->m_Model->IsStaticModel())
 			return;
 
-		SkeletonModel* skeleton = static_cast<SkeletonModel*>(component->m_Model.get());
+		SkeletonModel* skeleton = AsSkeletonModel(component->m_Model.get());
 
 		/* 关节实体是建在模型实体下面的：换模型 / 删实体时一并销毁，别在场景里留孤儿。
 		 * 嵌套关系无所谓：DestroyEntity 会把子节点提成根节点，按列表逐个删干净即可。 */

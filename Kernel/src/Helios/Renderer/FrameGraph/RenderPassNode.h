@@ -33,6 +33,10 @@ namespace Helios
 		/* 获取Pass名 */
 		const std::string& GetDebugName() const { return DebugName; }
 
+		/* 计算 Pass：只派发、不画附件（结果写在图外的缓冲里）。
+		 * 执行时不绑默认渲染目标，抓取时也不拿默认目标快照当输出。 */
+		bool IsComputePass{ false };
+
 		/* 对当前RenderPass, 在执行之前，需要创建需要的资源，对之后的RenderPass不会再使用的资源，应及时销毁。 */
 		std::vector<SharedPtr<IResource>>& GetResourcesNeedPrepared() { return m_ResourcesNeedPrepared; }
 		const std::vector<SharedPtr<IResource>>& GetResourcesNeedPrepared() const { return m_ResourcesNeedPrepared; }

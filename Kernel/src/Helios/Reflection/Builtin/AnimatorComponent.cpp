@@ -139,7 +139,8 @@ namespace Helios
 
 			const float before = component.m_Speed;
 			ImGui::SetNextItemWidth(value_width);
-			ImGui::DragFloat("##AnimatorSpeed", &component.m_Speed, 0.01f, 0.0f, 10.0f, "%.2fx");
+			ImGui::DragFloat("##AnimatorSpeed", &component.m_Speed,
+				AnimatorComponent::kSpeedStep, AnimatorComponent::kSpeedMin, AnimatorComponent::kSpeedMax, "%.2fx");
 			if (component.m_Speed != before)
 				changed = true;
 
