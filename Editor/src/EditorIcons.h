@@ -36,6 +36,8 @@ namespace Helios
 			Audio, Particle, Terrain,
 			/* 组件卡头部：与实体类型图标分开，按"这是个什么组件"造型 */
 			Transform, Tag,
+			/* 渲染层组件卡：多层堆叠 + 勾选（表示层掩码） */
+			LayerMask,
 			/* 面板/分组：统计类面板用 */
 			Stats,
 			/* 面板/分组：渲染图可视化页（Frame Graph）用 */
@@ -59,7 +61,7 @@ namespace Helios
 			/* 调试视图弹层的档位图形（分区各成族：Surface = 圆角方块、Lighting = 圆盘、
 			 * Analysis = 叠层方块）—— 与 DebugView 卡片同族的小图形 */
 			Albedo, Normal, Roughness, Metallic, SpecularColor, AmbientOcclusion, Emission, Ambient,
-			Diffuse, Specular, Shadow, Indirect, Overdraw, Mipmap, Probe,
+			Diffuse, Specular, Shadow, IndirectDiffuse, IndirectSpecular, Overdraw, Mipmap, Probe,
 			/* 面板工具动作：材质参数浮层的开关（模型编辑窗口右上角） */
 			Sliders,
 			/* 动画：片段 / 轨道 / 暂停 / 曲线 / 预览 / 循环播放（播放与停止在运行组） */

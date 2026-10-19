@@ -184,8 +184,10 @@ void SampleProbeIBL(int probe, vec3 N, vec3 R, float roughness, out vec3 irradia
 	}
 }
 
-/* 探针 IBL 合成（支持 top2 混合）：取图在这里，合成走公共库（与前向单探针版同一份） */
-vec3 EvaluateProbeIBL(SProbeSelection sel, vec3 N, vec3 V, float roughness, float metallic, vec3 albedo)
+/* 探针 IBL 的两个分量（支持 top2 混合）：取图在这里，合成走公共库。
+ * 正常着色取两者之和，调试视图按分量分别输出 */
+void EvaluateProbeIBLComponents(SProbeSelection sel, vec3 N, vec3 V, float roughness,
+	float metallic, vec3 albedo, out vec3 diffuse, out vec3 specular)
 {
 	roughness = clamp(roughness, 0.0f, 1.0f);
 	const float ndv = max(dot(N, V), 0.0f);
@@ -204,9 +206,18 @@ vec3 EvaluateProbeIBL(SProbeSelection sel, vec3 N, vec3 V, float roughness, floa
 		prefiltered = mix(prefiltered, prefiltered1, sel.Weight1);
 	}
 
-	vec2 brdf = texture(u_BRDFLut, vec2(ndv, roughness)).rg;
+	const vec2 brdf = texture(u_BRDFLut, vec2(ndv, roughness)).rg;
 
-	return ComposeIBL(N, V, metallic, albedo, irradiance, prefiltered, brdf);
+	diffuse = ComposeIBLDiffuse(N, V, metallic, albedo, irradiance);
+	specular = ComposeIBLSpecular(N, V, metallic, albedo, prefiltered, brdf);
+}
+
+vec3 EvaluateProbeIBL(SProbeSelection sel, vec3 N, vec3 V, float roughness, float metallic, vec3 albedo)
+{
+	vec3 diffuse;
+	vec3 specular;
+	EvaluateProbeIBLComponents(sel, N, V, roughness, metallic, albedo, diffuse, specular);
+	return diffuse + specular;
 }
 
 /* 调试分流（Diffuse / Specular / Shadow / Indirect / Probe）：须放在上面这些函数之后 */
@@ -244,17 +255,19 @@ void main()
 	/* 环境项 + 自发光只由负责合成的那一笔光照累加（见 Builtin/DirectLight.glsl） */
 	if (u_ComposeAmbientEmission > 0)
 	{
+		const float ambient_visibility = AmbientShadowVisibility(n, l, shadow);
+
 		/* 有探针时按逐像素选择取 IBL（权重混合 / 距离最近）；无探针退回平面环境项 */
 		if (u_ProbeCount > 0)
 		{
 			const SProbeSelection selection = SelectIBLProbes(world_pos);
 			lighting_result += max(vec3(0.0f),
-				EvaluateProbeIBL(selection, n, v, gbuffer.Roughness, gbuffer.Metallic, gbuffer.Albedo));
+				EvaluateProbeIBL(selection, n, v, gbuffer.Roughness, gbuffer.Metallic, gbuffer.Albedo)) * ambient_visibility;
 		}
 		else
 		{
 			/* 平面环境项与前向的无 IBL 回退走同一份合成 */
-			lighting_result += max(vec3(0.0f), ComposeFallbackAmbient(gbuffer.Ambient, gbuffer.Albedo, gbuffer.AO));
+			lighting_result += max(vec3(0.0f), ComposeFallbackAmbient(gbuffer.Ambient, gbuffer.Albedo, gbuffer.AO)) * ambient_visibility;
 		}
 		lighting_result += gbuffer.Emission;
 	}

@@ -489,6 +489,31 @@ namespace Helios
 		return data;
 	}
 
+	/* 本视图负责主阴影的光源下标（口径见头文件）：级联方向光优先，其次点光 / 聚光；
+	 * 完全没有阴影数据时返回 0，调用方按"照旧由第一笔合成"处理 */
+	size_t ShadowMapManager::FindPrimaryShadowLightIndex(const std::vector<SharedPtr<Light>>& lights) const
+	{
+		if (lights.empty())
+			return 0;
+
+		if (!m_CascadeShadowMaps.empty())
+		{
+			const Light* cascade_light = m_CascadeShadowMaps[0]->GetLight().get();
+			for (size_t index = 0; index < lights.size(); ++index)
+			{
+				if (lights[index].get() == cascade_light)
+					return index;
+			}
+		}
+
+		for (size_t index = 0; index < lights.size(); ++index)
+		{
+			if (GetPunctualShadowData(lights[index].get()).Valid)
+				return index;
+		}
+		return 0;
+	}
+
 	/* 清空已收集的阴影贴图与纹理，保留Manager对象本身 */
 	void ShadowMapManager::Reset()
 	{
@@ -660,6 +685,10 @@ namespace Helios
 						/* 天空盒不产生投影：顶点着色器把它铺满全屏（z = 远平面），
 						 * 如果参与投射，整个深度图会被压成一层"天空" */
 						if (mesh_object.Material && mesh_object.Material->IsSkyBox())
+							continue;
+
+						/* 透明物体不投影：阴影图只有深度、没有半透明，投出来是一块实心影子 */
+						if (mesh_object.Material && mesh_object.Material->IsTransparent())
 							continue;
 
 						/* 模型关闭「投影」后不写入阴影图（仍可接受阴影）：级联与点状共用这条 */

@@ -69,7 +69,7 @@ const int kDebugSpecularColor = 5;
 const int kDebugAmbientOcclusion = 6;
 const int kDebugEmission = 7;
 const int kDebugAmbient = 8;
-const int kDebugMipmap = 14;
+const int kDebugMipmap = 15;
 
 /* Mip 层级热力色：mip 0（最清晰）红 → 黄 → 绿 → 蓝（最糊）；t = 采样层级 / 最大层级 */
 vec3 MipLevelHeat(float t)

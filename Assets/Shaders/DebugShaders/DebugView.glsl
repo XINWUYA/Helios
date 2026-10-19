@@ -36,8 +36,13 @@ layout(location = 0) out vec4 OutFragColor;
  * 其余档位由 CPU 补黑 —— 声明的采样器每次绘制都必须有绑定 */
 layout(binding = 6) uniform sampler2D u_OverdrawTexture;
 
+/* 阴影累加纹理（DebugShadow.glsl 的加法累加结果，rg = 可见度 × 权重、权重）：
+ * 只在 Shadow 档有效，其余档位由 CPU 补黑 */
+layout(binding = 7) uniform sampler2D u_ShadowAccumTexture;
+
 /* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
- * 本 shader 处理 Surface 档（延迟：G-Buffer 直读）与 Overdraw 热力图 */
+ * 本 shader 处理 Surface 档（延迟：G-Buffer 直读）、Shadow 档（多光源平均可见度）
+ * 与 Overdraw 热力图 */
 layout(location = 0) uniform int u_DebugMode = 0;
 
 const int kDebugAlbedo = 1;
@@ -48,7 +53,8 @@ const int kDebugSpecularColor = 5;
 const int kDebugAmbientOcclusion = 6;
 const int kDebugEmission = 7;
 const int kDebugAmbient = 8;
-const int kDebugOverdraw = 13;
+const int kDebugShadow = 11;
+const int kDebugOverdraw = 14;
 
 /* Overdraw 热力色：0（背景）近黑 → 绿 → 红（高重叠）；计数步进 0.1 → 10 层饱和到红 */
 vec3 OverdrawHeat(float t)
@@ -82,6 +88,13 @@ void main()
 		debug_color = gbuffer.Emission;
 	else if (u_DebugMode == kDebugAmbient)
 		debug_color = gbuffer.Ambient;
+	else if (u_DebugMode == kDebugShadow)
+	{
+		/* 多光源叠加：rg 是逐光源累加的"可见度 × 权重"和"权重"，相除得到平均可见度。
+		 * 没有灯够得着时（权重和为 0）读作全受光 */
+		const vec2 accum = texture(u_ShadowAccumTexture, vert2frag.TexCoord).rg;
+		debug_color = vec3(accum.g > 1e-5f ? accum.r / accum.g : 1.0f);
+	}
 	else
 		/* kDebugOverdraw（其余档位不会发到这里）：覆盖全部像素，背景计 0、
 		 * 由天空（延迟）或清屏色（前向）在后收尾 */

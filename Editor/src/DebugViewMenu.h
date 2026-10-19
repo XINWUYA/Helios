@@ -34,8 +34,9 @@ namespace Helios::DebugViewMenu
 	inline constexpr Item kLightingItems[] = {
 		{ DebugViewMode::Diffuse, Icons::Id::Diffuse, "Diffuse" },
 		{ DebugViewMode::Specular, Icons::Id::Specular, "Specular" },
+		{ DebugViewMode::IndirectDiffuse, Icons::Id::IndirectDiffuse, "Indirect Diffuse" },
+		{ DebugViewMode::IndirectSpecular, Icons::Id::IndirectSpecular, "Indirect Specular" },
 		{ DebugViewMode::Shadow, Icons::Id::Shadow, "Shadow" },
-		{ DebugViewMode::Indirect, Icons::Id::Indirect, "Indirect" },
 		{ DebugViewMode::Probe, Icons::Id::Probe, "Probe" },
 	};
 
