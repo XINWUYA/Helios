@@ -131,6 +131,20 @@ namespace Helios
 		return current == entt::null;
 	}
 
+	LayerMask Scene::GetEntityLayerMask(entt::entity entity) const
+	{
+		if (!m_Registry.valid(entity))
+			return Layers::None;
+
+		const auto* layer = m_Registry.try_get<LayerComponent>(entity);
+		return (layer != nullptr) ? layer->m_Mask : Layers::Default;
+	}
+
+	bool Scene::IsEntityInView(entt::entity entity, LayerMask culling_mask) const
+	{
+		return IsEntityVisible(entity) && Layers::IsVisible(GetEntityLayerMask(entity), culling_mask);
+	}
+
 	glm::mat4 Scene::GetWorldTransform(entt::entity entity) const
 	{
 		/* 先自下而上收集父链，再自顶向下累积：一趟 O(深度)，不需要递归 */

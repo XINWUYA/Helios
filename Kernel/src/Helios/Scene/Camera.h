@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <glm/glm.hpp>
 #include "Helios/Renderer/RenderView.h"
+#include "LayerMask.h"
 #include "SceneObject.h"
 
 namespace Helios
@@ -35,6 +36,10 @@ namespace Helios
 		 * 与渲染管线同样落 RenderView、这里转发。 */
 		DebugViewMode GetDebugViewMode() const { return m_pRenderView->GetDebugViewMode(); }
 		void SetDebugViewMode(DebugViewMode mode) { m_pRenderView->SetDebugViewMode(mode); }
+
+		/* 可见层掩码：与对象的 LayerMask 相交非空才渲染（默认全部层）。 */
+		LayerMask GetCullingMask() const { return m_pRenderView->GetCullingMask(); }
+		void SetCullingMask(LayerMask mask) { m_pRenderView->SetCullingMask(mask); }
 
 		/* 相机位置（复用 SceneObject 基类存储） */
 		void SetPosition(const glm::vec3& position) override;

@@ -1,6 +1,7 @@
 #include "Pch.h"
 #include "ComponentRegistry.h"
 #include "Helios/Common/Utils.h"
+#include "Helios/Scene/LayerMask.h"
 #include <tinyxml2.h>
 
 namespace Helios
@@ -54,6 +55,7 @@ namespace Helios
 			case FieldType::Float:  element->SetAttribute(name, *static_cast<const float*>(value)); break;
 			case FieldType::Int:
 			case FieldType::Enum:   element->SetAttribute(name, *static_cast<const int*>(value)); break;
+			case FieldType::LayerMask: element->SetAttribute(name, *static_cast<const LayerMask*>(value)); break;
 			case FieldType::Vec2:   element->SetAttribute(name, ToString(*static_cast<const glm::vec2*>(value)).c_str()); break;
 			case FieldType::Vec3:   element->SetAttribute(name, ToString(*static_cast<const glm::vec3*>(value)).c_str()); break;
 			case FieldType::Vec4:
@@ -85,6 +87,7 @@ namespace Helios
 			case FieldType::Float:  *static_cast<float*>(target) = attribute->FloatValue(); break;
 			case FieldType::Int:
 			case FieldType::Enum:   *static_cast<int*>(target) = attribute->IntValue(); break;
+			case FieldType::LayerMask: *static_cast<LayerMask*>(target) = static_cast<LayerMask>(attribute->UnsignedValue()); break;
 			case FieldType::Vec2:   *static_cast<glm::vec2*>(target) = ToVec2(attribute->Value()); break;
 			case FieldType::Vec3:   *static_cast<glm::vec3*>(target) = ToVec3(attribute->Value()); break;
 			case FieldType::Vec4:

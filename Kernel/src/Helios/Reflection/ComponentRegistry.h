@@ -37,6 +37,7 @@ namespace Helios
 		String,
 		Enum,
 		AssetRef,
+		LayerMask, /* 32 位层掩码：控件是层复选，序列化按无符号写出 */
 	};
 
 	/* 字段可见性条件：不满足时该字段不出现在 Inspector（值保留，序列化照常写出）。

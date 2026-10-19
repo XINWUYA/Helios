@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <imgui.h>
 #include "Helios/ImGui/EditorTheme.h"
+#include "Helios/Scene/LayerMask.h"
 
 namespace Helios
 {
@@ -52,6 +53,8 @@ namespace ImGuiExt
 	bool DrawCheckboxUI(const std::string& label, bool& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个Combo */
 	void DrawComboUI(const std::string& label, const std::vector<std::string>& options, int& selected_idx, const std::function<void(int)>& callback = [](int) {}, float label_width = EditorTheme::Token::PropertyLabelWidth);
+	/* 绘制一个层掩码 UI（下拉里是 32 层复选，顶部有全不选 / 全选） */
+	void DrawLayerMaskUI(const std::string& label, LayerMask& mask, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个方向指示 */
 	bool DrawDirectionIndicator(const std::string& label, glm::vec3& direction, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个询问弹窗UI(todo: 还不能用，需要调试) */

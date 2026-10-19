@@ -7,6 +7,7 @@
 #include "Helios/ImGui/AxisGlyph.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/Scene/SceneCommon.h"
+#include "Helios/Scene/LayerMask.h"
 
 namespace Helios::ImGuiExt
 {
@@ -757,6 +758,64 @@ namespace Helios::ImGuiExt
 
 				if (is_selectd)
 					ImGui::SetItemDefaultFocus();
+			}
+
+			ImGui::EndCombo();
+		}
+
+		EndPropertyRow();
+	}
+
+	/* 层的摘要文案：全选 / 全不选说人话，零散组合显示首个层名 + 其余个数 */
+	static std::string DescribeLayerMask(LayerMask mask)
+	{
+		if (mask == Layers::None)
+			return "Nothing";
+		if (mask == Layers::All)
+			return "Everything";
+
+		std::string first;
+		int count = 0;
+		for (uint32_t index = 0; index < Layers::Count; ++index)
+		{
+			if ((mask & (1u << index)) == 0)
+				continue;
+			if (first.empty())
+				first = Layers::GetName(index);
+			++count;
+		}
+
+		return (count > 1) ? first + " +" + std::to_string(count - 1) : first;
+	}
+
+	/* 绘制一个层掩码 UI：值列是下拉按钮，弹出 32 层的复选（顶部全不选 / 全选） */
+	void DrawLayerMaskUI(const std::string& label, LayerMask& mask, float label_width)
+	{
+		PROFILE_FUNCTION();
+
+		const float value_width = BeginPropertyRow(label.c_str(), label_width);
+		const std::string summary = DescribeLayerMask(mask);
+
+		ImGui::SetNextItemWidth(value_width);
+		if (ImGui::BeginCombo("##LayerMask", summary.c_str()))
+		{
+			if (ImGui::Button("Nothing", ImVec2(-FLT_MIN, 0.0f)))
+				mask = Layers::None;
+			if (ImGui::Button("Everything", ImVec2(-FLT_MIN, 0.0f)))
+				mask = Layers::All;
+			ImGui::Separator();
+
+			for (uint32_t index = 0; index < Layers::Count; ++index)
+			{
+				/* 内置层在前、自定义层在后，中间一条分隔 */
+				if (index == Layers::BuiltinCount)
+					ImGui::Separator();
+
+				const LayerMask bit = 1u << index;
+				bool enabled = (mask & bit) != 0;
+				const std::string name = Layers::GetName(index);
+				if (ImGui::Checkbox(name.c_str(), &enabled))
+					mask = enabled ? (mask | bit) : (mask & ~bit);
 			}
 
 			ImGui::EndCombo();

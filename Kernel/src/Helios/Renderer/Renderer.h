@@ -66,6 +66,10 @@ namespace Helios
 		 * shadow_maps 为空表示本光源不参与阴影（字段按"无阴影"填充）。 */
 		static void FillLightUniformBuffer(const SharedPtr<Light>& light, const ShadowMapManager* shadow_maps);
 
+		/* 无光源的光照数据：强度 0、无阴影。视图的光源全被层剔除时用它画环境光 / IBL 那一笔，
+		 * 物体不会因为没光源而整片消失（见前向 / 延迟的光照循环）。 */
+		static void FillEmptyLightUniformBuffer();
+
 	private:
 		static SharedPtr<DeviceTexture> ExchangeCurrentShadowMap(SharedPtr<DeviceTexture> shadow_map);
 		friend class ScopedShadowMapBinding;

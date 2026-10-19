@@ -35,6 +35,10 @@ namespace Helios
 				&Camera::GetRenderPipeline, &Camera::SetRenderPipeline>(),
 				"RenderPipeline", FieldType::Enum)
 			.EnumOf<RenderPipeline>()
+			/* 可见层掩码：与对象 LayerMask 相交非空才渲染 */
+			.Field(MakeAccessor<&CameraComponent::m_Camera,
+				&Camera::GetCullingMask, &Camera::SetCullingMask>(),
+				"CullingMask", FieldType::LayerMask)
 			.Field(MakeAccessor<&CameraComponent::m_Camera, &Camera::GetFov, &Camera::SetFov>(),
 				"Fov", FieldType::Float)
 			.When(FieldCondition{ 0, FieldType::Bool, ConditionOp::IsTrue, 0.0, &IsPerspectiveProjection })

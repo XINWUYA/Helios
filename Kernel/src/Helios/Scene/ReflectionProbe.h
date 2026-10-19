@@ -1,5 +1,6 @@
 #pragma once
 #include "SceneObject.h"
+#include "LayerMask.h"
 #include "ReflectionProbeBakeCache.h"
 
 namespace Helios
@@ -50,6 +51,20 @@ namespace Helios
 
         /* 执行烘焙 */
         void Bake(RenderView* render_view);
+
+        /* 探针关心的层：烘焙只捕获与它相交的层（剔除不想烘进去的物体），
+         * 视图也只在与自身可见层相交时使用这份 IBL。默认全部层。 */
+        void SetCullingMask(LayerMask mask)
+        {
+            if (m_CullingMask == mask)
+                return;
+
+            m_CullingMask = mask;
+            /* 烘焙内容跟着掩码走：旧结果作废，下一帧重建。
+             * 加载场景时字段先设、缓存后载入，LoadBakeCache 会取消这个请求 */
+            RequestRebake();
+        }
+        [[nodiscard]] LayerMask GetCullingMask() const { return m_CullingMask; }
         /* 重置烘焙状态、下次渲染重新烘焙。注意：它会当场销毁烘焙结果和预览纹理 —— 这些可能仍被
          * 当前帧的 ImGui 绘制列表引用，直接销毁会留下悬垂指针。UI（Rebake 按钮）走 RequestRebake 推迟执行。 */
         void Reset();
@@ -184,6 +199,8 @@ namespace Helios
         /* IBL 应用参数（见上方 getter / setter 的说明） */
         glm::vec3 m_BoxSize{ 10.0f };
         float m_BlendDistance{ 0.0f };
+        /* 探针关心的层（烘焙与视图使用共用这一份） */
+        LayerMask m_CullingMask{ Layers::All };
 
         /* 烘焙结果缓存 */
         std::string m_BakeCachePath{};
@@ -225,18 +242,19 @@ namespace Helios
         bool HasProbe() const { return !m_RegisteredProbes.empty(); }
 
         /* 获取用于 IBL 的反射探针：启用混合时按盒体权重选最高的（与延迟的逐像素选择同语义），
-         * 未启用混合时就是距离最近的那个（旧行为）。 */
-        SharedPtr<ReflectionProbe> GetClostedReflectionProbe(const glm::vec3& target_pos) const;
+         * 未启用混合时就是距离最近的那个（旧行为）。层与视图可见层不相交的探针不参与。 */
+        SharedPtr<ReflectionProbe> GetClostedReflectionProbe(const glm::vec3& target_pos,
+            LayerMask culling_mask) const;
 
         /* 是否有探针启用了过渡混合（任一 BlendDistance > 0）：
-         * 没有时前向 / 延迟整套走旧的"距离最近"路径。 */
-        [[nodiscard]] bool IsProbeBlendingEnabled() const;
+         * 没有时前向 / 延迟整套走旧的"距离最近"路径。只看视图可见层内的探针。 */
+        [[nodiscard]] bool IsProbeBlendingEnabled(LayerMask culling_mask) const;
 
         /* 按到目标点的距离升序收集可用的已烘焙探针（最多 max_count 个；
-         * "可用"= 启用 + 已烘焙 + 双图齐备）。延迟光照据此决定本帧参与
+         * "可用"= 启用 + 已烘焙 + 双图齐备 + 层与视图相交）。延迟光照据此决定本帧参与
          * 逐像素选择的探针子集。 */
         std::vector<SharedPtr<ReflectionProbe>> CollectClosestBakedProbes(const glm::vec3& target_pos,
-            size_t max_count) const;
+            size_t max_count, LayerMask culling_mask) const;
 
         /* 获取BRDF查找表贴图 */
         const SharedPtr<DeviceTexture>& GetBRDFLutMap() const { return m_BRDFLutMap; }

@@ -6,6 +6,7 @@ namespace Helios
 	void RegisterBuiltinComponents()
 	{
 		RegisterCoreComponents();
+		RegisterLayerComponent();
 		RegisterSpriteComponent();
 		RegisterCameraComponent();
 		RegisterModelComponent();

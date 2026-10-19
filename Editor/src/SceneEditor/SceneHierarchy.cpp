@@ -261,6 +261,7 @@ namespace Helios
 
 			if (type == typeid(TransformComponent))       return Icons::Id::Transform;
 			if (type == typeid(NameComponent))            return Icons::Id::Tag;
+			if (type == typeid(LayerComponent))           return Icons::Id::LayerMask;
 			if (type == typeid(CameraComponent))          return Icons::Id::Camera;
 			if (type == typeid(ModelComponent))           return Icons::Id::Model;
 			if (type == typeid(SpriteComponent))          return Icons::Id::Sprite;
@@ -1977,6 +1978,9 @@ namespace Helios
 		case FieldType::Int:
 			ImGuiExt::DrawDragIntUI(field.Name, *reinterpret_cast<int*>(field_ptr), field.DragSpeed);
 			break;
+		case FieldType::LayerMask:
+			ImGuiExt::DrawLayerMaskUI(field.Name, *reinterpret_cast<LayerMask*>(field_ptr));
+			break;
 		case FieldType::Float:
 			ImGuiExt::DrawDragFloatUI(field.Name, *reinterpret_cast<float*>(field_ptr), field.DragSpeed);
 			break;
@@ -2171,6 +2175,17 @@ namespace Helios
 				state, component_changed);
 		}
 
+		void WriteBackMaterialRenderQueue(ModelComponent& component, const Model& model, int slot_index,
+			int32_t render_queue, bool& component_changed)
+		{
+			const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
+			if (slot == nullptr)
+				return;
+
+			MaterialSlotEditing::WriteRenderQueue(model, component.m_SlotOverrides, slot->Name,
+				render_queue, component_changed);
+		}
+
 		/* 有效材质（覆盖 ?: 模型默认 ?: 白模）由 Components.h 的 ResolveSlotMaterial 提供 */
 
 		/* ---- 光栅化状态（RenderRasterState）的行 ---- */
@@ -2363,6 +2378,14 @@ namespace Helios
 				{
 					WriteBackMaterialParam(component, model, slot_index, type, name, value, changed);
 				});
+		}
+
+		/* 渲染队列：小于 2500 不透明，2500 起透明（透明批次统一关深度写、按距离从远到近画） */
+		{
+			const SharedPtr<Material> live = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
+			int32_t render_queue = live->GetRenderQueue();
+			if (MaterialParamUI::DrawMaterialRenderQueueRow(render_queue))
+				WriteBackMaterialRenderQueue(component, model, slot_index, render_queue, changed);
 		}
 
 		/* 光栅化状态：可折叠分区（默认收起；值画在临时副本上，改动时才实例化写回）。上方压一条
@@ -2586,6 +2609,14 @@ namespace Helios
 					/* 有改动 → 记脏（Apply 变可用）+ 热更新（见 DrawAssetMaterialCards） */
 					on_edit();
 				});
+		}
+
+		/* 渲染队列：小于 2500 不透明，2500 起透明（透明批次统一关深度写、按距离从远到近画） */
+		int32_t render_queue = material.GetRenderQueue();
+		if (MaterialParamUI::DrawMaterialRenderQueueRow(render_queue))
+		{
+			material.SetRenderQueue(render_queue);
+			on_edit();
 		}
 
 		/* 光栅化状态：可折叠分区（默认收起；值画在临时副本上，改动时才实例化写回）。上方压一条

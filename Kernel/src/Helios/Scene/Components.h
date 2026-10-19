@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 #include "Helios/VirtualDevice/DeviceTexture.h"
+#include "LayerMask.h"
 #include "Camera.h"
 #include "Mesh.h"
 #include "Model.h"
@@ -91,6 +92,20 @@ namespace Helios
 		VisibilityComponent(const VisibilityComponent&) = default;
 		VisibilityComponent(bool visible)
 			: m_Visible(visible)
+		{
+		}
+	};
+
+	/* 渲染层组件：对象属于哪些层（位掩码）。相机按 CullingMask 取交集决定画不画，
+	 * 缺席 = 只在默认层。层只筛渲染收集（含阴影投射），不影响光照与层级。 */
+	struct LayerComponent : ComponentBase
+	{
+		LayerMask m_Mask{ Layers::Default };
+
+		LayerComponent() = default;
+		LayerComponent(const LayerComponent&) = default;
+		LayerComponent(LayerMask mask)
+			: m_Mask(mask)
 		{
 		}
 	};
@@ -304,6 +319,7 @@ namespace Helios
 	using SceneComponentList = std::tuple<
 		NameComponent,
 		TransformComponent,
+		LayerComponent,
 		SpriteComponent,
 		CameraComponent,
 		ModelComponent,

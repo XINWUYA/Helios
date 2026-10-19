@@ -7,12 +7,12 @@
         <Key Time="0.75" Value="0.000000 -1.000000 -0.000000 0.000000"/>
         <Key Time="1" Value="0.000000 0.707107 -0.000000 0.707107"/>
     </Track>
-    <Track Component="Transform" Property="Position" Type="Vec3" Interp="Linear">
+    <Track Component="Transform" Property="Position" Type="Vec3" Interp="Linear" Enabled="false">
         <Key Time="0" Value="2.410958 0.337814 3.416399"/>
         <Key Time="0.5" Value="2.410958 1.778000 3.416399"/>
         <Key Time="1" Value="2.410958 0.337814 3.416399"/>
     </Track>
-    <Track Component="Visibility" Property="Visible" Type="Float" Interp="Step">
+    <Track Component="Visibility" Property="Visible" Type="Float" Interp="Step" Enabled="false">
         <Key Time="0" Value="1.000000"/>
         <Key Time="0.34999999" Value="0.000000"/>
         <Key Time="0.5" Value="1.000000"/>

@@ -363,6 +363,10 @@ namespace Helios
 
         Reset();
 
+        /* 缓存读到了：加载场景时因 CullingMask 变化挂起的重烘焙请求作废
+         * （缓存就是按当前掩码烘的，直接复用） */
+        m_RebakeRequested = false;
+
         const auto restore_image = [this](const ReflectionProbeBakeCache::Image& image) -> SharedPtr<DeviceTexture>
         {
             PixelDesc pixel_desc;
@@ -717,7 +721,10 @@ namespace Helios
         const glm::mat4 capture_projection = MakeReversedZProjection(glm::perspective(glm::radians(90.0f), aspect, near_plane, far_plane));
         const glm::vec3 capture_position = GetPosition();
 
-        const auto& visible_objects = render_view->GetVisibleMeshObjects();
+        /* 本探针只捕获自己关心的层：按 CullingMask 重新收集一遍，
+         * 不受触发烘焙的那个相机看了哪些层的限制 */
+        std::vector<VisibleMeshObject> visible_objects;
+        render_view->CollectVisibleMeshObjects(GetCullingMask(), visible_objects);
 
         auto capture_fb = MakeSceneCaptureFrameBuffer(m_BakeResult.EnvColorCubemap, m_BakeResult.EnvDepthCubemap, size);
         for (uint32_t face = 0; face < 6; ++face)
@@ -898,12 +905,13 @@ namespace Helios
 
     namespace
     {
-        /* 探针当前可否用于 IBL 着色：启用、已烘焙、双图（辐照度 + 预滤波）齐备。
-         * 缺图（烘焙配置关掉了漫反射 / 镜面）时按"不可用"处理 ——
-         * 采样未绑定的立方图在 Metal 校验层直接断言，不做猜测性兜底。 */
-        bool IsProbeUsableForIBL(const SharedPtr<ReflectionProbe>& probe)
+        /* 探针当前可否用于 IBL 着色：启用、已烘焙、双图（辐照度 + 预滤波）齐备，
+         * 且探针关心的层与视图可见层相交。缺图（烘焙配置关掉了漫反射 / 镜面）时按"不可用"
+         * 处理 —— 采样未绑定的立方图在 Metal 校验层直接断言，不做猜测性兜底。 */
+        bool IsProbeUsableForIBL(const SharedPtr<ReflectionProbe>& probe, LayerMask culling_mask)
         {
             return probe != nullptr && probe->GetEnable() && probe->IsBaked()
+                && Layers::IsVisible(probe->GetCullingMask(), culling_mask)
                 && probe->GetIrradianceMap() != nullptr && probe->GetPrefilterMap() != nullptr;
         }
 
@@ -929,11 +937,12 @@ namespace Helios
 
     /* 获取用于 IBL 的反射探针（前向 per-draw）：启用混合时选"盒体权重最高"的（权重并列
      * 或全部出盒时比距离）；未启用（没有探针配 BlendDistance）时就是距离最近的旧行为。 */
-    SharedPtr<ReflectionProbe> ReflectionProbeManager::GetClostedReflectionProbe(const glm::vec3& target_pos) const
+    SharedPtr<ReflectionProbe> ReflectionProbeManager::GetClostedReflectionProbe(const glm::vec3& target_pos,
+        LayerMask culling_mask) const
     {
         PROFILE_FUNCTION();
 
-        const bool blend_enabled = IsProbeBlendingEnabled();
+        const bool blend_enabled = IsProbeBlendingEnabled(culling_mask);
 
         float best_weight = -1.0f;
         float best_dist_sq = std::numeric_limits<float>::max();
@@ -941,7 +950,7 @@ namespace Helios
 
         for (const auto& probe : m_RegisteredProbes)
         {
-            if (!IsProbeUsableForIBL(probe))
+            if (!IsProbeUsableForIBL(probe, culling_mask))
                 continue;
 
             const float dist_sq = glm::distance2(target_pos, probe->GetPosition());
@@ -967,13 +976,13 @@ namespace Helios
         return chosen;
     }
 
-    bool ReflectionProbeManager::IsProbeBlendingEnabled() const
+    bool ReflectionProbeManager::IsProbeBlendingEnabled(LayerMask culling_mask) const
     {
         PROFILE_FUNCTION();
 
         for (const auto& probe : m_RegisteredProbes)
         {
-            if (IsProbeUsableForIBL(probe) && probe->GetBlendDistance() > 0.0f)
+            if (IsProbeUsableForIBL(probe, culling_mask) && probe->GetBlendDistance() > 0.0f)
                 return true;
         }
         return false;
@@ -983,7 +992,7 @@ namespace Helios
      * 延迟光照在着色器里逐像素做"最近探针"选择，这里给出本帧参与选择的子集
      * （调用方传入相机位置：离视点更近的探针优先获得采样器槽位）。 */
     std::vector<SharedPtr<ReflectionProbe>> ReflectionProbeManager::CollectClosestBakedProbes(
-        const glm::vec3& target_pos, size_t max_count) const
+        const glm::vec3& target_pos, size_t max_count, LayerMask culling_mask) const
     {
         PROFILE_FUNCTION();
 
@@ -991,7 +1000,7 @@ namespace Helios
         usable.reserve(m_RegisteredProbes.size());
         for (const auto& probe : m_RegisteredProbes)
         {
-            if (IsProbeUsableForIBL(probe))
+            if (IsProbeUsableForIBL(probe, culling_mask))
                 usable.push_back(probe);
         }
 

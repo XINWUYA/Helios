@@ -25,6 +25,7 @@ namespace Helios
 		SetFarClip(source.GetFarClip());
 		SetAspectRatio(source.GetAspectRatio());
 		SetRenderPipeline(source.GetRenderPipeline());
+		SetCullingMask(source.GetCullingMask());
 
 		SetTransform(world_transform);
 		GetRenderView()->SetViewportRegion({ 0, 0, width, height });

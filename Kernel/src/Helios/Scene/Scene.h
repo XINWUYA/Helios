@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "AnimationRuntime.h"
+#include "LayerMask.h"
 
 namespace tinyxml2
 {
@@ -52,6 +53,13 @@ namespace Helios
 		 * m_Visible=false（缺席 = 可见）；隐藏沿父链传染（父隐藏整棵子树不画，子节点自身状态不受
 		 * 影响）；句柄无效返回 false。 */
 		[[nodiscard]] bool IsEntityVisible(entt::entity entity) const;
+
+		/* 实体所属的渲染层掩码：没有 LayerComponent 时是默认层；句柄无效返回 None */
+		[[nodiscard]] LayerMask GetEntityLayerMask(entt::entity entity) const;
+
+		/* 实体对本视图是否有效：自身与祖先可见，且层与视图可见层相交。
+		 * 模型与光源的收集共用这一口径。 */
+		[[nodiscard]] bool IsEntityInView(entt::entity entity, LayerMask culling_mask) const;
 
 		/* 世界变换 = 沿父链累积的局部变换；没有父节点时就是局部变换。
 		 * 句柄无效时返回单位阵。 */

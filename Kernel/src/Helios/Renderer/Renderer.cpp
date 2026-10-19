@@ -448,4 +448,28 @@ namespace Helios
 			cascade_depth_spans.empty() ? nullptr : &cascade_depth_spans);
 		s_RenderData.pLightUniformBuffer->SetData(&data, sizeof(LightUniformData));
 	}
+
+	void Renderer::FillEmptyLightUniformBuffer()
+	{
+		static LightUniformData data;
+
+		/* 逐字段归零：static 复用，上一笔的级联矩阵 / 阴影参数不能残留。
+		 * 类型取方向光 —— 强度 0 时着色结果为 0，不会踩到点光的衰减分支。 */
+		for (glm::mat4& mat : data.LightViewProjectionMat)
+			mat = glm::mat4(1.0f);
+		data.ColorIntensity = glm::vec4(0.0f);
+		data.LightDir = glm::vec3(0.0f);
+		data.LightType = static_cast<uint32_t>(LightType::Directional);
+		data.LightPos = glm::vec3(0.0f);
+		data.CascadeCount = 0;
+		data.CascadeSplits = glm::vec4(0.0f);
+		data.ShadowBias = 0.0f;
+		data.CascadeShadowBias = glm::vec4(0.0f);
+		for (glm::mat4& mat : data.PunctualShadowMat)
+			mat = glm::mat4(1.0f);
+		data.PunctualShadowParams = glm::vec4(0.0f);
+		data.PunctualLightParams = glm::vec4(0.0f);
+
+		s_RenderData.pLightUniformBuffer->SetData(&data, sizeof(LightUniformData));
+	}
 }

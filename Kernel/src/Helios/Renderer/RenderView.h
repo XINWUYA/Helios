@@ -4,6 +4,7 @@
 
 #include "FrameGraph/FrameGraphResourceHandle.h"
 #include "PostProcess/PostProcessEffectRegistry.h"
+#include "Helios/Scene/LayerMask.h"
 
 namespace Helios
 {
@@ -69,6 +70,11 @@ namespace Helios
 		void SetDebugViewMode(DebugViewMode mode) { m_DebugViewMode = mode; }
 		[[nodiscard]] DebugViewMode GetDebugViewMode() const { return m_DebugViewMode; }
 
+		/* 可见层掩码：与对象的 LayerMask 相交非空才进可见列表（阴影投射同源）。
+		 * 缺省全部层；相机上有同名转发（Camera::SetCullingMask）。 */
+		void SetCullingMask(LayerMask mask) { m_CullingMask = mask; }
+		[[nodiscard]] LayerMask GetCullingMask() const { return m_CullingMask; }
+
 		/* 本帧的后处理设置快照：由 Scene 每帧解析（后处理对象 → 逐效果采集）后写入；
 		 * 渲染侧（各效果的 Build）只读这份快照，不认识场景实体。缺省空 = 全部效果关闭。 */
 		void SetPostProcessState(const PostProcess::PostProcessState& state) { m_PostProcessState = state; }
@@ -114,6 +120,10 @@ namespace Helios
 		/* 获取可见MeshSegment */
 		[[nodiscard]] const std::vector<VisibleMeshObject>& GetVisibleMeshObjects() const { return m_VisibleMeshObjects; }
 
+		/* 按给定可见层掩码收集场景对象（模型段 + 解析后的材质），写进 out（不清空）。
+		 * 视图每帧用自身 CullingMask 收集；反射探针烘焙按探针的 CullingMask 调同一份逻辑。 */
+		void CollectVisibleMeshObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const;
+
 		/* 获取光源 */
 		[[nodiscard]] const std::vector<SharedPtr<Light>>& GetValidLights() const { return m_ValidLights; }
 
@@ -137,6 +147,8 @@ namespace Helios
 		RenderPipeline m_RenderPipeline{ RenderPipeline::Forward };
 		/* 调试视图模式（Surface / Lighting / Analysis / Animation 分类） */
 		DebugViewMode m_DebugViewMode{ DebugViewMode::None };
+		/* 可见层掩码：与对象 LayerMask 相交为空的对象不渲染 */
+		LayerMask m_CullingMask{ Layers::All };
 		/* 后处理设置快照（每视图一份；Scene 解析写入，缺省空 = 全部效果关闭） */
 		PostProcess::PostProcessState m_PostProcessState{};
 		/* 相机 */

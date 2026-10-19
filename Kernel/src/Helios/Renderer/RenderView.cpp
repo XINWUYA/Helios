@@ -138,6 +138,13 @@ namespace Helios
 
 		// todo: 视锥体剔除
 
+		CollectVisibleMeshObjects(m_CullingMask, m_VisibleMeshObjects);
+	}
+
+	void RenderView::CollectVisibleMeshObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const
+	{
+		PROFILE_FUNCTION();
+
 		/* 收集所有模型 */
 		const auto owner_scene = m_pOwnerScene.lock();
 		if (!owner_scene)
@@ -150,9 +157,9 @@ namespace Helios
 			if (!model_component.m_Model)
 				 continue;
 
-			/* 隐藏的实体（自身或祖先）不进可见列表：场景视口 / 阴影 / 探针烘焙
-			 * 都从这里取对象，一处过滤三处同步（判定收口在 Scene::IsEntityVisible）。 */
-			if (!owner_scene->IsEntityVisible(entity))
+			/* 隐藏的实体（自身或祖先）与看不到的层不进列表：场景视口 / 阴影 /
+			 * 探针烘焙都从这里取对象，一处过滤三处同步（判定收口在 Scene::IsEntityInView）。 */
+			if (!owner_scene->IsEntityInView(entity, culling_mask))
 				continue;
 
 			/* 组件里存的是相对父节点的局部变换，画到世界里的必须是沿父链累积的结果 */
@@ -170,11 +177,10 @@ namespace Helios
 				/* 收集时按解析链定下最终材质：实体绑定 ?: 模型槽表默认 ?: 内置白模 */
 				const auto material = ResolveSlotMaterial(
 					*model_component.m_Model, mesh_segment->GetSlotIndex(), &model_component.m_SlotOverrides);
-				m_VisibleMeshObjects.emplace_back((int)entity, local_2_world, mesh_segment, material,
+				out.emplace_back((int)entity, local_2_world, mesh_segment, material,
 					model_component.m_CastShadow, model_component.m_ReceiveShadow);
 			}
 		}
-
 	}
 
 	/* 准备光源信息 */
@@ -194,8 +200,9 @@ namespace Helios
 		const auto light_entity_view = owner_scene->GetRegistry().view<TransformComponent, LightComponent>();
 		for (auto& entity : light_entity_view)
 		{
-			/* 隐藏的光源不参与光照（与模型的过滤同源：隐藏 = 不画 + 不照） */
-			if (!owner_scene->IsEntityVisible(entity))
+			/* 隐藏的光源不参与光照（与模型的过滤同源：隐藏 = 不画 + 不照）；
+			 * 层同理 —— 相机看不到的层，它的光源也不进本视图 */
+			if (!owner_scene->IsEntityInView(entity, m_CullingMask))
 				continue;
 
 			auto [transform_component, light_component] = light_entity_view.get<TransformComponent, LightComponent>(entity);

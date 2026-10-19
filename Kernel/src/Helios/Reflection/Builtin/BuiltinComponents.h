@@ -7,6 +7,7 @@ namespace Helios
 	 * 注册顺序决定 Inspector 卡片顺序、Add 菜单顺序与场景元素写出顺序。 */
 
 	void RegisterCoreComponents();           /* Name / Transform / Visibility */
+	void RegisterLayerComponent();           /* Layer */
 	void RegisterSpriteComponent();
 	void RegisterCameraComponent();
 	void RegisterModelComponent();
