@@ -138,6 +138,33 @@ configure_file(
 # Add third-party libraries
 add_subdirectory(Libraries/ThirdParty)
 
+# 引擎源码与脚本模块共用的头文件目录。脚本要 include 引擎头，两边必须看到同一套
+# 第三方库与同一份配置头，否则类型定义对不上（脚本库是运行期 dlopen 的，编译器不会替我们查）。
+set(HELIOS_ENGINE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/spdlog/include
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/debugbreak
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glfw/include
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glad/include
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/imgui
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glm
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/stb
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/xxHash
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tracy/public
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/spirv-cross
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glslang
+    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glslang/SPIRV
+)
+if(APPLE)
+    list(APPEND HELIOS_ENGINE_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/metal-cpp)
+endif()
+if(VULKAN_SDK)
+    list(APPEND HELIOS_ENGINE_INCLUDE_DIRS ${VULKAN_SDK}/Include)
+endif()
+
 # Add Kernel
 add_subdirectory(Kernel)
 
@@ -152,6 +179,55 @@ if(BUILD_SAMPLES)
     add_subdirectory(Samples/Sample_SkyBox)
     add_subdirectory(Samples/Sample_CSM)
     add_subdirectory(Samples/Sample_IBL)
+endif()
+
+# 脚本模块
+# 编辑器里编译成动态库运行期加载（dlopen），符号留给宿主解析；
+# 打包时改 STATIC 编进可执行，见 Documents/脚本系统支持评估.md。
+file(GLOB_RECURSE HELIOS_SCRIPT_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/Assets/Scripts/*.cpp"
+)
+if(HELIOS_SCRIPT_SOURCES)
+    add_library(HeliosScripts MODULE ${HELIOS_SCRIPT_SOURCES})
+
+    target_include_directories(HeliosScripts PRIVATE
+        ${CMAKE_SOURCE_DIR}/Kernel/src
+        ${CMAKE_BINARY_DIR}
+        ${HELIOS_ENGINE_INCLUDE_DIRS}
+    )
+
+    target_compile_definitions(HeliosScripts PRIVATE
+        $<$<CONFIG:Debug>:HELIOS_DEBUG>
+        $<$<CONFIG:Release>:HELIOS_RELEASE>
+        $<$<CONFIG:Shipping>:HELIOS_SHIPPING>
+    )
+
+    # 脚本模块不链 Kernel：一旦链上静态库，链接器会把用到的 .o 拉进模块，
+    # 等于引擎有两份（Logger、注册表这些单例各一份）。只加头文件路径，
+    # 引擎符号留成未定义，运行期由 Editor 解析。
+    target_precompile_headers(HeliosScripts PRIVATE
+        "${CMAKE_SOURCE_DIR}/Kernel/src/Helios/Script/ScriptPch.h"
+    )
+
+    set_target_properties(HeliosScripts PROPERTIES
+        PREFIX ""                                  # 文件名可预测，编辑器按后缀找
+        SUFFIX ".hsmod"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/scripts"
+        FOLDER "Scripts"
+    )
+
+    if(APPLE)
+        # 引擎符号不链接进来，留到 dlopen 时由 Editor 提供
+        target_link_options(HeliosScripts PRIVATE "-undefined" "dynamic_lookup")
+    endif()
+
+    if(WIN32)
+        target_compile_definitions(HeliosScripts PRIVATE PLATFORM_WINDOWS)
+    elseif(APPLE)
+        target_compile_definitions(HeliosScripts PRIVATE PLATFORM_MACOS)
+    elseif(UNIX)
+        target_compile_definitions(HeliosScripts PRIVATE PLATFORM_LINUX)
+    endif()
 endif()
 
 # Print configuration summary

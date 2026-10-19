@@ -292,6 +292,8 @@ namespace Helios
 		case FileType::Material: return Icons::Id::FileMaterial;
 		case FileType::Probe:    return Icons::Id::FileProbe;
 		case FileType::Animation: return Icons::Id::AnimationClip;
+		case FileType::CppHeader: return Icons::Id::FileCppHeader;
+		case FileType::CppSource: return Icons::Id::FileCppSource;
 		}
 
 		return Icons::Id::File;
@@ -313,6 +315,8 @@ namespace Helios
 		case AssetFileKind::Material: return FileType::Material;
 		case AssetFileKind::Probe:    return FileType::Probe;
 		case AssetFileKind::Animation: return FileType::Animation;
+		case AssetFileKind::CppHeader: return FileType::CppHeader;
+		case AssetFileKind::CppSource: return FileType::CppSource;
 		}
 
 		return FileType::Default;
@@ -333,6 +337,8 @@ namespace Helios
 		case FileType::Material: return AssetFileKind::Material;
 		case FileType::Probe:    return AssetFileKind::Probe;
 		case FileType::Animation: return AssetFileKind::Animation;
+		case FileType::CppHeader: return AssetFileKind::CppHeader;
+		case FileType::CppSource: return AssetFileKind::CppSource;
 		case FileType::Folder:   return AssetFileKind::Other;   /* 文件夹不看大类（看 IsFolder） */
 		}
 
@@ -356,6 +362,8 @@ namespace Helios
 		case TypeFilter::Material: return "Materials";
 		case TypeFilter::Probe:    return "Reflection Probes";
 		case TypeFilter::Animation: return "Animations";
+		case TypeFilter::CppHeader: return "C++ Headers";
+		case TypeFilter::CppSource: return "C++ Sources";
 		}
 
 		return "All types";
@@ -376,6 +384,8 @@ namespace Helios
 		case TypeFilter::Material: return type == FileType::Material;
 		case TypeFilter::Probe:    return type == FileType::Probe;
 		case TypeFilter::Animation: return type == FileType::Animation;
+		case TypeFilter::CppHeader: return type == FileType::CppHeader;
+		case TypeFilter::CppSource: return type == FileType::CppSource;
 		}
 
 		return true;
@@ -1488,6 +1498,8 @@ namespace Helios
 		case TypeFilter::Material: return Icons::Id::FileMaterial;
 		case TypeFilter::Probe:    return Icons::Id::FileProbe;
 		case TypeFilter::Animation: return Icons::Id::AnimationClip;
+		case TypeFilter::CppHeader: return Icons::Id::FileCppHeader;
+		case TypeFilter::CppSource: return Icons::Id::FileCppSource;
 		}
 
 		return Icons::Id::File;

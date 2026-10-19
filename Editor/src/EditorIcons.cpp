@@ -616,6 +616,29 @@ namespace Helios::Icons
 			dl->AddLine(c.At(0.60f, 0.53f), c.At(0.73f, 0.40f), check, t);
 		}
 
+		/* 脚本组件：圆角页（折角）+ 代码符号 —— 与 FileCppSource 同一枚记号，
+		 * 圆角页是组件、折角页是磁盘文件。几何与 ScriptComponent.svg 同一副数。 */
+		void DrawScriptComponent(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 mint = PaletteColor(color, kMint);
+
+			dl->AddRectFilled(c.At(0.188f, 0.125f), c.At(0.781f, 0.875f),
+				PaletteColor(color, kViolet, 0.18f), c.Len(0.0625f));
+			dl->AddRect(c.At(0.188f, 0.125f), c.At(0.781f, 0.875f), color, c.Len(0.0625f), 0, t);
+			dl->AddLine(c.At(0.625f, 0.125f), c.At(0.625f, 0.281f), violet, t);
+			dl->AddLine(c.At(0.625f, 0.281f), c.At(0.781f, 0.281f), violet, t);
+
+			/* 尖括号 + 斜杠 */
+			dl->AddLine(c.At(0.406f, 0.406f), c.At(0.313f, 0.500f), mint, t);
+			dl->AddLine(c.At(0.313f, 0.500f), c.At(0.406f, 0.594f), mint, t);
+			dl->AddLine(c.At(0.563f, 0.406f), c.At(0.656f, 0.500f), mint, t);
+			dl->AddLine(c.At(0.656f, 0.500f), c.At(0.563f, 0.594f), mint, t);
+			dl->AddLine(c.At(0.531f, 0.375f), c.At(0.469f, 0.625f), mint, t);
+		}
+
 		void DrawSearch(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -1428,6 +1451,43 @@ namespace Helios::Icons
 				{ 0.500f, 0.641f }, { 0.466f, 0.572f }, { 0.397f, 0.547f }, { 0.466f, 0.522f }
 			};
 			FillPoly(dl, c, kStar, PaletteColor(color, kMint));
+		}
+
+		/* 头文件：页里一对尖括号夹着 H —— "声明"那类文件，与源文件的尖括号斜杠是一对。
+		 * 几何与 FileCppHeader.svg 同一副数。 */
+		void DrawFileCppHeader(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 mint = PaletteColor(color, kMint);
+
+			StrokePage(dl, c, t, color);
+
+			dl->AddLine(c.At(0.369f, 0.456f), c.At(0.331f, 0.531f), mint, t);
+			dl->AddLine(c.At(0.331f, 0.531f), c.At(0.369f, 0.606f), mint, t);
+			dl->AddLine(c.At(0.631f, 0.456f), c.At(0.669f, 0.531f), mint, t);
+			dl->AddLine(c.At(0.669f, 0.531f), c.At(0.631f, 0.606f), mint, t);
+
+			dl->AddLine(c.At(0.444f, 0.434f), c.At(0.444f, 0.628f), mint, t);
+			dl->AddLine(c.At(0.556f, 0.434f), c.At(0.556f, 0.628f), mint, t);
+			dl->AddLine(c.At(0.444f, 0.531f), c.At(0.556f, 0.531f), mint, t);
+		}
+
+		/* 源文件：页里一对尖括号夹着斜杠（代码符号）—— 与 ScriptComponent 同一枚记号，
+		 * 那边是组件、这里是磁盘上的文件。几何与 FileCppSource.svg 同一副数。 */
+		void DrawFileCppSource(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 mint = PaletteColor(color, kMint);
+
+			StrokePage(dl, c, t, color);
+
+			dl->AddLine(c.At(0.444f, 0.447f), c.At(0.375f, 0.541f), mint, t);
+			dl->AddLine(c.At(0.375f, 0.541f), c.At(0.444f, 0.634f), mint, t);
+			dl->AddLine(c.At(0.556f, 0.453f), c.At(0.625f, 0.547f), mint, t);
+			dl->AddLine(c.At(0.625f, 0.547f), c.At(0.556f, 0.641f), mint, t);
+			dl->AddLine(c.At(0.556f, 0.422f), c.At(0.481f, 0.672f), mint, t);
 		}
 
 		/* ---- 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 ----
@@ -2506,6 +2566,7 @@ namespace Helios::Icons
 			{ "Terrain",           &DrawTerrain },
 			{ "Transform",         &DrawTransform },
 			{ "Tag",               &DrawTag },
+			{ "ScriptComponent",   &DrawScriptComponent },
 			{ "LayerMask",         &DrawLayerMask },
 			{ "Stats",             &DrawStats },
 			{ "FrameGraph",        &DrawFrameGraph },
@@ -2527,6 +2588,8 @@ namespace Helios::Icons
 			{ "FileModel",         &DrawFileModel },
 			{ "FileMaterial",      &DrawFileMaterial },
 			{ "FileProbe",         &DrawFileProbe },
+			{ "FileCppHeader",     &DrawFileCppHeader },
+			{ "FileCppSource",     &DrawFileCppSource },
 			{ "Gizmos",            &DrawGizmos },
 			{ "Grid",              &DrawGrid },
 			{ "WorldAxis",         &DrawWorldAxis },

@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <functional>
+#include <unordered_map>
 #include "FrameGraphPanel.h"
 #include "RenderStatsPanel.h"
 #include "SceneHierarchy.h"
@@ -73,8 +74,14 @@ namespace Helios
 		void SetTimelineVisible(bool visible) { m_IsTimelineVisible = visible; }
 		[[nodiscard]] bool IsTimelineVisible() const { return m_IsTimelineVisible; }
 
+		/* 脚本执行顺序总表窗口显隐（Settings 菜单打开，默认不占布局） */
+		void SetScriptOrderVisible(bool visible) { m_IsScriptOrderVisible = visible; }
+		[[nodiscard]] bool IsScriptOrderVisible() const { return m_IsScriptOrderVisible; }
+
 		void SetGizmoType(int type) { m_GizmoType = type; }
-		void SetPlayMode(PlayMode mode) { m_PlayMode = mode; }
+		void SetPlayMode(PlayMode mode);
+		/* 热重载脚本：运行中的实例按字段迁移到新库，不需要退出 Runtime */
+		void ReloadScripts(const std::function<bool()>& swap_module);
 
 		/* 渲染管线（场景视口）：前向 / 延迟 —— 状态在编辑器相机的视图上（相机转发） */
 		void SetRenderPipeline(RenderPipeline pipeline) { m_pEditorCamera->SetRenderPipeline(pipeline); }
@@ -137,6 +144,10 @@ namespace Helios
 
 		/* 显示主场景视口 */
 		void ShowSceneViewportUI();
+		/* 脚本执行顺序总表：全场景挂载点按 Order 排，行内可改 */
+		void DrawScriptOrderWindow();
+		/* 顺序表的草稿落到组件上：按实体一条命令，可撤销 */
+		void ApplyScriptOrderDraft();
 		/* 显示渲染统计信息 */
 		void ShowStatisticInfoUI();
 		/* 选中Entity时显示操作Gizmo */
@@ -184,6 +195,8 @@ namespace Helios
 		float m_ViewGizmoDraggedDistance{ 0.0f };
 		/* 默认为编辑模式 */
 		PlayMode m_PlayMode{ PlayMode::Edit };
+		/* 进 Runtime 前的场景快照：退出时按它还原，空路径 = 没有快照 */
+		std::filesystem::path m_RuntimeSnapshotPath;
 		/* 当前编辑器是否被启用 */
 		bool m_IsActivated{ true };
 		/* 场景视口窗口是否显示 */
@@ -197,6 +210,10 @@ namespace Helios
 		bool m_IsTimelineVisible{ true };
 		/* 打开片段后要求把时间轴页签切到前台（下一帧 SetWindowFocus） */
 		bool m_FocusTimelineRequested{ false };
+		/* 脚本执行顺序总表窗口是否显示（Settings 菜单打开） */
+		bool m_IsScriptOrderVisible{ false };
+		/* 顺序表的草稿：key = 实体句柄 << 32 | 槽位下标，点 Apply 才写进组件 */
+		std::unordered_map<uint64_t, int> m_ScriptOrderDraft;
 		/* 本帧可视化可选的相机（渲染图与相机同生命周期，指针跨帧稳定） */
 		std::vector<FrameGraphPanel::CameraEntry> m_CameraEntries;
 		/* 渲染统计面板（每帧 CPU / GPU 耗时；绘制逻辑在面板自身） */

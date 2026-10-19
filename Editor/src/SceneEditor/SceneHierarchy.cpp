@@ -269,6 +269,7 @@ namespace Helios
 			if (type == typeid(PostProcessComponent))     return Icons::Id::PostProcess;
 			if (type == typeid(BloomComponent))           return Icons::Id::Bloom;
 			if (type == typeid(AnimatorComponent))        return Icons::Id::Animation;
+			if (type == typeid(ScriptComponent))          return Icons::Id::ScriptComponent;
 
 			/* 光源是一个组件块但造型分三种：图标跟着「当前光源类型」走，
 			 * 这样把 Type 从点光改成聚光时，卡头图标会立刻跟着变。
@@ -1496,6 +1497,8 @@ namespace Helios
 			case AssetFileKind::Material: return Icons::Id::FileMaterial;
 			case AssetFileKind::Probe:    return Icons::Id::FileProbe;
 			case AssetFileKind::Animation: return Icons::Id::AnimationClip;
+			case AssetFileKind::CppHeader: return Icons::Id::FileCppHeader;
+			case AssetFileKind::CppSource: return Icons::Id::FileCppSource;
 			case AssetFileKind::Other:    return Icons::Id::File;
 			}
 
@@ -1520,6 +1523,8 @@ namespace Helios
 			case AssetFileKind::Material: return "Material";
 			case AssetFileKind::Probe:    return "Reflection Probe";
 			case AssetFileKind::Animation: return "Animation Clip";
+			case AssetFileKind::CppHeader: return "C++ Header";
+			case AssetFileKind::CppSource: return "C++ Source";
 			}
 
 			return "File";

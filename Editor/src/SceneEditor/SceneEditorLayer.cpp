@@ -13,10 +13,50 @@
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/ModelImporter.h"
+#include "Helios/Common/PathUtils.h"
+#include "Helios/Script/ScriptRuntime.h"
 #include "ImGuizmo.h"
 
 namespace Helios
 {
+	namespace
+	{
+		/* 顺序表草稿的键：实体句柄在高位、槽位下标在低位 */
+		uint64_t ScriptOrderKey(entt::entity entity, size_t slot)
+		{
+			return (static_cast<uint64_t>(static_cast<uint32_t>(entity)) << 32) | static_cast<uint32_t>(slot);
+		}
+
+		/* Order 调整：Apply 一次写一个实体的全部槽位，撤销回退到写之前 */
+		class ScriptOrderCommand final : public ICommand
+		{
+		public:
+			ScriptOrderCommand(Entity entity, std::vector<int> before, std::vector<int> after)
+				: m_Entity(entity), m_Before(std::move(before)), m_After(std::move(after))
+			{
+			}
+
+			void Do() override { Apply(m_After); }
+			void Undo() override { Apply(m_Before); }
+			[[nodiscard]] const char* GetLabel() const override { return "Edit Script Order"; }
+
+		private:
+			void Apply(const std::vector<int>& orders)
+			{
+				if (!m_Entity || !m_Entity.HasComponent<ScriptComponent>())
+					return;
+
+				ScriptComponent& component = m_Entity.GetComponent<ScriptComponent>();
+				for (size_t i = 0; i < orders.size() && i < component.m_Scripts.size(); ++i)
+					component.m_Scripts[i].m_Order = orders[i];
+			}
+
+			Entity           m_Entity;
+			std::vector<int> m_Before;
+			std::vector<int> m_After;
+		};
+	}
+
 	SceneEditorLayer::SceneEditorLayer()
 		: ILayer("SceneEditorLayer")
 	{
@@ -109,6 +149,8 @@ namespace Helios
 		 * 窗口隐藏时由面板自身跳过提交（恢复入口在 View 菜单），但仍逐帧调用，
 		 * 抓取请求的置位 / 清零都在面板内部结算 */
 		m_FrameGraphPanel.OnImGuiRenderer(m_CameraEntries, m_IsFrameGraphVisible);
+
+		DrawScriptOrderWindow();
 
 		/* 主窗口，需要最后再画，以确保能够得到正确的窗口宽高 */
 		ShowSceneViewportUI();
@@ -470,9 +512,13 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* 旧场景摘除编辑器相机（场景可能仍被别处引用而继续存活） */
+		/* 旧场景摘除编辑器相机（场景可能仍被别处引用而继续存活）；
+		 * 脚本实例挂在旧场景上，一并停掉，别让它们继续引用要被替换的实体 */
 		if (m_pMainScene)
+		{
+			m_pMainScene->GetScriptRuntime().Stop();
 			m_pMainScene->RemoveExternalCamera(m_pEditorCamera.get());
+		}
 
 		m_pMainScene = scene;
 		SetActiveScenePath(path);
@@ -487,6 +533,8 @@ namespace Helios
 		m_HoveredEntity = {};
 		m_CommandStack.Clear();
 		m_IsGizmoDragging = false;
+		/* 顺序表的草稿指的是旧场景的槽位，一起丢掉 */
+		m_ScriptOrderDraft.clear();
 
 		/* 历史刚被清空（没保存过的新场景也一样）：当前位置就是干净点 */
 		MarkSceneSaved();
@@ -549,6 +597,232 @@ namespace Helios
 			return;
 
 		OpenScene(file_path);
+	}
+
+	void SceneEditorLayer::SetPlayMode(PlayMode mode)
+	{
+		if (m_PlayMode == mode)
+			return;
+
+		m_PlayMode = mode;
+		OnPlayModeChanged();
+	}
+
+	/* 脚本执行顺序总表：表格里改的是草稿，点 Apply 才写进组件（一条命令，可撤销） */
+	void SceneEditorLayer::DrawScriptOrderWindow()
+	{
+		if (!m_IsScriptOrderVisible || m_pMainScene == nullptr)
+			return;
+
+		if (!ImGui::Begin(Panel::kScriptOrder, &m_IsScriptOrderVisible))
+		{
+			ImGui::End();
+			return;
+		}
+
+		struct Row
+		{
+			Entity      Owner;
+			entt::entity Handle{ entt::null };
+			size_t      Slot{ 0 };
+			std::string EntityName;
+			std::string ClassName;
+			int         Current{ 0 };   /* 组件里现在的值，行序按它排 */
+			int         Draft{ 0 };     /* 表格里正在编辑的值 */
+		};
+
+		std::vector<Row> rows;
+		const auto view = m_pMainScene->GetRegistry().view<ScriptComponent>();
+		for (const entt::entity handle : view)
+		{
+			const ScriptComponent& component = view.get<ScriptComponent>(handle);
+			const auto* name = m_pMainScene->GetRegistry().try_get<NameComponent>(handle);
+
+			for (size_t i = 0; i < component.m_Scripts.size(); ++i)
+			{
+				Row row;
+				row.Owner = Entity{ handle, m_pMainScene };
+				row.Handle = handle;
+				row.Slot = i;
+				row.EntityName = (name != nullptr && !name->m_Name.empty()) ? name->m_Name : "Entity";
+				row.ClassName = component.m_Scripts[i].ClassName;
+				row.Current = component.m_Scripts[i].m_Order;
+
+				const auto draft = m_ScriptOrderDraft.find(ScriptOrderKey(handle, i));
+				row.Draft = (draft != m_ScriptOrderDraft.end()) ? draft->second : row.Current;
+				rows.push_back(std::move(row));
+			}
+		}
+
+		/* 行序按已经生效的值排：改完点 Apply 才重排，编辑时行不会跳来跳去 */
+		std::stable_sort(rows.begin(), rows.end(),
+			[](const Row& left, const Row& right) { return left.Current < right.Current; });
+
+		ImGui::TextDisabled("Scripts run in ascending Order; equal values keep the entity and slot order.");
+		if (m_PlayMode == PlayMode::Runtime)
+			ImGui::TextDisabled("Order cannot be edited while running.");
+
+		if (rows.empty())
+		{
+			ImGui::TextDisabled("No scripts in this scene.");
+			ImGui::End();
+			return;
+		}
+
+		const bool editable = (m_PlayMode != PlayMode::Runtime);
+		if (ImGui::BeginTable("##ScriptOrder", 3,
+			ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingFixedFit))
+		{
+			ImGui::TableSetupColumn("Entity", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("Script", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableSetupColumn("Order", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+			ImGui::TableHeadersRow();
+
+			for (const Row& row : rows)
+			{
+				ImGui::TableNextRow();
+				ImGui::PushID(static_cast<int>(static_cast<uint32_t>(row.Handle)));
+				ImGui::PushID(static_cast<int>(row.Slot));
+
+				/* 还没落盘的改动：名字标黄加星 */
+				const bool pending = (row.Draft != row.Current);
+
+				ImGui::TableNextColumn();
+				if (pending)
+					ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.30f, 1.0f), "%s *", row.EntityName.c_str());
+				else
+					ImGui::TextUnformatted(row.EntityName.c_str());
+
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(row.ClassName.empty() ? "(none)" : row.ClassName.c_str());
+
+				ImGui::TableNextColumn();
+				int order = row.Draft;
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				ImGui::BeginDisabled(!editable);
+				if (ImGui::DragInt("##Order", &order, 1.0f))
+					m_ScriptOrderDraft[ScriptOrderKey(row.Handle, row.Slot)] = order;
+				ImGui::EndDisabled();
+
+				ImGui::PopID();
+				ImGui::PopID();
+			}
+
+			ImGui::EndTable();
+		}
+
+		const bool has_draft = !m_ScriptOrderDraft.empty();
+		ImGui::BeginDisabled(!has_draft || !editable);
+		if (ImGui::Button("Apply"))
+			ApplyScriptOrderDraft();
+		ImGui::SameLine();
+		if (ImGui::Button("Revert"))
+			m_ScriptOrderDraft.clear();
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::TextDisabled(has_draft ? "Unsaved order changes." : "No pending changes.");
+
+		ImGui::End();
+	}
+
+	/* 草稿落到组件上：每个实体一条命令，撤销时整批退回 */
+	void SceneEditorLayer::ApplyScriptOrderDraft()
+	{
+		if (m_pMainScene == nullptr || m_ScriptOrderDraft.empty())
+			return;
+
+		std::vector<entt::entity> entities;
+		const auto view = m_pMainScene->GetRegistry().view<ScriptComponent>();
+		for (const entt::entity handle : view)
+			entities.push_back(handle);
+
+		for (const entt::entity handle : entities)
+		{
+			ScriptComponent& component = m_pMainScene->GetRegistry().get<ScriptComponent>(handle);
+			if (component.m_Scripts.empty())
+				continue;
+
+			std::vector<int> before;
+			std::vector<int> after;
+			before.reserve(component.m_Scripts.size());
+			after.reserve(component.m_Scripts.size());
+
+			bool touched = false;
+			for (size_t i = 0; i < component.m_Scripts.size(); ++i)
+			{
+				before.push_back(component.m_Scripts[i].m_Order);
+
+				const auto draft = m_ScriptOrderDraft.find(ScriptOrderKey(handle, i));
+				const int order = (draft != m_ScriptOrderDraft.end()) ? draft->second : component.m_Scripts[i].m_Order;
+				after.push_back(order);
+
+				if (order != component.m_Scripts[i].m_Order)
+					touched = true;
+			}
+
+			if (!touched)
+				continue;
+
+			m_CommandStack.Execute(CreateUniquePtr<ScriptOrderCommand>(
+				Entity{ handle, m_pMainScene }, std::move(before), std::move(after)));
+		}
+
+		m_ScriptOrderDraft.clear();
+	}
+
+	/* 热重载：场景交给自己，实例的存与回灌在 ScriptRuntime 里做 */
+	void SceneEditorLayer::ReloadScripts(const std::function<bool()>& swap_module)
+	{
+		if (m_pMainScene == nullptr)
+		{
+			if (swap_module)
+				swap_module();
+			return;
+		}
+
+		m_pMainScene->GetScriptRuntime().Reload(*m_pMainScene, swap_module);
+	}
+
+	/* 进出 Runtime：脚本实例跟着建 / 销毁。Edit 模式下场景里只留类名和参数，不跑脚本。
+	 * 进出都配一次场景快照 —— 运行期间删实体、改材质都不该留在场景里。 */
+	void SceneEditorLayer::OnPlayModeChanged()
+	{
+		if (m_pMainScene == nullptr)
+			return;
+
+		/* 顺序表的草稿跨运行时没有意义：进出一律丢掉 */
+		m_ScriptOrderDraft.clear();
+
+		if (m_PlayMode == PlayMode::Runtime)
+		{
+			/* 快照不写探针烘焙缓存：那是会真落盘的副作用，运行前不该有 */
+			m_RuntimeSnapshotPath = std::filesystem::temp_directory_path() / "helios_runtime_snapshot.scn";
+			m_pMainScene->Serializer(PathToUtf8(m_RuntimeSnapshotPath), false);
+
+			m_pMainScene->GetScriptRuntime().Start(*m_pMainScene);
+			return;
+		}
+
+		m_pMainScene->GetScriptRuntime().Stop();
+
+		if (!m_RuntimeSnapshotPath.empty())
+		{
+			/* 加载是「替换」语义：实体全部重建，旧句柄一律作废 */
+			if (!m_pMainScene->Deserializer(PathToUtf8(m_RuntimeSnapshotPath)))
+				CORE_LOG_ERROR("Failed to restore the scene snapshot: {}", PathToUtf8(m_RuntimeSnapshotPath));
+
+			std::error_code error;
+			std::filesystem::remove(m_RuntimeSnapshotPath, error);
+			m_RuntimeSnapshotPath.clear();
+
+			/* 还原会重建实体：撤销历史与选中都指向旧句柄，一起清掉。
+			 * 干净点不动 —— 进运行前本来没保存的改动，还原后仍显示为未保存。 */
+			m_CommandStack.Clear();
+			m_HoveredEntity = {};
+			m_IsGizmoDragging = false;
+			m_SceneHierarchy.SetSelectedEntity(Entity{});
+		}
 	}
 
 	void SceneEditorLayer::SaveScene()

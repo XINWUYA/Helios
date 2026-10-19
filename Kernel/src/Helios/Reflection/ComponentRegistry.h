@@ -36,7 +36,8 @@ namespace Helios
 		Color,
 		String,
 		Enum,
-		AssetRef,
+		AssetRef,  /* 资源引用：存路径文本，面板可直接拖入资源浏览器的文件 */
+		EntityRef, /* 实体引用：存实体名字，面板可直接拖入层级面板的节点 */
 		LayerMask, /* 32 位层掩码：控件是层复选，序列化按无符号写出 */
 	};
 

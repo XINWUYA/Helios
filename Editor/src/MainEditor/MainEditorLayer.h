@@ -6,6 +6,7 @@
 #include "EditorResourceBrowser.h"
 #include "LogPanel.h"
 #include "PanelLayoutRestore.h"
+#include "ScriptModule.h"
 
 namespace Helios
 {
@@ -47,6 +48,8 @@ namespace Helios
 		void ShowMenuUI();
 		/* 显示顶部工具栏（菜单栏与工作区之间的固定一行） */
 		void ShowToolbarUI();
+		/* 新建脚本模板：选个路径，生成带注册宏的 .cpp，编一次就能挂到实体上 */
+		void CreateScriptTemplate();
 
 		/* 按 Panel::kDefaultLayout 用 DockBuilder 构建默认停靠布局。
 		 * 必须在同一帧的 DockSpace() 之前调用（DockBuilder 的调用时序要求）；
@@ -67,5 +70,7 @@ namespace Helios
 		bool m_ResetLayoutRequested{ false };
 		/* 实时样式编辑器（Options 菜单 / 工具栏选项开关） */
 		bool m_ShowStyleEditor{ false };
+		/* C++ 脚本模块：编译与加载都在这里，脚本类注册进 ScriptRegistry */
+		ScriptModule m_ScriptModule;
 	};
 }

@@ -5,3 +5,9 @@
 
 // Assets path
 #define ASSETS_PATH "@ASSETS_PATH@"
+
+// Build directory: the editor uses it to rebuild the script module on demand
+#define HELIOS_BUILD_DIR "@CMAKE_BINARY_DIR@"
+
+// Script module output directory (see the HeliosScripts target)
+#define HELIOS_SCRIPT_OUTPUT_DIR "@CMAKE_BINARY_DIR@/scripts"

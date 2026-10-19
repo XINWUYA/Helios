@@ -13,6 +13,7 @@ namespace Helios
 		RegisterLightComponent();
 		RegisterReflectionProbeComponent();
 		RegisterAnimatorComponent();
+		RegisterScriptComponent();
 		RegisterPostProcessComponents();
 	}
 }

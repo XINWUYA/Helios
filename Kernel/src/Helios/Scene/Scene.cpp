@@ -15,6 +15,7 @@
 #include "Helios/Renderer/RenderView.h"
 #include "Helios/Renderer/PostProcess/PostProcessEffectRegistry.h"
 #include "Helios/Reflection/ComponentRegistry.h"
+#include "Helios/Script/ScriptRuntime.h"
 #include "SceneCommon.h"
 
 namespace Helios
@@ -28,6 +29,7 @@ namespace Helios
 	Scene::Scene()
 	{
 		m_pReflectionProbeManager = CreateSharedPtr<ReflectionProbeManager>();
+		m_pScriptRuntime = CreateUniquePtr<ScriptRuntime>();
 
 		/* 统一连接所有组件类型的信号 */
         ConnectSignalsForComponents(SceneComponentList{});
@@ -57,6 +59,40 @@ namespace Helios
 	}
 
 	/* 销毁实体 */
+	void Scene::QueueDestroy(Entity entity)
+	{
+		if (!entity || !m_Registry.valid(static_cast<entt::entity>(entity)))
+			return;
+
+		const entt::entity handle = static_cast<entt::entity>(entity);
+		if (std::find(m_PendingDestroy.begin(), m_PendingDestroy.end(), handle) == m_PendingDestroy.end())
+			m_PendingDestroy.push_back(handle);
+	}
+
+	/* 脚本请求的销毁排到本帧末尾处理：此时脚本 tick 与各趟视图遍历都已结束，
+	 * registry 进入稳定状态，删实体不会打断迭代。 */
+	void Scene::FlushPendingDestroy()
+	{
+		if (m_PendingDestroy.empty())
+			return;
+
+		const std::vector<entt::entity> pending = std::move(m_PendingDestroy);
+		m_PendingDestroy.clear();
+
+		for (const entt::entity handle : pending)
+		{
+			if (!m_Registry.valid(handle))
+				continue;
+
+			/* 先停掉挂在上面的脚本实例：OnDestroy 里还能访问实体 */
+			if (m_pScriptRuntime != nullptr)
+				m_pScriptRuntime->DestroyInstancesFor(handle);
+
+			Entity entity{ handle, shared_from_this() };
+			DestroyEntity(entity);
+		}
+	}
+
 	void Scene::DestroyEntity(Entity& entity)
 	{
 		PROFILE_FUNCTION();
@@ -213,8 +249,10 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* 实体即将销毁，动画会话不再需要还原 */
+		/* 实体即将销毁，动画会话与脚本实例都不再有宿主 */
 		m_AnimationRuntime.Clear();
+		if (m_pScriptRuntime != nullptr)
+			m_pScriptRuntime->Stop();
 
 		/* 实体销毁会触发组件的 OnRemoved（反射探针随之从管理器注销），
 		 * 但管理器仍可能持有引用，一并清空以保证不留上一份场景的残留。 */
@@ -247,12 +285,21 @@ namespace Helios
 			m_ExternalCameras.end());
 	}
 
+	ScriptRuntime& Scene::GetScriptRuntime()
+	{
+		return *m_pScriptRuntime;
+	}
+
 	void Scene::OnUpdate(float delta_time)
 	{
 		PROFILE_FUNCTION();
 
 		/* 动画先推进：属性轨道写组件，下面的变换推送才能当帧看到新姿势 */
 		m_AnimationRuntime.Tick(*this, delta_time);
+
+		/* 脚本紧随动画：脚本会改变换，必须赶在推送之前跑完 */
+		if (m_pScriptRuntime != nullptr)
+			m_pScriptRuntime->Tick(*this, delta_time);
 
 		/* 骨骼蒙皮：关节姿势已经定下来，这里把蒙皮模型的顶点重算一遍 */
 		SkeletonModel::UpdateScene(*this);
@@ -350,6 +397,9 @@ namespace Helios
 			if (render_view != nullptr)
 				render_view->SetPostProcessState(post_process_state);
 		}
+
+		/* 脚本请求的销毁放到最后：脚本 tick 与各趟视图遍历都跑完，registry 稳定了再删 */
+		FlushPendingDestroy();
 	}
 
 	/* 执行本帧收集到的所有渲染视图。
@@ -399,7 +449,7 @@ namespace Helios
 		m_Registry.emplace_or_replace<ComponentOrderComponent>(entity, std::move(components));
 	}
 
-	void Scene::Serializer(const std::string& path)
+	void Scene::Serializer(const std::string& path, bool write_bake_cache)
 	{
 		PROFILE_FUNCTION();
 
@@ -430,7 +480,7 @@ namespace Helios
 		/* 保存场景时才持久化烘焙结果：这里只登记请求（真正的写入等 GPU 执行完、由探针状态机在后续
 		 * 帧完成），但缓存路径要在序列化组件之前定下来（一并写进 .scn）；缓存按正在保存的场景文件
 		 * 位置分目录。 */
-		if (m_pReflectionProbeManager != nullptr)
+		if (m_pReflectionProbeManager != nullptr && write_bake_cache)
 			m_pReflectionProbeManager->RequestBakeCacheWrites(path);
 
 		/* 按实体句柄升序输出：registry 的遍历顺序与创建顺序无关，

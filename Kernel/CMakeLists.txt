@@ -60,29 +60,8 @@ target_include_directories(Kernel
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_BINARY_DIR}  # For HeliosConfig.h
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/spdlog/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/debugbreak
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glfw/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glad/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/imgui
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glm
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/stb
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/xxHash
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tracy/public
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/spirv-cross
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glslang
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glslang/SPIRV
+        ${HELIOS_ENGINE_INCLUDE_DIRS}
 )
-
-if(APPLE)
-    target_include_directories(Kernel PRIVATE
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/metal-cpp  # Metal C++ wrapper
-    )
-endif()
 
 if(VULKAN_SDK)
     target_include_directories(Kernel PRIVATE ${VULKAN_SDK}/Include)

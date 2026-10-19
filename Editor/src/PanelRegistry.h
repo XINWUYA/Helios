@@ -22,6 +22,8 @@ namespace Helios
 		inline constexpr const char* kLog            = "Log";
 		/* 时间轴：选中实体的动画片段编辑（播放头 / 关键帧 / 录制） */
 		inline constexpr const char* kTimeline       = "Timeline";
+		/* 脚本执行顺序：全场景脚本挂载点的 Order 总表（从 Settings 菜单打开，默认不占布局） */
+		inline constexpr const char* kScriptOrder    = "Script Order";
 
 		/* 默认停靠的语义槽位，与 BuildDefaultLayout 里的 DockNode 划分一一对应 */
 		enum class DockSlot : uint8_t

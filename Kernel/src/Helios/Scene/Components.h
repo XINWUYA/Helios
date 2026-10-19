@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 #include "Helios/VirtualDevice/DeviceTexture.h"
+#include "Helios/Reflection/ComponentRegistry.h"
 #include "LayerMask.h"
 #include "Camera.h"
 #include "Mesh.h"
@@ -20,6 +21,7 @@ namespace Helios
 {
 	class Scene;
 	class Entity;
+	class Script;
 
 	/* 组件基类 */
 	struct ComponentBase
@@ -315,6 +317,54 @@ namespace Helios
 		}
 	};
 
+	/* 脚本参数：名字、类型、文本值。编辑器只存文本，类缺失时原样保留，
+	 * 等脚本库补上（或字段类型改了）再按字段表重新解释。 */
+	struct ScriptProperty
+	{
+		std::string Name;
+		FieldType   Type{ FieldType::Float };
+		std::string Value;
+		/* 枚举的可选名字：面板画下拉用，不序列化（类缺失时为空，退回按数字编辑） */
+		std::vector<std::string> Options;
+
+		ScriptProperty() = default;
+		ScriptProperty(std::string name, FieldType type, std::string value)
+			: Name(std::move(name)), Type(type), Value(std::move(value))
+		{
+		}
+	};
+
+	/* 一个脚本挂载点：类名 + 参数，实例只在 Runtime 模式下存在 */
+	struct ScriptSlot
+	{
+		std::string                 ClassName;
+		std::vector<ScriptProperty> Properties;
+		/* 全局执行顺序：小的先跑，同值按实体与挂载顺序。只影响 tick 顺序，不影响 OnCreate 之外的东西 */
+		int                         m_Order{ 0 };
+		Script*                     Instance{ nullptr };
+
+		ScriptSlot() = default;
+		ScriptSlot(const ScriptSlot&) = default;
+		ScriptSlot& operator=(const ScriptSlot&) = default;
+	};
+
+	/* 脚本组件：一个实体可以挂多个脚本，按添加顺序执行。
+	 * 只记类名与参数，实例进 Runtime 才建，退出就销毁。 */
+	struct ScriptComponent : ComponentBase
+	{
+		std::vector<ScriptSlot> m_Scripts;
+
+		/* 面板画实体引用时要列场景里的实体，进场景时把所属场景记下来。
+		 * 不序列化、不参与比较：同场景内快照拷贝拿到的仍是同一个指针。 */
+		const Scene* m_pOwnerScene{ nullptr };
+
+		ScriptComponent() = default;
+		ScriptComponent(const ScriptComponent&) = default;
+		ScriptComponent& operator=(const ScriptComponent&) = default;
+
+		void OnAdded(const Scene& scene, Entity& entity) override { m_pOwnerScene = &scene; }
+	};
+
 	/* 场景中需要接入on_construct/on_destroy信号分发的全部组件类型 */
 	using SceneComponentList = std::tuple<
 		NameComponent,
@@ -325,6 +375,7 @@ namespace Helios
 		ModelComponent,
 		LightComponent,
 		ReflectionProbeComponent,
-		AnimatorComponent
+		AnimatorComponent,
+		ScriptComponent
 	>;
 }

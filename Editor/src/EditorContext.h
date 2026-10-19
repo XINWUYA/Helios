@@ -45,12 +45,19 @@ namespace Helios
 		 * 文件操作同样有效。命令不涉及场景改动时，自己声明 AffectsSceneDocument() 为假。 */
 		void Execute(UniquePtr<ICommand> command);
 
+		[[nodiscard]] bool IsScriptOrderVisible();
+		void SetScriptOrderVisible(bool visible);
+
 		/* ---- 运行 / Gizmo 状态（本类持有权威值，再转发给场景面板）---- */
 		[[nodiscard]] int GetGizmoType() const { return m_GizmoType; }
 		void SetGizmoType(int type);
 
 		[[nodiscard]] PlayMode GetPlayMode() const { return m_PlayMode; }
 		void SetPlayMode(PlayMode mode);
+
+		/* 热重载脚本：运行中的实例按字段迁移到新库，不用退出 Runtime。
+		 * swap_module 由调用方给（编译并换库），面板不认识脚本模块。 */
+		void ReloadScripts(const std::function<bool()>& swap_module);
 
 		/* ---- 渲染管线（编辑器场景视口）：前向 / 延迟。
 		 * 状态在相机的视图上（单一数据源），这里只做通道转发。 ---- */

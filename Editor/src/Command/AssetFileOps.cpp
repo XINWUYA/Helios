@@ -90,6 +90,9 @@ namespace Helios
 			{ ".PROBE", AssetFileKind::Probe },
 			/* 动画片段（属性面板的 Animator 卡拖进去就能播） */
 			{ ".ANIM", AssetFileKind::Animation },
+			/* 脚本源码：Assets/Scripts 下的 C++ 文件，浏览器里按头文件 / 源文件分两档 */
+			{ ".H", AssetFileKind::CppHeader }, { ".HPP", AssetFileKind::CppHeader },
+			{ ".CPP", AssetFileKind::CppSource }, { ".CC", AssetFileKind::CppSource },
 		};
 
 		for (const auto& entry : kByExtension)

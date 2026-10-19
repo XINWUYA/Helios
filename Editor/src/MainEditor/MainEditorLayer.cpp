@@ -6,7 +6,11 @@
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "ImGuizmo.h"
+#include "Helios/Application/FileDialog.h"
+#include "Helios/Common/PathUtils.h"
 #include "Helios/ImGui/EditorTheme.h"
+#include <cctype>
+#include <fstream>
 
 namespace Helios
 {
@@ -37,6 +41,9 @@ namespace Helios
 		EditorResourceBrowser::AnimationClipOpenSink clip_open;
 		clip_open.Open = [this](const std::string& path) { m_Context.OpenAnimationClip(path); };
 		m_ResourceBrowser.SetAnimationClipOpenSink(std::move(clip_open));
+
+		/* 启动时把已编译好的脚本模块挂上：类注册进 ScriptRegistry，属性面板与场景加载才有类可用 */
+		m_ScriptModule.LoadLatest();
 	}
 
 	void MainEditorLayer::OnDetached()
@@ -255,6 +262,68 @@ namespace Helios
 		ImGui::DockBuilderFinish(dockspace_id);
 	}
 
+	void MainEditorLayer::CreateScriptTemplate()
+	{
+		const std::string path = FileDialog::SaveFile("script(*.cpp)\0*.cpp\0", "NewScript.cpp");
+		if (path.empty())
+			return;
+
+		/* 脚本必须放在 Assets/Scripts 下：CMake 只从那里收集源文件 */
+		std::error_code error;
+		const std::filesystem::path target = std::filesystem::weakly_canonical(PathFromUtf8(path), error);
+		const std::filesystem::path script_root =
+			std::filesystem::weakly_canonical(std::filesystem::path(ASSETS_PATH) / "Scripts", error);
+		if (target.parent_path() != script_root)
+		{
+			CORE_LOG_ERROR("[Script] Scripts must be saved under {}.", PathToUtf8(script_root));
+			return;
+		}
+
+		std::string class_name = ExtractFilename(path);
+		if (class_name.empty())
+			class_name = "NewScript";
+
+		/* 类名得是合法标识符：非法字符换下划线，首字符补前缀 */
+		for (char& character : class_name)
+		{
+			if (!std::isalnum(static_cast<unsigned char>(character)) && character != '_')
+				character = '_';
+		}
+		if (!std::isalpha(static_cast<unsigned char>(class_name.front())))
+			class_name.insert(class_name.begin(), 'S');
+
+		std::ofstream file(target, std::ios::binary | std::ios::trunc);
+		if (!file.is_open())
+		{
+			CORE_LOG_ERROR("[Script] Failed to write {}.", path);
+			return;
+		}
+
+		file << "/* " << class_name << "：脚本模板。OnUpdate 每帧跑一次，Runtime 模式下生效。 */\n"
+			<< "#include \"Helios/Script/ScriptRegistry.h\"\n"
+			<< "#include \"Helios/Scene/Components.h\"\n"
+			<< "\n"
+			<< "namespace\n"
+			<< "{\n"
+			<< "\tclass " << class_name << " : public Helios::Script\n"
+			<< "\t{\n"
+			<< "\tpublic:\n"
+			<< "\t\tvoid OnUpdate(float delta_time) override\n"
+			<< "\t\t{\n"
+			<< "\t\t\t(void)delta_time;\n"
+			<< "\t\t}\n"
+			<< "\n"
+			<< "\t\tfloat m_Speed{ 1.0f };\n"
+			<< "\t};\n"
+			<< "}\n"
+			<< "\n"
+			<< "HELIOS_SCRIPT(" << class_name << ",\n"
+			<< "\tHELIOS_SCRIPT_FIELD(&" << class_name << "::m_Speed, \"Speed\", Helios::FieldType::Float))\n";
+		file.close();
+
+		CORE_LOG_INFO("[Script] Created {}. Pick Scripts > Recompile to load it.", path);
+	}
+
 	void MainEditorLayer::ShowMenuUI()
 	{
 		PROFILE_FUNCTION();
@@ -414,6 +483,39 @@ namespace Helios
 					if (ImGui::MenuItem("Reset Layout"))
 						m_ResetLayoutRequested = true;
 
+					ImGui::EndMenu();
+				}
+
+				/* Scripts：C++ 脚本模块的重编与重载 */
+				if (ImGui::BeginMenu("Scripts"))
+				{
+					if (ImGui::MenuItem("New Script..."))
+						CreateScriptTemplate();
+
+					ImGui::Separator();
+
+					if (ImGui::MenuItem("Recompile Scripts"))
+					{
+						/* 运行中也能用：实例按字段值迁移到新库，不用退出 Runtime */
+						m_Context.ReloadScripts([this]() { return m_ScriptModule.Recompile(); });
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Compile Assets/Scripts and hot-reload the module");
+
+					if (ImGui::MenuItem("Reload Module"))
+						m_Context.ReloadScripts([this]() { return m_ScriptModule.LoadLatest(); });
+
+					/* 脚本执行顺序：全场景一张表，Order 小的先跑 */
+					ImGui::Separator();
+					bool script_order = m_Context.IsScriptOrderVisible();
+					if (ImGui::MenuItem("Script Order", nullptr, &script_order))
+						m_Context.SetScriptOrderVisible(script_order);
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("脚本的全局执行顺序，按 Order 升序");
+
+					ImGui::Separator();
+					ImGui::TextDisabled("%s", m_ScriptModule.GetStatus().c_str());
+					ImGui::TextDisabled("%d class(es) registered", m_ScriptModule.GetClassCount());
 					ImGui::EndMenu();
 				}
 

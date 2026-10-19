@@ -133,6 +133,19 @@ namespace Helios
 			layer->SetPlayMode(mode);
 	}
 
+	void EditorContext::ReloadScripts(const std::function<bool()>& swap_module)
+	{
+		if (auto* layer = GetSceneLayer())
+		{
+			layer->ReloadScripts(swap_module);
+			return;
+		}
+
+		/* 场景面板还没建：至少把库换掉 */
+		if (swap_module)
+			swap_module();
+	}
+
 	/* 渲染管线读写都经场景面板落到编辑器相机（权威值在相机上）。
 	 * 面板未就绪时读回缺省延迟（相机缺省值），写为无操作。 */
 	RenderPipeline EditorContext::GetRenderPipeline()
@@ -218,6 +231,18 @@ namespace Helios
 	{
 		if (auto* layer = GetSceneLayer())
 			layer->SetFrameGraphVisible(visible);
+	}
+
+	bool EditorContext::IsScriptOrderVisible()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->IsScriptOrderVisible();
+	}
+
+	void EditorContext::SetScriptOrderVisible(bool visible)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->SetScriptOrderVisible(visible);
 	}
 
 	bool EditorContext::IsTimelineVisible()

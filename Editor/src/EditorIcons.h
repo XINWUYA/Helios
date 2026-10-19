@@ -36,6 +36,8 @@ namespace Helios
 			Audio, Particle, Terrain,
 			/* 组件卡头部：与实体类型图标分开，按"这是个什么组件"造型 */
 			Transform, Tag,
+			/* 脚本组件：圆角代码页（与源文件图标同一枚记号） */
+			ScriptComponent,
 			/* 渲染层组件卡：多层堆叠 + 勾选（表示层掩码） */
 			LayerMask,
 			/* 面板/分组：统计类面板用 */
@@ -54,6 +56,8 @@ namespace Helios
 			Capture,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
 			Directory, File, FileImage, FileSvg, FileScene, FileMtlGraph, FileShader, FileModel, FileMaterial, FileProbe,
+			/* 脚本源码：头文件 / 源文件 */
+			FileCppHeader, FileCppSource,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */
 			Gizmos, Grid, WorldAxis,
 			/* 调试视图（工具栏按钮 + 弹层档位） */

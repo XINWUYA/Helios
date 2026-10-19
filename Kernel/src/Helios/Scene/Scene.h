@@ -18,6 +18,7 @@ namespace Helios
 	class DeviceTexture;
 	class Camera;
 	class ReflectionProbeManager;
+	class ScriptRuntime;
 
 	/* 场景类 */
 	class Scene final : public std::enable_shared_from_this<Scene>
@@ -30,6 +31,10 @@ namespace Helios
 		Entity CreateEntity(const std::string& name = std::string());
 		/* 销毁实体 */
 		void DestroyEntity(Entity& entity);
+
+		/* 延迟销毁：脚本在一帧中间删实体不能当场删（registry 正在被遍历），
+		 * 排进队列，等本帧的脚本与视图都跑完再统一处理。 */
+		void QueueDestroy(Entity entity);
 		/* 清空所有实体，以及由实体派生的场景侧状态（反射探针管理器） */
 		void ClearAllEntities();
 		/* 销毁指定类型的实体 */
@@ -98,13 +103,17 @@ namespace Helios
 		/* 获取动画播放器（保存 / 清空场景时会先停掉播放并还原姿势） */
 		AnimationRuntime& GetAnimationRuntime() { return m_AnimationRuntime; }
 
+		/* 脚本运行时：进 Runtime 模式 Start、退出 Stop，由编辑器驱动（见 SceneEditorLayer） */
+		ScriptRuntime& GetScriptRuntime();
+
 		/* 属性面板里组件卡的显示顺序（组件名，按显示先后）。空表 = 按注册顺序。
 		 * 只是编辑器排版数据，随场景保存；运行时不用。返回的引用在组件被改写前有效。 */
 		[[nodiscard]] const std::vector<std::string>& GetComponentOrder(entt::entity entity) const;
 		void SetComponentOrder(entt::entity entity, std::vector<std::string> components);
 
-		/* 序列化场景 */
-		void Serializer(const std::string& path);
+		/* 序列化场景。write_bake_cache=false 用于运行前的临时快照：只存实体，
+		 * 不登记反射探针的烘焙缓存写入（那个副作用会真的写盘）。 */
+		void Serializer(const std::string& path, bool write_bake_cache = true);
 		bool Deserializer(const std::string& path);
 
 	private:
@@ -123,6 +132,9 @@ namespace Helios
 		/* 序列化一个实体 */
 		void SerializeEntity(tinyxml2::XMLElement* root_node, Entity& entity);
 
+		/* 处理 QueueDestroy 攒下的请求（OnUpdate 末尾调一次） */
+		void FlushPendingDestroy();
+
 		/* 场景中的所有实体都将注册到这里 */
 		entt::registry m_Registry;
 
@@ -136,5 +148,11 @@ namespace Helios
 
 		/* 动画播放器：每帧在变换推送之前推进 */
 		AnimationRuntime m_AnimationRuntime;
+
+		/* 脚本运行时：同样在变换推送之前 tick */
+		UniquePtr<ScriptRuntime> m_pScriptRuntime;
+
+		/* 等待本帧末处理的销毁请求（脚本删实体走这里） */
+		std::vector<entt::entity> m_PendingDestroy;
     };
 }
