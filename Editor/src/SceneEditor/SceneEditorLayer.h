@@ -94,8 +94,8 @@ namespace Helios
 		 * 同样由装配层接线，转发给层级面板（属性面板与层级树同属一个面板实现）。 */
 		void SetAssetSelection(const std::vector<AssetSelectionEntry>& selection);
 
-		/* 模型编辑器入口（跨面板能力）：属性面板的「Model Editor」卡点击 → 在模型编辑器里打开该模型。
-		 * 同样由装配层接线（面板不查 Layer）。 */
+		/* 模型编辑器入口（跨面板能力）：属性面板 Model 卡里的「Open in Model Editor」按钮点击 →
+		 * 在模型编辑器里打开该模型。同样由装配层接线（面板不查 Layer）。 */
 		using ModelEditorFunc = std::function<void(const std::string&)>;
 		void SetModelEditorFunc(ModelEditorFunc func);
 

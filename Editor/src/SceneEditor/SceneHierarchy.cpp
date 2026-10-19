@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "SceneHierarchy.h"
+#include "MaterialSlotEditing.h"
 #include "EditorCommon.h"
 #include "EditorIcons.h"
 #include "Gif.h"
@@ -25,6 +26,7 @@
 #include "Command/DeleteEntityCommand.h"
 #include "Command/ReparentEntityCommand.h"
 #include "Command/SetEntityVisibilityCommand.h"
+#include "Command/SetComponentOrderCommand.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Renderer/PostProcess/Effects/Bloom.h"
@@ -34,6 +36,7 @@
 #include <cctype>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -43,6 +46,9 @@ namespace Helios
 	{
 		/* 层级面板内部的拖拽载荷类型：被拖动实体的句柄 */
 		constexpr const char* kEntityDragPayload = "SCENE_HIERARCHY_ENTITY";
+
+		/* 卡内分区隔离线（画在材质卡那一段，详情卡与组件卡尾也要用） */
+		void DrawCardSectionDivider();
 
 		class ComponentCustomDrawCommand final : public ICommand
 		{
@@ -171,7 +177,7 @@ namespace Helios
 			{ Icons::Id::Model,            &HasModelComponent },
 			{ Icons::Id::Sprite,           &HasSpriteComponent },
 			/* 后处理对象排在表尾：挂了模型的实体保留模型造型（追加组件不改既有图标） */
-			{ Icons::Id::Emission,         &HasPostProcessComponent },
+			{ Icons::Id::PostProcess,      &HasPostProcessComponent },
 		};
 
 		/* 没有任何可识别组件的实体（只有 Name / Transform）用通用图标 */
@@ -259,8 +265,8 @@ namespace Helios
 			if (type == typeid(ModelComponent))           return Icons::Id::Model;
 			if (type == typeid(SpriteComponent))          return Icons::Id::Sprite;
 			if (type == typeid(ReflectionProbeComponent)) return Icons::Id::ReflectionProbe;
-			if (type == typeid(PostProcessComponent))     return Icons::Id::Emission;
-			if (type == typeid(BloomComponent))           return Icons::Id::Emission;
+			if (type == typeid(PostProcessComponent))     return Icons::Id::PostProcess;
+			if (type == typeid(BloomComponent))           return Icons::Id::Bloom;
 			if (type == typeid(AnimatorComponent))        return Icons::Id::Animation;
 
 			/* 光源是一个组件块但造型分三种：图标跟着「当前光源类型」走，
@@ -361,13 +367,22 @@ namespace Helios
 			return std::filesystem::path(path).stem().string();
 		}
 
+		/* 行右端 = 可视区右缘（不含横向滚动量）。InnerRect 扣掉了滚动条，再让一格内边距，
+		 * 口径与 WorkRect 的右端一致；直接拿 WorkRect 的话，滚一下眼睛就跟着内容跑到中间。 */
+		inline float TreeRowRight()
+		{
+			const ImGuiWindow* window = ImGui::GetCurrentWindowRead();
+			return window->InnerRect.Max.x - ImMax(window->WindowPadding.x, window->WindowBorderSize);
+		}
+
 		/* 实体行内容：按实体持有的组件解析图标，再交给共用的树行版式。
 		 * icon_color / clip_right 由调用方算好透传：隐藏行的整体压暗（含图标），
-		 * 以及"给行右端的眼睛让出一列"的文本裁剪。 */
+		 * 以及"给行右端的眼睛让出一列"的文本裁剪；content_inset 就是眼睛那一列的宽。 */
 		void DrawEntityRowLabel(const Entity& entity, const std::string& name,
-		                        ImVec4 icon_color, float clip_right)
+		                        ImVec4 icon_color, float clip_right, float content_inset)
 		{
-			PanelChrome::DrawTreeRowLabel(ResolveEntityIcon(entity), name, false, icon_color, clip_right);
+			PanelChrome::DrawTreeRowLabel(ResolveEntityIcon(entity), name, false, icon_color,
+				clip_right, content_inset);
 		}
 
 		/* 可见性开关（眼睛）按钮本体：命中区 + 悬停底色 + 图标 + tooltip。层级树行右端与属性
@@ -541,13 +556,17 @@ namespace Helios
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, pane_padding);
 			ImGui::BeginChild("##HierarchyTree", ImVec2(0.0f, body_height));
 			{
+				/* 行的高亮与命中区都按 WorkRect 算，而它会跟着横向滚动往左收 ——
+				 * 滚一下行右端就离窗口右缘差一截，眼睛那一列落在行外。把右端拉回可视区。 */
+				ImGuiWindow* tree = ImGui::GetCurrentWindow();
+				tree->WorkRect.Max.x += tree->Scroll.x;
+
 				/* 场景名作为根节点，实体树挂在它下面 */
 				ShowSceneRootNode(roots, children, pending_delete, filter);
 
 				/* 条目之下的空白区域：拖到这里表示提升到根层级。
 				 * 只覆盖空白、不覆盖条目：落在条目上的拖拽目标因为"源与目标相同"会被
 				 * ImGui 拒绝（拖起来又原位放下），这时若整窗也算目标，就会误当成提升到根层级。 */
-				ImGuiWindow* tree = ImGui::GetCurrentWindow();
 				const ImVec2 blank_top = ImGui::GetCursorScreenPos();
 				const ImVec2 tree_max(tree->Pos.x + tree->Size.x, tree->Pos.y + tree->Size.y);
 
@@ -1010,7 +1029,10 @@ namespace Helios
 		if (!m_ScenePath.empty() && ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", m_ScenePath.c_str());
 
-		PanelChrome::DrawTreeRowLabel(Icons::Id::Scene, MakeSceneDisplayName(m_ScenePath), m_SceneDirty);
+		/* 裁到行的右端（脏标记再占一小格）；放不下时按整段名字占位，横向能滑出来 */
+		const float clip_right = TreeRowRight() - (m_SceneDirty ? ImGui::GetFontSize() : 0.0f);
+		PanelChrome::DrawTreeRowLabel(Icons::Id::Scene, MakeSceneDisplayName(m_ScenePath), m_SceneDirty,
+			EditorTheme::Token::Text, clip_right);
 
 		if (is_opened)
 		{
@@ -1106,12 +1128,13 @@ namespace Helios
 			ImGui::PopStyleColor();
 
 		/* 行右端给可见性开关留一列：开关的命中区 = 行右端的方框（与行同高）。
-		 * 此刻"上一项"还是树节点，几何从它身上取。 */
+		 * 此刻"上一项"还是树节点，行高从它身上取；右端按可视区算，不跟着横向滚动跑。 */
 		const ImVec2 row_min = ImGui::GetItemRectMin();
 		const ImVec2 row_max = ImGui::GetItemRectMax();
 		const float eye_side = ImMax(row_max.y - row_min.y, 1.0f);
-		const ImVec2 eye_min(row_max.x - eye_side, row_min.y);
-		const ImVec2 eye_max(row_max.x, row_max.y);
+		const float row_right = TreeRowRight();
+		const ImVec2 eye_min(row_right - eye_side, row_min.y);
+		const ImVec2 eye_max(row_right, row_max.y);
 
 		/* 行的悬停（开关还没提交，HoveredId 不会被它抢走）：开关"悬停现形"要看它 */
 		const bool row_hovered = ImGui::IsItemHovered();
@@ -1153,7 +1176,7 @@ namespace Helios
 					std::transform(extension.begin(), extension.end(), extension.begin(),
 						[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
 
-					if (extension == ".mesh")
+					if (extension == ".mesh" || extension == ".model")
 						ApplyDroppedMeshToEntity(entity, PathToUtf8(g_AssetsPath / relative_path));
 				}
 			}
@@ -1171,11 +1194,19 @@ namespace Helios
 		}
 
 		/* 交互都在上面处理完了（那时"上一项"才是树节点），这里补画行内容：
-		 * 有效隐藏的行整体压暗（名字与图标），名字裁到开关列之前（放不下用省略号收尾）。 */
+		 * 有效隐藏的行整体压暗（名字与图标），名字裁到开关列之前（放不下用省略号收尾）。
+		 * 整块再按开关列的左沿裁一刀：图标也不许压进眼睛那一列。 */
 		const ImVec4 row_color = effectively_hidden ? EditorTheme::Token::TextDim : EditorTheme::Token::Text;
+		const ImGuiStyle& row_style = ImGui::GetStyle();
+		const float eye_left = eye_min.x - row_style.ItemInnerSpacing.x;
+
+		/* 放不下时排版按"整段名字 + 眼睛列"占位：横向滑到底，深节点的名字能整段看全 */
+		const float eye_inset = eye_side + row_style.ItemInnerSpacing.x * 2.0f;
+
 		ImGui::PushStyleColor(ImGuiCol_Text, row_color);
-		DrawEntityRowLabel(entity, name, row_color,
-			eye_min.x - ImGui::GetStyle().ItemInnerSpacing.x);
+		ImGui::PushClipRect(ImVec2(row_min.x, row_min.y), ImVec2(eye_left, row_max.y), true);
+		DrawEntityRowLabel(entity, name, row_color, eye_left, eye_inset);
+		ImGui::PopClipRect();
 		ImGui::PopStyleColor();
 
 		/* ---- 行右端：可见性开关（眼睛）----
@@ -1622,11 +1653,15 @@ namespace Helios
 			}
 		}
 
-		PanelChrome::EndCard(card);
+		/* 模型文件（.mesh / .obj / .fbx 等）：详情卡末尾直接给模型编辑器入口
+		 * （交换格式由编辑器里那条导入链先转成 .mesh 再开） */
+		if (!entry.IsFolder && entry.Kind == AssetFileKind::Model)
+		{
+			DrawCardSectionDivider();
+			DrawOpenInModelEditorButton(PathToUtf8(absolute_path));
+		}
 
-		/* 模型文件（.mesh / .obj）：模型编辑器入口卡 —— 同级平铺在详情卡之后，
-		 * 与 probe 图卡 / 材质卡同路数 */
-		DrawAssetModelEditorCard(entry);
+		PanelChrome::EndCard(card);
 
 		/* .probe：三张烘焙图各一张卡片 —— 同级平铺在详情卡之后（卡片通道不可嵌套，
 		 * "卡中卡"画不出来，与材质卡排在组件卡之后是同一条路数）。
@@ -1762,7 +1797,7 @@ namespace Helios
 			m_AssetDetailPath.clear();
 			m_AssetDetailRows.clear();
 			m_AssetProbeCards.clear();
-			m_AssetMaterialGroup = nullptr;
+			m_AssetMaterial = nullptr;
 			m_AssetMaterialShaderOptions.clear();
 			m_AssetMaterialDirty = false;
 			return;
@@ -1775,7 +1810,7 @@ namespace Helios
 		m_AssetDetailWriteTime = write_time;
 		m_AssetDetailRows.clear();
 		m_AssetProbeCards.clear();
-		m_AssetMaterialGroup = nullptr;
+		m_AssetMaterial = nullptr;
 		m_AssetMaterialShaderOptions.clear();
 		m_AssetMaterialDirty = false;
 
@@ -1894,18 +1929,16 @@ namespace Helios
 		}
 		else if (entry.Kind == AssetFileKind::Material)
 		{
-			/* 材质资产：整个文件读进编辑缓冲（全部条目，引用形态条目只显示不编辑）。
-			 * 条目标题下的「Materials」行给出条目数；读不回来的文件明确说 unreadable。 */
-			auto group = CreateSharedPtr<MaterialGroup>();
-			if (group->Deserializer(PathToUtf8(absolute_path)))
+			/* 材质资产：整个文件读进编辑缓冲（单条材质） */
+			auto material = CreateSharedPtr<Material>();
+			if (MaterialIO::ReadFile(PathToUtf8(absolute_path), *material))
 			{
-				m_AssetMaterialGroup = std::move(group);
-				m_AssetDetailRows.emplace_back("Materials",
-					std::to_string(m_AssetMaterialGroup->GetEntries().size()));
+				m_AssetMaterial = std::move(material);
+				m_AssetDetailRows.emplace_back("Type", "Material Asset");
 			}
 			else
 			{
-				m_AssetDetailRows.emplace_back("Materials", "unreadable");
+				m_AssetDetailRows.emplace_back("Material", "unreadable");
 			}
 
 			m_AssetMaterialShaderOptions = MaterialParamUI::CollectShaderOptions();
@@ -2115,67 +2148,30 @@ namespace Helios
 
 	namespace
 	{
-		/* 把槽的绑定换成"实例"（若已是实例则原样返回）。
-		 * 返回值：可编辑的实例材质；component_changed 标记组件数据被修改（撤销靠它）。 */
-		SharedPtr<Material> EnsureSlotInstance(ModelComponent& component, const Model& model,
-			int slot_index, bool& component_changed)
-		{
-			const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
-			if (slot == nullptr)
-				return nullptr;
-
-			auto iter = component.m_SlotOverrides.find(slot->Name);
-			if (iter != component.m_SlotOverrides.end() && iter->second.IsInstance && iter->second.pMaterial != nullptr)
-				return iter->second.pMaterial;
-
-			/* 从"当前生效材质"（覆盖 ?: 默认 ?: 白模）克隆 */
-			SharedPtr<Material> source;
-			std::string source_path;
-			if (iter != component.m_SlotOverrides.end() && iter->second.pMaterial != nullptr)
-			{
-				source = iter->second.pMaterial;
-				source_path = iter->second.pMaterial->GetPath();
-			}
-			else
-			{
-				source = (slot->pDefault != nullptr) ? slot->pDefault : Material::BuiltinWhite();
-				source_path = source->GetPath();
-			}
-
-			MaterialSlotOverride slot_override;
-			slot_override.pMaterial = source->Clone();
-			slot_override.IsInstance = true;
-			slot_override.SourceAssetPath = std::move(source_path);
-			component.m_SlotOverrides[slot->Name] = std::move(slot_override);
-			component_changed = true;
-
-			return component.m_SlotOverrides[slot->Name].pMaterial;
-		}
-
-		/* 参数改动写回：确保实例 → SetParameters 到实例（Texture 走 SetTexture 的绑定解析） */
+		/* 槽编辑语义在 MaterialSlotEditing 里（模型编辑器共用），这里只做索引到槽名的转换 */
 		void WriteBackMaterialParam(ModelComponent& component, const Model& model, int slot_index,
 			ParamType type, const std::string& name, const std::any& value, bool& component_changed)
 		{
-			SharedPtr<Material> instance = EnsureSlotInstance(component, model, slot_index, component_changed);
-			if (instance == nullptr)
+			const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
+			if (slot == nullptr)
 				return;
 
-			if (type == ParamType::Texture)
-				instance->SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
-			else
-				instance->SetParameters(type, name, value);
+			MaterialSlotEditing::WriteParam(model, component.m_SlotOverrides, slot->Name,
+				type, name, value, component_changed);
 		}
 
-		/* 光栅化状态改动写回：确保实例 → SetRasterState 到实例（与参数同一套撤销路径） */
 		void WriteBackMaterialRasterState(ModelComponent& component, const Model& model, int slot_index,
 			const RenderRasterState& state, bool& component_changed)
 		{
-			SharedPtr<Material> instance = EnsureSlotInstance(component, model, slot_index, component_changed);
-			if (instance == nullptr)
+			const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
+			if (slot == nullptr)
 				return;
 
-			instance->SetRasterState(state);
+			MaterialSlotEditing::WriteRasterState(model, component.m_SlotOverrides, slot->Name,
+				state, component_changed);
 		}
+
+		/* 有效材质（覆盖 ?: 模型默认 ?: 白模）由 Components.h 的 ResolveSlotMaterial 提供 */
 
 		/* ---- 光栅化状态（RenderRasterState）的行 ---- */
 
@@ -2301,10 +2297,10 @@ namespace Helios
 				ImGui::GetColorU32(EditorTheme::Token::Text), title);
 		}
 
-		/* 分区隔离线：把 RasterState 分区与上面的参数行隔开（收起时也在）。
+		/* 卡内分区隔离线：把卡尾动作与上面的内容隔开（材质卡的 Raster State 也用它）。
 		 * 自绘细线（项目惯例：自绘不占行距、间距说得清；ImGui::Separator 吃「1px + 整行距」、
 		 * 且 Separator 色在卡底上偏淡）——块高 = 上留 5 + 线 1 + 下留 5。 */
-		void DrawMaterialSectionDivider()
+		void DrawCardSectionDivider()
 		{
 			const float top_gap = Scaled(5.0f);
 			const float bottom_gap = Scaled(5.0f);
@@ -2372,7 +2368,7 @@ namespace Helios
 		/* 光栅化状态：可折叠分区（默认收起；值画在临时副本上，改动时才实例化写回）。上方压一条
 		 * 隔离线。注意：TreeNodeEx 只承担命中 / 折叠状态（标签传空串、三角自绘）；
 		 * NoTreePushOnOpen：内容不缩进（默认 TreePush 会 Indent 18px、整段右移错位）。 */
-		DrawMaterialSectionDivider();
+		DrawCardSectionDivider();
 		{
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 0.0f)); /* 藏掉 stock 箭头（自绘对位） */
 			const bool raster_open = ImGui::TreeNodeEx("##MaterialRasterState",
@@ -2392,56 +2388,18 @@ namespace Helios
 		return changed;
 	}
 
-	/* 「Model Editor」入口卡的本体：一个全宽按钮（实体属性面板与资源属性面板共用） */
-	void SceneHierarchy::DrawModelEditorEntry(const char* id, const std::string& absolute_path)
+	/* 「Open in Model Editor」按钮：文件模型才有可编辑的东西（内建 / 空模型没有路径）。
+	 * 画在所在卡片的卡身末尾，铺满内容宽 —— 实体侧是 Model 组件卡，资源侧是详情卡。 */
+	void SceneHierarchy::DrawOpenInModelEditorButton(const std::string& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
 		if (absolute_path.empty())
 			return;
 
-		ImGui::PushID(id);
-
-		const PanelChrome::Card card = PanelChrome::BeginCard("Model Editor", Icons::Id::Model);
-
-		if (card.Open)
-		{
-			const float button_width = ImGui::GetContentRegionAvail().x;
-			if (ImGui::Button("Open in Model Editor", ImVec2(button_width, 0.0f)) && m_ModelEditorFunc)
-				m_ModelEditorFunc(absolute_path);
-		}
-
-		PanelChrome::EndCard(card);
-		ImGui::PopID();
-	}
-
-	/* Model 编辑器的入口卡：把当前模型交给模型编辑器（重看子网格 / 调材质）。
-	 * 内建模型没有资产文件、模型为空都没有可编辑的东西，不画。 */
-	void SceneHierarchy::DrawModelEditorCard(const ModelComponent& component)
-	{
-		PROFILE_FUNCTION();
-
-		const auto& model = component.m_Model;
-		if (model == nullptr)
-			return;
-
-		BuiltinModelType builtin_type{};
-		if (model->TryGetBuiltinType(builtin_type))
-			return;
-
-		DrawModelEditorEntry("##ModelEditorCard", model->GetPath());
-	}
-
-	/* 资源属性面板的模型入口卡：Model 类资源都能进模型编辑器（交换格式由编辑器里那条
-	 * 导入链先转成 .mesh 再开） */
-	void SceneHierarchy::DrawAssetModelEditorCard(const AssetSelectionEntry& entry)
-	{
-		PROFILE_FUNCTION();
-
-		if (entry.IsFolder || entry.Kind != AssetFileKind::Model)
-			return;
-
-		DrawModelEditorEntry("##AssetModelEditorCard", PathToUtf8(g_AssetsPath / PathFromUtf8(entry.Path)));
+		const float button_width = ImGui::GetContentRegionAvail().x;
+		if (ImGui::Button("Open in Model Editor", ImVec2(button_width, 0.0f)) && m_ModelEditorFunc)
+			m_ModelEditorFunc(absolute_path);
 	}
 
 	/* Model 的材质卡：每槽一张，排在 Model 组件卡之后同级平铺。 */
@@ -2633,7 +2591,7 @@ namespace Helios
 		/* 光栅化状态：可折叠分区（默认收起；值画在临时副本上，改动时才实例化写回）。上方压一条
 		 * 隔离线。注意：TreeNodeEx 只承担命中 / 折叠状态（标签传空串、三角自绘）；
 		 * NoTreePushOnOpen：内容不缩进（默认 TreePush 会 Indent 18px，跟参数行错位）。 */
-		DrawMaterialSectionDivider();
+		DrawCardSectionDivider();
 		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 0.0f)); /* 藏掉 stock 箭头（自绘对位） */
 		const bool raster_open = ImGui::TreeNodeEx("##MaterialRasterState",
 			ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen, "%s", "");
@@ -2646,103 +2604,59 @@ namespace Helios
 		}
 	}
 
-	/* 每条目一张卡：可编辑的条目（内嵌定义）= 卡身 + 「Apply」；引用形态 / 空条目明确说清是什么，
-	 * 而不是给一张空卡。 */
+	/* 单条材质资产：卡身 + Apply */
 	void SceneHierarchy::DrawAssetMaterialCards(const std::filesystem::path& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
-		if (m_AssetMaterialGroup == nullptr)
+		if (m_AssetMaterial == nullptr)
 			return;
 
 		const std::string asset_path = PathToUtf8(absolute_path);
-		const auto& entries = m_AssetMaterialGroup->GetEntries();
-		for (size_t index = 0; index < entries.size(); ++index)
+		const SharedPtr<Material> editable = m_AssetMaterial;
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("Material", Icons::Id::FileMaterial);
+		if (card.Open)
 		{
-			const MaterialEntry& entry = entries[index];
-
-			/* 卡片键按索引：多条目各一张、折叠状态互不影响（槽名可空、可重名，不能当 ID） */
-			ImGui::PushID(static_cast<int>(index));
-
-			std::string title = "Material";
-			if (entries.size() > 1)
-				title += " " + std::to_string(index);
-			if (!entry.SlotName.empty())
-				title += " · " + entry.SlotName;
-
-			const PanelChrome::Card card = PanelChrome::BeginCard(title.c_str(), Icons::Id::FileMaterial);
-			if (card.Open)
+			DrawAssetMaterialBody(*m_AssetMaterial, [this, asset_path, editable]()
 			{
-				if (entry.pMaterial != nullptr)
-				{
-					/* 编辑缓冲的改动即时热更：同步缓存里的共享材质（场景在渲染的那份）——
-					 * 场景窗口立刻看到结果，无需等 Apply（Apply 只管落盘）。
-					 * 资产约定单条目：只有第 0 条对应对缓存条目。 */
-					const SharedPtr<Material> editable = entry.pMaterial;
-					const bool hot_sync = (index == 0);
-					DrawAssetMaterialBody(*entry.pMaterial, [this, asset_path, editable, hot_sync]()
-					{
-						m_AssetMaterialDirty = true;
-						if (hot_sync)
-							AssetManager::Instance().Refresh<Material>(asset_path, editable);
-					});
+				m_AssetMaterialDirty = true;
+				AssetManager::Instance().Refresh<Material>(asset_path, editable);
+			});
 
-					/* 「Apply」：保存修改并序列化到本地（整份文件的全部条目一起写出）；
-					 * 没有改动时禁用 —— 点了也只是原样重写，没有意义 */
-					ImGui::Spacing();
-					const bool has_changes = m_AssetMaterialDirty;
-					if (!has_changes)
-						ImGui::BeginDisabled();
-					if (ImGui::Button("Apply", ImVec2(ImGui::GetContentRegionAvail().x, 0.0f)))
-						ApplyAssetMaterialEdits(absolute_path);
-					if (!has_changes)
-						ImGui::EndDisabled();
-					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-						ImGui::SetTooltip(has_changes ? "Save changes to this .mtl file" : "No changes to apply");
-				}
-				else if (!entry.AssetPath.empty())
-				{
-					/* 引用形态：定义在别处（独立材质资产）—— 要改它得选中那份资产 */
-					ImGuiExt::DrawCommonTextUI("Asset", RELATIVE_PATH(entry.AssetPath));
-					ImGuiExt::DrawCommonTextUI("Type", "Shared material asset");
-				}
-				else
-				{
-					ImGuiExt::DrawCommonTextUI("Status", "Invalid material entry");
-				}
-			}
-
-			PanelChrome::EndCard(card);
-			ImGui::PopID();
+			ImGui::Spacing();
+			const bool has_changes = m_AssetMaterialDirty;
+			if (!has_changes)
+				ImGui::BeginDisabled();
+			if (ImGui::Button("Apply", ImVec2(ImGui::GetContentRegionAvail().x, 0.0f)))
+				ApplyAssetMaterialEdits(absolute_path);
+			if (!has_changes)
+				ImGui::EndDisabled();
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+				ImGui::SetTooltip(has_changes ? "Save changes to this material file" : "No changes to apply");
 		}
+
+		PanelChrome::EndCard(card);
 	}
 
-	/* 「Apply」：保存修改并序列化到本地。
-	 * 独立材质资产（约定单条目）另做缓存同步：命中缓存时就地换定义 —— 场景里已引用它的
-	 * 槽位无需重载场景即可生效；模型伴生的槽表以文件为准，模型下次加载时读到新定义。 */
+	/* 「Apply」：保存修改并序列化到本地，再同步共享材质缓存 */
 	void SceneHierarchy::ApplyAssetMaterialEdits(const std::filesystem::path& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
-		if (m_AssetMaterialGroup == nullptr)
+		if (m_AssetMaterial == nullptr)
 			return;
 
 		/* 参数表按当前 Shader 收敛后再落盘（反射是集合的单一来源：面板看不到的不写进文件） */
-		for (const MaterialEntry& entry : m_AssetMaterialGroup->GetEntries())
-		{
-			if (entry.pMaterial != nullptr)
-				entry.pMaterial->RetainShaderDeclaredParams();
-		}
+		m_AssetMaterial->RetainShaderDeclaredParams();
 
 		const std::string path = PathToUtf8(absolute_path);
-		m_AssetMaterialGroup->Serializer(path);
+		if (!MaterialIO::WriteFile(path, *m_AssetMaterial))
+			return;
 
 		/* 缓冲已与文件一致：按钮回到禁用（下一帧文件写入时间变化触发的重读也会再清一遍） */
 		m_AssetMaterialDirty = false;
-
-		if (const MaterialEntry* first = m_AssetMaterialGroup->GetEntryByIndex(0);
-			first != nullptr && first->pMaterial != nullptr)
-			AssetManager::Instance().Refresh<Material>(path, first->pMaterial);
+		AssetManager::Instance().Refresh<Material>(path, m_AssetMaterial);
 	}
 
 	/* 层级里拖入 .mesh：给实体挂 / 换模型。
@@ -2788,14 +2702,22 @@ namespace Helios
 	}
 
 	/* 绘制单个组件块：卡头（折叠箭头 + 图标 + 组件名 + 右侧菜单）+ 卡身（schema 字段 +
-	 * 组件自定义绘制）。卡片版式来自 PanelChrome，各面板共用。 */
-	void SceneHierarchy::DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component)
+	 * 组件自定义绘制）。卡片版式来自 PanelChrome，各面板共用。
+	 * 卡头可以拖着重排，菜单里也有逐格上移 / 下移。 */
+	void SceneHierarchy::DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component,
+		int order_index, int order_count, const ComponentCardFooter* footer)
 	{
 		PROFILE_FUNCTION();
 
 		/* 外层已 PushID(组件类型)，卡片的展开状态键因此天然按组件分开 */
 		const PanelChrome::Card card = PanelChrome::BeginCard(desc.Name,
-			ResolveComponentIcon(desc, component), Icons::Id::Menu, "Component options");
+			ResolveComponentIcon(desc, component), Icons::Id::Menu, "Component options",
+			true, desc.Name);
+
+		/* 自检：记下卡头矩形（按显示顺序），卡片画完再补下沿 */
+		const size_t rect_index = m_LastCardRects.size();
+		m_LastCardRects.push_back({ desc.Name, card.Min,
+			ImVec2(card.Min.x + card.Width, card.Min.y + card.HeaderHeight), card.HeaderHeight });
 
 		if (card.ActionClicked)
 			ImGui::OpenPopup("ComponentSettings");
@@ -2833,13 +2755,45 @@ namespace Helios
 					}
 				}
 			}
+
+			/* 卡尾动作（Model 卡的模型编辑器入口）：排在卡身内容之后，收起时跟着藏 */
+			if (footer != nullptr && footer->Label != nullptr)
+			{
+				DrawCardSectionDivider();
+				const float button_width = ImGui::GetContentRegionAvail().x;
+				if (ImGui::Button(footer->Label, ImVec2(button_width, 0.0f)) && footer->Clicked)
+					footer->Clicked();
+			}
 		}
 
-		PanelChrome::EndCard(card);
+		const PanelChrome::CardDrop drop = PanelChrome::EndCard(card);
+
+		/* 自检：整张卡的下沿（EndCard 已把光标推到卡下方） */
+		m_LastCardRects[rect_index].Max.y =
+			ImGui::GetCursorScreenPos().y - ImGui::GetStyle().ItemSpacing.y;
+
+		/* 别的卡片拖到这张卡上：按落点插到前面 / 后面（下一帧按新顺序画） */
+		if (drop.Received && drop.Payload != nullptr)
+			DropComponentCard(drop.Payload, desc.Name, drop.After);
 
 		/* 删除组件：经命令栈则可连组件数据一起还原 */
 		if (ImGui::BeginPopup("ComponentSettings"))
 		{
+			/* 上下移动：逐格挪，点完不收起（连点一直挪），到边界置灰 */
+			const ImGuiSelectableFlags stay_open = ImGuiSelectableFlags_DontClosePopups;
+			if (ImGui::Selectable("Move Up", false,
+				(order_index > 0) ? stay_open : (stay_open | ImGuiSelectableFlags_Disabled)))
+			{
+				MoveComponentCard(desc.Name, -1);
+			}
+			if (ImGui::Selectable("Move Down", false,
+				(order_index + 1 < order_count) ? stay_open : (stay_open | ImGuiSelectableFlags_Disabled)))
+			{
+				MoveComponentCard(desc.Name, 1);
+			}
+
+			ImGui::Separator();
+
 			if (ImGui::MenuItem("Remove") && desc.Remove != nullptr)
 			{
 				if (m_pCommandStack != nullptr)
@@ -2856,12 +2810,13 @@ namespace Helios
 		}
 	}
 
-	void SceneHierarchy::ShowEntityComponents()
+	/* 当前可见的组件卡，按用户存的顺序排：记过的按记录先后，没记过的保持注册顺序跟在后面。
+	 * 组件被移除后顺序表里的旧名字自然失效（找不到就不参与排序）。 */
+	std::vector<const ComponentDesc*> SceneHierarchy::CollectOrderedComponentDescs()
 	{
-		PROFILE_FUNCTION();
+		std::vector<const ComponentDesc*> descs;
 
 		/* 全部组件：由 ComponentRegistry 驱动，本类不认识任何具体组件类型。
-		 * 新增组件照 Builtin/ 建注册文件，这里零改动。
 		 * 例外只有一处：已在面板头部就地编辑的组件（Name）不再单独成卡。 */
 		for (const ComponentDesc& desc : ComponentRegistry::Instance().All())
 		{
@@ -2879,14 +2834,150 @@ namespace Helios
 			if (desc.Visible != nullptr && !desc.Visible(component))
 				continue;
 
-			ImGui::PushID(static_cast<int>(desc.Type.hash_code()));
-			DrawComponentBlock(desc, m_SelectedEntity, component);
+			descs.push_back(&desc);
+		}
 
-			/* Model 的入口卡与材质卡 / Camera 的预览卡：各自排在组件卡之后同级平铺
+		if (m_pOwnerScene == nullptr)
+			return descs;
+
+		const std::vector<std::string>& order = m_pOwnerScene->GetComponentOrder(m_SelectedEntity);
+		if (order.empty())
+			return descs;
+
+		std::unordered_map<std::string, size_t> ranks;
+		ranks.reserve(order.size());
+		for (size_t i = 0; i < order.size(); ++i)
+			ranks.emplace(order[i], i);
+
+		/* 记过的按记录先后排，没记过的等价、排在后面（stable_sort 保持注册顺序）。
+		 * 没记过的一律用同一个大下标，比较才满足严格弱序 */
+		constexpr size_t kUnranked = std::numeric_limits<size_t>::max();
+		const auto rank_of = [&ranks](const ComponentDesc& desc)
+		{
+			const auto iter = ranks.find(desc.Name);
+			return (iter != ranks.end()) ? iter->second : kUnranked;
+		};
+
+		std::stable_sort(descs.begin(), descs.end(),
+			[&rank_of](const ComponentDesc* lhs, const ComponentDesc* rhs)
+			{
+				return rank_of(*lhs) < rank_of(*rhs);
+			});
+
+		return descs;
+	}
+
+	std::vector<std::string> SceneHierarchy::VisibleComponentOrder()
+	{
+		std::vector<std::string> names;
+		for (const ComponentDesc* desc : CollectOrderedComponentDescs())
+			names.emplace_back(desc->Name);
+		return names;
+	}
+
+	void SceneHierarchy::StoreComponentCardOrder(const std::vector<std::string>& names)
+	{
+		if (m_pOwnerScene == nullptr || !m_SelectedEntity)
+			return;
+
+		/* 顺序变了才记一笔：拖拽 / 上移下移都进编辑历史，场景的未保存标记也跟着亮 */
+		std::vector<std::string> before = m_pOwnerScene->GetComponentOrder(m_SelectedEntity);
+		if (before == names)
+			return;
+
+		if (m_pCommandStack != nullptr)
+		{
+			m_pCommandStack->Execute(CreateUniquePtr<SetComponentOrderCommand>(
+				m_pOwnerScene, m_SelectedEntity, std::move(before), names));
+		}
+		else
+		{
+			m_pOwnerScene->SetComponentOrder(m_SelectedEntity, names);
+		}
+	}
+
+	bool SceneHierarchy::MoveComponentCard(const std::string& name, int delta)
+	{
+		if (delta == 0)
+			return false;
+
+		std::vector<std::string> order = VisibleComponentOrder();
+		const auto found = std::find(order.begin(), order.end(), name);
+		if (found == order.end())
+			return false;
+
+		const int index = static_cast<int>(found - order.begin());
+		const int target = index + delta;
+		if (target < 0 || target >= static_cast<int>(order.size()))
+			return false;
+
+		std::swap(order[static_cast<size_t>(index)], order[static_cast<size_t>(target)]);
+		StoreComponentCardOrder(order);
+		return true;
+	}
+
+	void SceneHierarchy::DropComponentCard(const std::string& source, const std::string& target, bool after)
+	{
+		if (source == target)
+			return;
+
+		std::vector<std::string> order = VisibleComponentOrder();
+		const auto source_it = std::find(order.begin(), order.end(), source);
+		if (source_it == order.end())
+			return;
+
+		order.erase(source_it);
+
+		/* 摘掉 source 之后再找落点：同一张卡上拖到自己的上 / 下半区不会跑位 */
+		const auto target_it = std::find(order.begin(), order.end(), target);
+		if (target_it == order.end())
+			return;
+
+		order.insert(after ? target_it + 1 : target_it, source);
+		StoreComponentCardOrder(order);
+	}
+
+	void SceneHierarchy::ShowEntityComponents()
+	{
+		PROFILE_FUNCTION();
+
+		m_LastCardRects.clear();
+
+		const std::vector<const ComponentDesc*> descs = CollectOrderedComponentDescs();
+		const int count = static_cast<int>(descs.size());
+
+		for (int i = 0; i < count; ++i)
+		{
+			const ComponentDesc& desc = *descs[static_cast<size_t>(i)];
+			void* component = (desc.GetPtr != nullptr) ? desc.GetPtr(m_SelectedEntity) : nullptr;
+
+			ImGui::PushID(static_cast<int>(desc.Type.hash_code()));
+
+			/* Model 卡尾部的模型编辑器入口：文件模型才有路径可交（内建 / 空模型不画） */
+			ComponentCardFooter model_footer;
+			if (component != nullptr && desc.Type == std::type_index(typeid(ModelComponent)))
+			{
+				const SharedPtr<Model>& model = static_cast<ModelComponent*>(component)->m_Model;
+				BuiltinModelType builtin_type{};
+				if (model != nullptr && !model->TryGetBuiltinType(builtin_type))
+				{
+					const std::string path = model->GetPath();
+					model_footer.Label = "Open in Model Editor";
+					model_footer.Clicked = [this, path]()
+					{
+						if (m_ModelEditorFunc)
+							m_ModelEditorFunc(path);
+					};
+				}
+			}
+
+			DrawComponentBlock(desc, m_SelectedEntity, component, i, count,
+				model_footer.Label != nullptr ? &model_footer : nullptr);
+
+			/* Model 的材质卡 / Camera 的预览卡：各自排在组件卡之后同级平铺
 			 * （卡片背景走绘制通道、通道不可嵌套 —— 附加卡画不进组件卡里）。 */
 			if (desc.Type == std::type_index(typeid(ModelComponent)))
 			{
-				DrawModelEditorCard(*static_cast<ModelComponent*>(component));
 				DrawModelMaterialCards(m_SelectedEntity, *static_cast<ModelComponent*>(component));
 			}
 			else if (desc.Type == std::type_index(typeid(CameraComponent)))

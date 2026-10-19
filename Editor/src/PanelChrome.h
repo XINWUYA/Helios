@@ -4,6 +4,7 @@
  * 卡身里别用 ImGui::Columns / ChannelsSplit：卡片背景要等画完内容再补，通道不能套通道。 */
 
 #include <string>
+#include <cstring>
 #include <imgui.h>
 /* 卡片背景要用 ImGuiWindow::InnerRect（滚动条之外的可用区域），故需要内部头 */
 #include <imgui_internal.h>
@@ -107,9 +108,11 @@ namespace Helios::PanelChrome
 
 	/* ==================== 树行内容 ==================== */
 
-	/* 只读单行文本，宽度由调用方限定（width）：超宽就用省略号收尾，排版宽度被占位框夹在 width 内。
-	 * 别用 PushClipRect + TextUnformatted：它只裁绘制不裁布局，超宽文本会把面板撑出横向可滑区。 */
-	inline void DrawClippedTextLine(const char* text, float width)
+	/* 只读单行文本，宽度由调用方限定（width）：超宽就用省略号收尾。
+	 * layout_width > 0 时排版按它占位（横向滚动要有内容可滚），绘制仍只到 width；
+	 * 不传就按 width 占位 —— 别用 PushClipRect + TextUnformatted：它只裁绘制不裁布局，
+	 * 超宽文本会把面板撑出横向可滑区。 */
+	inline void DrawClippedTextLine(const char* text, float width, float layout_width = 0.0f)
 	{
 		const ImVec2 cursor = ImGui::GetCursorScreenPos();
 		const ImVec2 text_pos(cursor.x, cursor.y + ImGui::GetCurrentWindow()->DC.CurrLineTextBaseOffset);
@@ -121,10 +124,11 @@ namespace Helios::PanelChrome
 			return;
 		}
 
-		/* 放不下：省略号收尾。占位与文本行同高、只占裁剪后的那一截宽，
-		 * 行内容与行右端的尾随控件不会重叠。 */
+		/* 放不下：省略号收尾。占位与文本行同高：默认只占裁剪后的那一截宽，
+		 * 行内容与行右端的尾随控件不会重叠；给了 layout_width 就按它铺开。 */
 		const float avail = ImMax(width, 1.0f);
-		ImGui::Dummy(ImVec2(avail, ImGui::GetTextLineHeight()));
+		const float layout = (layout_width > 0.0f) ? layout_width : avail;
+		ImGui::Dummy(ImVec2(layout, ImGui::GetTextLineHeight()));
 		ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), text_pos,
 			ImVec2(text_pos.x + avail, text_pos.y + ImGui::GetTextLineHeight()),
 			text_pos.x + avail, text_pos.x + avail, text, nullptr, &text_size);
@@ -132,9 +136,11 @@ namespace Helios::PanelChrome
 
 	/* 树节点行内容：图标 + 文本（marked 时带脏标记）。要在 TreeNodeEx 之后紧接着调用，
 	 * TreeNode 的标签传空字符串 ""（不能传 "##"）；点击 / 拖拽 / 右键也都得在它后面立刻处理。
-	 * clip_right > 0 时把文本裁到该 x 之前，给行右端留出尾随控件的位置（走 DrawClippedTextLine）。 */
+	 * clip_right > 0 时把文本裁到该 x 之前，给行右端留出尾随控件的位置（走 DrawClippedTextLine）。
+	 * content_inset 是行右端控件占的宽：放不下时排版按"整段名字 + 它"占位，横向滑到底名字能整段露出来。 */
 	inline void DrawTreeRowLabel(Icons::Id icon, const std::string& text, bool marked = false,
-	                             ImVec4 icon_color = EditorTheme::Token::Text, float clip_right = 0.0f)
+	                             ImVec4 icon_color = EditorTheme::Token::Text, float clip_right = 0.0f,
+	                             float content_inset = 0.0f)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 
@@ -153,19 +159,33 @@ namespace Helios::PanelChrome
 
 		ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
 
-		/* 有尾随控件（clip_right > 0）时按"到 clip_right 为止"的宽度裁；没有就不限宽 */
+		/* 有尾随控件（clip_right > 0）时按"到 clip_right 为止"的宽度裁；没有就不限宽。
+		 * 放不下时排版按"整段名字 + 行右端控件"占位 —— 横向滚动得能滚到名字整段露出来。 */
+		float text_width = 0.0f;
+		bool text_clipped = false;
 		if (clip_right > 0.0f)
-			DrawClippedTextLine(text.c_str(), clip_right - ImGui::GetCursorScreenPos().x);
+		{
+			text_width = ImGui::CalcTextSize(text.c_str()).x;
+			text_clipped = (text_width > clip_right - ImGui::GetCursorScreenPos().x);
+			DrawClippedTextLine(text.c_str(), clip_right - ImGui::GetCursorScreenPos().x,
+				text_clipped ? text_width + content_inset : 0.0f);
+		}
 		else
+		{
 			ImGui::TextUnformatted(text.c_str());
+		}
 
 		if (!marked)
 			return;
 
-		/* 脏标记：名字后点一个实心圆点（自绘，不依赖字体里有没有 '•'） */
-		ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
-
+		/* 脏标记：名字后点一个实心圆点（自绘，不依赖字体里有没有 '•'）。
+		 * 名字被裁时排版已经铺到整段，圆点按可见区末尾定位，别跟着跑到窗口外。 */
 		const float dot_radius = ImMax(1.5f, ImGui::GetFontSize() * 0.16f);
+		if (text_clipped)
+			ImGui::SetCursorScreenPos(ImVec2(clip_right + style.ItemInnerSpacing.x, icon_min.y));
+		else
+			ImGui::SameLine(0.0f, style.ItemInnerSpacing.x);
+
 		ImGui::Dummy(ImVec2(dot_radius * 2.0f, ImGui::GetFontSize()));
 
 		const ImVec2 dot_min = ImGui::GetItemRectMin();
@@ -609,6 +629,9 @@ namespace Helios::PanelChrome
 		return EditorTheme::Token::CardPad;
 	}
 
+	/* 卡片拖拽载荷的类型（内容 = 调用方给的字符串标识，比如组件名） */
+	inline constexpr const char* kCardDragPayload = "HELIOS_CARD";
+
 	struct Card
 	{
 		ImVec2 Min{ 0.0f, 0.0f };   /* 卡头行左上角（= 面板内容区原点） */
@@ -620,6 +643,17 @@ namespace Helios::PanelChrome
 		bool   Open{ true };
 		bool   ActionClicked{ false };  /* 卡头右端的动作按钮被点了（调用方据此开菜单） */
 		bool   HeaderHovered{ false };  /* 卡头整行（含动作位）是否悬停 —— 悬停要提亮 */
+		bool   Reorderable{ false };    /* 卡头能拖走，整张卡能接住别的卡 */
+		bool   Dragging{ false };       /* 本卡就是当前拖拽源（边框提亮） */
+		ImGuiID DropId{ 0 };            /* 拖拽落点的 ID（卡自己的作用域内取） */
+	};
+
+	/* 拖拽落在卡上的结果（EndCard 返回）：Payload 是载荷里的字符串，只在当帧有效 */
+	struct CardDrop
+	{
+		bool Received{ false };
+		bool After{ false };            /* 落点在卡片下半：插到这张卡后面 */
+		const char* Payload{ nullptr };
 	};
 
 	/* 折叠指示三角：朝下 = 展开、朝右 = 折叠；两个方向是同一个三角形转 90°
@@ -639,10 +673,12 @@ namespace Helios::PanelChrome
 	}
 
 	/* 开一张卡片：卡头（折叠箭头 + 可选图标 + 标题 + 右端动作）+ 卡身；动作按钮由卡片自己提交。
-	 * 折叠状态存在窗口级存储里、键 = 标题（连同调用方 ID 作用域）；同名卡要调用方自己 PushID 区分。 */
+	 * 折叠状态存在窗口级存储里、键 = 标题（连同调用方 ID 作用域）；同名卡要调用方自己 PushID 区分。
+	 * drag_payload 非空时卡头能拖走（内容就是这段字符串），点击折叠改成松手才判定，
+	 * 拖过一段距离的松手不算点击。 */
 	inline Card BeginCard(const char* title, Icons::Id title_icon = Icons::Id::None,
 	                      Icons::Id action_icon = Icons::Id::None, const char* action_tooltip = nullptr,
-	                      bool default_open = true)
+	                      bool default_open = true, const char* drag_payload = nullptr)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 		ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -653,11 +689,13 @@ namespace Helios::PanelChrome
 		card.Right = card.Min.x + card.Width;
 		card.HeaderHeight = ImGui::GetFrameHeight();
 		card.Pad = CardPad();
+		card.Reorderable = (drag_payload != nullptr);
 
 		/* 卡的身份 = 标题：折叠键 / 卡头命中区 / 动作按钮都挂在这一层作用域；
 		 * 这一层只包卡头，卡身内容的 ID 不受影响。 */
 		ImGui::PushID(title);
 		bool* open = ImGui::GetStateStorage()->GetBoolRef(ImGui::GetID("##CardOpen"), default_open);
+		card.DropId = ImGui::GetID("##CardDrop");
 
 		draw_list->ChannelsSplit(2);
 		draw_list->ChannelsSetCurrent(1); /* 内容画在上层，卡背景稍后补在下层 */
@@ -668,8 +706,28 @@ namespace Helios::PanelChrome
 			ImVec2(ImMax(card.Width - action_width, 1.0f), card.HeaderHeight));
 
 		const bool header_hovered = ImGui::IsItemHovered();
-		if (ImGui::IsItemClicked())
+
+		/* 可拖动的卡：按下卡头拖走；松手时没拖过一段距离才算点击 */
+		if (card.Reorderable)
+		{
+			if (ImGui::BeginDragDropSource())
+			{
+				ImGui::SetDragDropPayload(kCardDragPayload, drag_payload, strlen(drag_payload) + 1);
+				ImGui::TextUnformatted(title);
+				ImGui::EndDragDropSource();
+				card.Dragging = true;
+			}
+
+			if (ImGui::IsItemDeactivated() && ImGui::IsItemHovered()
+				&& !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+			{
+				*open = !*open;
+			}
+		}
+		else if (ImGui::IsItemClicked())
+		{
 			*open = !*open;
+		}
 
 		bool action_hovered = false;
 		if (action_width > 0.0f)
@@ -713,8 +771,9 @@ namespace Helios::PanelChrome
 		ImGui::Separator();
 	}
 
-	/* 收尾：算出卡高、把背景补到内容底下、把光标推到卡片下方 */
-	inline void EndCard(const Card& card)
+	/* 收尾：算出卡高、把背景补到内容底下、把光标推到卡片下方。
+	 * 可重排的卡顺便接住拖过来的卡片，返回值告诉调用方是谁落到了哪儿。 */
+	inline CardDrop EndCard(const Card& card)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 		ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -754,11 +813,47 @@ namespace Helios::PanelChrome
 		draw_list->AddRect(card_lo, card_far,
 			ImGui::GetColorU32(EditorTheme::Token::Border), rounding);
 
+		/* 正在拖这张卡：边框换成强调色，一眼看出拖的是哪张 */
+		if (card.Dragging)
+			draw_list->AddRect(card_lo, card_far,
+				ImGui::GetColorU32(EditorTheme::Token::Accent), rounding, 0, 1.5f);
+
 		draw_list->PopClipRect();
 
 		draw_list->ChannelsMerge();
 
+		/* 接住别的卡片：整张卡都是命中区（拖动时卡身控件本来也点不到）。
+		 * 落点按卡片上下半区分，插入线就画在对应那条边 —— 松手前就能看到会插到哪。 */
+		CardDrop drop;
+		if (card.Reorderable)
+		{
+			const ImGuiPayload* payload = ImGui::GetDragDropPayload();
+			if (payload != nullptr && payload->IsDataType(kCardDragPayload)
+				&& ImGui::BeginDragDropTargetCustom(ImRect(card_lo, card_far), card.DropId))
+			{
+				if (const ImGuiPayload* accepted = ImGui::AcceptDragDropPayload(kCardDragPayload,
+					ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+				{
+					drop.After = ImGui::GetIO().MousePos.y > (card_lo.y + card_far.y) * 0.5f;
+
+					const float indicator_y = drop.After ? card_far.y : card_lo.y;
+					draw_list->AddLine(ImVec2(card_lo.x, indicator_y), ImVec2(card_far.x, indicator_y),
+						ImGui::GetColorU32(EditorTheme::Token::Accent), 2.0f);
+
+					/* 真松手才交回载荷；悬停预览只画线 */
+					if (accepted->IsDelivery())
+					{
+						drop.Received = true;
+						drop.Payload = static_cast<const char*>(accepted->Data);
+					}
+				}
+				ImGui::EndDragDropTarget();
+			}
+		}
+
 		/* 卡与卡之间的间距：显式把光标推到卡片下方，免得和卡内留白互相纠缠 */
 		ImGui::SetCursorScreenPos(ImVec2(card.Min.x, card_bottom + style.ItemSpacing.y));
+
+		return drop;
 	}
 }

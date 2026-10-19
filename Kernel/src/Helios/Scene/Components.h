@@ -5,6 +5,7 @@
 #include <glm/gtx/quaternion.hpp>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Camera.h"
 #include "Mesh.h"
@@ -138,7 +139,7 @@ namespace Helios
 	struct MaterialSlotOverride
 	{
 		SharedPtr<Material> pMaterial; /* 覆盖（共享资产）或实例（独立） */
-		std::string SourceAssetPath;   /* 实例的来源资产路径（"重置回来源"用；空 = 无来源） */
+		std::string SourceAssetPath;   /* 来源材质文件（"重置回来源"用；空 = 无来源） */
 		bool IsInstance{ false };      /* 实例：参数独立、序列化全量内嵌 */
 	};
 
@@ -184,6 +185,7 @@ namespace Helios
 				std::swap(m_SlotOverrides, copy.m_SlotOverrides);
 				std::swap(m_CastShadow, copy.m_CastShadow);
 				std::swap(m_ReceiveShadow, copy.m_ReceiveShadow);
+				std::swap(m_EnableSkinning, copy.m_EnableSkinning);
 			}
 			return *this;
 		}
@@ -245,6 +247,11 @@ namespace Helios
 	 * （不序列化、不进字段表）。Loop 是实例级开关，覆盖 clip 文件里的默认值。 */
 	struct AnimatorComponent : ComponentBase
 	{
+		/* 播放速度的编辑范围（属性卡与模型编辑器的动画卡共用一份口径） */
+		static constexpr float kSpeedMin = 0.0f;
+		static constexpr float kSpeedMax = 10.0f;
+		static constexpr float kSpeedStep = 0.01f;
+
 		SharedPtr<AnimationClip> m_Clip{ nullptr };
 		float m_Speed{ 1.0f };
 		float m_Time{ 0.0f };
@@ -278,6 +285,19 @@ namespace Helios
 
 		PostProcessComponent() = default;
 		PostProcessComponent(const PostProcessComponent&) = default;
+	};
+
+	/* 属性面板里组件卡的显示顺序（编辑器排版用）：存组件名，没记到的按注册顺序排在后面。
+	 * 不注册、不上属性面板，随场景一起存（见 Scene::Serializer）。 */
+	struct ComponentOrderComponent : ComponentBase
+	{
+		std::vector<std::string> m_Components;
+
+		ComponentOrderComponent() = default;
+		ComponentOrderComponent(std::vector<std::string> components)
+			: m_Components(std::move(components))
+		{
+		}
 	};
 
 	/* 场景中需要接入on_construct/on_destroy信号分发的全部组件类型 */

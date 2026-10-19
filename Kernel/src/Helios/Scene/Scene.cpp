@@ -363,6 +363,28 @@ namespace Helios
 		return {};
 	}
 
+	const std::vector<std::string>& Scene::GetComponentOrder(entt::entity entity) const
+	{
+		static const std::vector<std::string> empty;
+		const auto* order = m_Registry.try_get<ComponentOrderComponent>(entity);
+		return (order != nullptr) ? order->m_Components : empty;
+	}
+
+	void Scene::SetComponentOrder(entt::entity entity, std::vector<std::string> components)
+	{
+		if (!m_Registry.valid(entity))
+			return;
+
+		/* 空表就是回到注册顺序，不挂一个空组件 */
+		if (components.empty())
+		{
+			m_Registry.remove<ComponentOrderComponent>(entity);
+			return;
+		}
+
+		m_Registry.emplace_or_replace<ComponentOrderComponent>(entity, std::move(components));
+	}
+
 	void Scene::Serializer(const std::string& path)
 	{
 		PROFILE_FUNCTION();
@@ -495,6 +517,14 @@ namespace Helios
 					LoadComponentFromXml(desc, component, element);
 			}
 
+			/* 属性面板卡片顺序（旧文件没有这个属性）：逗号分隔的组件名 */
+			if (const char* card_order = entity_root->Attribute("CardOrder"); card_order != nullptr)
+			{
+				std::vector<std::string> components = SplitString(card_order, ',');
+				if (!components.empty())
+					m_Registry.emplace<ComponentOrderComponent>(entity, std::move(components));
+			}
+
 			entities_by_file_id.emplace(id_attribute->Unsigned64Value(), entity);
 			loaded_entities.emplace_back(entity_root, entity);
 		}
@@ -538,6 +568,13 @@ namespace Helios
 		 * 存的是父实体的句柄，加载时按 ID 重新映射（见 Deserializer）。 */
 		if (const entt::entity parent = GetParent(entity); parent != entt::null)
 			entity_root->SetAttribute("Parent", static_cast<uint32_t>(parent));
+
+		/* 属性面板卡片顺序：名字用逗号连成一个属性，省得多一层元素 */
+		if (const auto* card_order = m_Registry.try_get<ComponentOrderComponent>(entity);
+			card_order != nullptr && !card_order->m_Components.empty())
+		{
+			entity_root->SetAttribute("CardOrder", JoinStrings(card_order->m_Components, ',').c_str());
+		}
 
 		/* 其余组件由注册表驱动，元素名即组件名 */
 		for (const ComponentDesc& desc : ComponentRegistry::Instance().All())

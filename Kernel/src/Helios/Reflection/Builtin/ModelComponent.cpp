@@ -57,8 +57,10 @@ namespace Helios
 				}
 				else
 				{
-					/* "覆盖"约定挂的是材质资产；运行时构造的匿名材质没有路径可存，跳过 */
-					const auto& material_path = slot_override.pMaterial->GetPath();
+					/* "覆盖"挂的是材质资产；运行时构造的匿名材质没有路径可存，跳过 */
+					const std::string& material_path = !slot_override.SourceAssetPath.empty()
+						? slot_override.SourceAssetPath
+						: slot_override.pMaterial->GetPath();
 					if (material_path.empty())
 						continue;
 					override_doc->SetAttribute("Asset", RELATIVE_PATH(material_path).c_str());
@@ -103,6 +105,7 @@ namespace Helios
 					const char* asset = override_doc->Attribute("Asset");
 					if (asset == nullptr || *asset == '\0')
 						continue;
+
 					auto material = AssetManager::Instance().GetOrLoad<Material>(ABSOLUTE_PATH(asset));
 					if (material == nullptr)
 					{
@@ -110,6 +113,7 @@ namespace Helios
 						continue;
 					}
 					slot_override.pMaterial = std::move(material);
+					slot_override.SourceAssetPath = ABSOLUTE_PATH(asset);
 				}
 
 				model_component.m_SlotOverrides[slot_name] = std::move(slot_override);
@@ -117,7 +121,7 @@ namespace Helios
 		}
 
 		/* ==================== 材质槽区块 ====================
-		 * 每槽一行（槽名 | 材质名输入框 + 挂载 / 清除 / 重置）= Model 卡里保留的"材质引用"。
+		 * 每槽一行（槽名 | 绑定的材质文件 + 拖拽挂载 / 清除 / 重置）= Model 卡里的"材质引用"。
 		 * 材质详情（Shader 和参数）在 SceneHierarchy 的"材质卡"里（通道不能嵌套、只能同级平铺）。 */
 
 		/* 资源引用输入框：外观是标准输入框、只读展示资源名（文本可选中复制），
@@ -131,8 +135,8 @@ namespace Helios
 			ImGui::InputTextWithHint(id, hint, buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
 		}
 
-		/* 槽行：槽名 | 材质名输入框（只读展示 + 拖拽挂载 .mtl）+ 清除 / 重置。
-		 * 输入框显示材质名，实例额外带 [实例] 标记（参数独立于来源资产，要分得开）。 */
+		/* 槽行：槽名 | 有效材质（.mtl，只读展示 + 拖拽挂载）+ 清除 / 重置。
+		 * 有效材质 = 实体绑定 ?: 模型清单默认 ?: 内置白模；都没有时留空、hint 提示可拖入。 */
 		bool DrawMaterialSlotRow(ModelComponent& component, const Model& model, int slot_index)
 		{
 			const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
@@ -145,41 +149,22 @@ namespace Helios
 			const bool has_override = (iter != component.m_SlotOverrides.end() && iter->second.pMaterial != nullptr);
 			const bool is_instance = has_override && iter->second.IsInstance;
 
-			/* 值显示：材质名 + 实例标记；完整路径进 tooltip */
-			std::string display;
-			std::string tooltip_path;
+			/* 有效材质来自哪份 .mtl（覆盖优先；模型清单默认次之） */
+			std::string material_path;
 			if (has_override)
 			{
-				if (is_instance)
-				{
-					const bool has_source = !iter->second.SourceAssetPath.empty();
-					display = (has_source
-						? PathToUtf8(PathFromUtf8(iter->second.SourceAssetPath).filename())
-						: std::string("(material instance)")) + "   [Instance]";
-					tooltip_path = has_source
-						? RELATIVE_PATH(iter->second.SourceAssetPath)
-						: std::string("(material instance)");
-				}
-				else
-				{
-					/* "覆盖"约定挂的是材质资产；运行时构造的匿名材质没有路径 */
-					const std::string& material_path = iter->second.pMaterial->GetPath();
-					display = material_path.empty()
-						? std::string("(material)")
-						: PathToUtf8(PathFromUtf8(material_path).filename());
-					tooltip_path = material_path.empty() ? std::string("(material)") : RELATIVE_PATH(material_path);
-				}
-			}
-			else if (slot->pDefault != nullptr && !slot->pDefault->GetPath().empty())
-			{
-				display = PathToUtf8(PathFromUtf8(slot->pDefault->GetPath()).filename());
-				tooltip_path = RELATIVE_PATH(slot->pDefault->GetPath());
+				material_path = !iter->second.SourceAssetPath.empty()
+					? iter->second.SourceAssetPath
+					: iter->second.pMaterial->GetPath();
 			}
 			else
 			{
-				display = "Builtin White";
-				tooltip_path = "(builtin white)";
+				material_path = slot->SourcePath;
 			}
+
+			const std::string display = material_path.empty()
+				? std::string()
+				: PathToUtf8(PathFromUtf8(material_path).filename());
 
 			const float gap = ImGui::GetStyle().ItemInnerSpacing.x;
 
@@ -189,21 +174,26 @@ namespace Helios
 			 * BeginPropertyRow 统一压成"字体高"，这里要跟行内实际控件一致 */
 			const float frame_height = ImGui::GetFrameHeight();
 
-			/* 右端按钮区：清除（X）+ 实例时的重置 */
-			const float reset_width = is_instance
+			/* 右端按钮区：清除（X）+ 有来源时的重置 */
+			const bool can_reset = is_instance && !iter->second.SourceAssetPath.empty();
+			const float reset_width = can_reset
 				? ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f
 				: 0.0f;
 			float button_zone = has_override ? (frame_height + gap) : 0.0f;
-			if (is_instance)
+			if (can_reset)
 				button_zone += reset_width + gap;
 
 			const float target_width = std::max(1.0f, value_width - button_zone);
 
-			DrawRefInputBox("##MaterialRef", display, target_width, nullptr);
+			DrawRefInputBox("##MaterialRef", display, target_width, "Drop .mtl here");
 
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("%s\n\nDrag a .mtl material asset here to assign or replace this slot's material",
-					tooltip_path.c_str());
+			{
+				if (!material_path.empty())
+					ImGui::SetTooltip("%s\n\nDrag a .mtl material asset here", RELATIVE_PATH(material_path).c_str());
+				else
+					ImGui::SetTooltip("Drag a .mtl material asset here");
+			}
 
 			if (ImGui::BeginDragDropTarget())
 			{
@@ -225,6 +215,7 @@ namespace Helios
 							{
 								MaterialSlotOverride slot_override;
 								slot_override.pMaterial = std::move(material);
+								slot_override.SourceAssetPath = absolute_path;
 								component.m_SlotOverrides[slot->Name] = std::move(slot_override);
 								changed = true;
 							}
@@ -234,32 +225,27 @@ namespace Helios
 				ImGui::EndDragDropTarget();
 			}
 
-			if (is_instance)
+			if (can_reset)
 			{
 				ImGui::SameLine(0.0f, gap);
 				if (ImGui::Button("Reset", ImVec2(reset_width, frame_height)))
 				{
-					/* 从来源资产重新克隆（无来源 = 回默认） */
-					if (!iter->second.SourceAssetPath.empty())
+					/* 来源是模型默认（含清单里的参数覆盖）就克隆模型默认；否则回来源资产 */
+					const bool from_model_default = iter->second.SourceAssetPath == slot->SourcePath;
+					SharedPtr<Material> source = (from_model_default && slot->pDefault != nullptr)
+						? slot->pDefault
+						: AssetManager::Instance().GetOrLoad<Material>(iter->second.SourceAssetPath);
+					if (source != nullptr)
 					{
-						auto source = AssetManager::Instance().GetOrLoad<Material>(iter->second.SourceAssetPath);
-						if (source != nullptr)
-						{
-							auto& slot_override = component.m_SlotOverrides[slot->Name];
-							slot_override.pMaterial = source->Clone();
-							slot_override.IsInstance = true;
-							changed = true;
-						}
-					}
-					else
-					{
-						component.m_SlotOverrides.erase(slot->Name);
+						auto& slot_override = component.m_SlotOverrides[slot->Name];
+						slot_override.pMaterial = source->Clone();
+						slot_override.IsInstance = true;
 						changed = true;
 					}
 				}
 
 				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Re-clone from the source asset (or fall back to default)");
+					ImGui::SetTooltip("Re-clone from the model default or source asset");
 			}
 
 			if (has_override)
@@ -272,7 +258,7 @@ namespace Helios
 				}
 
 				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Clear override / instance, fall back to the model default");
+					ImGui::SetTooltip("Clear the binding, fall back to the model default");
 			}
 
 			ImGuiExt::EndPropertyRow();
@@ -303,6 +289,7 @@ namespace Helios
 			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
 			ImGui::TextDisabled("(%d slots, %d overridden)", static_cast<int>(slots.size()), overridden_count);
 			ImGui::PopTextWrapPos();
+
 
 			for (int i = 0; i < static_cast<int>(slots.size()); ++i)
 			{

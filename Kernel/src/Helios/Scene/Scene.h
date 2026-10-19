@@ -1,6 +1,8 @@
 ﻿#pragma once
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
+#include <string>
+#include <vector>
 #include "AnimationRuntime.h"
 
 namespace tinyxml2
@@ -87,6 +89,11 @@ namespace Helios
 
 		/* 获取动画播放器（保存 / 清空场景时会先停掉播放并还原姿势） */
 		AnimationRuntime& GetAnimationRuntime() { return m_AnimationRuntime; }
+
+		/* 属性面板里组件卡的显示顺序（组件名，按显示先后）。空表 = 按注册顺序。
+		 * 只是编辑器排版数据，随场景保存；运行时不用。返回的引用在组件被改写前有效。 */
+		[[nodiscard]] const std::vector<std::string>& GetComponentOrder(entt::entity entity) const;
+		void SetComponentOrder(entt::entity entity, std::vector<std::string> components);
 
 		/* 序列化场景 */
 		void Serializer(const std::string& path);

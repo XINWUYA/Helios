@@ -19,7 +19,6 @@ namespace Helios
 	class Scene;
 	class DeviceTexture;
 	class Material;
-	class MaterialGroup;
 	struct EntityTemplateDesc;
 
 	/* 场景实体层级树 + 属性面板。层级树按父子关系展开；层级面板 = 顶栏（搜索 + 筛选 + 新建）+
@@ -46,7 +45,7 @@ namespace Helios
 		 * 由上层接线注入（装配层 → SceneEditorLayer → 这里），面板不查 Layer。 */
 		using AssetRevealFunc = std::function<void(const std::string&)>;
 		void SetAssetRevealFunc(AssetRevealFunc func) { m_AssetRevealFunc = std::move(func); }
-		/* 模型编辑器入口（跨面板能力）：Model 卡的「Model Editor」按钮点击 → 打开该模型。
+		/* 模型编辑器入口（跨面板能力）：Model 卡里的「Open in Model Editor」按钮点击 → 打开该模型。
 		 * 同样由上层接线注入（装配层 → SceneEditorLayer → 这里），未注入时点击无动作。 */
 		using ModelEditorFunc = std::function<void(const std::string&)>;
 		void SetModelEditorFunc(ModelEditorFunc func) { m_ModelEditorFunc = std::move(func); }
@@ -64,6 +63,19 @@ namespace Helios
 		/* 相机预览是否在场景登记中（正在为属性面板渲染预览画面）。
 		 * 面板每帧按「选中了相机 + 预览卡展开 + 面板窗口可见」重新挣取，见 ShowEntityPropertiesUI。 */
 		[[nodiscard]] bool IsCameraPreviewActive() const { return m_IsCameraPreviewActive; }
+
+		/* 最近一帧每张组件卡的矩形（按显示顺序）。自检 / 自动化验证用，业务代码别依赖。 */
+		struct CardRect
+		{
+			std::string Name;
+			ImVec2 Min;
+			ImVec2 Max;         /* 整张卡的下沿（收起时就是卡头下沿） */
+			float HeaderHeight;
+		};
+		const std::vector<CardRect>& GetLastCardRects() const { return m_LastCardRects; }
+
+		/* 把某张组件卡上移 / 下移一格（属性面板的卡头菜单用）：真的挪了才返回 true */
+		bool MoveComponentCard(const std::string& name, int delta);
 
 	private:
 		/* 父节点 -> 子节点。每帧由当前层级关系现算：父子关系只有 ParentComponent
@@ -111,14 +123,9 @@ namespace Helios
 		/* Model 的材质卡：每槽一张，排在 Model 组件卡之后（卡片背景走绘制通道、通道不可嵌套，
 		 * "卡中卡"画不出来 —— 所以材质详情不能画在组件卡里，只能同级平铺）。 */
 		void DrawModelMaterialCards(Entity entity, ModelComponent& component);
-		/* Model 编辑器的入口卡：模型是文件资产时给一个「Open in Model Editor」按钮
-		 * （内建模型没有资产文件，不出现），平铺在 Model 组件卡之后、材质卡之前 */
-		void DrawModelEditorCard(const ModelComponent& component);
-		/* 「Model Editor」入口卡的本体（实体属性面板与资源属性面板共用） */
-		void DrawModelEditorEntry(const char* id, const std::string& absolute_path);
-		/* 资源属性面板的模型入口卡：选中的是模型资源（Model 类）时给同一个入口按钮，
-		 * 平铺在资源详情卡之后 —— 与 probe 图卡 / 材质卡同路数 */
-		void DrawAssetModelEditorCard(const AssetSelectionEntry& entry);
+		/* Model 编辑器的入口按钮：模型是文件资产时才有（内建模型没有资产文件，不出现）。
+		 * 画在当前卡片里 —— 实体侧在 Model 组件卡尾部，资源侧在详情卡尾部。 */
+		void DrawOpenInModelEditorButton(const std::string& absolute_path);
 		/* 材质卡主体：当前材质的属性行（Shader + 参数，可就地编辑 → 自动实例化） */
 		bool DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index);
 		/* Camera 的预览卡：被选中相机视野的实时画面（编辑器侧工具预览相机渲染，
@@ -196,6 +203,14 @@ namespace Helios
 		void ShowPropertiesHeader();
 		/* 显示选中实体的全部组件（遍历 ComponentRegistry，不认识具体类型） */
 		void ShowEntityComponents();
+		/* 当前可见的组件卡（按用户存的顺序排好；绘制与移动共用这一份） */
+		std::vector<const ComponentDesc*> CollectOrderedComponentDescs();
+		/* 当前可见组件卡的显示顺序（组件名） */
+		std::vector<std::string> VisibleComponentOrder();
+		/* 拖拽落点：把 source 插到 target 前面 / 后面 */
+		void DropComponentCard(const std::string& source, const std::string& target, bool after);
+		/* 顺序写回场景（空表 = 回到注册顺序） */
+		void StoreComponentCardOrder(const std::vector<std::string>& names);
 		/* 无选中实体时的空状态提示 */
 		void ShowEmptyPropertiesHint();
 		/* 增加组件按钮（菜单项同样来自注册表） */
@@ -216,8 +231,19 @@ namespace Helios
 		 * 面板头部就地编辑的实体名共享同一套撤销语义。 */
 		void DrawEditableField(const ComponentDesc& desc, Entity& entity, void* component,
 		                       const FieldDesc& field, FieldDrawFunc draw);
-		/* 绘制单个组件块：卡片 = 卡头（折叠箭头 + 组件图标 + 名称 + 右侧菜单）+ 卡身（字段） */
-		void DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component);
+		/* 组件卡尾部的一行动作按钮（如 Model 卡的「Open in Model Editor」）：
+		 * 标签为空表示没有；点击回调由调用方按组件准备。 */
+		struct ComponentCardFooter
+		{
+			const char* Label{ nullptr };
+			std::function<void()> Clicked;
+		};
+
+		/* 绘制单个组件块：卡片 = 卡头（折叠箭头 + 组件图标 + 名称 + 右侧菜单）+ 卡身（字段）。
+		 * order_index / order_count 是本帧在面板里的位置，给菜单的上下移动判断边界。
+		 * footer 非空时在卡身末尾补一行按钮（跟着卡片一起折叠）。 */
+		void DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component,
+		                        int order_index, int order_count, const ComponentCardFooter* footer = nullptr);
 
 		/* 所属场景 */
 		SharedPtr<Scene> m_pOwnerScene;
@@ -252,7 +278,7 @@ namespace Helios
 		std::vector<ProbeImageCard> m_AssetProbeCards;
 		/* 材质资产（.mtl）的编辑缓冲与可选 Shader：与深挖详情同一缓存键（路径 + 写入时间）
 		 * 从磁盘读入；编辑只改缓冲（不碰场景与缓存），点「Apply」才序列化回文件。 */
-		SharedPtr<MaterialGroup> m_AssetMaterialGroup;
+		SharedPtr<Material> m_AssetMaterial;
 		std::vector<std::string> m_AssetMaterialShaderOptions;
 		/* 编辑缓冲有没有未保存的改动（Apply 按钮的禁用依据）：改 Shader / 参数时置位，
 		 * 重读缓冲（换选中项 / 文件变化 / Apply 写盘后）清掉 */
@@ -271,6 +297,8 @@ namespace Helios
 		bool m_IsCameraPreviewActive{ false };
 		/* 本帧是否请求预览（帧首清零、预览卡置位、帧末结算起停；见 ShowEntityPropertiesUI） */
 		bool m_CameraPreviewWanted{ false };
+		/* 上一帧每张组件卡的矩形（自检用） */
+		std::vector<CardRect> m_LastCardRects;
 		/* 字段编辑的合并窗口是否已打开（连续拖动合并为一条历史） */
 		bool m_FieldEditTransactionOpen{ false };
 		/* 组件自定义绘制的合并窗口是否已打开（同上，走 CustomDraw 通道：材质参数拖动等） */
