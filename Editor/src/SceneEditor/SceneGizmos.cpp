@@ -10,6 +10,7 @@
 #include "Helios/Common/Utils.h"
 #include "Helios/Scene/Material.h"
 #include "Helios/Scene/Scene.h"
+#include "Helios/Scene/SkeletonModel.h"
 
 /* 场景 gizmo 的完整实现（对外接口见 SceneGizmos.h）：
  *   常量 / 顶点辅助 → 网格与坐标轴几何 → 各类型实体图标几何 → 顶点数组缓存 →
@@ -91,6 +92,19 @@ namespace Helios
 
 		/* 精灵：框 + 对角线（图像占位样式） */
 		constexpr float kSpriteGizmoHalfExtent = 0.5f;
+
+		/* 不吃网格淡出的 gizmo：范围放到天边（远大于任何真实距离，且两值不等 ——
+		 * float 在 1e9 量级 +1 会被舍掉） */
+		constexpr float kGizmoNoFadeInner = 1.0e6f;
+		constexpr float kGizmoNoFadeOuter = 2.0e6f;
+
+		/* === 骨骼节点预览（Debug View 的 Skeleton 档）===
+		 * 关节画成屏幕恒定大小的圆点，父子关节之间拉一条线；关深度测试通看
+		 * 网格内部（骨骼本来就埋在模型里）。 */
+		const glm::vec3 kBoneLineColor{ 1.00f, 0.66f, 0.30f };	/* 橙：骨骼连线 */
+		const glm::vec3 kJointNodeColor{ 1.00f, 0.86f, 0.52f };	/* 亮黄：关节节点 */
+		constexpr float kBoneLineWidth = 3.0f;			/* 连线宽度（逻辑像素） */
+		constexpr float kJointNodePixelSize = 36.0f;	/* 圆点像素基准（× 轴心点半径 ≈ 1.6 像素） */
 
 		/* 每类的标称屏幕尺寸（逻辑像素；绘制时 × 内容缩放折成物理像素） */
 		constexpr float kLightGizmoPixelSize = 56.0f;
@@ -544,6 +558,44 @@ namespace Helios
 			return vertex_array;
 		}
 
+		/* 关节圆点：与实体轴心点同一套几何（三个正交小圆），只是换了颜色 */
+		std::vector<float> BuildJointNodeVertices()
+		{
+			std::vector<float> vertices;
+			PushPivotDot(vertices, glm::vec3(0.0f), kJointNodeColor);
+			return vertices;
+		}
+
+		SharedPtr<DeviceVertexArray> GetJointNodeVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorSkeletonJoint_VertexArray", BuildJointNodeVertices());
+			return vertex_array;
+		}
+
+		/* 骨骼连线的顶点缓冲：位置每帧随姿势变。DrawArrays 按缓冲区容量出顶点数，
+		 * 所以容量必须正好等于本帧数据 —— 数量变了重建，没变就原地覆盖。 */
+		SharedPtr<DeviceVertexArray> GetBoneLineVertexArray(const std::vector<float>& vertices)
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			static size_t capacity = 0;
+
+			if (vertices.empty())
+				return nullptr;
+
+			if (!vertex_array || vertices.size() != capacity)
+			{
+				vertex_array = MakeGizmoVertexArray("EditorSkeletonBone_VertexArray", vertices);
+				capacity = vertices.size();
+				return vertex_array;
+			}
+
+			vertex_array->GetVertexBuffers().front()->SetData(vertices.data(),
+				static_cast<uint32_t>(vertices.size() * sizeof(float)));
+			return vertex_array;
+		}
+
 		/* gizmo 材质：纯色、不参与光照、线 / 锥不剔面、深度写入开启（引擎约定"关闭写入 =
 		 * 连深度测试一起关"）。混合用 SrcAlpha / OneMinusSrcAlpha（网格远景靠 alpha 渐隐）。
 		 * grid_major > 0 表示画的是地面网格；其余 gizmo 要显式写 0。 */
@@ -595,33 +647,24 @@ namespace Helios
 			return material;
 		}
 
-		/* 实体 gizmo 材质：跟坐标轴同一个 shader，只是淡出范围放到天边（淡出是网格收边用的）。
-		 * 两个值要远大于任何真实距离、还得保持不等（float 在 1e9 量级 +1 会被舍掉）。 */
+		/* 实体 gizmo 材质：跟坐标轴同一个 shader，只是淡出范围放到天边（淡出是网格收边用的） */
 		SharedPtr<Material> GetEntityGizmoMaterial()
 		{
 			static SharedPtr<Material> material;
 			if (!material)
-				material = CreateGizmoMaterial(1.0e6f, 2.0e6f, 0.0f);
+				material = CreateGizmoMaterial(kGizmoNoFadeInner, kGizmoNoFadeOuter, 0.0f);
 			return material;
 		}
 
-		/* 模型线框的材质：纯色不参与光照；三角形只画边靠光栅状态的 Wireframe 位。
-		 * 关深度写入 = 连深度测试一起关（引擎约定）—— 线框通看结构，不被自身面片遮挡 */
-		SharedPtr<Material> GetWireframeMaterial()
+		/* 骨骼节点材质：同样吃坐标轴 shader（屏幕空间等宽线 + 顶点色），关深度写
+		 * = 连深度测试一起关，骨骼才透得过网格 */
+		SharedPtr<Material> GetSkeletonMaterial()
 		{
 			static SharedPtr<Material> material;
 			if (!material)
 			{
-				material = CreateSharedPtr<Material>();
-				material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/Overlay/Wireframe.glsl")));
-				material->SetParameters(ParamType::Vec4, "u_WireframeColor",
-					glm::vec4(0.62f, 0.94f, 1.0f, 1.0f)); /* 亮青白：深浅模型上都看得清 */
-
-				auto& raster_state = material->GetRasterState();
-				raster_state.CullMode = CullMode::Cull_None;
-				raster_state.EnableDepthWrite = false;
-				raster_state.Wireframe = true;
+				material = CreateGizmoMaterial(kGizmoNoFadeInner, kGizmoNoFadeOuter, 0.0f);
+				material->GetRasterState().EnableDepthWrite = false;
 			}
 			return material;
 		}
@@ -1000,6 +1043,75 @@ namespace Helios
 			SubmitProbeGizmos(scene, material, camera_position, gizmo_screen_scale);
 			SubmitSpriteGizmos(scene, material, camera_position, gizmo_screen_scale);
 		}
+
+		/* 骨骼节点预览（Debug View 的 Skeleton 档）：场景里每个骨骼模型的关节画成圆点，
+		 * 父子关节之间拉一条线。关节实体由 SkeletonModel 按名字对上关节表，位置跟着
+		 * 动画每帧更新；线先画、点后画，点压在线头上。 */
+		void SubmitSkeletonNodes(RenderView& render_view, const glm::vec3& camera_position,
+			float gizmo_screen_scale)
+		{
+			const auto scene = render_view.GetOwnerScene();
+			if (!scene)
+				return;
+
+			auto& registry = scene->GetRegistry();
+			const auto model_view = registry.view<TransformComponent, ModelComponent>();
+
+			std::vector<float> bone_vertices;
+			std::vector<glm::vec3> joint_positions;
+			for (const entt::entity entity : model_view)
+			{
+				const auto& model = model_view.get<ModelComponent>(entity).m_Model;
+				if (model == nullptr || model->IsStaticModel() || !scene->IsEntityVisible(entity))
+					continue;
+
+				const SkeletonModel* skeleton = AsSkeletonModel(model.get());
+				const auto& joints = skeleton->GetJointEntities();
+				if (joints.empty())
+					continue;
+
+				const auto& joint_table = skeleton->GetSkin().GetJoints();
+				const auto joint_position = [&](size_t index)
+				{
+					return glm::vec3(scene->GetWorldTransform(joints[index])[3]);
+				};
+
+				for (size_t index = 0; index < joints.size(); ++index)
+				{
+					if (!scene->IsEntityValid(joints[index]))
+						continue;
+
+					/* 根骨骼没有父关节，只画点不拉线 */
+					if (index < joint_table.size() && joint_table[index].Parent >= 0)
+					{
+						const size_t parent = static_cast<size_t>(joint_table[index].Parent);
+						if (parent < joints.size() && scene->IsEntityValid(joints[parent]))
+							PushLineBand(bone_vertices, joint_position(parent), joint_position(index), kBoneLineColor);
+					}
+
+					joint_positions.push_back(joint_position(index));
+				}
+			}
+
+			if (const auto bone_vertex_array = GetBoneLineVertexArray(bone_vertices))
+			{
+				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, glm::mat4(1.0f), nullptr, nullptr });
+				Renderer::Submit(GetSkeletonMaterial(), MeshPrimitive{ bone_vertex_array, PrimitiveType::Triangles });
+			}
+
+			/* 关节圆点：屏幕恒定小尺寸，与光源 / 探针的轴心点同一口径 */
+			for (const glm::vec3& position : joint_positions)
+			{
+				GizmoTransformParts parts;
+				parts.Translation = position;
+				const float world_scale = GizmoWorldScaleAt(camera_position, position,
+					kJointNodePixelSize, gizmo_screen_scale);
+				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1,
+					BuildGizmoModel(parts, world_scale, glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f)),
+					nullptr, nullptr });
+				Renderer::Submit(GetSkeletonMaterial(), MeshPrimitive{ GetJointNodeVertexArray(), PrimitiveType::Triangles });
+			}
+		}
 	}
 
 	/* 场景 gizmo 显隐的单一数据源（声明见 SceneGizmos.h）：绘制侧每帧读、UI 侧改写 */
@@ -1042,31 +1154,14 @@ namespace Helios
 				2.0f * std::tan(glm::radians(camera.GetFov()) * 0.5f) * content_scale
 				/ static_cast<float>(viewport_region.Height);
 			SubmitEntityGizmos(render_view, entity_gizmo_material, camera_position, gizmo_screen_scale);
-		}
 
-		/* 模型线框叠加（模型预览的调试开关）：遍历场景里的模型段，用线框材质再画一遍
-		 * （纯色 + 线框光栅状态 + 关深度：xray 通看结构）。调用方保证只在开关打开时进来 */
-		void SubmitModelWireframe(RenderView& render_view)
-		{
-			const auto scene = render_view.GetOwnerScene();
-			if (!scene)
-				return;
-
-			const auto wireframe_material = GetWireframeMaterial();
-			auto& registry = scene->GetRegistry();
-			const auto model_view = registry.view<TransformComponent, ModelComponent>();
-			for (const entt::entity entity : model_view)
+			/* 骨骼节点预览（Debug View 的 Skeleton 档）：最后画，盖在其他 gizmo 上 */
+			if (render_view.GetDebugViewMode() == DebugViewMode::Skeleton)
 			{
-				const auto& model_component = model_view.get<ModelComponent>(entity);
-				if (model_component.m_Model == nullptr || !scene->IsEntityVisible(entity))
-					continue;
-
-				const glm::mat4 world_transform = scene->GetWorldTransform(entity);
-				for (const auto& mesh_segment : model_component.m_Model->GetMeshSegments())
-				{
-					Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, world_transform, nullptr, nullptr });
-					Renderer::Submit(wireframe_material, mesh_segment->GetMeshPrimitive());
-				}
+				const auto skeleton_material = GetSkeletonMaterial();
+				skeleton_material->SetParameters(ParamType::Float, "u_LineWidth", kBoneLineWidth * content_scale);
+				skeleton_material->SetParameters(ParamType::Vec2, "u_ViewportSize", viewport_size);
+				SubmitSkeletonNodes(render_view, camera_position, gizmo_screen_scale);
 			}
 		}
 
@@ -1087,7 +1182,10 @@ namespace Helios
 				if (model_component.m_Model == nullptr || !scene->IsEntityVisible(entity))
 					continue;
 
-				const auto& mesh_segments = model_component.m_Model->GetMeshSegments();
+				/* 蒙皮模型取当前姿势的动态段：高亮染的是画面上的那一份（源段会停在绑定姿态） */
+				const auto& mesh_segments = model_component.m_EnableSkinning
+					? model_component.m_Model->GetRenderSegments()
+					: model_component.m_Model->GetMeshSegments();
 				if (segment_index >= static_cast<int>(mesh_segments.size()))
 					continue;
 

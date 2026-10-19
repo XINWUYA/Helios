@@ -31,7 +31,7 @@ namespace Helios
 		RenderPipeline GetRenderPipeline() const { return m_pRenderView->GetRenderPipeline(); }
 		void SetRenderPipeline(RenderPipeline pipeline) { m_pRenderView->SetRenderPipeline(pipeline); }
 
-		/* 调试视图模式（Surface / Lighting / Analysis 分类见 DebugViewMode）：
+		/* 调试视图模式（Surface / Lighting / Analysis / Animation 分类见 DebugViewMode）：
 		 * 与渲染管线同样落 RenderView、这里转发。 */
 		DebugViewMode GetDebugViewMode() const { return m_pRenderView->GetDebugViewMode(); }
 		void SetDebugViewMode(DebugViewMode mode) { m_pRenderView->SetDebugViewMode(mode); }

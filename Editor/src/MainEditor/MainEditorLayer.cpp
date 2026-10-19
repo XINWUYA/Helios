@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "MainEditorLayer.h"
+#include "DebugViewMenu.h"
 #include "SceneEditor/SceneGizmos.h"
 #include "EditorIcons.h"
 #include "PanelChrome.h"
@@ -199,90 +200,19 @@ namespace Helios
 			return text;
 		}
 
-		/* ---- 调试视图（Debug View）：档位表 = 分类、标签与图形的单一来源 ----
-		 * View 菜单子菜单与工具栏弹层共用；表内顺序即菜单顺序；分区名做段头。 */
-		struct DebugViewMenuItem
-		{
-			DebugViewMode Mode;
-			Icons::Id Icon;
-			const char* Label;
-		};
-
-		constexpr DebugViewMenuItem kDebugViewSurfaceItems[] = {
-			{ DebugViewMode::Albedo, Icons::Id::Albedo, "Albedo" },
-			{ DebugViewMode::Normal, Icons::Id::Normal, "Normal" },
-			{ DebugViewMode::Roughness, Icons::Id::Roughness, "Roughness" },
-			{ DebugViewMode::Metallic, Icons::Id::Metallic, "Metallic" },
-			{ DebugViewMode::SpecularColor, Icons::Id::SpecularColor, "Specular Color" },
-			{ DebugViewMode::AmbientOcclusion, Icons::Id::AmbientOcclusion, "Ambient Occlusion" },
-			{ DebugViewMode::Emission, Icons::Id::Emission, "Emission" },
-			{ DebugViewMode::Ambient, Icons::Id::Ambient, "Ambient" },
-		};
-
-		constexpr DebugViewMenuItem kDebugViewLightingItems[] = {
-			{ DebugViewMode::Diffuse, Icons::Id::Diffuse, "Diffuse" },
-			{ DebugViewMode::Specular, Icons::Id::Specular, "Specular" },
-			{ DebugViewMode::Shadow, Icons::Id::Shadow, "Shadow" },
-			{ DebugViewMode::Indirect, Icons::Id::Indirect, "Indirect" },
-			{ DebugViewMode::Probe, Icons::Id::Probe, "Probe" },
-		};
-
-		constexpr DebugViewMenuItem kDebugViewAnalysisItems[] = {
-			{ DebugViewMode::Overdraw, Icons::Id::Overdraw, "Overdraw" },
-			{ DebugViewMode::Mipmap, Icons::Id::Mipmap, "Mipmap" },
-		};
-
-		/* 单个分类：分区头 + 若干单选行（选中即高亮、弹层留在原地——连点切换不重开）；
-		 * enabled 用于"当前管线不支持"的置灰（如前向下的光照分量档位） */
-		void DrawDebugViewCategory(EditorContext& context, const char* title,
-			const DebugViewMenuItem* items, int count, bool enabled)
-		{
-			PanelChrome::MenuSectionHeader(title);
-
-			const DebugViewMode current = context.GetDebugViewMode();
-			for (int i = 0; i < count; ++i)
-			{
-				const DebugViewMenuItem& item = items[i];
-				if (PanelChrome::MenuItemSelectWithIcon(item.Icon, item.Label, current == item.Mode, enabled))
-					context.SetDebugViewMode(item.Mode);
-			}
-		}
-
-		/* 调试视图档位（View 菜单和工具栏弹层共用）：Shaded 复位行 + 三个分类段（Surface /
-		 * Lighting / Analysis），档位行 = 图形 + 标签 + 选中勾；点击不收起弹层。光照分量只有延迟
-		 * 管线能拆、前向下的就置灰。 */
+		/* ---- 调试视图（Debug View）：档位表与行版式在 DebugViewMenu.h（场景视口与模型
+		 * 编辑器预览共用同一份）；这里只把点选落到编辑器上下文 ---- */
 		void DrawDebugViewMenuItems(EditorContext& context)
 		{
-			if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::DebugView, "Shaded",
-				context.GetDebugViewMode() == DebugViewMode::None))
-			{
-				context.SetDebugViewMode(DebugViewMode::None);
-			}
-
-			const bool lighting_supported = (context.GetRenderPipeline() == RenderPipeline::Deferred);
-			DrawDebugViewCategory(context, "SURFACE", kDebugViewSurfaceItems, IM_ARRAYSIZE(kDebugViewSurfaceItems), true);
-			DrawDebugViewCategory(context, "LIGHTING", kDebugViewLightingItems, IM_ARRAYSIZE(kDebugViewLightingItems), lighting_supported);
-			DrawDebugViewCategory(context, "ANALYSIS", kDebugViewAnalysisItems, IM_ARRAYSIZE(kDebugViewAnalysisItems), true);
+			DebugViewMenu::DrawItems(context.GetDebugViewMode(),
+				context.GetRenderPipeline() == RenderPipeline::Deferred,
+				[&context](DebugViewMode mode) { context.SetDebugViewMode(mode); });
 		}
 
 		/* 当前档位的显示名（工具栏 tooltip 用；Shaded / 未知档返回空） */
 		const char* DebugViewModeLabel(DebugViewMode mode)
 		{
-			const auto find_in = [mode](const DebugViewMenuItem* items, int count) -> const char*
-			{
-				for (int i = 0; i < count; ++i)
-				{
-					if (items[i].Mode == mode)
-						return items[i].Label;
-				}
-				return nullptr;
-			};
-
-			if (const char* surface = find_in(kDebugViewSurfaceItems, IM_ARRAYSIZE(kDebugViewSurfaceItems)))
-				return surface;
-			if (const char* lighting = find_in(kDebugViewLightingItems, IM_ARRAYSIZE(kDebugViewLightingItems)))
-				return lighting;
-			return find_in(kDebugViewAnalysisItems, IM_ARRAYSIZE(kDebugViewAnalysisItems));
+			return DebugViewMenu::ModeLabel(mode);
 		}
 	}
 

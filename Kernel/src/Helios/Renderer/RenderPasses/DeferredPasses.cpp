@@ -49,6 +49,8 @@ namespace Helios
 			case DebugViewMode::Ambient:
 			case DebugViewMode::Overdraw:
 			case DebugViewMode::Mipmap:
+			case DebugViewMode::Skeleton:
+			case DebugViewMode::Wireframe:
 				return 0;
 			}
 			return 0;
@@ -544,9 +546,11 @@ namespace Helios
 			AddGBufferPass(*render_view);
 			const auto lighting_output = AddLightingPass(*render_view);
 			/* 调试视图（合成 / Overdraw / 几何重绘档位）：光照之后、天空之前 ——
-			 * 先落笔、天空最后负责背景像素；Lighting 类档位在光照阶段内分流，此处空操作 */
+			 * 先落笔、天空最后负责背景像素（线框档除外，见下）；Lighting 类档位在光照阶段内分流，此处空操作 */
 			DebugView::AddDebugViewPasses(*render_view, { lighting_output, true });
-			AddSkyPass(*render_view);
+			/* 线框档要的是纯结构视图：背景停在调试 Pass 的清空色，不画天空 */
+			if (render_view->GetDebugViewMode() != DebugViewMode::Wireframe)
+				AddSkyPass(*render_view);
 
 			/* 后处理链（效果注册表驱动）：天空之后、输出之前；无效果 / 未启用 = 恒直通 */
 			const auto final_output = PostProcess::AddPostProcessPasses(*render_view, lighting_output);

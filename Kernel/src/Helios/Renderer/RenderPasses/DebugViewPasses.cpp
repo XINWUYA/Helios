@@ -46,6 +46,8 @@ namespace Helios
 				case DebugViewMode::Indirect:
 				case DebugViewMode::Probe:
 				case DebugViewMode::Overdraw:
+				case DebugViewMode::Skeleton:
+				case DebugViewMode::Wireframe:
 					break;
 				}
 				return nullptr;
@@ -158,6 +160,78 @@ namespace Helios
 					);
 
 				return overdraw_pass->GetData().Count;
+			}
+
+			/* 线框材质：与编辑器模型线框共用一份着色器（只吃位置和一个纯色 uniform）。
+			 * 参数全程不变，静态一份逐帧复用 */
+			SharedPtr<Material> GetWireframeDebugMaterial()
+			{
+				static SharedPtr<Material> material;
+				if (material != nullptr)
+					return material;
+
+				material = CreateSharedPtr<Material>();
+				material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(
+					ABSOLUTE_PATH("Shaders/Overlay/Wireframe.glsl")));
+				material->SetParameters(ParamType::Vec4, "u_WireframeColor",
+					glm::vec4(0.62f, 0.94f, 1.0f, 1.0f)); /* 与模型线框同色 */
+
+				auto& raster_state = material->GetRasterState();
+				raster_state.CullMode = CullMode::Cull_None;
+				raster_state.EnableDepthWrite = false;
+				raster_state.Wireframe = true;
+				return material;
+			}
+
+			/* 线框 Pass：所有可见对象用"纯位置 + 纯色"着色器重画一遍，三角形只画边（光栅状态的
+			 * Wireframe 位）。关深度写入 = 连深度测试一起关 —— 背面边也看得见，通看结构；
+			 * 颜色清空后只落线框（背景停在清空色，纯结构视图）。 */
+			void AddWireframePass(RenderView& render_view, const Target& target)
+			{
+				PROFILE_FUNCTION();
+
+				auto& frame_graph = render_view.GetFrameGraph();
+				const auto& viewport_region = render_view.GetViewportRegion();
+
+				struct WireframePassData
+				{
+					FrameGraphResourceHandleTyped<FrameGraphTexture> Output;
+				};
+
+				frame_graph->AddPass<WireframePassData>("DebugWireframePass",
+					[&](FrameGraphBuilder& builder, WireframePassData& data)
+					{
+						data.Output = target.Output;
+						builder.BindInputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment);
+
+						FrameGraphPassInfo::Descriptor pass_desc;
+						pass_desc.Attachments.ColorAttachments(0) = data.Output;
+						pass_desc.ViewportRegion = viewport_region;
+						builder.CreateRenderPass("DebugWireframeRenderTarget", pass_desc);
+						builder.AsSideEffect();
+					},
+					[&render_view](const FrameGraphResources& resources, const WireframePassData&)
+					{
+						const auto render_pass_info = resources.GetPassRenderTarget();
+						render_view.EmplacePassFrameBuffer("DebugWireframe", render_pass_info);
+
+						render_pass_info->Bind();
+						{
+							const SharedPtr<Material> material = GetWireframeDebugMaterial();
+							for (const auto& mesh_object : render_view.GetVisibleMeshObjects())
+							{
+								const auto& object_material = mesh_object.Material;
+								if (object_material == nullptr || object_material->IsSkyBox())
+									continue;
+
+								Renderer::FillObjectUniformBuffer(mesh_object);
+								Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive());
+							}
+						}
+						render_pass_info->Unbind();
+						Renderer::GetRenderAPI()->Flush();
+					}
+					);
 			}
 
 			/* 调试合成 Pass：全屏把 Surface 档位（延迟 = G-Buffer 直读）或 Overdraw 热力图覆写进视图
@@ -336,6 +410,10 @@ namespace Helios
 			case DebugViewMode::Probe:
 				return;
 
+			/* 骨骼节点预览：叠加层由编辑器视口的 gizmo 画（见 SceneGizmos），管线本体不变 */
+			case DebugViewMode::Skeleton:
+				return;
+
 			case DebugViewMode::Overdraw:
 			{
 				const auto count = AddOverdrawPass(render_view);
@@ -345,6 +423,11 @@ namespace Helios
 
 			case DebugViewMode::Mipmap:
 				AddDebugMaterialPass(render_view, target, mode);
+				return;
+
+			/* 线框：纯色画三角形的边，两管线同一套几何重绘 */
+			case DebugViewMode::Wireframe:
+				AddWireframePass(render_view, target);
 				return;
 
 			/* Surface 类：延迟直读 G-Buffer（合成）；前向无 G-Buffer，材质重采样近似 */

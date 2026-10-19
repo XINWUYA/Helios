@@ -86,6 +86,31 @@ namespace Helios::Icons
 			draw_list->AddConvexPolyFilled(buffer, N, color);
 		}
 
+		/* 凹多边形填充（阶梯、拉长的运动体这类收不了凸）：走耳剪切 */
+		template <int N>
+		void FillConcavePoly(ImDrawList* draw_list, const Canvas& canvas, const float (&points)[N][2], ImU32 color)
+		{
+			std::vector<ImVec2> buffer;
+			buffer.reserve(N);
+			for (int i = 0; i < N; ++i)
+				buffer.push_back(canvas.At(points[i][0], points[i][1]));
+
+			Svg::FillPolygon(draw_list, buffer, color);
+		}
+
+		/* 虚线圆：光晕衰减环用 */
+		void StrokeDashedCircle(ImDrawList* draw_list, const ImVec2& center, float radius, ImU32 color,
+		                        float thickness, float dash, float gap)
+		{
+			const float circumference = 2.0f * kPi * radius;
+			for (float offset = 0.0f; offset < circumference; offset += dash + gap)
+			{
+				draw_list->PathArcTo(center, radius, offset / radius,
+					std::min(offset + dash, circumference) / radius, 6);
+				draw_list->PathStroke(color, 0, thickness);
+			}
+		}
+
 		/* ---- 文件 ---- */
 
 		/* 文件页：所有"页面型"图标共用的外形（右上折角，折角填一层淡色） */
@@ -2137,6 +2162,193 @@ namespace Helios::Icons
 			dl->AddCircleFilled(c.At(0.70f, 0.32f), c.Len(0.055f), PaletteColor(color, kMint));
 		}
 
+		/* ---- 后处理 ---- */
+
+		/* RenderPass：三张依次下落的板 + 右侧下行箭头（效果按顺序串成链） */
+		void DrawRenderPass(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			for (int i = 0; i < 3; ++i)
+			{
+				const float top = 0.09f + 0.29f * static_cast<float>(i);
+				const float plate[4][2] = {
+					{ 0.375f, top }, { 0.625f, top + 0.125f }, { 0.375f, top + 0.25f }, { 0.125f, top + 0.125f }
+				};
+				if (i == 0)
+					FillPoly(dl, c, plate, PaletteColor(color, kViolet, 0.18f));
+				StrokePolyline(dl, c, plate, t, PaletteColor(color, kViolet), true);
+			}
+
+			dl->AddLine(c.At(0.844f, 0.16f), c.At(0.844f, 0.66f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.75f, 0.57f), c.At(0.844f, 0.66f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.938f, 0.57f), c.At(0.844f, 0.66f), PaletteColor(color, kMint), t);
+		}
+
+		/* PostProcess：画面外框 + 取景内容 + 提亮星芒（成片之上再加一层效果） */
+		void DrawPostProcess(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const float rounding = c.Len(0.045f);
+
+			dl->AddRectFilled(c.At(0.11f, 0.125f), c.At(0.89f, 0.875f), PaletteColor(color, kViolet, 0.18f), rounding);
+			dl->AddRect(c.At(0.11f, 0.125f), c.At(0.89f, 0.875f), PaletteColor(color, kViolet), rounding, 0, t);
+			dl->AddCircleFilled(c.At(0.312f, 0.312f), c.Len(0.0625f), PaletteColor(color, kMint));
+
+			const ImVec2 ridge[] = {
+				c.At(0.19f, 0.72f), c.At(0.375f, 0.50f), c.At(0.50f, 0.625f), c.At(0.625f, 0.47f), c.At(0.81f, 0.72f)
+			};
+			dl->AddPolyline(ridge, IM_ARRAYSIZE(ridge), PaletteColor(color, kViolet), 0, t);
+
+			const ImVec2 star_vertical[] = {
+				c.At(0.688f, 0.25f), c.At(0.724f, 0.375f), c.At(0.688f, 0.50f), c.At(0.652f, 0.375f)
+			};
+			const ImVec2 star_horizontal[] = {
+				c.At(0.563f, 0.375f), c.At(0.688f, 0.34f), c.At(0.813f, 0.375f), c.At(0.688f, 0.41f)
+			};
+			dl->AddConvexPolyFilled(star_vertical, IM_ARRAYSIZE(star_vertical), PaletteColor(color, kMint));
+			dl->AddConvexPolyFilled(star_horizontal, IM_ARRAYSIZE(star_horizontal), PaletteColor(color, kMint));
+		}
+
+		/* Bloom：中心亮核 + 两圈光晕（外圈虚线）+ 八向发散 */
+		void DrawBloom(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImVec2 middle = c.At(0.50f, 0.50f);
+
+			dl->AddCircleFilled(middle, c.Len(0.094f), PaletteColor(color, kMint));
+			dl->AddCircle(middle, c.Len(0.25f), PaletteColor(color, kViolet), 0, t);
+			StrokeDashedCircle(dl, middle, c.Len(0.406f), color, t, c.Len(0.047f), c.Len(0.094f));
+
+			dl->AddLine(c.At(0.50f, 0.03f), c.At(0.50f, 0.125f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.50f, 0.875f), c.At(0.50f, 0.97f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.03f, 0.50f), c.At(0.125f, 0.50f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.875f, 0.50f), c.At(0.97f, 0.50f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.172f, 0.172f), c.At(0.238f, 0.238f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.762f, 0.762f), c.At(0.828f, 0.828f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.828f, 0.172f), c.At(0.762f, 0.238f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.238f, 0.762f), c.At(0.172f, 0.828f), PaletteColor(color, kViolet), t);
+		}
+
+		/* ColorGrading：色轮（三块扇区）+ 顶部选取点 */
+		void DrawColorGrading(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImVec2 middle = c.At(0.50f, 0.50f);
+			const float radius = c.Len(0.375f);
+
+			dl->AddCircleFilled(middle, radius, PaletteColor(color, kViolet, 0.16f));
+
+			/* 三个扇区填薄荷：从右侧经底部绕到顶部 */
+			dl->PathArcTo(middle, radius, 0.0f, 1.5f * kPi, 24);
+			dl->PathLineTo(middle);
+			dl->PathFillConvex(PaletteColor(color, kMint, 0.16f));
+			dl->PathArcTo(middle, radius, 0.0f, 1.5f * kPi, 24);
+			dl->PathStroke(PaletteColor(color, kMint), 0, t);
+			dl->AddLine(middle, c.At(0.875f, 0.50f), PaletteColor(color, kMint), t);
+			dl->AddLine(middle, c.At(0.50f, 0.125f), PaletteColor(color, kMint), t);
+
+			dl->AddCircle(middle, radius, PaletteColor(color, kViolet), 0, t);
+
+			/* 顶部选取点 + 右侧明度弧 + 两个色点 */
+			dl->AddCircleFilled(c.At(0.50f, 0.3125f), c.Len(0.069f), PaletteColor(color, kMint, 0.16f));
+			dl->AddCircle(c.At(0.50f, 0.3125f), c.Len(0.069f), PaletteColor(color, kMint), 0, t);
+			dl->PathArcTo(c.At(0.6625f, 0.506f), c.Len(0.0625f), kPi * 0.5f, kPi * 1.5f, 8);
+			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+			dl->AddCircleFilled(c.At(0.375f, 0.6875f), c.Len(0.018f), PaletteColor(color, kViolet));
+			dl->AddCircleFilled(c.At(0.50f, 0.75f), c.Len(0.018f), PaletteColor(color, kViolet));
+		}
+
+		/* DepthOfField：相机机身 + 镜头 + 下方对焦条（清晰范围） */
+		void DrawDepthOfField(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			static constexpr float kBody[8][2] = {
+				{ 0.094f, 0.5625f }, { 0.094f, 0.281f }, { 0.3125f, 0.281f }, { 0.406f, 0.156f },
+				{ 0.625f, 0.156f }, { 0.719f, 0.281f }, { 0.906f, 0.281f }, { 0.906f, 0.5625f }
+			};
+			FillPoly(dl, c, kBody, PaletteColor(color, kViolet, 0.18f));
+			StrokePolyline(dl, c, kBody, t, PaletteColor(color, kViolet), true);
+
+			dl->AddCircleFilled(c.At(0.50f, 0.422f), c.Len(0.156f), PaletteColor(color, kMint, 0.16f));
+			dl->AddCircle(c.At(0.50f, 0.422f), c.Len(0.156f), PaletteColor(color, kMint), 0, t);
+			dl->AddCircle(c.At(0.50f, 0.422f), c.Len(0.0625f), PaletteColor(color, kViolet), 0, t);
+
+			dl->AddLine(c.At(0.125f, 0.781f), c.At(0.3125f, 0.781f), color, t);
+			dl->AddLine(c.At(0.6875f, 0.781f), c.At(0.875f, 0.781f), color, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.781f), c.Len(0.047f), PaletteColor(color, kMint));
+		}
+
+		/* MotionBlur：左侧速度线 + 右侧拉长的运动体 */
+		void DrawMotionBlur(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->AddLine(c.At(0.125f, 0.25f), c.At(0.4375f, 0.25f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.219f, 0.406f), c.At(0.594f, 0.406f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.3125f, 0.5625f), c.At(0.656f, 0.5625f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.406f, 0.719f), c.At(0.8125f, 0.719f), PaletteColor(color, kViolet), t);
+
+			static constexpr float kBlob[10][2] = {
+				{ 0.531f, 0.219f }, { 0.688f, 0.25f }, { 0.781f, 0.375f }, { 0.844f, 0.5625f }, { 0.781f, 0.75f },
+				{ 0.656f, 0.844f }, { 0.50f, 0.875f }, { 0.594f, 0.75f }, { 0.625f, 0.5625f }, { 0.594f, 0.375f }
+			};
+			FillConcavePoly(dl, c, kBlob, PaletteColor(color, kMint, 0.18f));
+			StrokePolyline(dl, c, kBlob, t, PaletteColor(color, kMint), true);
+		}
+
+		/* AntiAliasing：阶梯边缘 + 虚线对齐参考（锯齿与过渡采样） */
+		void DrawAntiAliasing(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			static constexpr float kStairs[13][2] = {
+				{ 0.1875f, 0.719f }, { 0.1875f, 0.281f }, { 0.375f, 0.281f }, { 0.375f, 0.1875f },
+				{ 0.5625f, 0.1875f }, { 0.5625f, 0.094f }, { 0.8125f, 0.094f }, { 0.8125f, 0.656f },
+				{ 0.594f, 0.656f }, { 0.594f, 0.75f }, { 0.375f, 0.75f }, { 0.375f, 0.844f }, { 0.1875f, 0.844f }
+			};
+			FillConcavePoly(dl, c, kStairs, PaletteColor(color, kViolet, 0.18f));
+			StrokePolyline(dl, c, kStairs, t, PaletteColor(color, kViolet), true);
+
+			dl->AddLine(c.At(0.094f, 0.8125f), c.At(0.281f, 0.8125f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.4375f, 0.8125f), c.At(0.594f, 0.8125f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.75f, 0.781f), c.At(0.875f, 0.781f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.281f, 0.90f), c.At(0.281f, 0.75f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.4375f, 0.844f), c.At(0.4375f, 0.6875f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.594f, 0.75f), c.At(0.594f, 0.594f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.656f, 0.125f), c.At(0.75f, 0.125f), PaletteColor(color, kMint), t);
+		}
+
+		/* Vignette：画面外框 + 内框 + 中心亮区 + 虚线衰减环 */
+		void DrawVignette(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImVec2 middle = c.At(0.50f, 0.50f);
+			const float rounding = c.Len(0.045f);
+
+			dl->AddRectFilled(c.At(0.094f, 0.125f), c.At(0.906f, 0.875f), PaletteColor(color, kViolet, 0.18f), rounding);
+			dl->AddRect(c.At(0.094f, 0.125f), c.At(0.906f, 0.875f), PaletteColor(color, kViolet), rounding, 0, t);
+			dl->AddRect(c.At(0.156f, 0.1875f), c.At(0.844f, 0.8125f), PaletteColor(color, kMint), c.Len(0.02f), 0, t);
+
+			dl->AddCircleFilled(middle, c.Len(0.1875f), PaletteColor(color, kMint, 0.16f));
+			dl->AddCircle(middle, c.Len(0.1875f), PaletteColor(color, kMint), 0, t);
+			StrokeDashedCircle(dl, middle, c.Len(0.281f), PaletteColor(color, kViolet), t, c.Len(0.044f), c.Len(0.075f));
+
+			dl->AddLine(c.At(0.219f, 0.25f), c.At(0.281f, 0.25f), color, t);
+			dl->AddLine(c.At(0.719f, 0.25f), c.At(0.781f, 0.25f), color, t);
+			dl->AddLine(c.At(0.219f, 0.75f), c.At(0.281f, 0.75f), color, t);
+			dl->AddLine(c.At(0.719f, 0.75f), c.At(0.781f, 0.75f), color, t);
+		}
+
 		constexpr IconDesc s_Icons[] = {
 			{ "None",              nullptr },
 			{ "NewScene",          &DrawNewScene },
@@ -2236,6 +2448,14 @@ namespace Helios::Icons
 			{ "Curve",             &DrawCurve },
 			{ "Preview",           &DrawPreview },
 			{ "Loop",              &DrawLoop },
+			{ "RenderPass",        &DrawRenderPass },
+			{ "PostProcess",       &DrawPostProcess },
+			{ "Bloom",             &DrawBloom },
+			{ "ColorGrading",      &DrawColorGrading },
+			{ "DepthOfField",      &DrawDepthOfField },
+			{ "MotionBlur",        &DrawMotionBlur },
+			{ "AntiAliasing",      &DrawAntiAliasing },
+			{ "Vignette",          &DrawVignette },
 		};
 
 		static_assert(sizeof(s_Icons) / sizeof(s_Icons[0]) == static_cast<size_t>(Id::COUNT),

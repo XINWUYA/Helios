@@ -351,7 +351,8 @@ namespace Helios
 	};
 
 	/* 调试视图模式：把视图的成像通道换成对应的调试读数（状态挂在 RenderView 上）。Surface =
-	 * 材质 / G-Buffer 通道；Lighting = 光照分量（仅延迟）；Analysis = 逐片元统计（Overdraw / Mipmap）。
+	 * 材质 / G-Buffer 通道；Lighting = 光照分量（仅延迟）；Analysis = 逐片元统计与几何结构
+	 * （Overdraw / Mipmap / Wireframe）；Animation = 骨骼节点预览（不改成像，只在正常着色上叠关节与连线）。
 	 * 序号跟调试着色器常量一一对应，不能单独调。 */
 	enum class DebugViewMode : uint8_t
 	{
@@ -379,6 +380,12 @@ namespace Helios
 
 		/* 反射探针选择可视化（Lighting 类；值追加在尾部，不动既有序号） */
 		Probe = 15,
+
+		/* Animation：骨骼节点预览（叠加层；渲染由编辑器视口的 gizmo 承担） */
+		Skeleton = 16,
+
+		/* Analysis：线框结构（纯色画三角形的边，通看几何；值追加在尾部，不动既有序号） */
+		Wireframe = 17,
 	};
 
 	/* 视口区域信息 */

@@ -109,7 +109,7 @@ namespace Helios
 				/* 后处理对象：场景级后处理配置。新建即成型——标记 + 当前默认效果 Bloom
 				 * （后续效果按需在属性面板「+」菜单里追加） */
 				EntityTemplateRegistrar("Post Process")
-					.Icon(Icons::Id::Emission)
+					.Icon(Icons::Id::PostProcess)
 					.Component([](Entity& entity) { entity.AddComponent<PostProcessComponent>(); })
 					.Component([](Entity& entity) { entity.AddComponent<BloomComponent>(); })
 					.Register();

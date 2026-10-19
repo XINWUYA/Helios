@@ -18,7 +18,8 @@ namespace Helios
 		};
 
 		/* 按视图的调试模式追加对应的调试 Pass。调用时机 = 管线主体之后、天空背景之前（合成和几何
-		 * 重绘先落笔，天空最后收背景）；模式为 None 或由光照阶段分流时是空操作。 */
+		 * 重绘先落笔，天空最后收背景）；模式为 None、由光照阶段分流、或由编辑器叠加层绘制
+		 * （Skeleton）时是空操作。 */
 		void AddDebugViewPasses(RenderView& render_view, const Target& target);
 	}
 }
