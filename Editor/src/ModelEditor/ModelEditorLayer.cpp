@@ -149,6 +149,24 @@ namespace Helios
 		const glm::vec3 light_direction = glm::normalize(glm::vec3(0.25f, -0.7f, -0.66f));
 		light_transform.m_Rotation = glm::eulerAngles(
 			glm::rotation(glm::vec3(0.0f, -1.0f, 0.0f), light_direction));
+
+		/* 默认铺一片天空盒当预览背景，材质跟场景里那份共用（Materials/Sky.mtl）。
+		 * 顶点着色器去掉了视图平移，相机就在球心，天空自然铺满整个视口。 */
+		SharedPtr<Material> sky_material = CreateSharedPtr<Material>();
+		if (MaterialIO::ReadFile("Materials/Sky.mtl", *sky_material))
+		{
+			/* 从球内侧看：剔掉朝外的正面，只留内表面 */
+			RenderRasterState sky_raster_state = sky_material->GetRasterState();
+			sky_raster_state.CullMode = CullMode::Cull_Front;
+			sky_material->SetRasterState(sky_raster_state);
+
+			Entity sky = m_pDefaultScene->CreateEntity("Sky");
+			auto& sky_model = sky.AddComponent<ModelComponent>();
+			sky_model.m_Model = Model::Create(BuiltinModelType::Sphere, sky_material);
+			/* 天空盒不投也不收阴影 */
+			sky_model.m_CastShadow = false;
+			sky_model.m_ReceiveShadow = false;
+		}
 	}
 
 	void ModelEditorLayer::OnDetached()

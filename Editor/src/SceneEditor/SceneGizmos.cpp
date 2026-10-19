@@ -1190,6 +1190,12 @@ namespace Helios
 				if (segment_index >= static_cast<int>(mesh_segments.size()))
 					continue;
 
+				/* 天空盒不算模型：球面铺满整个视口，染上去整片画面都变强调色 */
+				const auto material = ResolveSlotMaterial(*model_component.m_Model,
+					mesh_segments[segment_index]->GetSlotIndex(), &model_component.m_SlotOverrides);
+				if (material == nullptr || material->IsSkyBox())
+					continue;
+
 				const glm::mat4 world_transform = scene->GetWorldTransform(entity);
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, world_transform, nullptr, nullptr });
 				Renderer::Submit(highlight_material, mesh_segments[segment_index]->GetMeshPrimitive());
