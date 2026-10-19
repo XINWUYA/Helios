@@ -8,6 +8,7 @@
 #include <assimp/scene.h>
 #include <assimp/material.h>
 
+#include "ModelManifest.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Scene/Material.h"
@@ -369,18 +370,33 @@ namespace Helios
 			}
 		}
 
-		/* 写出伴生 .mtl（槽表）：一条材质一条，贴图引用「收进来之后」的落点
-		 * （序列化时统一转成资产相对形式）。 */
-		void WriteMaterialFile(const std::filesystem::path& mtl_path, const std::filesystem::path& dest_dir,
-			const ImportedModel& model)
+		/* 槽名做文件名：清理非法字符，重名加序号 */
+		std::string UniqueSlotName(const std::string& raw, int index, std::set<std::string>& used)
 		{
-			auto material_group = CreateSharedPtr<MaterialGroup>();
+			const std::string base = SanitizeFileName(raw, "Material_" + std::to_string(index));
+
+			std::string name = base;
+			int suffix = 2;
+			while (!used.insert(name).second)
+				name = base + "_" + std::to_string(suffix++);
+			return name;
+		}
+
+		/* 每份材质写一个 .mtl（槽名做文件名），按导入顺序返回槽表 */
+		std::vector<ModelManifest::Slot> WriteMaterialAssets(const std::filesystem::path& materials_dir,
+			const std::filesystem::path& dest_dir, const ImportedModel& model)
+		{
+			std::vector<ModelManifest::Slot> slots;
+			std::error_code directory_error;
+			std::filesystem::create_directories(materials_dir, directory_error);
+
 			/* 着色器按资产根解析成绝对路径：相对路径直接喂文件流是相对进程工作目录的，会读不到 */
 			auto default_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(kDefaultMaterialShader));
 
 			TextureLoadConfig load_config;
 			load_config.IsFlipV = false; /* UV 在导入时已翻转，贴图按原样上传（与既有模型资产同口径） */
 
+			std::set<std::string> used_names;
 			for (size_t material_index = 0; material_index < model.Materials.size(); ++material_index)
 			{
 				const ImportedMaterial& material_data = model.Materials[material_index];
@@ -401,11 +417,19 @@ namespace Helios
 						material->SetTexture(param_name, texture);
 				}
 
-				material_group->EmplaceMaterial(material);
-				material_group->SetEntrySlotName(static_cast<int>(material_index), material_data.SlotName);
+				const std::string slot_name = UniqueSlotName(material_data.SlotName,
+					static_cast<int>(material_index), used_names);
+
+				ModelManifest::Slot slot;
+				slot.Name = slot_name;
+				slot.AssetPath = PathToUtf8(materials_dir / PathFromUtf8(slot_name + ".mtl"));
+				if (!MaterialIO::WriteFile(slot.AssetPath, *material))
+					CORE_LOG_WARN("Failed to write imported material: {}.", slot.AssetPath);
+
+				slots.push_back(std::move(slot));
 			}
 
-			material_group->Serializer(PathToUtf8(mtl_path));
+			return slots;
 		}
 
 		/* Obj 伴生材质的避让：引擎写的 .mtl 是 XML 格式，和 obj 的 mtllib 同名会互相踩。
@@ -528,8 +552,17 @@ namespace Helios
 			if (!WriteMeshFile(mesh_path, model.Shapes, model.Skin))
 				return {};
 
+			std::filesystem::path model_path;
 			if (!model.Materials.empty())
-				WriteMaterialFile(dest_dir / PathFromUtf8(stem + ".mtl"), dest_dir, model);
+			{
+				/* 几何进 .mesh，材质一条一个 .mtl，.model 清单负责组装 */
+				const std::filesystem::path materials_dir = dest_dir / PathFromUtf8(stem + "_materials");
+				const std::vector<ModelManifest::Slot> slots =
+					WriteMaterialAssets(materials_dir, dest_dir, model);
+				model_path = dest_dir / PathFromUtf8(stem + ".model");
+				if (!ModelManifest::Write(PathToUtf8(model_path), PathToUtf8(mesh_path), slots))
+					return {};
+			}
 
 			/* 有动画就跟着写 .anim（和 .mesh 同目录，文件名带来源动画名） */
 			for (size_t animation_index = 0; animation_index < model.Animations.size(); ++animation_index)
@@ -542,7 +575,7 @@ namespace Helios
 				model.Animations[animation_index].Serializer(PathToUtf8(animation_path));
 			}
 
-			return PathToUtf8(mesh_path);
+			return model_path.empty() ? PathToUtf8(mesh_path) : PathToUtf8(model_path);
 		}
 
 		/* assimp 材质里的贴图引用：外部文件 或 scene.mTextures 里的内嵌项（*N） */

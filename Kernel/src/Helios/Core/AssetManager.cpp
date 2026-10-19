@@ -31,18 +31,10 @@ namespace Helios
 	/* 材质: 从 .mtl 文件加载独立材质资产(单条目、内嵌定义; 引用形态留给模型槽表使用) */
 	SharedPtr<Material> AssetFactory<Material>::Create(const std::string& path)
 	{
-		auto group = CreateSharedPtr<MaterialGroup>();
-		if (!group->Deserializer(path))
+		auto material = CreateSharedPtr<Material>();
+		if (!MaterialIO::ReadFile(path, *material))
 			return nullptr;
 
-		const auto* entry = group->GetEntryByIndex(0);
-		if (entry == nullptr || entry->pMaterial == nullptr)
-		{
-			CORE_LOG_ERROR("Material asset must contain one embedded material entry: {}.", path);
-			return nullptr;
-		}
-
-		auto material = entry->pMaterial;
 		material->SetPath(ABSOLUTE_PATH(path));
 		return material;
 	}

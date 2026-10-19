@@ -27,11 +27,15 @@ namespace Helios
 
 	/* 材质槽：几何侧声明的"材质需求"。
 	 * 稳定标识是名字（导入时取 OBJ 材质名，重名加后缀唯一化）；
-	 * pDefault 为模型级默认绑定（来自伴生 .mtl 槽表，可空 = 解析时兜底白模）。 */
+	 * pDefault 为模型级默认绑定（来自 .model 清单，可空 = 解析时兜底白模）。
+	 * SourcePath / pOverride 记录默认绑定来自哪份 .mtl、叠了哪些参数覆盖。 */
 	struct MaterialSlot
 	{
 		std::string Name;
+		std::string SourcePath;
 		SharedPtr<Material> pDefault;
+		SharedPtr<Material> pOverride;    /* 参数覆盖层（只存改过的参数；空 = 纯引用 / 内嵌） */
+		bool HasRasterOverride{ false };  /* 覆盖里是否带 RasterState */
 	};
 
 	/* 模型类：默认静态模型，仅支持 .mesh（由 ModelEditor 导出）。几何和材质解耦 —— 模型只描述
@@ -45,8 +49,10 @@ namespace Helios
 		/* 标记是否为静态模型 */
 		[[nodiscard]] virtual bool IsStaticModel() const { return true; }
 
-		/* 模型路径 */
+		/* 模型路径：.model（清单）或 .mesh（纯几何，白模） */
 		[[nodiscard]] const std::string& GetPath() const { return m_Path; }
+		/* 几何 payload 路径（.model 的 Geometry 或 .mesh 自己） */
+		[[nodiscard]] const std::string& GetGeometryPath() const { return m_GeometryPath; }
 		/* 内建模型类型（无资产文件、程序化生成）；非内建模型返回 false。
 		 * UI（属性面板 / 场景树图标）与序列化判断"要不要当路径处理"都走它。 */
 		[[nodiscard]] bool TryGetBuiltinType(BuiltinModelType& out_type) const;
@@ -71,12 +77,23 @@ namespace Helios
 		/* 获取所有MeshSegments */
 		[[nodiscard]] const std::vector<SharedPtr<MeshSegment>>& GetMeshSegments() const { return m_MeshSegments; }
 
+		/* 画到屏幕上的段：骨骼模型是当前姿势的动态段，静态模型就是自己的段。
+		 * 渲染收集与编辑器的线框 / 高亮叠加都走这里，口径只有一个。 */
+		[[nodiscard]] virtual const std::vector<SharedPtr<MeshSegment>>& GetRenderSegments() const
+		{
+			return m_MeshSegments;
+		}
+
 		/* 添加一个材质槽 */
 		void AddMaterialSlot(const std::string& name, const SharedPtr<Material>& material);
 		/* 获取槽表 */
 		[[nodiscard]] const std::vector<MaterialSlot>& GetMaterialSlots() const { return m_MaterialSlots; }
+		/* 按名字取槽（空名 / 找不到返回 nullptr） */
+		[[nodiscard]] const MaterialSlot* GetSlotByName(const std::string& name) const;
 		/* 按索引取槽（越界返回 nullptr） */
 		[[nodiscard]] const MaterialSlot* GetSlotByIndex(int idx) const;
+		/* 网格段对应的槽（段 -> slot_index -> 槽；段越界 / 没有槽返回 nullptr） */
+		[[nodiscard]] const MaterialSlot* GetSlotForSegment(size_t segment_index) const;
 
 		/* 从路径加载一个模型， 仅支持.mesh文件 */
 		static SharedPtr<Model> Create(const std::string& path);
@@ -84,14 +101,14 @@ namespace Helios
 		static SharedPtr<Model> Create(BuiltinModelType type, const SharedPtr<Material>& material = nullptr);
 
 	private:
-		/* 加载模型时，读取伴生 .mtl 槽表 */
-		void LoadMaterialSlots(const std::string& path);
-		/* 槽表兜底：段没有可用槽（导入时没材质 / 伴生 .mtl 缺失或条目比段少）时补默认槽。
+		/* 槽表兜底：段没有可用槽（.mesh 白模 / 清单条目比段少）时补默认槽。
 		 * 槽名是实体侧材质覆盖的挂载键，缺了它面板挂的材质落不到渲染上 */
 		void EnsureMaterialSlots();
 
-		/* 文件路径 */
+		/* 资产路径（.model / .mesh） */
 		std::string m_Path{};
+		/* 几何 payload 路径 */
+		std::string m_GeometryPath{};
 		/* 一个模型中包含的子模型 */
 		std::vector<SharedPtr<MeshSegment>> m_MeshSegments{};
 		/* 材质槽表（与 MeshSegment 的槽索引对位） */

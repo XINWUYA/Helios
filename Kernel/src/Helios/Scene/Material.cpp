@@ -7,6 +7,9 @@
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include <cctype>
+#include <cstring>
+#include <fstream>
+#include <iterator>
 
 namespace Helios
 {
@@ -374,185 +377,6 @@ namespace Helios
 		}
 	}
 
-	/* 添加一个内嵌材质条目 */
-	void MaterialGroup::EmplaceMaterial(const SharedPtr<Material>& material)
-	{
-		MaterialEntry entry;
-		entry.pMaterial = material;
-		m_Entries.emplace_back(std::move(entry));
-	}
-
-	/* 设置条目槽名 */
-	void MaterialGroup::SetEntrySlotName(int idx, std::string name)
-	{
-		if (idx < 0 || idx >= static_cast<int>(m_Entries.size()))
-			return;
-
-		m_Entries[idx].SlotName = std::move(name);
-	}
-
-	/* 设置条目的材质资产引用（空 = 回内嵌定义） */
-	void MaterialGroup::SetEntryAssetPath(int idx, std::string path)
-	{
-		if (idx < 0 || idx >= static_cast<int>(m_Entries.size()))
-			return;
-
-		m_Entries[idx].AssetPath = std::move(path);
-	}
-
-	/* 根据索引获取条目 */
-	const MaterialEntry* MaterialGroup::GetEntryByIndex(int idx) const
-	{
-		if (idx < 0 || idx >= static_cast<int>(m_Entries.size()))
-			return nullptr;
-
-		return &m_Entries[idx];
-	}
-
-	/* 根据索引获取内嵌材质 */
-	const SharedPtr<Material>& MaterialGroup::GetMaterialByIndex(int idx)
-	{
-		if (idx < 0 || idx >= static_cast<int>(m_Entries.size()))
-		{
-			CORE_LOG_ERROR("Unaccessable material idx, default return ErrorMaterial.");
-			return Material::Error();
-		}
-
-		return m_Entries[idx].pMaterial;
-	}
-
-	/* 序列化 */
-	void MaterialGroup::Serializer(const std::string& path)
-	{
-		m_Path = path;
-
-		ASSERT(!m_Path.empty());
-		std::filesystem::path material_path;
-		if (!TryPathFromUtf8(path, material_path))
-		{
-			CORE_LOG_ERROR("Invalid UTF-8 material path.");
-			return;
-		}
-		auto material_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
-			OpenUtf8File(material_path, "wb"), &std::fclose);
-		if (!material_file)
-		{
-			CORE_LOG_ERROR("Failed to open material file for writing: {}.", path);
-			return;
-		}
-		
-		/* 写入材质信息 */
-		auto* out_mtl_file = new tinyxml2::XMLDocument();
-		out_mtl_file->InsertEndChild(out_mtl_file->NewDeclaration());
-		auto* mtl_root = out_mtl_file->NewElement("Materials");
-		out_mtl_file->InsertEndChild(mtl_root);
-		mtl_root->SetAttribute("Count", static_cast<unsigned int>(m_Entries.size()));
-
-		for (int i = 0; i < static_cast<int>(m_Entries.size()); ++i)
-		{
-			const auto& entry = m_Entries[i];
-			auto* mtl_doc = mtl_root->InsertNewChildElement("Material");
-
-			/* ID */
-			mtl_doc->SetAttribute("ID", i);
-
-			/* 槽名（可空 = 未指定） */
-			if (!entry.SlotName.empty())
-				mtl_doc->SetAttribute("Slot", entry.SlotName.c_str());
-
-			/* 材质资产引用（可空 = 内嵌定义） */
-			if (!entry.AssetPath.empty())
-				mtl_doc->SetAttribute("Asset", RELATIVE_PATH(entry.AssetPath).c_str());
-
-			/* 材质体：内嵌形态才有；引用形态只写路径 */
-			if (entry.AssetPath.empty() && entry.pMaterial != nullptr)
-			{
-				MaterialIO::WriteBody(mtl_doc, *entry.pMaterial);
-			}
-		}
-
-		/* 保存到文本 */
-		if (out_mtl_file->SaveFile(material_file.get()) != tinyxml2::XML_SUCCESS)
-			CORE_LOG_ERROR("Failed to write material file: {}.", path);
-		delete out_mtl_file;
-	}
-
-	/* 反序列化 */
-	bool MaterialGroup::Deserializer(const std::string& path)
-	{
-		PROFILE_FUNCTION();
-
-		m_Path = ABSOLUTE_PATH(path);
-		ASSERT(!m_Path.empty());
-
-		std::filesystem::path material_path;
-		if (!TryPathFromUtf8(m_Path, material_path))
-		{
-			CORE_LOG_ERROR("Invalid UTF-8 material path.");
-			return false;
-		}
-		auto material_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
-			OpenUtf8File(material_path, "rb"), &std::fclose);
-		if (!material_file)
-		{
-			CORE_LOG_ERROR("Failed to open material file: {}.", m_Path);
-			return false;
-		}
-
-		/* 读取材质信息 */
-		auto in_mtl_file = std::make_unique<tinyxml2::XMLDocument>();
-		tinyxml2::XMLError error = in_mtl_file->LoadFile(material_file.get());
-		if (error != tinyxml2::XML_SUCCESS)
-		{
-			CORE_LOG_ERROR("Failed to deserializer mtl file: {}.", m_Path);
-			return false;
-		}
-
-		const tinyxml2::XMLElement* mtl_root = in_mtl_file->FirstChildElement("Materials");
-		if (mtl_root == nullptr)
-		{
-			CORE_LOG_ERROR("Missing <Materials> root in mtl file: {}.", m_Path);
-			return false;
-		}
-
-		/* 条目数取"声明值"与"实际元素数"的较大者：手工编辑过 Count 的文件也能完整读入 */
-		int actual_count = 0;
-		for (const auto* element = mtl_root->FirstChildElement("Material"); element; element = element->NextSiblingElement("Material"))
-			++actual_count;
-		m_Entries.resize(static_cast<size_t>(std::max(mtl_root->IntAttribute("Count"), actual_count)));
-
-		for (const tinyxml2::XMLElement* mtl_doc = mtl_root->FirstChildElement("Material"); mtl_doc; mtl_doc = mtl_doc->NextSiblingElement("Material"))
-		{
-			/* ID */
-			const int id = mtl_doc->IntAttribute("ID");
-			ASSERT(id >= 0 && id < static_cast<int>(m_Entries.size()));
-			if (id < 0 || id >= static_cast<int>(m_Entries.size()))
-				continue;
-
-			MaterialEntry entry;
-
-			/* 槽名（老资产没有 = 未指定） */
-			if (const char* slot = mtl_doc->Attribute("Slot"))
-				entry.SlotName = slot;
-
-			/* 材质资产引用（解析推迟到使用方：模型加载链 / 场景覆盖） */
-			if (const char* asset = mtl_doc->Attribute("Asset"))
-			{
-				entry.AssetPath = ABSOLUTE_PATH(asset);
-			}
-			else
-			{
-				auto material = CreateSharedPtr<Material>();
-				if (MaterialIO::ReadBody(mtl_doc, *material))
-					entry.pMaterial = std::move(material);
-			}
-
-			m_Entries[id] = std::move(entry);
-		}
-
-		return true;
-	}
-
 	/* ---- 材质体读写：.mtl 条目、独立材质资产、实例覆盖共用 ---- */
 	namespace MaterialIO
 	{
@@ -573,7 +397,7 @@ namespace Helios
 			}
 		}
 
-		void WriteBody(tinyxml2::XMLElement* material_element, const Material& material)
+		void WriteBody(tinyxml2::XMLElement* material_element, const Material& material, bool write_raster_state)
 		{
 			/* Shader */
 			const auto& shader = material.GetShader();
@@ -626,7 +450,10 @@ namespace Helios
 				}
 			}
 
-			/* RasterState */
+			/* RasterState（参数覆盖可以不带，沿用基材质） */
+			if (!write_raster_state)
+				return;
+
 			const auto raster_state = material.GetRasterState();
 			auto* raster_state_doc = material_element->InsertNewChildElement("RasterState");
 			raster_state_doc->SetAttribute("CullMode", static_cast<uint32_t>(raster_state.CullMode));
@@ -729,6 +556,150 @@ namespace Helios
 			}
 
 			return true;
+		}
+
+		bool ReadFile(const std::string& path, Material& material)
+		{
+			const std::string absolute = ABSOLUTE_PATH(path);
+			std::ifstream stream(PathFromUtf8(absolute), std::ios::binary);
+			if (!stream)
+			{
+				CORE_LOG_ERROR("Failed to open material file: {}.", absolute);
+				return false;
+			}
+
+			const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+			tinyxml2::XMLDocument document;
+			if (document.Parse(text.c_str()) != tinyxml2::XML_SUCCESS)
+			{
+				CORE_LOG_ERROR("Bad material file: {}.", absolute);
+				return false;
+			}
+
+			const tinyxml2::XMLElement* element = document.FirstChildElement("Material");
+			if (element == nullptr)
+			{
+				CORE_LOG_ERROR("Material file has no <Material>: {}.", absolute);
+				return false;
+			}
+
+			return ReadBody(element, material);
+		}
+
+		bool WriteFile(const std::string& path, const Material& material)
+		{
+			const std::string absolute = ABSOLUTE_PATH(path);
+			const std::filesystem::path file_path = PathFromUtf8(absolute);
+
+			std::error_code error;
+			if (!file_path.parent_path().empty())
+				std::filesystem::create_directories(file_path.parent_path(), error);
+
+			tinyxml2::XMLDocument document;
+			document.InsertEndChild(document.NewDeclaration());
+			auto* root = document.NewElement("Material");
+			document.InsertEndChild(root);
+			WriteBody(root, material);
+
+			/* 文件句柄走 UTF-8 路径的打开方式（Windows 上 char* 路径会丢非 ASCII） */
+			auto file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+				OpenUtf8File(file_path, "wb"), &std::fclose);
+			if (!file)
+			{
+				CORE_LOG_ERROR("Failed to open material file for writing: {}.", absolute);
+				return false;
+			}
+
+			if (document.SaveFile(file.get()) != tinyxml2::XML_SUCCESS)
+			{
+				CORE_LOG_ERROR("Failed to write material file: {}.", absolute);
+				return false;
+			}
+			return true;
+		}
+
+		bool MakeTexturesLocal(const std::string& material_path, const std::string& texture_dir)
+		{
+			const std::string absolute = ABSOLUTE_PATH(material_path);
+			const std::filesystem::path target_dir = PathFromUtf8(texture_dir);
+			if (target_dir.empty())
+				return false;
+
+			std::ifstream stream(PathFromUtf8(absolute), std::ios::binary);
+			if (!stream)
+			{
+				CORE_LOG_ERROR("Failed to open material file: {}.", absolute);
+				return false;
+			}
+
+			const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+			tinyxml2::XMLDocument document;
+			if (document.Parse(text.c_str()) != tinyxml2::XML_SUCCESS)
+			{
+				CORE_LOG_ERROR("Bad material file: {}.", absolute);
+				return false;
+			}
+
+			std::error_code error;
+			std::filesystem::create_directories(target_dir, error);
+
+			/* 贴图挂在 <ParamInfo> 下面：整棵树找 <Texture>，逐条搬 */
+			const auto relocate = [&](auto&& self, tinyxml2::XMLElement* element) -> void
+			{
+				if (std::strcmp(element->Name(), "Texture") == 0)
+				{
+					const char* source_attribute = element->Attribute("Path");
+					if (source_attribute != nullptr && *source_attribute != '\0')
+					{
+						const std::filesystem::path source = ResolveAssetPath(PathFromUtf8(source_attribute));
+						if (std::filesystem::is_regular_file(source, error))
+						{
+							const std::filesystem::path destination = target_dir / source.filename();
+							std::error_code equivalent_error;
+							const bool same_file = std::filesystem::exists(destination, equivalent_error)
+								&& std::filesystem::equivalent(source, destination, equivalent_error);
+
+							bool copied = true;
+							if (!same_file)
+							{
+								std::filesystem::copy_file(source, destination,
+									std::filesystem::copy_options::overwrite_existing, error);
+								copied = !error;
+								if (error)
+									CORE_LOG_WARN("Failed to copy texture {}: {}.", PathToUtf8(source), error.message());
+							}
+
+							if (copied)
+							{
+								element->SetAttribute("Path",
+									RELATIVE_PATH(PathToUtf8(destination)).c_str());
+							}
+						}
+					}
+				}
+
+				for (tinyxml2::XMLElement* child = element->FirstChildElement();
+					child != nullptr; child = child->NextSiblingElement())
+				{
+					self(self, child);
+				}
+			};
+
+			for (tinyxml2::XMLElement* element = document.FirstChildElement();
+				element != nullptr; element = element->NextSiblingElement())
+			{
+				relocate(relocate, element);
+			}
+
+			auto file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+				OpenUtf8File(PathFromUtf8(absolute), "wb"), &std::fclose);
+			if (!file)
+			{
+				CORE_LOG_ERROR("Failed to open material file for writing: {}.", absolute);
+				return false;
+			}
+
+			return document.SaveFile(file.get()) == tinyxml2::XML_SUCCESS;
 		}
 	}
 }

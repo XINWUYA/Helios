@@ -286,7 +286,7 @@ namespace Helios::MaterialParamUI
 	 * 按钮上显示当前 Shader 的文件名、右缘一枚朝下的箭头；悬停看全路径；
 	 * 菜单打开时重扫可选清单；当前 Shader 不在清单里（资产外路径之类）时树顶补一条。
 	 * 返回 true = 选中了新的 Shader（已 SetShader，调用方按需热更）。 */
-	inline bool DrawMaterialShaderRow(Material& material, std::vector<std::string>& options_cache)
+	inline std::string DrawMaterialShaderPicker(const Material& material, std::vector<std::string>& options_cache)
 	{
 		const SharedPtr<DeviceShader> shader = material.GetShader();
 		const std::string current = (shader != nullptr) ? RELATIVE_PATH(shader->GetPath()) : std::string();
@@ -332,7 +332,7 @@ namespace Helios::MaterialParamUI
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("%s", current.empty() ? "Pick a shader" : current.c_str());
 
-		bool changed = false;
+		std::string picked;
 		/* 弹层给一条最小宽度约束：各行铺满弹层，勾选列因此对齐在同一条纵线上 */
 		ImGui::SetNextWindowSizeConstraints(ImVec2(Scaled(200.0f), 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 		if (ImGui::BeginPopup("##ShaderMenu"))
@@ -358,19 +358,23 @@ namespace Helios::MaterialParamUI
 				&& std::find(options_cache.begin(), options_cache.end(), current) == options_cache.end())
 				nodes.insert(nodes.begin(), ShaderMenuNode{ current, current, {} });
 
-			std::string picked;
 			DrawShaderMenuLevel(nodes, current, picked);
 			ImGui::EndPopup();
-
-			if (!picked.empty() && picked != current)
-			{
-				material.SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(picked)));
-				changed = true;
-			}
 		}
 
 		ImGuiExt::EndPropertyRow();
-		return changed;
+		return (picked != current) ? picked : std::string();
+	}
+
+	/* 直接改材质的 Shader：资产编辑缓冲这类"就地写"的场合用 */
+	inline bool DrawMaterialShaderRow(Material& material, std::vector<std::string>& options_cache)
+	{
+		const std::string picked = DrawMaterialShaderPicker(material, options_cache);
+		if (picked.empty())
+			return false;
+
+		material.SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(picked)));
+		return true;
 	}
 
 	/* 一条材质参数行：值画在临时缓冲上，改动经 write_back 落进目标材质（槽位 → 自动实例化

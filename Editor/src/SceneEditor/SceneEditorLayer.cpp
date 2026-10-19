@@ -71,7 +71,7 @@ namespace Helios
 		m_SceneHierarchy.SetAssetSelection(selection);
 	}
 
-	/* 模型编辑器入口：转给层级面板（属性面板的「Model Editor」卡点击用它打开模型编辑器）。 */
+	/* 模型编辑器入口：转给层级面板（Model 卡里的「Open in Model Editor」按钮用它打开模型编辑器）。 */
 	void SceneEditorLayer::SetModelEditorFunc(ModelEditorFunc func)
 	{
 		m_SceneHierarchy.SetModelEditorFunc(std::move(func));
@@ -368,7 +368,7 @@ namespace Helios
 		const std::string extension = ToLowercase(PathToUtf8(path.extension()).c_str());
 		const bool exchange_format = extension == ".obj" || extension == ".fbx" || extension == ".gltf"
 			|| extension == ".glb" || extension == ".dae" || extension == ".stl";
-		if (extension != ".mesh" && !exchange_format)
+		if (extension != ".mesh" && extension != ".model" && !exchange_format)
 			return false;
 
 		/* 已经在本项目资产里的（资源浏览器拖入 / 项目内的文件）原地转换；
@@ -393,8 +393,7 @@ namespace Helios
 			}
 			else
 			{
-				/* 项目外收进来的 .mesh：连伴生的 .mtl 一起搬（贴图按槽表里的相对路径寻址，
-				 * 引用项目外贴图的那种搬进来也不全，出错在加载时自然报） */
+				/* 项目外收进来的 .mesh 只是几何 payload（白模）；带材质的模型走 .model 清单 */
 				std::error_code error;
 				std::filesystem::create_directories(dest_dir, error);
 
@@ -405,13 +404,6 @@ namespace Helios
 				{
 					EDITOR_LOG_ERROR("Failed to copy model file: {}.", PathToUtf8(path));
 					return false;
-				}
-
-				const std::filesystem::path source_mtl = PathFromUtf8(ReplaceFileSuffix(PathToUtf8(path), ".mtl"));
-				if (std::filesystem::exists(source_mtl, error))
-				{
-					std::filesystem::copy_file(source_mtl, PathFromUtf8(ReplaceFileSuffix(PathToUtf8(dest_mesh), ".mtl")),
-						std::filesystem::copy_options::overwrite_existing, error);
 				}
 
 				mesh_path = PathToUtf8(dest_mesh);

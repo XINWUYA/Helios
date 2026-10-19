@@ -1,0 +1,4 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Model Geometry="Models/big_cottage/Cottage.mesh">
+  <Material Slot="Cottage" Asset="Models/big_cottage/Cottage_materials/Cottage.mtl" />
+</Model>

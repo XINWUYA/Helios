@@ -79,12 +79,12 @@ namespace Helios
 			/* 着色器：.glsl 是源，.metal 是同一次编译的产物（落在 Assets/Cache/Shaders 下）——
 			 * 两样都是"一个着色器"，筛 Shaders 时一起出来。 */
 			{ ".GLSL", AssetFileKind::Shader }, { ".METAL", AssetFileKind::Shader },
-			/* 模型：支持的交换格式是 .obj / .fbx / .gltf / .glb / .dae / .stl（内置解析 + assimp），
-			 * .mesh 是它旁边那份二进制网格缓存 —— 都算"这个模型的文件"。 */
+			/* 模型：源格式 + .mesh（几何 payload）+ .model（清单：几何 + 槽表） */
 			{ ".OBJ", AssetFileKind::Model }, { ".MESH", AssetFileKind::Model }, { ".FBX", AssetFileKind::Model },
 			{ ".GLTF", AssetFileKind::Model }, { ".GLB", AssetFileKind::Model },
 			{ ".DAE", AssetFileKind::Model }, { ".STL", AssetFileKind::Model },
-			/* 材质资产：.mtl 既是独立单条目材质资产，也是模型伴生的槽表（同一份 schema） */
+			{ ".MODEL", AssetFileKind::Model },
+			/* 材质：一层 .mtl（单条材质资产） */
 			{ ".MTL", AssetFileKind::Material },
 			/* 反射探针的烘焙缓存（保存场景时落盘，加载时直接恢复） */
 			{ ".PROBE", AssetFileKind::Probe },
@@ -213,26 +213,24 @@ namespace Helios
 				"</MaterialGraph>\n";
 		}
 
-		/* 单材质资产：与内置白模同一套配置（PBRStandard.glsl + 默认贴图满配）——
+		/* 材质资产：与内置白模同一套配置（PBRStandard.glsl + 默认贴图满配）——
 		 * 零外部依赖、编辑器前向与延迟（经 G-Buffer 转换）都是正确外观，用户随后改参数 / 换贴图。 */
 		if (ext == ".mtl")
 		{
 			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-				"<Materials Count=\"1\">\n"
-				"    <Material ID=\"0\" ShaderPath=\"Shaders/MaterialShaders/PBRStandard.glsl\">\n"
-				"        <Parameters>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_AlbedoTexture\"><Texture Path=\"Textures/White.png\" Slot=\"0\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_SpecularTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"1\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_NormalTexture\"><Texture Path=\"Textures/normal.png\" Slot=\"2\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_BumpTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"3\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_DisplacementTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"4\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_RoughnessTexture\"><Texture Path=\"Textures/White.png\" Slot=\"5\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_MetallicTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"6\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_EmissiveTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"7\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"            <ParamInfo Type=\"0\" Name=\"u_AmbientTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"8\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
-				"        </Parameters>\n"
-				"    </Material>\n"
-				"</Materials>\n";
+				"<Material ShaderPath=\"Shaders/MaterialShaders/PBRStandard.glsl\">\n"
+				"    <Parameters>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_AlbedoTexture\"><Texture Path=\"Textures/White.png\" Slot=\"0\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_SpecularTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"1\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_NormalTexture\"><Texture Path=\"Textures/normal.png\" Slot=\"2\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_BumpTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"3\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_DisplacementTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"4\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_RoughnessTexture\"><Texture Path=\"Textures/White.png\" Slot=\"5\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_MetallicTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"6\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_EmissiveTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"7\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_AmbientTexture\"><Texture Path=\"Textures/Black.png\" Slot=\"8\"><LoadConfig IsFlipV=\"false\" IsGenMips=\"true\" SamplerType=\"0\"/></Texture></ParamInfo>\n"
+				"    </Parameters>\n"
+				"</Material>\n";
 		}
 
 		/* 空动画：时长 1 秒、循环，没有轨道（挂到 Animator 上不报错，先给个可播的壳） */

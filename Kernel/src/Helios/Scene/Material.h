@@ -149,61 +149,21 @@ namespace Helios
 		static SharedPtr<Material> m_pBuiltinWhiteMaterial;
 	};
 
-	/* 一条材质条目：内嵌定义 +（可选）槽名和材质资产引用。三种场合共用：模型伴生的 .mtl（多条）、
-	 * 独立材质资产 .mtl（单条）、场景实例化覆盖（序列化复用同一份定义，见 MaterialIO）。 */
-	struct MaterialEntry
-	{
-		std::string SlotName;          /* 槽名（空 = 未指定） */
-		std::string AssetPath;         /* 材质资产引用（空 = 内嵌定义） */
-		SharedPtr<Material> pMaterial; /* 内嵌材质（引用形态时为空） */
-	};
-
-	/* 材质组类：
-	 * 模型伴生 .mtl 的读写载体（也是独立材质资产文件的读写载体）。
-	 * 槽表语义：组内条目与模型 MeshSegment 的槽索引对位。 */
-	class MaterialGroup final
-	{
-	public:
-		MaterialGroup() = default;
-		~MaterialGroup() = default;
-
-		/* 添加一个内嵌材质条目 */
-		void EmplaceMaterial(const SharedPtr<Material>& material);
-		/* 添加一个完整条目 */
-		void EmplaceEntry(MaterialEntry entry) { m_Entries.emplace_back(std::move(entry)); }
-		/* 设置条目槽名（导出前把导入时的材质名写进槽表） */
-		void SetEntrySlotName(int idx, std::string name);
-		/* 设置条目的材质资产引用（空 = 内嵌定义）：带路径的条目序列化只写 Asset，
-		 * 加载方按路径解析材质资产 */
-		void SetEntryAssetPath(int idx, std::string path);
-		/* 根据索引获取条目（越界返回 nullptr） */
-		[[nodiscard]] const MaterialEntry* GetEntryByIndex(int idx) const;
-		/* 根据索引获取内嵌材质（越界回退 Error 材质；引用形态条目返回空指针） */
-		const SharedPtr<Material>& GetMaterialByIndex(int idx);
-		/* 获取全部条目 */
-		[[nodiscard]] const std::vector<MaterialEntry>& GetEntries() const { return m_Entries; }
-		/* 清空材质 */
-		void ClearAllMaterials() { m_Entries.clear(); }
-
-		/* 序列化 */
-		void Serializer(const std::string& path);
-		/* 反序列化 */
-		bool Deserializer(const std::string& path);
-
-	private:
-
-		/* 材质组路径 */
-		std::string m_Path{};
-		/* 材质条目列表（槽表） */
-		std::vector<MaterialEntry> m_Entries;
-	};
-
 	/* 材质体（ShaderPath / Parameters / RasterState）的读写：
-	 * .mtl 条目、独立材质资产、场景实例覆盖共用同一份实现。 */
+	 * .mtl 文件、.model 覆盖、场景实例覆盖共用同一份实现。 */
 	namespace MaterialIO
 	{
-		/* 把材质的定义写进一个元素（<Material> 或实例覆盖元素） */
-		void WriteBody(tinyxml2::XMLElement* material_element, const Material& material);
+		/* 读 / 写一个 .mtl 文件：根元素就是 <Material> */
+		bool ReadFile(const std::string& path, Material& material);
+		bool WriteFile(const std::string& path, const Material& material);
+
+		/* 把材质引用的贴图收进 texture_dir 并改写 Path：导出的模型目录自包含 */
+		bool MakeTexturesLocal(const std::string& material_path, const std::string& texture_dir);
+
+		/* 把材质的定义写进一个元素（<Material> 或实例覆盖元素）；write_raster_state = false
+		 * 时只写参数（引用条目的参数覆盖用，光栅状态沿用基材质） */
+		void WriteBody(tinyxml2::XMLElement* material_element, const Material& material,
+			bool write_raster_state = true);
 		/* 从一个元素读回材质定义；失败返回 false（材质保持默认构造） */
 		bool ReadBody(const tinyxml2::XMLElement* material_element, Material& material);
 	}

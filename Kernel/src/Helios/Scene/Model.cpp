@@ -1,12 +1,14 @@
 ﻿#include "Pch.h"
 #include "Model.h"
 #include "SkeletonModel.h"
+#include "ModelManifest.h"
 #include "Mesh.h"
 #include "SceneCommon.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/Math.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
+#include "Helios/VirtualDevice/DeviceTexture.h"
 
 namespace Helios
 {
@@ -406,6 +408,65 @@ namespace Helios
 		return m_SkinData != nullptr && !m_SkinData->IsEmpty();
 	}
 
+	namespace
+	{
+		/* 把条目的参数覆盖叠到已克隆的材质上：只覆盖写过的参数；
+		 * RasterState 只有在覆盖里显式带了才替换 */
+		void ApplyMaterialOverride(Material& target, const MaterialSlot& entry)
+		{
+			if (entry.pOverride == nullptr)
+				return;
+
+			for (const auto& [id, param] : entry.pOverride->GetAllParameters())
+			{
+				if (param.Type == ParamType::Texture)
+				{
+					const auto& texture = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(param.Value);
+					target.SetTexture(param.Name, texture.first);
+				}
+				else
+				{
+					target.SetParameters(param.Type, param.Name, param.Value);
+				}
+			}
+
+			if (entry.HasRasterOverride)
+				target.SetRasterState(entry.pOverride->GetRasterState());
+		}
+
+		/* 清单条目 -> 模型槽：引用条目在这里解析成默认材质（覆盖叠在克隆体上），
+		 * 内嵌条目直接用文件里的定义 */
+		MaterialSlot ResolveManifestSlot(const ModelManifest::Slot& entry)
+		{
+			MaterialSlot slot;
+			slot.Name = entry.Name;
+			slot.SourcePath = entry.AssetPath;
+			slot.pOverride = entry.pOverride;
+			slot.HasRasterOverride = entry.HasRasterOverride;
+
+			if (entry.AssetPath.empty())
+			{
+				slot.pDefault = entry.pEmbedded;
+				return slot;
+			}
+
+			const SharedPtr<Material> base = AssetManager::Instance().GetOrLoad<Material>(entry.AssetPath);
+			if (base == nullptr)
+				return slot;
+
+			if (entry.pOverride == nullptr)
+			{
+				slot.pDefault = base;
+				return slot;
+			}
+
+			auto resolved = base->Clone();
+			ApplyMaterialOverride(*resolved, slot);
+			slot.pDefault = std::move(resolved);
+			return slot;
+		}
+	}
+
 	/* 从路径加载一个模型 */
 	SharedPtr<Model> Model::Create(const std::string& path)
 	{
@@ -423,7 +484,35 @@ namespace Helios
 		std::string suffix = ExtractFileSuffix(model_path);
 		std::transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower);
 
-		/* 加载Mesh模型数据 */
+		/* .model 清单：Geometry 指向几何 payload，<Material> 是槽表 */
+		if (suffix == "model")
+		{
+			std::string geometry_path;
+			std::vector<ModelManifest::Slot> entries;
+			if (!ModelManifest::Read(model_path, geometry_path, entries))
+				return nullptr;
+
+			SharedPtr<Model> model = Create(geometry_path);
+			if (model == nullptr)
+			{
+				CORE_LOG_ERROR("Failed to load geometry '{}' for model '{}'.", geometry_path, model_path);
+				return nullptr;
+			}
+
+			model->m_Path = model_path;
+			model->m_GeometryPath = geometry_path;
+
+			/* 几何加载时按段补过一遍占位槽，这里换成清单里的槽表 */
+			model->m_MaterialSlots.clear();
+			model->m_MaterialSlots.reserve(entries.size());
+			for (const ModelManifest::Slot& entry : entries)
+				model->m_MaterialSlots.push_back(ResolveManifestSlot(entry));
+
+			model->EnsureMaterialSlots();
+			return model;
+		}
+
+		/* 加载Mesh模型数据（纯几何；没有清单就是白模） */
 		if (suffix == "mesh")
 		{
 			/* 有骨骼段的 .mesh 交给 SkeletonModel（同一个入口、同一个模型装载流程） */
@@ -431,9 +520,7 @@ namespace Helios
 				? std::static_pointer_cast<Model>(CreateSharedPtr<SkeletonModel>(model_path))
 				: CreateSharedPtr<Model>(model_path);
 
-			/* 读取伴生 .mtl 槽表（缺失 = 空槽表 → 解析时全部兜底白模） */
-			const std::string mtl_filepath = ReplaceFileSuffix(model_path, ".mtl");
-			model->LoadMaterialSlots(mtl_filepath);
+			model->m_GeometryPath = model_path;
 
 			/* 直接从mesh文件加载 */
 			const std::filesystem::path mesh_path = PathFromUtf8(model_path);
@@ -602,6 +689,16 @@ namespace Helios
 		m_MaterialSlots.emplace_back(std::move(slot));
 	}
 
+	const MaterialSlot* Model::GetSlotByName(const std::string& name) const
+	{
+		for (const MaterialSlot& slot : m_MaterialSlots)
+		{
+			if (slot.Name == name)
+				return &slot;
+		}
+		return nullptr;
+	}
+
 	/* 槽表兜底：无槽的段分配新槽、索引越界的段把空缺补齐（默认槽没材质，解析时兜底白模） */
 	void Model::EnsureMaterialSlots()
 	{
@@ -632,52 +729,18 @@ namespace Helios
 		return &m_MaterialSlots[idx];
 	}
 
+	const MaterialSlot* Model::GetSlotForSegment(size_t segment_index) const
+	{
+		if (segment_index >= m_MeshSegments.size() || m_MeshSegments[segment_index] == nullptr)
+			return nullptr;
+
+		return GetSlotByIndex(m_MeshSegments[segment_index]->GetSlotIndex());
+	}
+
 	/* 内建模型类型：路径即身份名（见 TryParseBuiltinModelName） */
 	bool Model::TryGetBuiltinType(BuiltinModelType& out_type) const
 	{
 		return TryParseBuiltinModelName(m_Path, out_type);
-	}
-
-	/* 加载模型时，读取伴生 .mtl 槽表 */
-	void Model::LoadMaterialSlots(const std::string& path)
-	{
-		/* 伴生 .mtl 不存在 = 未配置材质（正常状态：几何先进场、材质后挂），静默跳过 */
-		const std::filesystem::path absolute_mtl_path = PathFromUtf8(ABSOLUTE_PATH(path));
-		std::error_code error;
-		if (!std::filesystem::exists(absolute_mtl_path, error))
-			return;
-
-		auto material_group = CreateSharedPtr<MaterialGroup>();
-		if (!material_group->Deserializer(path))
-			return;
-
-		const auto& entries = material_group->GetEntries();
-		m_MaterialSlots.reserve(entries.size());
-		for (int i = 0; i < static_cast<int>(entries.size()); ++i)
-		{
-			const auto& entry = entries[i];
-
-			MaterialSlot slot;
-			/* 槽名：显式指定优先；老资产没有名字 → 生成 slot_N（与索引对位稳定） */
-			slot.Name = entry.SlotName.empty() ? ("slot_" + std::to_string(i)) : entry.SlotName;
-
-			/* 默认绑定：资产引用优先解析；内嵌定义直接用；两者皆无 → 空（解析时兜底白模） */
-			if (!entry.AssetPath.empty())
-			{
-				slot.pDefault = AssetManager::Instance().GetOrLoad<Material>(entry.AssetPath);
-				if (slot.pDefault == nullptr)
-				{
-					CORE_LOG_WARN("Failed to load material asset '{}' for model '{}' slot '{}'.",
-						entry.AssetPath, m_Path, slot.Name);
-				}
-			}
-			else
-			{
-				slot.pDefault = entry.pMaterial;
-			}
-
-			m_MaterialSlots.emplace_back(std::move(slot));
-		}
 	}
 
 }
