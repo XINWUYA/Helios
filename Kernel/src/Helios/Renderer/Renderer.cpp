@@ -3,11 +3,6 @@
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
-#ifdef PLATFORM_MACOS
-#include "GraphicsAPI/Metal/MetalBuffer.h"
-#include "GraphicsAPI/Metal/MetalRenderAPI.h"
-#include "GraphicsAPI/Metal/MetalShader.h"
-#endif
 #include "Renderer.h"
 #include "RenderView.h"
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
@@ -289,50 +284,28 @@ namespace Helios
 		const SharedPtr<DeviceStorageBuffer>& skinned,
 		uint32_t vertex_count)
 	{
-#ifdef PLATFORM_MACOS
-		if (CurrentAPI() != RenderAPI::Metal || vertex_count == 0)
+		if (m_pRenderAPI == nullptr || vertex_count == 0 || !m_pRenderAPI->SupportsCompute())
 			return false;
 
 		if (SkinComputeShader() == nullptr)
 			SkinComputeShader() = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Compute/GPUSkin.glsl"));
 
-		auto* metal_shader = dynamic_cast<MetalShader*>(SkinComputeShader().get());
-		auto* metal_api = dynamic_cast<MetalRenderAPI*>(GetRenderAPI().get());
-		if (metal_shader == nullptr || metal_api == nullptr)
+		const SharedPtr<DeviceShader>& shader = SkinComputeShader();
+		if (shader == nullptr || !shader->IsCompute())
 			return false;
 
-		const auto metal_buffer = [](const SharedPtr<DeviceStorageBuffer>& buffer) -> MTL::Buffer*
-		{
-			auto storage = std::dynamic_pointer_cast<MetalStorageBuffer>(buffer);
-			return storage != nullptr ? storage->GetMetalBuffer() : nullptr;
+		/* 绑定点跟 GPUSkin.glsl 的声明一致：0 调色板（uniform 块）、1 绑定顶点、
+		 * 2 权重、3 上屏顶点；顶点数常量块在 4 号 */
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
+			{ 0, palette },
+			{ 1, bind_vertices },
+			{ 2, weights },
+			{ 3, skinned },
 		};
 
-		MTL::Buffer* palette_buffer = metal_buffer(palette);
-		MTL::Buffer* bind_buffer = metal_buffer(bind_vertices);
-		MTL::Buffer* weight_buffer = metal_buffer(weights);
-		MTL::Buffer* skinned_buffer = metal_buffer(skinned);
-		if (palette_buffer == nullptr || bind_buffer == nullptr
-			|| weight_buffer == nullptr || skinned_buffer == nullptr)
-			return false;
-
-		/* 调色板是 uniform 块：MSL 里被排到 [[buffer(16)]]（SSBO 占 1..3） */
-		std::vector<std::pair<uint32_t, MTL::Buffer*>> buffers;
-		buffers.emplace_back(16, palette_buffer);
-		buffers.emplace_back(1, bind_buffer);
-		buffers.emplace_back(2, weight_buffer);
-		buffers.emplace_back(3, skinned_buffer);
-
-		const uint32_t group_size = metal_shader->GetThreadGroupSize();
+		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
 		const uint32_t group_count = (vertex_count + group_size - 1) / group_size;
-		return metal_api->DispatchCompute(metal_shader, buffers, &vertex_count, sizeof(vertex_count), group_count);
-#else
-		(void)palette;
-		(void)bind_vertices;
-		(void)weights;
-		(void)skinned;
-		(void)vertex_count;
-		return false;
-#endif
+		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, &vertex_count, sizeof(vertex_count), group_count);
 	}
 
 	void Renderer::FillObjectUniformBuffer(const VisibleMeshObject& mesh_object)

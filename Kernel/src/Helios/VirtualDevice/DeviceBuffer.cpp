@@ -102,6 +102,15 @@ namespace Helios
 	SharedPtr<DeviceVertexBuffer> DeviceVertexBuffer::CreateShared(const std::string& name,
 		const SharedPtr<DeviceStorageBuffer>& storage, uint32_t size)
 	{
+#ifndef __APPLE__
+		/* GL 的缓冲名与用途无关：同一块显存直接当顶点缓冲用，VAO 只记缓冲名 */
+		if (Renderer::CurrentAPI() == RenderAPI::OpenGL)
+		{
+			auto gl_storage = std::dynamic_pointer_cast<OpenGLStorageBuffer>(storage);
+			if (gl_storage != nullptr && gl_storage->GetBufferID() != 0)
+				return CreateSharedPtr<OpenGLVertexBuffer>(name, gl_storage->GetBufferID(), size);
+		}
+#endif
 #ifdef PLATFORM_MACOS
 		if (Renderer::CurrentAPI() == RenderAPI::Metal)
 		{
@@ -180,6 +189,14 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+		case RenderAPI::OpenGL:
+#ifdef __APPLE__
+			/* macOS 只有 GL 4.1，没有 SSBO */
+			CORE_LOG_ERROR("Storage buffer is not supported by OpenGL 4.1 on macOS!");
+			return nullptr;
+#else
+			return CreateSharedPtr<OpenGLStorageBuffer>(name, data, size);
+#endif
 #ifdef PLATFORM_MACOS
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalStorageBuffer>(name, data, size);

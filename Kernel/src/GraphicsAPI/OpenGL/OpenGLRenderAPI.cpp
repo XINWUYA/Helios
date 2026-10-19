@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "OpenGLRenderAPI.h"
+#include "OpenGLBuffer.h"
 #include "OpenGLCommon.h"
 #include "OpenGLShader.h"
 #include "OpenGLTexture.h"
@@ -9,6 +10,49 @@
 
 namespace Helios
 {
+#ifndef __APPLE__
+	namespace
+	{
+		/* binding point 是上下文级状态，而引擎的 uniform 缓冲只在创建时绑一次。
+		 * 计算派发临时占用几个点，先记下来、派发完原样还回去（连 offset / size 一起）。 */
+		struct SavedBufferBinding
+		{
+			GLenum Target{ GL_NONE };
+			GLuint Binding{ 0 };
+			GLuint Buffer{ 0 };
+			GLint64 Offset{ 0 };
+			GLint64 Size{ 0 };
+		};
+
+		SavedBufferBinding CaptureBufferBinding(GLenum target, GLuint binding)
+		{
+			SavedBufferBinding saved{};
+			saved.Target = target;
+			saved.Binding = binding;
+
+			const bool is_uniform = target == GL_UNIFORM_BUFFER;
+			GLint buffer = 0;
+			glGetIntegeri_v(is_uniform ? GL_UNIFORM_BUFFER_BINDING : GL_SHADER_STORAGE_BUFFER_BINDING, binding, &buffer);
+			saved.Buffer = static_cast<GLuint>(buffer);
+
+			if (saved.Buffer != 0)
+			{
+				glGetInteger64i_v(is_uniform ? GL_UNIFORM_BUFFER_START : GL_SHADER_STORAGE_BUFFER_START, binding, &saved.Offset);
+				glGetInteger64i_v(is_uniform ? GL_UNIFORM_BUFFER_SIZE : GL_SHADER_STORAGE_BUFFER_SIZE, binding, &saved.Size);
+			}
+			return saved;
+		}
+
+		void RestoreBufferBinding(const SavedBufferBinding& saved)
+		{
+			if (saved.Buffer == 0)
+				glBindBufferBase(saved.Target, saved.Binding, 0);
+			else
+				glBindBufferRange(saved.Target, saved.Binding, saved.Buffer,
+					static_cast<GLintptr>(saved.Offset), static_cast<GLsizeiptr>(saved.Size));
+		}
+	}
+#endif
 	void OpenGLMessageCallback(
 		unsigned source,
 		unsigned type,
@@ -186,6 +230,91 @@ namespace Helios
 
 		const auto count = vertex_array->GetVertexCount();
 		glDrawArrays(TranslateToOpenGLPrimitiveType(type), 0, count);
+	}
+
+	bool OpenGLRenderAPI::DispatchCompute(const SharedPtr<DeviceShader>& shader,
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+		uint32_t param_binding, const void* param_data, uint32_t param_size,
+		uint32_t group_count)
+	{
+#ifdef __APPLE__
+		/* macOS 的 GL 只有 4.1，没有计算着色器 */
+		(void)shader;
+		(void)buffers;
+		(void)param_binding;
+		(void)param_data;
+		(void)param_size;
+		(void)group_count;
+		return false;
+#else
+		PROFILE_FUNCTION();
+
+		auto* gl_shader = dynamic_cast<OpenGLShader*>(shader.get());
+		if (gl_shader == nullptr || !gl_shader->IsCompute() || group_count == 0)
+			return false;
+
+		/* 先把缓冲全部解析出来：半路失败不会留下改了一半的绑定 */
+		struct ResolvedBinding
+		{
+			GLenum Target;
+			GLuint Binding;
+			GLuint Buffer;
+		};
+		const auto& uniform_blocks = shader->GetReflectionData().UniformBlockBindings;
+		std::vector<ResolvedBinding> resolved;
+		resolved.reserve(buffers.size());
+		for (const auto& [binding, buffer] : buffers)
+		{
+			auto gl_buffer = std::dynamic_pointer_cast<OpenGLStorageBuffer>(buffer);
+			if (gl_buffer == nullptr || gl_buffer->GetBufferID() == 0)
+				return false;
+
+			/* uniform 块要挂到 GL_UNIFORM_BUFFER，其余按 SSBO 走 */
+			const GLenum target = uniform_blocks.find(binding) != uniform_blocks.end()
+				? GL_UNIFORM_BUFFER : GL_SHADER_STORAGE_BUFFER;
+			resolved.push_back({ target, binding, gl_buffer->GetBufferID() });
+		}
+
+		gl_shader->Bind();
+
+		std::vector<SavedBufferBinding> saved;
+		saved.reserve(resolved.size() + 1);
+		for (const ResolvedBinding& item : resolved)
+		{
+			saved.push_back(CaptureBufferBinding(item.Target, item.Binding));
+			glBindBufferBase(item.Target, item.Binding, item.Buffer);
+		}
+
+		/* 这一趟的常量块：拷进临时 UBO，按 std140 最小 16 字节挂到指定 binding */
+		if (param_data != nullptr && param_size > 0)
+		{
+			const uint32_t block_size = std::max<uint32_t>(16u, (param_size + 15u) / 16u * 16u);
+			if (m_ComputeParamBuffer == 0)
+			{
+				GLuint buffer = 0;
+				glCreateBuffers(1, &buffer);
+				m_ComputeParamBuffer = buffer;
+			}
+			if (m_ComputeParamBufferSize < block_size)
+			{
+				glNamedBufferData(m_ComputeParamBuffer, block_size, nullptr, GL_DYNAMIC_DRAW);
+				m_ComputeParamBufferSize = block_size;
+			}
+			glNamedBufferSubData(m_ComputeParamBuffer, 0, param_size, param_data);
+
+			saved.push_back(CaptureBufferBinding(GL_UNIFORM_BUFFER, param_binding));
+			glBindBufferRange(GL_UNIFORM_BUFFER, param_binding, m_ComputeParamBuffer, 0, block_size);
+		}
+
+		glDispatchCompute(group_count, 1, 1);
+		/* 结果要给后续的顶点拉取 / 存储缓冲读写用，等写入可见再往下走 */
+		glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
+
+		for (auto it = saved.rbegin(); it != saved.rend(); ++it)
+			RestoreBufferBinding(*it);
+
+		return true;
+#endif
 	}
 
 	void OpenGLRenderAPI::Flush()

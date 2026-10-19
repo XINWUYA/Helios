@@ -73,11 +73,13 @@ namespace Helios
         MTL::RenderPassDescriptor* GetActiveRenderPassDescriptor() const { return m_ActiveRenderPassDescriptor; }
 
         /* 计算派发：先收掉当前渲染编码器（与 blit 同套路），开 compute encoder → 绑缓冲 → dispatch。
-         * 下一个绘制会自己重开渲染编码器。buffers 是 (索引, Metal 缓冲) 列表，param_data 走 setBytes。 */
-        bool DispatchCompute(class MetalShader* shader,
-            const std::vector<std::pair<uint32_t, MTL::Buffer*>>& buffers,
-            const void* param_data, uint32_t param_size,
-            uint32_t group_count);
+         * 下一个绘制会自己重开渲染编码器。装箱下标按 shader 反射换算：
+         * uniform 块走 [[buffer(N + UniformBufferBase)]]，storage 缓冲直接用 binding。 */
+        [[nodiscard]] bool SupportsCompute() const override { return true; }
+        bool DispatchCompute(const SharedPtr<DeviceShader>& shader,
+            const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+            uint32_t param_binding, const void* param_data, uint32_t param_size,
+            uint32_t group_count) override;
 
         /* 渲染通道管理 */
         void BeginRenderPass(MTL::RenderPassDescriptor* renderPassDescriptor);

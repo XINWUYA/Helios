@@ -22,6 +22,21 @@ namespace Helios
 		void DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count = 0, uint32_t index_offset = 0) override;
 		void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) override;
 
+		/* 计算着色器要 GL 4.3+：桌面上下文起步就是 4.5，非 macOS 一定有；
+		 * macOS 只有 4.1，不支持 */
+		[[nodiscard]] bool SupportsCompute() const override
+		{
+#ifdef __APPLE__
+			return false;
+#else
+			return true;
+#endif
+		}
+		bool DispatchCompute(const SharedPtr<DeviceShader>& shader,
+			const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+			uint32_t param_binding, const void* param_data, uint32_t param_size,
+			uint32_t group_count) override;
+
 		void Flush() override;
 
 		/* OpenGL 的 mip 生成是立即执行的，直接转交纹理自身实现
@@ -54,6 +69,10 @@ namespace Helios
 		/* 默认目标快照的常驻预览纹理（AcquireDefaultTargetSnapshot 用；随视口
 		 * 尺寸变化重建、跨帧复用） */
 		SharedPtr<DeviceTexture> m_DefaultTargetSnapshot;
+
+		/* 计算派发的常量块暂存缓冲（std140，用多少分多少，之后只增不减） */
+		uint32_t m_ComputeParamBuffer{ 0 };
+		uint32_t m_ComputeParamBufferSize{ 0 };
 
 		/* 扩展支持标记 */
 		struct

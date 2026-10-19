@@ -49,7 +49,7 @@ namespace Helios
 		static void FillObjectUniformBuffer(const VisibleMeshObject& mesh_object);
 
 		/* GPU 蒙皮：一次 dispatch 把绑定顶点按调色板写进上屏缓冲。
-		 * 只有 Metal 后端支持；返回 false 时调用方退回 CPU 蒙皮。 */
+		 * 后端支持计算着色器（Metal / GL 4.3+）才成立；返回 false 时调用方退回 CPU 蒙皮。 */
 		static bool DispatchSkin(const SharedPtr<class DeviceStorageBuffer>& palette,
 			const SharedPtr<class DeviceStorageBuffer>& bind_vertices,
 			const SharedPtr<class DeviceStorageBuffer>& weights,

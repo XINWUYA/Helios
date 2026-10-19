@@ -66,8 +66,8 @@ namespace Helios
 
         /* 计算着色器（#type compute）：惰性建管线，线程组尺寸从 local_size_x 读 */
         MTL::ComputePipelineState* GetComputePipelineState();
-        [[nodiscard]] bool IsCompute() const { return m_IsCompute; }
-        [[nodiscard]] uint32_t GetThreadGroupSize() const { return m_ThreadGroupSize; }
+        [[nodiscard]] bool IsCompute() const override { return m_IsCompute; }
+        [[nodiscard]] uint32_t GetThreadGroupSize() const override { return m_ThreadGroupSize; }
 
     private:
         /* 计算着色器状态 */

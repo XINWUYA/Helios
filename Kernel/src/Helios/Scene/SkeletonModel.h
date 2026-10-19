@@ -119,7 +119,7 @@ namespace Helios
 		[[nodiscard]] const std::vector<entt::entity>& GetJointEntities() const { return m_Joints; }
 		[[nodiscard]] std::vector<glm::mat4>& GetPalette() { return m_Palette; }
 
-		/* GPU 蒙皮是否就绪（Metal 才可能为真；不成立时走 CPU） */
+		/* GPU 蒙皮是否就绪（后端支持计算着色器才可能为真；不成立时走 CPU） */
 		[[nodiscard]] bool IsGpuSkinned() const { return m_GpuReady; }
 		/* 开关 GPU 蒙皮（默认开；检查里可以关掉跑 CPU 路径做对照） */
 		void SetGpuSkinningEnabled(bool enabled) { m_GpuSkinningEnabled = enabled; }

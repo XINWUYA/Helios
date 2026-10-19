@@ -308,17 +308,11 @@ namespace Helios
 
             /* 线程组尺寸：读 local_size_x（缺省 64） */
             const std::string& glsl = compute_source->second;
-            const size_t size_pos = glsl.find("local_size_x");
-            if (size_pos != std::string::npos)
-            {
-                const size_t equals = glsl.find('=', size_pos);
-                if (equals != std::string::npos)
-                {
-                    const int parsed = std::atoi(glsl.c_str() + equals + 1);
-                    if (parsed > 0 && parsed <= 1024)
-                        m_ThreadGroupSize = static_cast<uint32_t>(parsed);
-                }
-            }
+            m_ThreadGroupSize = ParseThreadGroupSize(glsl);
+
+            /* 反射 uniform 块 binding：派发时据此把缓冲放到 MSL 的高位槽位 */
+            m_Reflection.Clear();
+            ReflectFromGLSLSource(glsl);
 
             CORE_LOG_INFO("Metal compute shader created: {}", m_DebugName);
             return;

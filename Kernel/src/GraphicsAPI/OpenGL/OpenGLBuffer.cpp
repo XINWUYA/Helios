@@ -44,11 +44,21 @@ namespace Helios
 #endif
 	}
 
+	/* 复用外部 GL 缓冲：名字归传入方所有，析构时不删 */
+	OpenGLVertexBuffer::OpenGLVertexBuffer(const std::string& name, uint32_t buffer_id, uint32_t size)
+		: m_VertexBufferId(buffer_id), m_DataSize(size), m_OwnsBuffer(false)
+	{
+		PROFILE_FUNCTION();
+
+		(void)name;
+	}
+
 	OpenGLVertexBuffer::~OpenGLVertexBuffer()
 	{
 		PROFILE_FUNCTION();
 
-		glDeleteBuffers(1, &m_VertexBufferId);
+		if (m_OwnsBuffer)
+			glDeleteBuffers(1, &m_VertexBufferId);
 	}
 
 	/* 绑定顶点数据 */
@@ -183,4 +193,49 @@ namespace Helios
 		const uint32_t index_size = (m_IndexType == IndexType::UInt16) ? sizeof(uint16_t) : sizeof(uint32_t);
 		m_Count = size / index_size;
 	}
+
+#ifndef __APPLE__
+	OpenGLStorageBuffer::OpenGLStorageBuffer(const std::string& name, const void* data, uint32_t size)
+		: m_Size(size)
+	{
+		PROFILE_FUNCTION();
+
+		glCreateBuffers(1, &m_BufferID);
+		glNamedBufferData(m_BufferID, size, data, GL_DYNAMIC_DRAW);
+#ifdef HELIOS_DEBUG
+		glObjectLabel(GL_BUFFER, m_BufferID, -1, name.c_str());
+#endif
+	}
+
+	OpenGLStorageBuffer::~OpenGLStorageBuffer()
+	{
+		PROFILE_FUNCTION();
+
+		glDeleteBuffers(1, &m_BufferID);
+	}
+
+	void OpenGLStorageBuffer::SetData(const void* data, uint32_t size)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_BufferID == 0 || data == nullptr || size > m_Size)
+			return;
+
+		glNamedBufferSubData(m_BufferID, 0, size, data);
+	}
+
+	/* 计算着色器写完之后要在 CPU 侧看结果就得回读：映射接口没有常驻指针，
+	 * 每次读进镜像再返回（这条路径只在检查 / 工具里用） */
+	void* OpenGLStorageBuffer::GetMappedData()
+	{
+		PROFILE_FUNCTION();
+
+		if (m_BufferID == 0 || m_Size == 0)
+			return nullptr;
+
+		m_Shadow.resize(m_Size);
+		glGetNamedBufferSubData(m_BufferID, 0, m_Size, m_Shadow.data());
+		return m_Shadow.data();
+	}
+#endif
 }

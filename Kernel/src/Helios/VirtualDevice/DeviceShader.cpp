@@ -17,6 +17,17 @@ namespace Helios
 	{
 	}
 
+	uint32_t DeviceShader::ParseThreadGroupSize(const std::string& glsl_source)
+	{
+		static const std::regex local_size_regex(R"(local_size_x\s*=\s*(\d+))");
+		std::smatch match;
+		if (!std::regex_search(glsl_source, match, local_size_regex))
+			return 64;
+
+		const uint32_t parsed = static_cast<uint32_t>(std::stoul(match[1].str()));
+		return (parsed > 0 && parsed <= 1024) ? parsed : 64;
+	}
+
 	/* 创建Shader */
 	SharedPtr<DeviceShader> DeviceShader::Create(const std::string& filepath)
 	{
@@ -335,6 +346,11 @@ namespace Helios
 				if (!name.empty())
 					m_Reflection.SamplerBindings[name] = binding;
 			}
+
+			/* uniform 块：派发计算时要按 binding 绑到 uniform 缓冲，其余按 storage 缓冲处理 */
+			for (const auto& resource : resources.uniform_buffers)
+				m_Reflection.UniformBlockBindings.insert(
+					compiler.get_decoration(resource.id, spv::DecorationBinding));
 		}
 		catch (const std::exception& e)
 		{
@@ -419,6 +435,18 @@ namespace Helios
 
 			add_material_param(param_type, name, std::move(default_value),
 				HasDirective(match.str(4), kPropertyMarker), ParsePropertySpec(match.str(4)));
+		}
+
+		/* uniform 块（`layout(std140, binding = N) uniform Block {`）的 binding：
+		 * 只认块声明，裸 uniform 不带花括号、不会命中 */
+		static const std::regex block_regex(R"(layout\s*\(([^)]*)\)\s*uniform\s+[A-Za-z_]\w*\s*\{)");
+		static const std::regex block_binding_regex(R"(binding\s*=\s*(\d+))");
+		for (auto it = std::sregex_iterator(source.begin(), source.end(), block_regex); it != std::sregex_iterator(); ++it)
+		{
+			const std::string qualifiers = (*it).str(1);
+			std::smatch binding_match;
+			if (std::regex_search(qualifiers, binding_match, block_binding_regex))
+				m_Reflection.UniformBlockBindings.insert(static_cast<uint32_t>(std::stoul(binding_match[1].str())));
 		}
 	}
 }

@@ -109,6 +109,13 @@ namespace Helios
 		const std::string shader_src = ReadFile(filepath);
 		PreProcessShaderSrc(shader_src, m_OpenGLSourceCodes);
 
+		const auto compute_source = m_OpenGLSourceCodes.find(GL_COMPUTE_SHADER);
+		if (compute_source != m_OpenGLSourceCodes.end())
+		{
+			m_IsCompute = true;
+			m_ThreadGroupSize = ParseThreadGroupSize(compute_source->second);
+		}
+
 		CreateShaderProgram();
 	}
 

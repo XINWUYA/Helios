@@ -3,6 +3,7 @@
 #include <any>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <glm/glm.hpp>
 #include "DeviceVertexArray.h"
 #include "Helios/Renderer/RenderCommon.h"
@@ -55,12 +56,15 @@ namespace Helios
 		 * 只有带 @property 标记的才归材质（见 ReflectedMaterialParam::Property），其余是引擎逐绘制
 		 * 给的值或库内部声明。空 = 拿不到声明的场合（如 SPIR-V 反射路径），调用方自行回退。 */
 		std::vector<ReflectedMaterialParam> MaterialParams{};
+		/* 声明为 uniform 块（std140）的 binding：计算派发据此区分 uniform 缓冲与 storage 缓冲 */
+		std::unordered_set<uint32_t> UniformBlockBindings{};
 
 		void Clear()
 		{
 			SamplerBindings.clear();
 			SamplerStateBindings.clear();
 			MaterialParams.clear();
+			UniformBlockBindings.clear();
 		}
 
 		[[nodiscard]] int FindSamplerBinding(const std::string& name) const
@@ -126,6 +130,13 @@ namespace Helios
 
 		/* 获取Shader名 */
 		virtual const std::string& GetDebugName() const = 0;
+
+		/* 计算着色器：每个工作组多少线程（local_size_x，缺省 64） */
+		[[nodiscard]] virtual bool IsCompute() const { return false; }
+		[[nodiscard]] virtual uint32_t GetThreadGroupSize() const { return 64; }
+
+		/* 从 GLSL 源码读 local_size_x（读不到按 64） */
+		[[nodiscard]] static uint32_t ParseThreadGroupSize(const std::string& glsl_source);
 
 		/* 创建Shader */
 		static SharedPtr<DeviceShader> Create(const std::string& filepath);

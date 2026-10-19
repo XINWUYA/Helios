@@ -1,4 +1,7 @@
 ﻿#pragma once
+#include <cstdint>
+#include <string>
+#include <vector>
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 
 namespace Helios
@@ -8,6 +11,9 @@ namespace Helios
 	public:
 		OpenGLVertexBuffer(const std::string& name, uint32_t size);
 		OpenGLVertexBuffer(const std::string& name, const void* vertices, uint32_t size);
+		/* 复用已有的 GL 缓冲（计算着色器写它、绘制读它，省一次拷贝）。
+		 * 缓冲名归传入方所有，这里只借用、不删除。 */
+		OpenGLVertexBuffer(const std::string& name, uint32_t buffer_id, uint32_t size);
 		~OpenGLVertexBuffer() override;
 
 		/* 绑定 */
@@ -32,6 +38,8 @@ namespace Helios
 		uint32_t m_DataSize{ 0 };
 		/* 顶点布局 */
 		VertexBufferLayout m_Layout{};
+		/* 缓冲名的所有权：复用外部缓冲时为 false，析构不删 */
+		bool m_OwnsBuffer{ true };
 	};
 
 
@@ -59,5 +67,28 @@ namespace Helios
 		uint32_t m_Count{ 0 };
 		IndexType m_IndexType{ IndexType::UInt32 };
 	};
+
+#ifndef __APPLE__
+	/* 计算着色器用的读写缓冲（SSBO）。macOS 只有 GL 4.1，没有这个能力，不编进来。 */
+	class OpenGLStorageBuffer : public DeviceStorageBuffer
+	{
+	public:
+		OpenGLStorageBuffer(const std::string& name, const void* data, uint32_t size);
+		~OpenGLStorageBuffer() override;
+
+		void SetData(const void* data, uint32_t size) override;
+		/* 从 GPU 回读当前内容（计算写完之后读结果用），返回内部镜像 */
+		[[nodiscard]] void* GetMappedData() override;
+		[[nodiscard]] uint32_t GetDataSize() const override { return m_Size; }
+
+		[[nodiscard]] uint32_t GetBufferID() const { return m_BufferID; }
+
+	private:
+		uint32_t m_BufferID{ 0 };
+		uint32_t m_Size{ 0 };
+		/* 回读镜像（GetMappedData 的返回区） */
+		std::vector<uint8_t> m_Shadow{};
+	};
+#endif
 }
 

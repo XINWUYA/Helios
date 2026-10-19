@@ -1,11 +1,15 @@
 ﻿#pragma once
 #include <glm/glm.hpp>
+#include <utility>
+#include <vector>
 #include "RenderCommon.h"
 #include <Helios/VirtualDevice/DeviceVertexArray.h>
 
 namespace Helios
 {
 	class DeviceTexture;
+	class DeviceShader;
+	class DeviceStorageBuffer;
 
 	class RenderAPI
 	{
@@ -39,6 +43,21 @@ namespace Helios
 		virtual void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) = 0;
 		/* Flush */
 		virtual void Flush() = 0;
+
+		/* 后端有没有计算着色器（GL 4.3+ / Metal）。false 时调用方直接走 CPU 路径。 */
+		[[nodiscard]] virtual bool SupportsCompute() const { return false; }
+
+		/* 计算派发：shader 跑 group_count 个工作组。
+		 *   buffers       着色器 layout(binding = N) 与对应缓冲（uniform 块 / storage 缓冲按 shader 反射区分）
+		 *   param_*       同一趟的常量块（std140 布局），绑到 param_binding
+		 * 默认不支持，返回 false 让调用方回退。 */
+		virtual bool DispatchCompute(const SharedPtr<DeviceShader>& /*shader*/,
+			const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& /*buffers*/,
+			uint32_t /*param_binding*/, const void* /*param_data*/, uint32_t /*param_size*/,
+			uint32_t /*group_count*/)
+		{
+			return false;
+		}
 
 		/* 给纹理生成 mipmap 并记录进当前帧的命令流。帧内调用（比如探针烘焙之后）必须用它 ——
 		 * DeviceTexture::GenerateMipmap 会独立提交命令缓冲区，先于还没提交的烘焙绘制执行、读到空纹理。 */

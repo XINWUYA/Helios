@@ -2,6 +2,8 @@
 
 #include "Pch.h"
 #include "MetalRenderAPI.h"
+#include "MetalBindings.h"
+#include "MetalBuffer.h"
 #include "MetalCommon.h"
 #include "MetalTexture.h"
 #include "MetalVertexArray.h"
@@ -877,12 +879,13 @@ namespace Helios
         }
     }
 
-    bool MetalRenderAPI::DispatchCompute(MetalShader* shader,
-        const std::vector<std::pair<uint32_t, MTL::Buffer*>>& buffers,
-        const void* param_data, uint32_t param_size,
+    bool MetalRenderAPI::DispatchCompute(const SharedPtr<DeviceShader>& shader,
+        const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+        uint32_t param_binding, const void* param_data, uint32_t param_size,
         uint32_t group_count)
     {
-        if (shader == nullptr || !shader->IsCompute())
+        auto* compute_shader = dynamic_cast<MetalShader*>(shader.get());
+        if (compute_shader == nullptr || !compute_shader->IsCompute())
             return false;
 
         /* 帧还没开始（Scene 更新阶段）就先借一帧的命令缓冲：整帧共用，最后由 Present 提交 */
@@ -891,7 +894,7 @@ namespace Helios
         if (m_CurrentCommandBuffer == nullptr)
             return false;
 
-        MTL::ComputePipelineState* pipeline = shader->GetComputePipelineState();
+        MTL::ComputePipelineState* pipeline = compute_shader->GetComputePipelineState();
         if (pipeline == nullptr)
             return false;
 
@@ -907,23 +910,40 @@ namespace Helios
             m_RasterStateEncoder = nullptr;
         }
 
+        /* 着色器 binding → MSL buffer 下标：uniform 块在引擎预留的高位区间
+         * （见 MetalBinding::ToBufferIndex），storage 缓冲直接用 binding */
+        const auto& uniform_blocks = shader->GetReflectionData().UniformBlockBindings;
+        const auto to_buffer_index = [&uniform_blocks](uint32_t binding)
+        {
+            return uniform_blocks.find(binding) != uniform_blocks.end()
+                ? MetalBinding::ToBufferIndex(binding) : binding;
+        };
+
+        /* 先全部解析成功再开编码器：半路失败时不会留下没结束的编码器 */
+        std::vector<std::pair<uint32_t, MTL::Buffer*>> resolved;
+        resolved.reserve(buffers.size());
+        for (const auto& [binding, buffer] : buffers)
+        {
+            auto storage = std::dynamic_pointer_cast<MetalStorageBuffer>(buffer);
+            if (storage == nullptr || storage->GetMetalBuffer() == nullptr)
+                return false;
+            resolved.emplace_back(to_buffer_index(binding), storage->GetMetalBuffer());
+        }
+
         MTL::ComputeCommandEncoder* encoder = m_CurrentCommandBuffer->computeCommandEncoder();
         if (encoder == nullptr)
             return false;
 
         encoder->setComputePipelineState(pipeline);
-        for (const auto& [index, buffer] : buffers)
-        {
-            if (buffer != nullptr)
-                encoder->setBuffer(buffer, 0, index);
-        }
-        /* 注意：编译器的 MSL 把 uniform 块排在 [[buffer(16)]] 起（SSBO 从 1 起），
-         * 参数块这里是 20 号，和 GPUSkin.glsl 的绑定不是一一对应 */
+        for (const auto& [index, buffer] : resolved)
+            encoder->setBuffer(buffer, 0, index);
+
+        /* 常量块走 setBytes：每次派发独立副本，不占常驻缓冲 */
         if (param_data != nullptr && param_size > 0)
-            encoder->setBytes(param_data, param_size, 20);
+            encoder->setBytes(param_data, param_size, to_buffer_index(param_binding));
 
         encoder->dispatchThreadgroups(MTL::Size(group_count, 1, 1),
-            MTL::Size(shader->GetThreadGroupSize(), 1, 1));
+            MTL::Size(compute_shader->GetThreadGroupSize(), 1, 1));
         encoder->endEncoding();
         return true;
     }

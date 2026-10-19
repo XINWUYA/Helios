@@ -27,6 +27,10 @@ namespace Helios
 		void SetMat4(const std::string& name, const glm::mat4& value) override;
 		[[nodiscard]] const std::string& GetDebugName() const override { return m_DebugName; }
 
+		/* 计算着色器（#type compute）：桌面 GL 4.3+ 才有，线程组尺寸读 local_size_x */
+		[[nodiscard]] bool IsCompute() const override { return m_IsCompute; }
+		[[nodiscard]] uint32_t GetThreadGroupSize() const override { return m_ThreadGroupSize; }
+
 		/* 把驱动消息里的 "program N" 句柄还原成 shader 名附在消息后。驱动警告只带
 		 * 句柄不带名字，且句柄会复用，需要按当时的登记表反查（实现见 .cpp） */
 		[[nodiscard]] static std::string AnnotateProgramHandlesInMessage(const char* message);
@@ -41,6 +45,8 @@ namespace Helios
 
 		std::string m_DebugName{"Unnamed Shader"};
 		uint32_t m_ProgramID{ 0 };
+		bool m_IsCompute{ false };
+		uint32_t m_ThreadGroupSize{ 64 };
 
 #ifdef PLATFORM_WINDOWS
 		std::unordered_map<GLenum, std::vector<uint32_t>> m_OpenGLSPIRVs{};
