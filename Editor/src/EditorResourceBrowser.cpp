@@ -552,11 +552,22 @@ namespace Helios
 			m_SelectionAnchor = (m_SelectionAnchor != nullptr)
 				? FindNode(m_RootFileNodeTree, remap(m_SelectionAnchor->FilePath)) : nullptr;
 
-			/* 刚新建的那一项：建完就选中它，用户不用自己去找（否则"新建成功了但看不出来"） */
+			/* 刚新建的那一项：建完就选中它，用户不用自己去找（否则"新建成功了但看不出来"）。
+			 * 定位请求也一样走这里：重建前没赶上的目标，重建后连同它所在的目录一起落位。 */
 			if (!m_PendingSelectPath.empty())
 			{
 				if (SharedPtr<FileNode> created = FindNode(m_RootFileNodeTree, m_PendingSelectPath))
 				{
+					const std::filesystem::path parent = PathFromUtf8(m_PendingSelectPath).parent_path();
+					const SharedPtr<FileNode> parent_node = parent.empty()
+						? m_RootFileNodeTree
+						: FindNode(m_RootFileNodeTree, PathToUtf8(parent));
+					if (parent_node != nullptr)
+					{
+						m_CurrentFileNode = parent_node;
+						m_RevealCurrentNode = true;
+					}
+
 					m_Selection = { created };
 					m_SelectionAnchor = created;
 				}
@@ -616,6 +627,13 @@ namespace Helios
 		 * 越过一档、把滚动条顶到面板右缘（见 ShowBrowserBody）。两栏是子窗口，各自把上下内边距加回去。 */
 		const ImVec2 pane_padding = ImGui::GetStyle().WindowPadding;
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pane_padding.x, 0.0f));
+
+		/* 定位过来的这一帧把面板带到前台：它可能正压在别的页签后面，只改选中项是看不见的 */
+		if (m_FocusRequested)
+		{
+			m_FocusRequested = false;
+			ImGui::SetNextWindowFocus();
+		}
 
 		ImGui::Begin(Panel::kResourceBrowser);
 		{
@@ -909,6 +927,9 @@ namespace Helios
 		if (relative_path.rfind("..", 0) == 0)
 			return;
 
+		/* 定位是从别的面板跳过来：面板可能压在别的页签后面，下一帧带到前台 */
+		m_FocusRequested = true;
+
 		if (m_RootFileNodeTree == nullptr || m_IsDirty)
 		{
 			m_PendingSelectPath = relative_path;
@@ -1179,19 +1200,19 @@ namespace Helios
 			|| ImGui::IsPopupOpen(m_PopupDelete, ImGuiPopupFlags_None))
 			return;
 
-		if ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A))
+		if ((io.KeyCtrl || io.KeySuper) && KeyPressed(ImGuiKey_A))
 		{
 			m_Selection = visible;
 			m_SelectionAnchor = visible.empty() ? nullptr : visible.front();
 			ClearRenameCandidate();
 		}
 
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+		if (KeyPressed(ImGuiKey_Escape))
 			ClearSelection();
 
 		/* Delete / Backspace = 删除选中（先弹确认）。macOS 上标 delete 的键其实就是 Backspace，
 		 * 两个都收。重命名没有快捷键（ImGui 没有 F2 枚举），走右键菜单。 */
-		if (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Backspace))
+		if (KeyPressed(ImGuiKey_Delete) || KeyPressed(ImGuiKey_Backspace))
 		{
 			std::vector<std::string> paths;
 			paths.reserve(m_Selection.size());

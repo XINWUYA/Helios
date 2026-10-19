@@ -7,20 +7,11 @@
 
 namespace Helios
 {
-	/* 模型材质的载体：只留槽名（导出槽表、加载后按名对位用）。
-	 * 具体参数不放这里 —— 编辑期改的是 MaterialGroup 里那份活材质（按着色器反射出参数行）。 */
-	struct MaterialParams
-	{
-		std::string Name;
-	};
-
-	/* 子模型信息 */
+	/* 子模型信息：卡片的显示名 / 规模与悬停高亮用；材质走模型的槽表 */
 	struct SubModelInfo
 	{
 		std::string Name;
 		SharedPtr<DeviceVertexArray> VertexArray;
-		std::vector<float> VertexData; /* 顶点数据的原始信息，保存模型时需要 */
-		MaterialParams MaterialParams;
 		std::pair<glm::vec3, glm::vec3> AABB;
 	};
 

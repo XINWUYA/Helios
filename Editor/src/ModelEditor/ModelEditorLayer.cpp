@@ -1,10 +1,15 @@
 ﻿#include "Pch.h"
 #include "ModelEditorLayer.h"
+#include "MaterialSlotEditing.h"
 #include <glm/gtx/quaternion.hpp>
+#include <algorithm>
+#include <cfloat>
 #include <limits>
 #include "Helios/Application/Application.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/ModelImporter.h"
+#include "Helios/Scene/ModelManifest.h"
+#include "DebugViewMenu.h"
 #include "EditorCommon.h"
 #include "EditorIcons.h"
 #include "MaterialParamUI.h"
@@ -39,6 +44,56 @@ namespace Helios
 			char buffer[64] = {};
 			snprintf(buffer, sizeof(buffer), "%.3f, %.3f, %.3f", value.x, value.y, value.z);
 			return buffer;
+		}
+
+		/* 片段显示名：去掉导入时加的 <模型名>_ 前缀与扩展名，只留 take 名 */
+		std::string ClipDisplayName(const std::string& mesh_path, const std::string& clip_path)
+		{
+			const std::string clip_stem = PathToUtf8(PathFromUtf8(clip_path).stem());
+			const std::string prefix = PathToUtf8(PathFromUtf8(mesh_path).stem()) + "_";
+			if (clip_stem.rfind(prefix, 0) == 0 && clip_stem.size() > prefix.size())
+				return clip_stem.substr(prefix.size());
+			return clip_stem;
+		}
+
+		float ClipDuration(const AnimatorComponent& animator)
+		{
+			return (animator.m_Clip != nullptr) ? animator.m_Clip->GetDuration() : 0.0f;
+		}
+
+		/* 与 .mesh 同目录的 .anim，按文件名排序。prefix 非空时只收该前缀
+		 * （导入命名是 <模型名>_<片段名>.anim，别的模型的片段不掺进来） */
+		std::vector<std::filesystem::path> FindSiblingClipFiles(const std::filesystem::path& mesh_path,
+			const std::string& prefix)
+		{
+			std::vector<std::filesystem::path> clip_paths;
+
+			std::error_code error;
+			if (!std::filesystem::is_directory(mesh_path.parent_path(), error))
+				return clip_paths;
+
+			for (const auto& entry : std::filesystem::directory_iterator(mesh_path.parent_path(), error))
+			{
+				if (!entry.is_regular_file(error))
+					continue;
+				if (ToLowercase(PathToUtf8(entry.path().extension()).c_str()) != ".anim")
+					continue;
+				if (!prefix.empty() && PathToUtf8(entry.path().stem()).rfind(prefix, 0) != 0)
+					continue;
+
+				clip_paths.push_back(entry.path());
+			}
+			std::sort(clip_paths.begin(), clip_paths.end());
+			return clip_paths;
+		}
+
+		/* 导出路径归一：后缀不对（或没给）时按目标类型补上 */
+		std::filesystem::path ResolveExportPath(const std::string& file_path, const char* extension)
+		{
+			std::filesystem::path target = PathFromUtf8(file_path);
+			if (ToLowercase(PathToUtf8(target.extension()).c_str()) != extension)
+				target.replace_extension(extension);
+			return target;
 		}
 
 		/* 模型预览网格的格距：视线里约 6 格为目标，取 1/2/5 序列里最近的一档
@@ -81,7 +136,6 @@ namespace Helios
 		/* 编辑器相机登记为外部相机：每帧随场景相机一起收集渲染（见 Scene::AddExternalCamera） */
 		m_pDefaultScene->AddExternalCamera(m_pEditorCamera.get());
 		m_pModelInfo = CreateUniquePtr<ModelInfo>();
-		m_pMaterialGroup = CreateSharedPtr<MaterialGroup>();
 
 		/* 默认在场景中增加一盏方向光，光源颜色为白色 */
 		Entity entity = m_pDefaultScene->CreateEntity("DirectionalLight");
@@ -121,7 +175,32 @@ namespace Helios
 		/* 相机导航：指针在视口上才授权起手 */
 		m_pEditorCamera->SetNavigationAllowed(m_IsViewportHovered);
 		m_pEditorCamera->OnUpdate(delta_time);
+
+		/* 槽覆盖改过才同步到预览实体：编辑会自动换实例，换的是 map 里的指针 */
+		if (m_SlotOverridesDirty && m_pDefaultScene != nullptr
+			&& m_pDefaultScene->IsEntityValid(m_PreviewEntity))
+		{
+			if (auto* component = m_pDefaultScene->GetRegistry().try_get<ModelComponent>(m_PreviewEntity))
+			{
+				component->m_SlotOverrides = m_SlotOverrides;
+				m_SlotOverridesDirty = false;
+			}
+		}
+
 		m_pDefaultScene->OnUpdate(delta_time);
+
+		/* 打开模型后的首帧已经把关节树建好（SkeletonModel 在动画 Tick 之后建），
+		 * 现在再开播：下一次 Tick 才有关节可绑 */
+		if (m_AnimationStartPending)
+		{
+			m_AnimationStartPending = false;
+			if (AnimatorComponent* animator = GetPreviewAnimator())
+			{
+				animator->m_AutoPlay = true;
+				animator->m_Playing = true;
+				animator->m_Scrubbing = false;
+			}
+		}
 
 		/* 执行本帧收集到的渲染视图：模型视口的内容在这里产生 */
 		m_pDefaultScene->Render();
@@ -343,6 +422,8 @@ namespace Helios
 			ImGui::BeginChild("##ModelParamsContent", ImVec2(0.0f, 0.0f), false,
 				ImGuiWindowFlags_AlwaysUseWindowPadding | ImGuiWindowFlags_AlwaysVerticalScrollbar);
 			ShowModelBaseInfoCard();
+			ShowExportCard();
+			ShowAnimationCard();
 			ShowSubModelCards();
 			ImGui::EndChild();
 		}
@@ -370,7 +451,7 @@ namespace Helios
 		return clicked;
 	}
 
-	/* 预览工具（左上角并排的三个图标按钮）：保存模型 / 线框预览 / 重置视图。
+	/* 预览工具（左上角并排的三个图标按钮）：保存模型 / Debug View / 重置视图。
 	 * 位置与参数面板开关同款（按父窗口内容区算屏幕位置）—— 左上角不压任何子窗口、
 	 * 也不随面板收起，始终画在父窗口上；按钮悬停会挡掉视口悬停（见 ShowModelWindowUI 帧末结算） */
 	void ModelEditorLayer::ShowPreviewTools()
@@ -390,19 +471,36 @@ namespace Helios
 		bool hovered = false;
 
 		if (Icons::IconButton(Icons::Id::Save, ImVec2(button_size, button_size),
-			false, "Save Model (.mesh + .mtl)"))
+			false, "Save Model (.model + .mesh + .mtl + .anim)"))
 			ExportMeshAndMtl();
 		hovered |= ImGui::IsItemHovered();
 
-		/* 线框开着时按钮点亮（画面上只剩线框，按钮给个状态反馈） */
+		/* Debug View：与场景视口同一份档位表（见 DebugViewMenu.h），按钮点亮 = 不是 Shaded 档 */
 		ImGui::SameLine(0.0f, style.ItemSpacing.x);
-		if (Icons::IconButton(Icons::Id::Grid, ImVec2(button_size, button_size),
-			m_IsWireframeEnabled, "Wireframe"))
-		{
-			m_IsWireframeEnabled = !m_IsWireframeEnabled;
-			m_pEditorCamera->SetWireframeOverlay(m_IsWireframeEnabled);
-		}
+		const DebugViewMode debug_view = m_pEditorCamera->GetDebugViewMode();
+		const bool debug_menu_open = ImGui::IsPopupOpen("##ModelDebugViewMenu");
+		if (debug_menu_open)
+			ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+		if (Icons::IconButton(Icons::Id::DebugView, ImVec2(button_size, button_size),
+			debug_view != DebugViewMode::None, "Debug View"))
+			ImGui::OpenPopup("##ModelDebugViewMenu");
+		if (debug_menu_open)
+			ImGui::PopStyleColor();
 		hovered |= ImGui::IsItemHovered();
+
+		/* 弹层贴在按钮左下；档位行点选不收起，连点切档 */
+		ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y + Scaled(4.0f)),
+			ImGuiCond_Appearing);
+		ImGui::SetNextWindowSizeConstraints(ImVec2(DebugViewMenu::MinimumMenuWidth(), 0.0f),
+			ImVec2(FLT_MAX, FLT_MAX));
+		if (ImGui::BeginPopup("##ModelDebugViewMenu"))
+		{
+			/* 编辑器的预览相机缺省走延迟管线；前向时光照分量置灰（与场景视口同规则） */
+			DebugViewMenu::DrawItems(debug_view,
+				m_pEditorCamera->GetRenderPipeline() == RenderPipeline::Deferred,
+				[this](DebugViewMode mode) { m_pEditorCamera->SetDebugViewMode(mode); });
+			ImGui::EndPopup();
+		}
 
 		ImGui::SameLine(0.0f, style.ItemSpacing.x);
 		if (Icons::IconButton(Icons::Id::FitView, ImVec2(button_size, button_size),
@@ -437,6 +535,231 @@ namespace Helios
 		PanelChrome::EndCard(card);
 	}
 
+	/* 导出卡（右栏）：模型 / 材质 / 动画各走各的对话框，只写选中的那一种文件。
+	 * 左上角的一键保存是整包（.mesh + .mtl + 贴图 + 片段），这里用于单独出一份资产 */
+	void ModelEditorLayer::ShowExportCard()
+	{
+		PROFILE_FUNCTION();
+
+		if (m_pModel == nullptr || m_pModelInfo == nullptr)
+			return;
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("Export", Icons::Id::Export);
+
+		if (card.Open)
+		{
+			const auto draw_export_row = [this](const char* label, const char* button_text,
+				const std::string& tooltip, bool enabled, void (ModelEditorLayer::*action)())
+			{
+				const float value_width = ImGuiExt::BeginPropertyRow(label);
+
+				ImGui::BeginDisabled(!enabled);
+				if (ImGui::Button(button_text, ImVec2(value_width, 0.0f)))
+					(this->*action)();
+				ImGui::EndDisabled();
+
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("%s", tooltip.c_str());
+
+				ImGuiExt::EndPropertyRow();
+			};
+
+			draw_export_row("Model", "Export .mesh", "Copy the model geometry (.mesh) to a chosen file",
+				true, &ModelEditorLayer::ExportModelOnly);
+
+			/* 多槽模型先选槽：默认第一条，导出的是选中的那一份 */
+			const auto& slots = m_pModel->GetMaterialSlots();
+			if (slots.size() > 1)
+			{
+				std::vector<std::string> names;
+				names.reserve(slots.size());
+				for (const MaterialSlot& slot : slots)
+					names.push_back(slot.Name);
+
+				m_ExportSlot = std::clamp(m_ExportSlot, 0, static_cast<int>(names.size()) - 1);
+				ImGuiExt::DrawComboUI("Slot", names, m_ExportSlot,
+					[this](int picked) { m_ExportSlot = picked; });
+			}
+
+			std::string material_tooltip = "Write the edited material (.mtl) to a chosen file";
+			if (!slots.empty())
+			{
+				const int index = std::clamp(m_ExportSlot, 0, static_cast<int>(slots.size()) - 1);
+				material_tooltip = "Export '" + slots[static_cast<size_t>(index)].Name + "' (.mtl) to a chosen file";
+			}
+			draw_export_row("Material", "Export .mtl", material_tooltip,
+				!slots.empty(), &ModelEditorLayer::ExportMaterialOnly);
+
+			/* 动画导的是当前选中的片段：把它的名字带进提示里 */
+			std::string animation_tooltip = "No animation clip";
+			const SharedPtr<AnimationClip>* selected =
+				(m_SelectedClip >= 0 && m_SelectedClip < static_cast<int>(m_AnimationClips.size()))
+				? &m_AnimationClips[static_cast<size_t>(m_SelectedClip)] : nullptr;
+			if (selected != nullptr && *selected != nullptr)
+			{
+				animation_tooltip = "Export '" + ClipDisplayName(m_pModelInfo->m_Path, (*selected)->GetPath())
+					+ "' (.anim) to a chosen file";
+			}
+			draw_export_row("Animation", "Export .anim", animation_tooltip,
+				selected != nullptr && *selected != nullptr, &ModelEditorLayer::ExportSelectedAnimation);
+		}
+
+		PanelChrome::EndCard(card);
+	}
+
+	/* 单独导出模型：只拷 .mesh（骨骼段原样带走），不写材质与片段 */
+	void ModelEditorLayer::ExportModelOnly()
+	{
+		if (!m_pModelInfo || !m_pModel)
+			return;
+
+		const std::string default_name = PathToUtf8(PathFromUtf8(m_pModelInfo->m_Path).filename());
+		const auto file_path = FileDialog::SaveFile("Mesh(*.mesh)\0*.mesh\0", default_name.c_str());
+		if (file_path.empty())
+			return;
+
+		ExportModelTo(file_path);
+	}
+
+	/* 单独导出材质：写选中槽的那一条 .mtl */
+	void ModelEditorLayer::ExportMaterialOnly()
+	{
+		if (!m_pModelInfo || !m_pModel)
+			return;
+
+		std::filesystem::path default_path = PathFromUtf8(m_pModelInfo->m_Path);
+		default_path.replace_extension(".mtl");
+		const auto file_path = FileDialog::SaveFile("Material(*.mtl)\0*.mtl\0",
+			PathToUtf8(default_path.filename()).c_str());
+		if (file_path.empty())
+			return;
+
+		ExportMaterialTo(file_path, m_ExportSlot);
+	}
+
+	/* 单独导出动画：只写当前选中片段的 .anim，默认文件名用片段名（不带模型前缀） */
+	void ModelEditorLayer::ExportSelectedAnimation()
+	{
+		if (m_SelectedClip < 0 || m_SelectedClip >= static_cast<int>(m_AnimationClips.size()))
+			return;
+
+		const SharedPtr<AnimationClip>& clip = m_AnimationClips[static_cast<size_t>(m_SelectedClip)];
+		if (clip == nullptr)
+			return;
+
+		const std::string default_name = ClipDisplayName(m_pModelInfo->m_Path, clip->GetPath()) + ".anim";
+		const auto file_path = FileDialog::SaveFile("Animation(*.anim)\0*.anim\0", default_name.c_str());
+		if (file_path.empty())
+			return;
+
+		ExportAnimationTo(file_path);
+	}
+
+	/* 动画卡（右栏）：打开带骨骼动画的模型时自动挂上的动画组件，在这里就是一张卡 ——
+	 * 片段、播放、循环、速度、时间轴都在这里改，预览下一帧跟着动。
+	 * 模型没带片段（组件没挂）时整张卡不出现 */
+	void ModelEditorLayer::ShowAnimationCard()
+	{
+		PROFILE_FUNCTION();
+
+		AnimatorComponent* animator = GetPreviewAnimator();
+		if (animator == nullptr || m_AnimationClips.empty())
+			return;
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("Animation", Icons::Id::Animation);
+		if (card.Open)
+		{
+			/* 片段：单个直接显示，多个 take 给下拉切换 */
+			if (m_AnimationClips.size() > 1)
+			{
+				std::vector<std::string> names;
+				names.reserve(m_AnimationClips.size());
+				for (const auto& clip : m_AnimationClips)
+				{
+					names.push_back(clip != nullptr
+						? ClipDisplayName(m_pModelInfo->m_Path, clip->GetPath()) : std::string("(missing)"));
+				}
+
+				int selected = (m_SelectedClip >= 0 && m_SelectedClip < static_cast<int>(m_AnimationClips.size()))
+					? m_SelectedClip : 0;
+				ImGuiExt::DrawComboUI("Clip", names, selected,
+					[this, animator](int index)
+					{
+						m_SelectedClip = index;
+						animator->m_Clip = m_AnimationClips[static_cast<size_t>(index)];
+						animator->m_Loop = animator->m_Clip->IsLoop();
+						animator->m_Time = 0.0f;
+						animator->m_Playing = true;
+						animator->m_Scrubbing = false;
+					});
+			}
+			else
+			{
+				const SharedPtr<AnimationClip>& clip = m_AnimationClips.front();
+				ImGuiExt::DrawCommonTextUI("Clip", clip != nullptr
+					? ClipDisplayName(m_pModelInfo->m_Path, clip->GetPath()) : std::string("(missing)"));
+			}
+
+			/* 播放 / 暂停：暂停停在当前姿势，跟时间轴面板同一套语义 */
+			{
+				ImGuiExt::BeginPropertyRow("Playback");
+
+				const float button_size = ImGui::GetFrameHeight();
+				const bool playing = animator->m_Playing;
+				if (Icons::IconButton(playing ? Icons::Id::Pause : Icons::Id::Play,
+					ImVec2(button_size, button_size), playing, playing ? "Pause" : "Play"))
+				{
+					animator->m_Playing = !playing;
+					animator->m_Scrubbing = !animator->m_Playing;
+				}
+
+				ImGui::SameLine();
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextDisabled("%.2f / %.2f s", animator->m_Time, ClipDuration(*animator));
+				ImGuiExt::EndPropertyRow();
+			}
+
+			/* 时间轴：拖到哪一帧就定格在哪一帧（播放随之停下） */
+			{
+				const float duration = ClipDuration(*animator);
+				float time = animator->m_Time;
+				const float value_width = ImGuiExt::BeginPropertyRow("Time");
+				ImGui::SetNextItemWidth(value_width);
+				if (duration > 1.0e-5f
+					&& ImGui::SliderFloat("##AnimationTime", &time, 0.0f, duration, "%.2f s"))
+				{
+					animator->m_Playing = false;
+					animator->m_Scrubbing = true;
+					animator->m_Time = time;
+				}
+				ImGuiExt::EndPropertyRow();
+			}
+
+			ImGuiExt::DrawCheckboxUI("Loop", animator->m_Loop);
+
+			/* 速度：与动画组件的属性卡同一口径 */
+			{
+				const float value_width = ImGuiExt::BeginPropertyRow("Speed");
+				ImGui::SetNextItemWidth(value_width);
+				ImGui::DragFloat("##AnimationSpeed", &animator->m_Speed,
+					AnimatorComponent::kSpeedStep, AnimatorComponent::kSpeedMin,
+					AnimatorComponent::kSpeedMax, "%.2fx");
+				ImGuiExt::EndPropertyRow();
+			}
+		}
+
+		PanelChrome::EndCard(card);
+	}
+
+	/* 预览实体上挂的动画组件（模型带片段时才挂） */
+	AnimatorComponent* ModelEditorLayer::GetPreviewAnimator()
+	{
+		if (m_pDefaultScene == nullptr || !m_pDefaultScene->IsEntityValid(m_PreviewEntity))
+			return nullptr;
+
+		return m_pDefaultScene->GetRegistry().try_get<AnimatorComponent>(m_PreviewEntity);
+	}
+
 	/* 每个子模型一张卡：规模信息 + 它的材质（Shader 选择 + 按反射列出的参数行）。
 	 * 悬停卡头 = 该子模型的网格段在预览里高亮（多个子网格时才做：单网格没有"哪一段"的歧义）。 */
 	void ModelEditorLayer::ShowSubModelCards()
@@ -448,9 +771,13 @@ namespace Helios
 		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
 		{
 			const auto& sub_model_info = m_pModelInfo->m_SubModelInfos[i];
-			const auto& material = m_pMaterialGroup->GetMaterialByIndex(i);
-			const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(i));
-			if (sub_model_info == nullptr || material == nullptr || entry == nullptr)
+			const MaterialSlot* slot = m_pModel->GetSlotForSegment(i);
+			if (sub_model_info == nullptr || slot == nullptr)
+				continue;
+
+			SharedPtr<Material> material =
+				MaterialSlotEditing::Resolve(*m_pModel, m_SlotOverrides, slot->Name);
+			if (material == nullptr)
 				continue;
 
 			ImGui::PushID(static_cast<int>(i));
@@ -468,16 +795,26 @@ namespace Helios
 				ImGuiExt::DrawCommonTextUI("Vertices",
 					std::to_string(sub_model_info->VertexArray->GetVertexCount()));
 
-				/* 材质区：来源引用行 + Shader 选择行 + 参数行（集合与类型都来自 Shader 反射，
-				 * 换 Shader 行集跟着换；值缺的显示反射默认值）。与属性面板的材质卡共用同一套控件。 */
+				/* 材质区：来源行 + Shader + 参数行；编辑语义与属性面板共用 MaterialSlotEditing */
 				ImGui::Separator();
 				ImGui::TextColored(EditorTheme::Token::TextLabel, "Material Parameters");
 
-				DrawSubModelMaterialRefRow(static_cast<int>(i), *entry);
+				DrawSubModelMaterialRefRow(static_cast<int>(i));
 
-				/* 换 Shader 也是编辑：挂着的资产引用脱钩（导出随条目形态走） */
-				if (MaterialParamUI::DrawMaterialShaderRow(*material, m_ShaderOptions))
-					DetachSubModelMaterialAsset(i);
+				/* 换 Shader 先落到实例上：共享的模型默认 / 材质资产不能被就地改 */
+				const std::string picked = MaterialParamUI::DrawMaterialShaderPicker(*material, m_ShaderOptions);
+				if (!picked.empty())
+				{
+					bool changed = false;
+					SharedPtr<Material> instance =
+						MaterialSlotEditing::MakeInstance(*m_pModel, m_SlotOverrides, slot->Name, changed);
+					if (instance != nullptr)
+					{
+						instance->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(picked)));
+						material = std::move(instance);
+						MarkSlotOverridesDirty();
+					}
+				}
 
 				const std::vector<MaterialParamUI::MaterialParamRow> rows = MaterialParamUI::BuildMaterialParamRows(*material);
 				if (rows.empty())
@@ -485,8 +822,7 @@ namespace Helios
 
 				for (const MaterialParamUI::MaterialParamRow& row : rows)
 				{
-					/* 层里的材质就是编辑缓冲：改动落回材质本体（写回里顺带做脱钩） */
-					MaterialParamUI::DrawMaterialParamRow(row.Param, row.Spec, nullptr,
+					MaterialParamUI::DrawMaterialParamRow(row.Param, row.Spec, m_AssetRevealFunc,
 						[this, i](ParamType type, const std::string& name, const std::any& value)
 						{
 							WriteSubModelMaterialParam(i, type, name, value);
@@ -499,14 +835,18 @@ namespace Helios
 		}
 	}
 
-	/* 子模型卡的材质引用行：显示当前材质来源（资产引用 = 文件名；内嵌 = embedded），
-	 * 拖一个 .mtl 落上来即挂载（或替换）—— 内容反序列化进编辑缓冲，见 AssignSubModelMaterial */
-	void ModelEditorLayer::DrawSubModelMaterialRefRow(int index, const MaterialEntry& entry)
+
+	/* 子模型卡的材质引用行：显示当前来源（覆盖来源 ?: 模型清单默认），拖 .mtl 落上来即挂载 */
+	void ModelEditorLayer::DrawSubModelMaterialRefRow(int index)
 	{
-		const bool by_asset = !entry.AssetPath.empty();
-		const std::string display = by_asset
-			? PathToUtf8(PathFromUtf8(entry.AssetPath).filename())
-			: std::string("(embedded)");
+		const MaterialSlot* slot = m_pModel->GetSlotForSegment(static_cast<size_t>(index));
+		if (slot == nullptr)
+			return;
+
+		const std::string source = MaterialSlotEditing::SourcePath(*m_pModel, m_SlotOverrides, slot->Name);
+		const std::string display = source.empty()
+			? std::string("(model default)")
+			: PathToUtf8(PathFromUtf8(source).filename());
 
 		const float value_width = ImGuiExt::BeginPropertyRow("Material", EditorTheme::Token::PropertyLabelWidth, true);
 
@@ -518,9 +858,9 @@ namespace Helios
 
 		if (ImGui::IsItemHovered())
 		{
-			if (by_asset)
+			if (!source.empty())
 				ImGui::SetTooltip("%s\n\nDrag a .mtl material asset here to assign or replace it. Editing parameters detaches from the asset.",
-					RELATIVE_PATH(entry.AssetPath).c_str());
+					RELATIVE_PATH(source).c_str());
 			else
 				ImGui::SetTooltip("Drag a .mtl material asset here to assign it");
 		}
@@ -544,22 +884,32 @@ namespace Helios
 		ImGuiExt::EndPropertyRow();
 	}
 
-	/* 当前模型第 index 段的材质来源：资产引用路径（空 = 内嵌定义） */
-	std::string ModelEditorLayer::GetSubModelMaterialAssetPath(size_t index) const
+	SharedPtr<Material> ModelEditorLayer::GetSubModelMaterial(size_t index) const
 	{
-		const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(index));
-		return (entry != nullptr) ? entry->AssetPath : std::string();
+		const MaterialSlot* slot = m_pModel->GetSlotForSegment(index);
+		if (slot == nullptr)
+			return nullptr;
+
+		return MaterialSlotEditing::Resolve(*m_pModel, m_SlotOverrides, slot->Name);
 	}
 
-	/* 挂材质资产：GetOrLoad 把该 .mtl 反序列化（单条目、内嵌定义的材质资产），内容就地把
-	 * 编辑缓冲那份材质覆盖成资产定义 —— 对象地址不变，预览与参数行立即跟随；条目记下
-	 * 引用路径，导出随条目形态写引用（模型跟随材质资产变化）。 */
+	/* 当前模型第 index 段的材质来源（覆盖来源 ?: 清单默认；空 = 内嵌 / 白模） */
+	std::string ModelEditorLayer::GetSubModelMaterialAssetPath(size_t index) const
+	{
+		const MaterialSlot* slot = m_pModel->GetSlotForSegment(index);
+		if (slot == nullptr)
+			return {};
+
+		return MaterialSlotEditing::SourcePath(*m_pModel, m_SlotOverrides, slot->Name);
+	}
+
+	/* 挂材质资产：记成槽覆盖（共享引用）；改参数时由 MaterialSlotEditing 自动转实例 */
 	bool ModelEditorLayer::AssignSubModelMaterial(size_t index, const std::string& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
-		const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(index));
-		if (entry == nullptr || entry->pMaterial == nullptr)
+		const MaterialSlot* slot = m_pModel->GetSlotForSegment(index);
+		if (slot == nullptr)
 			return false;
 
 		auto material = AssetManager::Instance().GetOrLoad<Material>(absolute_path);
@@ -569,34 +919,25 @@ namespace Helios
 			return false;
 		}
 
-		entry->pMaterial->CopyDefinitionFrom(*material);
-		m_pMaterialGroup->SetEntryAssetPath(static_cast<int>(index), absolute_path);
+		MaterialSlotOverride slot_override;
+		slot_override.pMaterial = std::move(material);
+		slot_override.SourceAssetPath = absolute_path;
+		m_SlotOverrides[slot->Name] = std::move(slot_override);
+		MarkSlotOverridesDirty();
 		return true;
 	}
 
-	/* 参数写回：改动落编辑缓冲；挂着资产引用的随之转内嵌（导出写全量定义） */
+	/* 参数写回：与属性面板同一条路（改参数自动实例化） */
 	void ModelEditorLayer::WriteSubModelMaterialParam(size_t index, ParamType type,
 		const std::string& name, const std::any& value)
 	{
-		const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(index));
-		if (entry == nullptr || entry->pMaterial == nullptr)
+		const MaterialSlot* slot = m_pModel->GetSlotForSegment(index);
+		if (slot == nullptr)
 			return;
 
-		if (type == ParamType::Texture)
-			entry->pMaterial->SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
-		else
-			entry->pMaterial->SetParameters(type, name, value);
-
-		DetachSubModelMaterialAsset(index);
-	}
-
-	/* 材质被就地编辑：挂着的资产引用转内嵌 —— 改动塞进下一次导出的全量定义，
-	 * 资产文件本身不动（改资产是资源面板里的事） */
-	void ModelEditorLayer::DetachSubModelMaterialAsset(size_t index)
-	{
-		const MaterialEntry* entry = m_pMaterialGroup->GetEntryByIndex(static_cast<int>(index));
-		if (entry != nullptr && !entry->AssetPath.empty())
-			m_pMaterialGroup->SetEntryAssetPath(static_cast<int>(index), "");
+		bool changed = false;
+		MaterialSlotEditing::WriteParam(*m_pModel, m_SlotOverrides, slot->Name, type, name, value, changed);
+		MarkSlotOverridesDirty();
 	}
 
 	/* 未导入模型时的提示：空窗口要说清"为什么是空的、该怎么办"。
@@ -670,7 +1011,7 @@ namespace Helios
 			return false;
 
 		const std::string extension = ToLowercase(PathToUtf8(PathFromUtf8(path).extension()).c_str());
-		if (extension == ".mesh")
+		if (extension == ".model" || extension == ".mesh")
 			return LoadMeshModel(path);
 
 		const bool exchange_format = extension == ".obj" || extension == ".fbx" || extension == ".gltf"
@@ -692,8 +1033,8 @@ namespace Helios
 		return LoadMeshModel(mesh_path);
 	}
 
-	/* 加载 .mesh：模型编辑器对"场景里在用的那份资产"打开 —— 网格段与槽表材质都来自资产本身。
-	 * 材质克隆进编辑缓冲（就地改参数看效果），几何不重建、直接用加载好的对象。 */
+	/* 加载 .model / .mesh：模型编辑器对"场景里在用的那份资产"打开 —— 网格段与槽表都来自
+	 * 资产本身；编辑落在槽覆盖上（改参数自动转实例），几何不重建。 */
 	bool ModelEditorLayer::LoadMeshModel(const std::string& path)
 	{
 		PROFILE_FUNCTION();
@@ -709,79 +1050,58 @@ namespace Helios
 
 		m_pModelInfo->Reset();
 		m_pModelInfo->m_Path = path;
-		m_pMaterialGroup->ClearAllMaterials();
+		m_SlotOverrides.clear();
+		m_SlotOverridesDirty = false;
+		m_ExportSlot = 0;
 
-		/* 每个网格段一张子模型卡 + 一条材质条目（按段索引对位）：
-		 * 材质取段的槽默认绑定（伴生 .mtl），没有就补默认材质 */
-		const auto& segments = model->GetMeshSegments();
-		for (size_t i = 0; i < segments.size(); ++i)
+		/* 每个网格段一张子模型卡；材质按段的槽索引取（见 Model::GetSlotForSegment） */
+		for (const auto& segment : model->GetMeshSegments())
 		{
-			const auto& segment = segments[i];
-
 			auto sub_model_info = CreateSharedPtr<SubModelInfo>();
 			sub_model_info->Name = segment->GetDebugName();
 			sub_model_info->VertexArray = segment->GetMeshPrimitive().VertexArray;
 			sub_model_info->AABB = std::make_pair(segment->GetAABBMin(), segment->GetAABBMax());
-
-			const MaterialSlot* slot = model->GetSlotByIndex(segment->GetSlotIndex());
-			if (slot != nullptr)
-				sub_model_info->MaterialParams.Name = slot->Name;
 			m_pModelInfo->m_SubModelInfos.emplace_back(std::move(sub_model_info));
-
-			auto material = (slot != nullptr && slot->pDefault != nullptr)
-				? slot->pDefault->Clone()
-				: Material::Create(AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/MaterialShaders/PBRStandard.glsl")));
-			m_pMaterialGroup->EmplaceMaterial(std::move(material));
-			if (slot != nullptr)
-			{
-				m_pMaterialGroup->SetEntrySlotName(static_cast<int>(i), slot->Name);
-
-				/* 槽默认材质来自资产引用（GetOrLoad 加载的带路径）：条目保留引用身份 ——
-				 * 不改参数的话导出继续写引用形态（模型与材质资产保持同步） */
-				if (slot->pDefault != nullptr && !slot->pDefault->GetPath().empty())
-					m_pMaterialGroup->SetEntryAssetPath(static_cast<int>(i), slot->pDefault->GetPath());
-			}
 		}
 
 		m_pModelInfo->m_AABB = std::make_pair(model->GetAABBMin(), model->GetAABBMax());
+
+		/* 模型自带的动画片段就在 .mesh 旁边，一并收进来 */
+		CollectAnimationClips(path);
 
 		m_pModel = std::move(model);
 		ShowModelInScene();
 		return true;
 	}
 
-	/* 拷贝指定格式的文件到目标路径 */
-	static bool CopyFileFromTo(const std::filesystem::path& src_path, const std::filesystem::path& dst_path, const std::regex& suffix)
+	/* 收集与 .mesh 同目录的动画片段：先按导入命名（<模型名>_<片段名>.anim）找，
+	 * 找不到就认目录里所有 .anim —— 模型改过名的导出目录片段沿用原名，靠这条兜底。
+	 * 按文件名排序，首个就是默认播的那个 */
+	void ModelEditorLayer::CollectAnimationClips(const std::string& mesh_path)
 	{
 		PROFILE_FUNCTION();
 
-		if (src_path.empty() || src_path.empty())
-			return false;
+		m_AnimationClips.clear();
+		m_SelectedClip = -1;
 
-		if (!std::filesystem::exists(src_path))
-			return false;
+		const std::filesystem::path path = PathFromUtf8(mesh_path);
+		std::vector<std::filesystem::path> clip_paths =
+			FindSiblingClipFiles(path, PathToUtf8(path.stem()) + "_");
+		if (clip_paths.empty())
+			clip_paths = FindSiblingClipFiles(path, {});
 
-		for (auto& item : std::filesystem::directory_iterator(src_path))
+		for (const std::filesystem::path& clip_path : clip_paths)
 		{
-			std::filesystem::path dst_item_path = dst_path / item.path().filename();
-			if (std::filesystem::is_directory(item.status()))
-			{
-				std::filesystem::create_directory(dst_item_path);
-				CopyFileFromTo(item.path(), dst_item_path, suffix);
-			}
-			else
-			{
-				if (std::regex_match(item.path().extension().string(), suffix))
-				{
-					std::filesystem::copy_file(item.path(), dst_item_path, std::filesystem::copy_options::skip_existing);
-				}
-			}
+			auto clip = AssetManager::Instance().GetOrLoad<AnimationClip>(PathToUtf8(clip_path));
+			if (clip != nullptr)
+				m_AnimationClips.push_back(std::move(clip));
 		}
-		return true;
+
+		if (!m_AnimationClips.empty())
+			m_SelectedClip = 0;
 	}
 
-	/* 保存模型（.mesh & .mtl）：弹窗预填当前模型的文件名，选目标后走 SaveModelTo */
+	/* 一键保存模型（.model + .mesh + .mtl + .anim）：弹窗预填当前模型的文件名 */
 	void ModelEditorLayer::ExportMeshAndMtl()
 	{
 		PROFILE_FUNCTION();
@@ -789,104 +1109,264 @@ namespace Helios
 		if (!m_pModelInfo || !m_pModel)
 			return;
 
-		const std::string default_name = PathToUtf8(PathFromUtf8(m_pModelInfo->m_Path).filename());
-		const auto file_path = FileDialog::SaveFile("Mesh(*.mesh)\0*.mesh\0", default_name.c_str());
+		std::filesystem::path default_path = PathFromUtf8(m_pModelInfo->m_Path);
+		default_path.replace_extension(".model");
+		const auto file_path = FileDialog::SaveFile("Model(*.model)\0*.model\0",
+			PathToUtf8(default_path.filename()).c_str());
 		if (file_path.empty())
 			return;
 
 		SaveModelTo(file_path);
 	}
 
-	/* 保存到指定路径：几何不可编辑 —— 当前 .mesh 原样拷贝到目标，再把材质与贴图写到同一
-	 * 目录。材质条目按形态写出：内嵌的收敛参数后全量写、引用形态只写 Asset（模型跟随
-	 * 材质资产）；贴图一并拷到目标目录（内嵌材质的引用是相对路径，导出目录自包含）。 */
-	bool ModelEditorLayer::SaveModelTo(const std::string& mesh_file_path)
+	/* 保存到指定路径：几何原样拷成 .mesh，材质写成独立 .mtl，最后写 .model 清单组装。
+	 * 内嵌 / 改过参数的条目生成 <stem>_materials/<Slot>.mtl；纯引用保留原路径。 */
+	bool ModelEditorLayer::SaveModelTo(const std::string& model_file_path)
 	{
 		PROFILE_FUNCTION();
 
 		if (!m_pModelInfo || !m_pModel)
 			return false;
 
-		/* 补后缀：对话框里没带扩展名（或给了别的）时按 .mesh 落盘 —— 模型只写这个格式 */
-		std::string target_path = mesh_file_path;
-		std::filesystem::path target_mesh = PathFromUtf8(target_path);
-		if (ToLowercase(PathToUtf8(target_mesh.extension()).c_str()) != ".mesh")
-		{
-			target_mesh.replace_extension(".mesh");
-			target_path = PathToUtf8(target_mesh);
-		}
-
-		const std::filesystem::path source_mesh = PathFromUtf8(m_pModelInfo->m_Path);
-		if (source_mesh.empty() || target_mesh.empty())
+		const std::filesystem::path target_model = ResolveExportPath(model_file_path, ".model");
+		if (target_model.empty())
 			return false;
 
-		/* 几何与打开的 .mesh 完全一致：原样拷贝（目标就是自己时跳过） */
+		const std::string stem = PathToUtf8(target_model.stem());
+		const std::filesystem::path target_mesh = target_model.parent_path() / PathFromUtf8(stem + ".mesh");
+		const std::filesystem::path source_mesh = PathFromUtf8(m_pModel->GetGeometryPath());
+		if (source_mesh.empty())
+			return false;
+
 		std::error_code error;
+		std::filesystem::create_directories(target_model.parent_path(), error);
 		if (source_mesh != target_mesh)
 		{
 			std::filesystem::copy_file(source_mesh, target_mesh,
 				std::filesystem::copy_options::overwrite_existing, error);
 			if (error)
 			{
-				EDITOR_LOG_ERROR("Failed to save model mesh to {}: {}.", target_path, error.message());
+				EDITOR_LOG_ERROR("Failed to export model geometry to {}: {}.",
+					PathToUtf8(target_mesh), error.message());
 				return false;
 			}
 		}
 
-		/* 导出材质：把导入时的材质名写进槽表（加载后覆盖表按槽名匹配）；
-		 * 参数收敛只对内嵌条目做（反射是集合的单一来源，引用条目不写材质体） */
-		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
+		/* 动画片段跟着模型走：拷到目标目录，文件名只留片段名 */
+		for (const SharedPtr<AnimationClip>& clip : m_AnimationClips)
 		{
-			m_pMaterialGroup->SetEntrySlotName(static_cast<int>(i),
-				m_pModelInfo->m_SubModelInfos[i]->MaterialParams.Name);
-		}
-		for (const MaterialEntry& entry : m_pMaterialGroup->GetEntries())
-		{
-			if (entry.AssetPath.empty() && entry.pMaterial != nullptr)
-				entry.pMaterial->RetainShaderDeclaredParams();
+			if (clip == nullptr || clip->GetPath().empty())
+				continue;
+
+			const std::filesystem::path clip_path = PathFromUtf8(clip->GetPath());
+			const std::filesystem::path target_clip = target_model.parent_path()
+				/ PathFromUtf8(ClipDisplayName(m_pModelInfo->m_Path, clip->GetPath()) + ".anim");
+			if (target_clip == clip_path)
+				continue;
+
+			std::error_code clip_error;
+			std::filesystem::copy_file(clip_path, target_clip,
+				std::filesystem::copy_options::overwrite_existing, clip_error);
+			if (clip_error)
+			{
+				EDITOR_LOG_WARN("Failed to save animation clip to {}: {}.",
+					PathToUtf8(target_clip), clip_error.message());
+			}
 		}
 
-		std::filesystem::path target_mtl = target_mesh;
-		target_mtl.replace_extension(".mtl");
-		m_pMaterialGroup->Serializer(PathToUtf8(target_mtl));
+		const std::filesystem::path materials_dir =
+			target_model.parent_path() / PathFromUtf8(stem + "_materials");
+		std::filesystem::create_directories(materials_dir, error);
 
-		/* 拷贝贴图文件（材质里的引用是相对路径，导出目录要自包含） */
-		const std::regex pattern(R"(^.*\.(pdf|png|jpeg|jpg|tga|bmp|dds)$)");
-		CopyFileFromTo(source_mesh.parent_path(), target_mesh.parent_path(), pattern);
+		std::vector<ModelManifest::Slot> entries;
+		std::set<std::string> used_material_names;
+		const auto& slots = m_pModel->GetMaterialSlots();
+		for (int index = 0; index < static_cast<int>(slots.size()); ++index)
+		{
+			const MaterialSlot& slot = slots[index];
+			const auto override_iter = m_SlotOverrides.find(slot.Name);
+			const MaterialSlotOverride* slot_override =
+				(override_iter != m_SlotOverrides.end()) ? &override_iter->second : nullptr;
+
+			const SharedPtr<Material> material = (slot_override != nullptr && slot_override->pMaterial != nullptr)
+				? slot_override->pMaterial : slot.pDefault;
+			if (material == nullptr)
+				continue;
+
+			/* 能沿用引用就沿用：实体覆盖是共享资产 / 模型默认本身是引用；
+			 * 实例 / 内嵌 / 白模写成独立 .mtl */
+			std::string asset_path;
+			if (slot_override != nullptr && !slot_override->IsInstance
+				&& !slot_override->SourceAssetPath.empty())
+			{
+				asset_path = slot_override->SourceAssetPath;
+			}
+			else if (slot_override == nullptr && !slot.SourcePath.empty())
+			{
+				asset_path = slot.SourcePath;
+			}
+
+			if (asset_path.empty())
+			{
+				/* 文件名按槽名清理；清理后重名的加序号，别互相覆盖 */
+				const std::string base_name = SanitizeFileName(slot.Name, "Slot_" + std::to_string(index));
+				std::string slot_name = base_name;
+				int suffix = 2;
+				while (!used_material_names.insert(slot_name).second)
+					slot_name = base_name + "_" + std::to_string(suffix++);
+
+				const std::filesystem::path material_path = materials_dir / PathFromUtf8(slot_name + ".mtl");
+				if (MaterialIO::WriteFile(PathToUtf8(material_path), *material))
+				{
+					/* 贴图跟着搬进目标目录，导出的模型自己就能加载 */
+					MaterialIO::MakeTexturesLocal(PathToUtf8(material_path),
+						PathToUtf8(target_model.parent_path() / "textures"));
+				}
+				else
+				{
+					EDITOR_LOG_WARN("Failed to export material: {}.", PathToUtf8(material_path));
+				}
+				asset_path = PathToUtf8(material_path);
+			}
+
+			ModelManifest::Slot entry;
+			entry.Name = slot.Name;
+			entry.AssetPath = asset_path;
+
+			/* 模型默认自带的参数覆盖：没动过才原样写回（覆盖层属于引用形态） */
+			if (slot_override == nullptr && slot.pOverride != nullptr && asset_path == slot.SourcePath)
+			{
+				entry.pOverride = slot.pOverride;
+				entry.HasRasterOverride = slot.HasRasterOverride;
+			}
+
+			entries.push_back(std::move(entry));
+		}
+
+		if (!ModelManifest::Write(PathToUtf8(target_model), PathToUtf8(target_mesh), entries))
+			return false;
 
 		return true;
 	}
 
-	/* 把当前模型放进编辑器场景：旧模型实体全部销毁，只留一个挂当前模型的实体；
-	 * 取景交给视口尺寸就绪的下一帧（m_AutoFocusPending → FocusOn，见 ShowModelWindowUI） */
+	/* 单独导出模型：只拷 .mesh（骨骼段原样带走），不写材质与片段 */
+	bool ModelEditorLayer::ExportModelTo(const std::string& mesh_file_path)
+	{
+		PROFILE_FUNCTION();
+
+		if (!m_pModelInfo || !m_pModel)
+			return false;
+
+		const std::filesystem::path target_mesh = ResolveExportPath(mesh_file_path, ".mesh");
+		const std::filesystem::path source_mesh = PathFromUtf8(m_pModel->GetGeometryPath());
+		if (source_mesh.empty() || target_mesh.empty())
+			return false;
+		if (source_mesh == target_mesh)
+			return true;
+
+		std::error_code error;
+		std::filesystem::copy_file(source_mesh, target_mesh,
+			std::filesystem::copy_options::overwrite_existing, error);
+		if (error)
+		{
+			EDITOR_LOG_ERROR("Failed to export model mesh to {}: {}.",
+				PathToUtf8(target_mesh), error.message());
+			return false;
+		}
+		return true;
+	}
+
+	/* 单独导出材质：只写选中槽的 .mtl（内嵌定义全量写） */
+	bool ModelEditorLayer::ExportMaterialTo(const std::string& material_file_path, int slot_index)
+	{
+		PROFILE_FUNCTION();
+
+		if (!m_pModelInfo || !m_pModel || m_pModel->GetMaterialSlots().empty())
+			return false;
+
+		const std::filesystem::path target = ResolveExportPath(material_file_path, ".mtl");
+		if (target.empty())
+			return false;
+
+		const int index = std::clamp(slot_index, 0, static_cast<int>(m_pModel->GetMaterialSlots().size()) - 1);
+		const MaterialSlot& slot = m_pModel->GetMaterialSlots()[static_cast<size_t>(index)];
+		const SharedPtr<Material> material = MaterialSlotEditing::Resolve(*m_pModel, m_SlotOverrides, slot.Name);
+		if (material == nullptr)
+			return false;
+
+		return MaterialIO::WriteFile(PathToUtf8(target), *material);
+	}
+
+	/* 单独导出动画：只写当前选中片段的 .anim（轨道与事件原样落盘） */
+	bool ModelEditorLayer::ExportAnimationTo(const std::string& animation_file_path)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_SelectedClip < 0 || m_SelectedClip >= static_cast<int>(m_AnimationClips.size()))
+			return false;
+
+		const SharedPtr<AnimationClip>& clip = m_AnimationClips[static_cast<size_t>(m_SelectedClip)];
+		if (clip == nullptr)
+			return false;
+
+		const std::filesystem::path target = ResolveExportPath(animation_file_path, ".anim");
+		if (target.empty())
+			return false;
+
+		clip->Serializer(PathToUtf8(target));
+
+		std::error_code error;
+		return std::filesystem::exists(target, error);
+	}
+
+	/* 把当前模型放进编辑器场景：旧预览实体整棵销毁（骨骼的关节是它的子节点），
+	 * 只留一个挂当前模型的实体；模型自带片段时自动挂动画组件并关联首个 clip，
+	 * 关节树交给场景更新建好后开播 —— 打开就能看动。取景交给视口尺寸就绪的下一帧
+	 * （m_AutoFocusPending → FocusOn，见 ShowModelWindowUI） */
 	void ModelEditorLayer::ShowModelInScene()
 	{
 		PROFILE_FUNCTION();
 
-		/* 先移除场景中的其他模型 */
-		m_pDefaultScene->DestroyTargetEntities<ModelComponent>();
+		/* 先销毁上一个预览实体：Scene::DestroyEntity 会把骨骼模型的关节实体一并清掉。
+		 * 只清组件的话关节树会留在场景里，换个模型就多存一棵。 */
+		if (m_pDefaultScene->IsEntityValid(m_PreviewEntity))
+		{
+			Entity previous{ m_PreviewEntity, m_pDefaultScene->shared_from_this() };
+			m_pDefaultScene->DestroyEntity(previous);
+		}
+		m_PreviewEntity = entt::null;
 
 		if (m_pModel == nullptr)
 			return;
 
 		/* 将模型添加到场景中 */
 		Entity entity = m_pDefaultScene->CreateEntity(m_pModel->GetDebugName());
+		m_PreviewEntity = static_cast<entt::entity>(entity);
+
 		auto& mesh_component = entity.AddComponent<ModelComponent>();
 		mesh_component.m_Model = m_pModel;
 
-		/* 编辑缓冲接到预览实体上：按段把槽覆盖指向 m_pMaterialGroup 里的材质 ——
-		 * 面板改参数 / 换贴图 / 换 Shader 改的就是这一份，预览下一帧立刻可见；
-		 * 导出写的也是它，两处同源（不接的话预览渲染的会是模型自带的默认材质，改什么都不会动） */
-		for (size_t i = 0; i < m_pModelInfo->m_SubModelInfos.size(); ++i)
-		{
-			const std::string& slot_name = m_pModelInfo->m_SubModelInfos[i]->MaterialParams.Name;
-			const auto& material = m_pMaterialGroup->GetMaterialByIndex(static_cast<int>(i));
-			if (slot_name.empty() || material == nullptr)
-				continue;
+		/* 预览实体用同一套槽覆盖：面板改参数 / 换贴图 / 换 Shader，预览下一帧跟着变 */
+		mesh_component.m_SlotOverrides = m_SlotOverrides;
+		m_SlotOverridesDirty = false;
 
-			MaterialSlotOverride& slot_override = mesh_component.m_SlotOverrides[slot_name];
-			slot_override.pMaterial = material;
-			slot_override.IsInstance = true;
+		/* 模型自带动画：动画组件自动挂好，clip 关联首个；播放等场景更新把关节树建好再开
+		 * （见 OnUpdate 的 m_AnimationStartPending，AutoPlay 也要那时才置位 ——
+		 * 首帧就置位的话 Tick 会先跑，关节还不存在，绑不上就一直绑不上了） */
+		m_AnimationStartPending = false;
+		if (!m_AnimationClips.empty() && !m_pModel->IsStaticModel())
+		{
+			auto& animator = entity.AddComponent<AnimatorComponent>();
+			animator.m_Clip = m_AnimationClips.front();
+			animator.m_Loop = animator.m_Clip->IsLoop();
+			animator.m_AutoPlay = false;
+			animator.m_Playing = false;
+			animator.m_Time = 0.0f;
+			m_AnimationStartPending = true;
+		}
+		else
+		{
+			m_SelectedClip = -1;
 		}
 
 		/* 预览网格改成以模型为中心、格距按模型尺寸缩放（大模型取景距离远，场景口径的

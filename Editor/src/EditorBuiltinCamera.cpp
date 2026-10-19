@@ -265,9 +265,6 @@ namespace Helios
 					/* 子网格高亮（模型预览：悬停子模型卡）：强调色平铺该段，垫在线框底下 */
 					if (m_HighlightSegment >= 0)
 						SceneGizmos::SubmitModelSegmentHighlight(render_view, m_HighlightSegment);
-					/* 模型线框叠加（模型预览的调试开关）：xray 边线画在最上层 */
-					if (m_IsWireframeOverlay)
-						SceneGizmos::SubmitModelWireframe(render_view);
 				}
 				render_pass_info->Unbind();
 			}

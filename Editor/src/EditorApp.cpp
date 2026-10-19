@@ -32,6 +32,7 @@ namespace Helios
 
 		auto main_layer = CreateSharedPtr<MainEditorLayer>();
 		auto scene_layer = CreateSharedPtr<SceneEditorLayer>();
+		auto model_layer = CreateSharedPtr<ModelEditorLayer>();
 
 		/* 层级面板的材质卡：点击贴图要定位到资源浏览器 ——
 		 * 两层互不认识对方，通道在装配层接上（面板不查 Layer）。 */
@@ -40,7 +41,14 @@ namespace Helios
 			main_layer->RevealAsset(relative_path);
 		});
 
-		/* 属性面板的「Model Editor」入口：点了就在模型编辑器里打开该模型（同一条接线思路） */
+		/* 模型编辑器的材质卡走同一条定位通道（那边也是同一个材质控件） */
+		model_layer->SetAssetRevealFunc([main_layer](const std::string& relative_path)
+		{
+			main_layer->RevealAsset(relative_path);
+		});
+
+		/* 属性面板 Model 卡里的「Open in Model Editor」按钮：点了就在模型编辑器里打开该模型
+		 * （同一条接线思路） */
 		scene_layer->SetModelEditorFunc([main_layer](const std::string& path)
 		{
 			main_layer->OpenModel(path);
@@ -56,6 +64,6 @@ namespace Helios
 
 		PushLayer(main_layer); /* 要先添加 */
 		PushLayer(scene_layer);
-		PushLayer(CreateSharedPtr<ModelEditorLayer>());
+		PushLayer(model_layer);
 	}
 }

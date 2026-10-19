@@ -422,6 +422,9 @@ namespace Helios
 		float m_TreePaneRatio{ 0.32f };
 		/* 待办：把当前目录在目录树里露出来（展开祖先 + 滚到可见），下一次画完树即清 */
 		bool m_RevealCurrentNode{ true };
+		/* 待办：下一次画面板时把本窗口带到前台。定位是"跨面板跳过来"，
+		 * 面板可能被压在别的页签后面 —— 只改选中项的话用户什么也看不见。 */
+		bool m_FocusRequested{ false };
 		/* 目录树行"按下时是点击意图"的待办：松开那一帧才决定要不要真的切目录 ——
 		 * 中途变成拖拽（把文件夹拖去别处）就不算点击，与"拖动不是查看"同一套语义
 		 * （见 DrawFolderNode 的松开判定）。 */

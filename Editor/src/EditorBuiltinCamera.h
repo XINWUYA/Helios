@@ -35,11 +35,6 @@ namespace Helios
 		[[nodiscard]] const glm::vec3& GetPreviewGridCenter() const { return m_PreviewGridCenter; }
 		[[nodiscard]] float GetPreviewGridScale() const { return m_PreviewGridScale; }
 
-		/* 模型线框叠加（模型预览的调试开关）：AxisPass 末尾把场景里的模型段再画一遍线框
-		 * （见 SceneGizmos::SubmitModelWireframe）。缺省关闭。 */
-		void SetWireframeOverlay(bool enabled) { m_IsWireframeOverlay = enabled; }
-		[[nodiscard]] bool IsWireframeOverlayEnabled() const { return m_IsWireframeOverlay; }
-
 		/* 子网格高亮（模型预览：悬停子模型卡时用）：>= 0 时把场景里模型的该网格段用强调色
 		 * 平铺再画一遍（见 SceneGizmos::SubmitModelSegmentHighlight）。缺省 -1 = 不画。 */
 		void SetHighlightSegment(int segment_index) { m_HighlightSegment = segment_index; }
@@ -147,8 +142,6 @@ namespace Helios
 		bool m_HasPreviewGrid{ false };
 		glm::vec3 m_PreviewGridCenter{ 0.0f };
 		float m_PreviewGridScale{ 1.0f };
-		/* 模型线框叠加开关（见 SetWireframeOverlay） */
-		bool m_IsWireframeOverlay{ false };
 		/* 子网格高亮（见 SetHighlightSegment）：-1 = 不画 */
 		int m_HighlightSegment{ -1 };
 		/* 上一帧按键状态：起手要求“按下沿”，避免按住按键从其他窗口拖进视口时误起手 */
