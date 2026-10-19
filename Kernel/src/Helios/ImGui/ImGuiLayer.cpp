@@ -68,6 +68,9 @@ namespace Helios
 		ImGui::CreateContext();
 		ImGuiIO& io = ImGui::GetIO(); (void)io;
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;       // Enable Keyboard Controls
+		/* 导航开着时 ImGui 会把有焦点的窗口算成「键盘归它」，WantCaptureKeyboard 一直是 true，
+		 * 应用层的快捷键就全被挡掉（视口里 WER 切 gizmo 没反应）。这条让键盘只在控件真激活时才被接管 */
+		io.ConfigFlags |= ImGuiConfigFlags_NavNoCaptureKeyboard;
 		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;			// Enable Docking
 		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;			// Enable Multi-Viewport / Platform Windows
 		//io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls

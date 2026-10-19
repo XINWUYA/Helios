@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdio>
 #include <ctime>
+#include "EditorCommon.h"
 #include "EditorIcons.h"
 #include "PanelRegistry.h"
 #include "Helios/Core/Logger.h"
@@ -503,17 +504,17 @@ namespace Helios
 		if (!ImGui::IsWindowHovered() || io.WantTextInput)
 			return;
 
-		if ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_A))
+		if ((io.KeyCtrl || io.KeySuper) && KeyPressed(ImGuiKey_A))
 			SelectAllVisible();
 
-		if ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_C))
+		if ((io.KeyCtrl || io.KeySuper) && KeyPressed(ImGuiKey_C))
 		{
 			const std::string text = BuildSelectedText();
 			if (!text.empty())
 				ImGui::SetClipboardText(text.c_str());
 		}
 
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+		if (KeyPressed(ImGuiKey_Escape))
 			ClearSelection();
 	}
 

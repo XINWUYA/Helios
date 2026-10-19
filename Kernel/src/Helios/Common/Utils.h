@@ -57,6 +57,13 @@ namespace Helios
 		return result;
 	}
 
+	/* 按单个分隔符切 / 拼：序列化里存一串名字（如组件卡顺序）用，空段丢弃 */
+	std::vector<std::string> SplitString(const std::string& value, char separator);
+	std::string JoinStrings(const std::vector<std::string>& values, char separator);
+
+	/* 把任意文本变成安全文件名：路径分隔符等非法字符换成下划线，空串用 fallback */
+	std::string SanitizeFileName(const std::string& name, const std::string& fallback);
+
 	/* float to string */
 	inline std::string ToString(float value, int precision = 6)
 	{

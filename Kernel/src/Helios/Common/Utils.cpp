@@ -129,4 +129,60 @@ namespace Helios
 	{
 		return stbi_info(path.c_str(), &out_width, &out_height, &out_channels) != 0;
 	}
+
+	std::vector<std::string> SplitString(const std::string& value, char separator)
+	{
+		std::vector<std::string> parts;
+		std::string current;
+		for (const char character : value)
+		{
+			if (character == separator)
+			{
+				if (!current.empty())
+					parts.push_back(std::move(current));
+				current.clear();
+			}
+			else
+			{
+				current.push_back(character);
+			}
+		}
+
+		if (!current.empty())
+			parts.push_back(std::move(current));
+		return parts;
+	}
+
+	std::string JoinStrings(const std::vector<std::string>& values, char separator)
+	{
+		std::string joined;
+		for (const std::string& value : values)
+		{
+			if (value.empty())
+				continue;
+
+			if (!joined.empty())
+				joined.push_back(separator);
+			joined += value;
+		}
+		return joined;
+	}
+
+	std::string SanitizeFileName(const std::string& name, const std::string& fallback)
+	{
+		std::string result = name.empty() ? fallback : name;
+		for (char& character : result)
+		{
+			switch (character)
+			{
+			case '/': case '\\': case ':': case '*': case '?':
+			case '"': case '<': case '>': case '|': case ' ':
+				character = '_';
+				break;
+			default:
+				break;
+			}
+		}
+		return result;
+	}
 }

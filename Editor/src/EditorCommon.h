@@ -11,6 +11,19 @@
 
 namespace Helios
 {
+	/* ImGui 1.86 的 IsKeyPressed / IsKeyDown 收的是"后端键号"（KeyMap 里的值，如 GLFW 键码），
+	 * ImGuiKey 只是 KeyMap 的下标 —— 直接把 ImGuiKey 传进去会读到别的键，所以统一经这里转一道。
+	 * 映射不存在（KeyMap 为 -1）时返回 false。 */
+	inline bool KeyPressed(ImGuiKey key, bool repeat = true)
+	{
+		return ImGui::IsKeyPressed(ImGui::GetKeyIndex(key), repeat);
+	}
+
+	inline bool KeyDown(ImGuiKey key)
+	{
+		return ImGui::IsKeyDown(ImGui::GetKeyIndex(key));
+	}
+
 	/* 执行模式 */
 	enum class PlayMode : uint8_t
 	{

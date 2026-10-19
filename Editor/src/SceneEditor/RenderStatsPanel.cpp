@@ -798,6 +798,10 @@ namespace Helios
 
 		if (card.Open)
 		{
+			/* 两张计时卡同处一个面板窗口：卡内控件各套一层 ID 作用域，
+			 * 同图标的按钮才不会撞 id（撞了后面那个点不动） */
+			ImGui::PushID("CPU Timings");
+
 			bool timer_enabled = CPUTimerProfiler::Instance().IsEnabled();
 			if (ImGuiExt::DrawCheckboxUI("CPU Timer", timer_enabled))
 			{
@@ -951,6 +955,8 @@ namespace Helios
 					}
 				}
 			}
+
+			ImGui::PopID();
 		}
 
 		PanelChrome::EndCard(card);
@@ -2052,6 +2058,9 @@ namespace Helios
 
 		if (card.Open)
 		{
+			/* 与 CPU 卡同理：卡内控件套一层 ID 作用域，别和上面那张卡的按钮撞 id */
+			ImGui::PushID("GPU Timings");
+
 			/* GPU 计时器的开关：面板级开关，占卡身的一行 */
 			bool timer_enabled = RenderQueryProfiler::Instance().IsEnabled();
 			if (ImGuiExt::DrawCheckboxUI("GPU Timer", timer_enabled))
@@ -2252,6 +2261,8 @@ namespace Helios
 					ImGui::EndTable();
 				}
 			}
+
+			ImGui::PopID();
 		}
 
 		PanelChrome::EndCard(card);
