@@ -21,7 +21,7 @@ namespace Helios
 	class ScriptRuntime;
 
 	/* 场景类 */
-	class Scene final : public std::enable_shared_from_this<Scene>
+	class HELIOS_API Scene final : public std::enable_shared_from_this<Scene>
 	{
 	public:
 		Scene();

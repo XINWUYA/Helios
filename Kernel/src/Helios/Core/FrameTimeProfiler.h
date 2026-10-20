@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <chrono>
 #include <cstdint>
 
@@ -8,7 +8,7 @@ namespace Helios
 	 * （含帧准备里的垂直同步等待）；CPU = Update + UI + Present 之和（不含等待，才看得出余量）；
 	 * GPU = 本帧总耗时（调用方在 EndFrame 传入）。平滑按 0.9 / 0.1 EMA；历史保留最近 kHistorySize
 	 * 帧的原始值供面板画曲线。 */
-	class FrameTimeProfiler
+	class HELIOS_API FrameTimeProfiler
 	{
 	public:
 		/* CPU 阶段划分（不渲染的帧不统计） */

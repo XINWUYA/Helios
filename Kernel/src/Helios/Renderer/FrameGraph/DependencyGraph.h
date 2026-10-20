@@ -3,7 +3,7 @@
 namespace Helios
 {
 	/* 依赖关系图 */
-	class DependencyGraph
+	class HELIOS_API DependencyGraph
 	{
 	public:
 		/* 节点 */

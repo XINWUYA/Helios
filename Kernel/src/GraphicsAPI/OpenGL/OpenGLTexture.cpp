@@ -2,8 +2,15 @@
 #include "OpenGLTexture.h"
 #include "OpenGLCommon.h"
 
+/* stb 的实现编进了引擎库里，Editor 侧也要直接调用（非 Windows 默认可见，收紧可见性时要显式放开） */
+#if !defined(PLATFORM_WINDOWS)
+#pragma GCC visibility push(default)
+#endif
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#if !defined(PLATFORM_WINDOWS)
+#pragma GCC visibility pop
+#endif
 
 namespace Helios
 {

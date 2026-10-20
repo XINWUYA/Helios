@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -9,7 +9,7 @@ namespace Helios
 {
 	/* 命令栈：编辑历史的唯一管理者。位置模型：[0, m_NextIndex) 是已执行、[m_NextIndex, size) 是
 	 * 可重做分支；Execute 会丢弃重做分支；合并窗口内的连续命令能并入栈顶。 */
-	class CommandStack
+	class HELIOS_API CommandStack
 	{
 	public:
 		CommandStack() = default;

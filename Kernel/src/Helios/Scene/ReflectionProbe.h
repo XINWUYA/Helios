@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "SceneObject.h"
 #include "LayerMask.h"
 #include "ReflectionProbeBakeCache.h"
@@ -10,7 +10,7 @@ namespace Helios
     class RenderView;
 
     /* 反射探针：在指定位置烘焙IBL反射 */
-    class ReflectionProbe : public SceneObject
+    class HELIOS_API ReflectionProbe : public SceneObject
     {
     public:
         /* IBL烘焙参数 */
@@ -222,7 +222,7 @@ namespace Helios
     };
 
     /* 统一管理场景中所有ReflectionProbe */
-    class ReflectionProbeManager
+    class HELIOS_API ReflectionProbeManager
     {
     public:
         ReflectionProbeManager() = default;

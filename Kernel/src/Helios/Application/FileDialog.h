@@ -1,8 +1,9 @@
 ﻿#pragma once
+#include "Helios/Common/Export.h"
 namespace Helios
 {
 	/* 系统文件弹窗 */
-	class FileDialog
+	class HELIOS_API FileDialog
 	{
 	public:
 		/* 通过文件窗口选取指定类型文件路径 */
@@ -12,5 +13,5 @@ namespace Helios
 	};
 
 	/* 打开到指定文件目录 */
-	bool OpenFileExplorer(const char* path);
+	HELIOS_API bool OpenFileExplorer(const char* path);
 }

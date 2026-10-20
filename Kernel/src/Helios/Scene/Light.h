@@ -28,7 +28,7 @@ namespace Helios
 	};
 
 	/* 光源类 */
-	class Light : public SceneObject
+	class HELIOS_API Light : public SceneObject
 	{
 	public:
 		Light() = default;

@@ -19,7 +19,7 @@ namespace Helios
 	class Light;
 
 	/* 对当前RenderView可见的模型 */
-	struct VisibleMeshObject
+	struct HELIOS_API VisibleMeshObject
 	{
 		int ObjectId{ -1 };
 		glm::mat4 Local2WorldMat;
@@ -45,7 +45,7 @@ namespace Helios
 	 * 每个RenderView单独做裁剪
 	 * 每个RenderView单独对应一套后处理
 	 */
-	class RenderView
+	class HELIOS_API RenderView
 	{
 	public:
 		RenderView(Camera* owner_camera);

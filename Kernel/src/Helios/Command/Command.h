@@ -1,10 +1,10 @@
-#pragma once
+﻿#pragma once
 
 namespace Helios
 {
 	/* 编辑命令：编辑操作的写入口。Do / Undo 必须成对可逆；TryMerge 把连续的同目标改动（比如
 	 * Gizmo 拖拽每帧产生的位移）合并成一条历史记录。 */
-	class ICommand
+	class HELIOS_API ICommand
 	{
 	public:
 		virtual ~ICommand() = default;

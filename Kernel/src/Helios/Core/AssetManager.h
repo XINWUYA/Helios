@@ -75,7 +75,7 @@ namespace Helios
 	 * 线程安全: 所有对资源映射的读写均受内部互斥锁保护。
 	 * 失败(返回空指针)的创建不入缓存, 下次调用会重试。 */
 	template<typename AssetType, typename LoadConfig = NoConfig>
-	class AssetStore
+	class HELIOS_API AssetStore
 	{
 	public:
 		/* 单例 */
@@ -134,7 +134,7 @@ namespace Helios
 	 * - auto material = AssetManager::Instance().GetOrLoad<Material>("Materials/a.mtl");
 	 * - AssetManager::Instance().Refresh<Material>(path, edited);  (材质编辑保存后同步缓存)
 	 */
-	class AssetManager
+	class HELIOS_API AssetManager
 	{
 	public:
 		/* 单例 */

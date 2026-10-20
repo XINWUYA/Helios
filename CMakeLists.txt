@@ -80,8 +80,9 @@ if(MSVC)
         /wd4819
     )
 
-    # Static runtime library
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    # Dynamic runtime library：Windows 下 Kernel 是 DLL，Editor 与脚本 DLL 都要跨模块
+    # 传对象（SharedPtr / std::string），静态 CRT 会让每个模块各有一个堆，delete 直接崩。
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
     # Common GCC/Clang flags
     add_compile_options(-Wall -Wextra)
@@ -216,10 +217,8 @@ if(HELIOS_SCRIPT_SOURCES)
         FOLDER "Scripts"
     )
 
-    if(APPLE)
-        # 引擎符号不链接进来，留到 dlopen 时由 Editor 提供
-        target_link_options(HeliosScripts PRIVATE "-undefined" "dynamic_lookup")
-    endif()
+    # 脚本模块链接 Kernel 动态库：符号由链接器解析，三个平台同一套机制。
+    target_link_libraries(HeliosScripts PRIVATE Kernel)
 
     if(WIN32)
         target_compile_definitions(HeliosScripts PRIVATE PLATFORM_WINDOWS)

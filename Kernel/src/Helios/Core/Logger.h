@@ -5,7 +5,7 @@
 
 namespace Helios 
 {
-	class Logger
+	class HELIOS_API Logger
 	{
 	public:
 		static void Init();

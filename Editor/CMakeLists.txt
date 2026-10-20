@@ -55,13 +55,11 @@ target_link_libraries(Editor
         ImGuizmo
 )
 
-# 脚本模块在运行期调用引擎函数，静态库默认只把「链接期被引用」的 .o 拉进可执行文件，
-# 脚本用到但编辑器自己没用过的符号会缺失（dlopen 报 symbol not found in flat namespace）。
-# 这里强制整包链进来；打包形态把脚本改成静态编译，不依赖这条。
+# 脚本模块在运行期调用引擎函数：Kernel 是动态库，符号由链接器解析，
+# 不需要整包拉进可执行文件，也不需要额外导出开关。
 if(APPLE)
-    target_link_options(Editor PRIVATE "LINKER:-force_load,$<TARGET_LINKER_FILE:Kernel>")
-elseif(WIN32)
-    target_link_options(Editor PRIVATE "/WHOLEARCHIVE:$<TARGET_LINKER_FILE:Kernel>")
+    # 让可执行文件按 @rpath 找同一次构建出来的 libKernel.dylib
+    set_target_properties(Editor PROPERTIES BUILD_RPATH "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}")
 endif()
 
 # Build configuration specific settings
@@ -79,9 +77,6 @@ target_compile_definitions(Editor
 set_target_properties(Editor PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${OUTPUT_DIR}"
     FOLDER "Applications"
-    # 脚本模块 dlopen 时要解析引擎符号。macOS 上可执行文件默认导出全局符号，
-    # 但开了 dead_strip 就未必 —— 显式导出，别让 Release 构建在加载脚本时挂掉。
-    ENABLE_EXPORTS ON
 )
 
 # Platform-specific settings

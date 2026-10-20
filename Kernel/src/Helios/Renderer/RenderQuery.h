@@ -123,7 +123,7 @@ namespace Helios
 	/*
 	 * 用于统计GPUPass耗时信息
 	 */
-	class RenderQueryProfiler
+	class HELIOS_API RenderQueryProfiler
 	{
 	public:
 		~RenderQueryProfiler();

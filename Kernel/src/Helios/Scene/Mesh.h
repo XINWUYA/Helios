@@ -10,7 +10,7 @@ namespace Helios
 	class DeviceVertexArray;
 
 	/* 图元 */
-	struct MeshPrimitive
+	struct HELIOS_API MeshPrimitive
 	{
 		PrimitiveType PrimitiveType{ PrimitiveType::Triangles };
 		SharedPtr<DeviceVertexArray> VertexArray{ nullptr };

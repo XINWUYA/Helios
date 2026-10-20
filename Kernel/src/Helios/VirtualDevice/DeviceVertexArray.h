@@ -4,7 +4,7 @@
 
 namespace Helios
 {
-	class DeviceVertexArray
+	class HELIOS_API DeviceVertexArray
 	{
 	public:
 		DeviceVertexArray() = default;

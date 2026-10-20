@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -14,7 +14,7 @@ namespace Helios
 
 	/* 脚本基类：实例只活在 Runtime 模式里，由 ScriptRuntime 统一创建和销毁。
 	 * 脚本写自己的成员当参数，用 HELIOS_SCRIPT_FIELD 声明哪些能被面板编辑与存盘。 */
-	class Script
+	class HELIOS_API Script
 	{
 	public:
 		virtual ~Script() = default;
@@ -174,6 +174,6 @@ namespace Helios
 
 	/* 属性文本与实例字段互转：UI 按文本存参数，运行时灌进实例，两边共用这一对函数。
 	 * 类型与字段不匹配时写入不做任何事，读出返回空串。 */
-	bool ApplyScriptPropertyText(Script& script, const ScriptFieldDesc& field, const std::string& text);
-	std::string ReadScriptPropertyText(Script& script, const ScriptFieldDesc& field);
+	HELIOS_API bool ApplyScriptPropertyText(Script& script, const ScriptFieldDesc& field, const std::string& text);
+	HELIOS_API std::string ReadScriptPropertyText(Script& script, const ScriptFieldDesc& field);
 }

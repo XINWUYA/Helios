@@ -91,7 +91,7 @@ namespace Helios
 	};
 
 	/* Shader基类 */
-	class DeviceShader
+	class HELIOS_API DeviceShader
 	{
 	public:
 		DeviceShader(std::string path);

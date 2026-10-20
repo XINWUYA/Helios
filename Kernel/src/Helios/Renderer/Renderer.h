@@ -16,7 +16,7 @@ namespace Helios
 	class Light;
 	struct MeshPrimitive;
 
-	class Renderer
+	class HELIOS_API Renderer
 	{
 	public:
 		static void Init();

@@ -9,7 +9,7 @@ namespace Helios
 	class RenderPassNode;
 
 	/* FrameGraphPass信息 */
-	struct FrameGraphPassInfo
+	struct HELIOS_API FrameGraphPassInfo
 	{
 		static constexpr uint32_t MAX_ATTACHMENT_NUM = MAX_COLOR_ATTACHMENT_NUM + 2; /* 后面两个分别对应Depth和Stencil */
 		static constexpr uint32_t DEPTH_ATTACHMENT_IDX = MAX_COLOR_ATTACHMENT_NUM;
@@ -54,7 +54,7 @@ namespace Helios
 	/* FrameGraphPass基类
 	 * 一个FrameGraphPass对应一个RenderPass，包含该RenderPass的私有数据和执行方法
 	 */
-	class IFrameGraphPass
+	class HELIOS_API IFrameGraphPass
 	{
 	public:
 		virtual ~IFrameGraphPass() = default;

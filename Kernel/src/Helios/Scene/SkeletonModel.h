@@ -1,4 +1,5 @@
-#pragma once
+﻿#pragma once
+#include "Helios/Common/Export.h"
 #include <array>
 #include <cstdint>
 #include <iosfwd>
@@ -94,7 +95,7 @@ namespace Helios
 	/* 骨骼模型的实例数据：每个挂了蒙皮模型的实体一份（实体自己的动态网格与调色板）。
 	 * 几何 / 材质仍来自共享的 Model 资产；骨骼相关的操作（建关节实体、取关节变换、
 	 * 每帧重算上屏顶点）都收在这里，Scene 只需要调 UpdateScene。 */
-	class SkeletonModel final : public Model
+	class HELIOS_API SkeletonModel final : public Model
 	{
 	public:
 		explicit SkeletonModel(std::string path);
@@ -200,6 +201,6 @@ namespace Helios
 
 	/* 非静态模型按约定就是骨骼模型（Model::Create 按 .mesh 有没有骨骼段定类型）：
 	 * 转换统一收在这里，调用方不用到处 static_cast。 */
-	[[nodiscard]] SkeletonModel* AsSkeletonModel(Model* model);
-	[[nodiscard]] const SkeletonModel* AsSkeletonModel(const Model* model);
+	[[nodiscard]] HELIOS_API SkeletonModel* AsSkeletonModel(Model* model);
+	[[nodiscard]] HELIOS_API const SkeletonModel* AsSkeletonModel(const Model* model);
 }

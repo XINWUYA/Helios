@@ -1,4 +1,5 @@
-#pragma once
+﻿#pragma once
+#include "Helios/Common/Export.h"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -54,7 +55,7 @@ namespace Helios
 		Less,
 	};
 
-	struct FieldCondition
+	struct HELIOS_API FieldCondition
 	{
 		size_t      DependOffset{ 0 };               /* 依赖字段相对组件起始的偏移 */
 		FieldType   DependType{ FieldType::Bool };   /* 依赖字段类型：决定按什么类型读取 */
@@ -114,7 +115,7 @@ namespace Helios
 	/* 枚举字段的名称提供者 */
 	using EnumNamesFunc = std::vector<std::string> (*)();
 
-	struct FieldDesc
+	struct HELIOS_API FieldDesc
 	{
 		const char* Name{ nullptr };        /* 显示名 */
 		FieldType   Type{ FieldType::Float };
@@ -199,12 +200,12 @@ namespace Helios
 	};
 
 	/* 按字段表把组件写入 / 读出 XML 元素（Scene 序列化使用） */
-	void SaveComponentToXml(const ComponentDesc& desc, const void* component, tinyxml2::XMLElement* element);
-	void LoadComponentFromXml(const ComponentDesc& desc, void* component, const tinyxml2::XMLElement* element);
+	HELIOS_API void SaveComponentToXml(const ComponentDesc& desc, const void* component, tinyxml2::XMLElement* element);
+	HELIOS_API void LoadComponentFromXml(const ComponentDesc& desc, void* component, const tinyxml2::XMLElement* element);
 
 	/* 取字段当前值的地址：偏移字段直接取址，访问器字段经 Get 拷进 buffer 后返回 buffer。
 	 * 用于编辑前后比较（属性面板据此生成改动命令）。 */
-	const void* ReadFieldValue(const FieldDesc& field, const void* component, void* buffer);
+	HELIOS_API const void* ReadFieldValue(const FieldDesc& field, const void* component, void* buffer);
 
 	/* 求成员在类内的字节偏移（用真实对象取址，避免 UB） */
 	template <typename T, typename M>
@@ -229,9 +230,9 @@ namespace Helios
 	}
 
 	/* 判定条件是否满足 */
-	[[nodiscard]] bool EvaluateCondition(const FieldCondition& condition, const void* component);
+	[[nodiscard]] HELIOS_API bool EvaluateCondition(const FieldCondition& condition, const void* component);
 
-	class ComponentRegistry
+	class HELIOS_API ComponentRegistry
 	{
 	public:
 		static ComponentRegistry& Instance();

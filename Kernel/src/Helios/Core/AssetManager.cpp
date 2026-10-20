@@ -7,6 +7,10 @@
 #include <Helios/Scene/AnimationClip.h>
 #include <Helios/Scene/SceneCommon.h>
 #include <Helios/Common/Utils.h>
+#if !defined(PLATFORM_WINDOWS)
+/* 模板的实例化符号继承模板定义处的可见性，只能整段放开 */
+#pragma GCC visibility push(default)
+#endif
 
 namespace Helios
 {
@@ -167,11 +171,11 @@ namespace Helios
 	}
 
 	/* 显式实例化资源缓存, 供外部链接使用 */
-	template class AssetStore<DeviceShader, NoConfig>;
-	template class AssetStore<DeviceTexture, TextureLoadConfig>;
-	template class AssetStore<Model, NoConfig>;
-	template class AssetStore<Material, NoConfig>;
-	template class AssetStore<AnimationClip, NoConfig>;
+	template class HELIOS_API AssetStore<DeviceShader, NoConfig>;
+	template class HELIOS_API AssetStore<DeviceTexture, TextureLoadConfig>;
+	template class HELIOS_API AssetStore<Model, NoConfig>;
+	template class HELIOS_API AssetStore<Material, NoConfig>;
+	template class HELIOS_API AssetStore<AnimationClip, NoConfig>;
 
 
 	AssetManager& AssetManager::Instance()
@@ -180,3 +184,6 @@ namespace Helios
 		return instance;
 	}
 }
+#if !defined(PLATFORM_WINDOWS)
+#pragma GCC visibility pop
+#endif

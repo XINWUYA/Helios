@@ -82,7 +82,7 @@ namespace Helios
 	};
 
 	/* 根据描述创建FrameBuffer */
-	class DeviceFrameBuffer
+	class HELIOS_API DeviceFrameBuffer
 	{
 	public:
 		virtual ~DeviceFrameBuffer() = default;

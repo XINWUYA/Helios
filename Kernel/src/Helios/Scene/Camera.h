@@ -14,7 +14,7 @@ namespace Helios
 	};
 
 	/* 相机类 */
-	class Camera : public SceneObject
+	class HELIOS_API Camera : public SceneObject
 	{
 	public:
 		Camera(CameraProjectionType type = CameraProjectionType::Perspective, float fov = 45.0f, float aspect_ratio = 1.778f, float near_clip = 0.1f, float far_clip = 1000.0f);

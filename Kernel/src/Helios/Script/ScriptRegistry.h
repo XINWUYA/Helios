@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 #include <vector>
 #include "Helios/Script/Script.h"
@@ -7,7 +7,7 @@ namespace Helios
 {
 	/* 脚本类注册表：脚本库加载时往这里注册，卸载前整表清空。
 	 * 与组件注册表分开两张表 —— 脚本类随库生灭，组件是编译期固定的。 */
-	class ScriptRegistry
+	class HELIOS_API ScriptRegistry
 	{
 	public:
 		static ScriptRegistry& Instance();

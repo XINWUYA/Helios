@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "Helios/Common/Export.h"
 #include <cstdint>
 #include <filesystem>
 #include <regex>
@@ -33,14 +34,14 @@ namespace Helios
 	 * path: "assets/scenes/test.scn"
 	 * return: "test"
 	 */
-	std::string ExtractFilename(const std::string& path);
+	HELIOS_API std::string ExtractFilename(const std::string& path);
 
 	/* Extract filename from path
 	 * Examples:
 	 * path: "assets/scenes/test.scn"
 	 * return: "scn"
 	 */
-	std::string ExtractFileSuffix(const std::string& path);
+	HELIOS_API std::string ExtractFileSuffix(const std::string& path);
 
 	/* Replace file suffix
 	 * Examples:
@@ -62,7 +63,7 @@ namespace Helios
 	std::string JoinStrings(const std::vector<std::string>& values, char separator);
 
 	/* 把任意文本变成安全文件名：路径分隔符等非法字符换成下划线，空串用 fallback */
-	std::string SanitizeFileName(const std::string& name, const std::string& fallback);
+	HELIOS_API std::string SanitizeFileName(const std::string& name, const std::string& fallback);
 
 	/* float to string */
 	inline std::string ToString(float value, int precision = 6)
@@ -133,7 +134,7 @@ namespace Helios
 	/* string to Id
 	 * use xxHash
 	 */
-	uint32_t ToID(const std::string& value);
+	HELIOS_API uint32_t ToID(const std::string& value);
 
 	/* Enum���͵�λ���� */
 	template<typename Enum>
@@ -219,14 +220,14 @@ namespace Helios
 	 * 换一种格式化规则只改这一处。 */
 
 	/* 人类可读的文件大小：B / KB / MB / GB（一位小数） */
-	std::string FormatFileSize(uintmax_t bytes);
+	HELIOS_API std::string FormatFileSize(uintmax_t bytes);
 
 	/* 文件最后写入时间：本地时区的 MM-DD HH:MM（面板的窄值列放不下完整日期）；
 	 * 读取失败时返回 "unknown"。 */
-	std::string FormatFileWriteTime(const std::filesystem::path& path);
+	HELIOS_API std::string FormatFileWriteTime(const std::filesystem::path& path);
 
 	/* 只读文件头取图片的尺寸与通道数（不解码像素，走 stb 的 info 接口）：
 	 * 属性面板展示图片信息用，比整图加载便宜几个数量级。
 	 * 不是支持的图片 / 读不出文件头时返回 false。 */
-	bool QueryImageInfo(const std::string& path, int& out_width, int& out_height, int& out_channels);
+	HELIOS_API bool QueryImageInfo(const std::string& path, int& out_width, int& out_height, int& out_channels);
 }

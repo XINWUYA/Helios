@@ -2,8 +2,10 @@
 
 project(Kernel LANGUAGES CXX)
 
-# Static library
-add_library(Kernel STATIC)
+# 脚本模块在运行期要调用引擎里任意函数，所以 Kernel 一律编成动态库：
+#   脚本 DLL / bundle 链接它，符号由链接器解析，三个平台走同一套机制。
+# Windows 额外要全量导出符号（见下面的 WINDOWS_EXPORT_ALL_SYMBOLS）。
+add_library(Kernel SHARED)
 
 # Source files
 # CONFIGURE_DEPENDS 让新增/删除源文件后无需手动重新配置即可被自动收录
@@ -84,6 +86,7 @@ target_link_libraries(Kernel
         assimp
         xxHash
         spirv-cross
+        spdlog
         glslang
         SPIRV
         glslang-default-resource-limits
@@ -124,15 +127,37 @@ target_compile_definitions(Kernel
 )
 
 # Output directory
+# DLL / dylib 放到可执行文件旁边，Windows 与 macOS 都按 exe 附近找。
 set_target_properties(Kernel PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${OUTPUT_DIR}"
     FOLDER "Engine"
 )
+
+if(NOT WIN32)
+    # macOS / Linux 默认全导出，标不标 HELIOS_API 都能跑。打开这个选项可以模拟 Windows 的
+    # 约束（没标的符号不给外部用），用来检查标注有没有漏 —— 漏了就是链接错误。
+    option(HELIOS_HIDDEN_VISIBILITY "Hide Kernel symbols not marked HELIOS_API" OFF)
+    if(HELIOS_HIDDEN_VISIBILITY)
+        set_target_properties(Kernel PROPERTIES
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN ON
+        )
+        # 模板显式实例化的符号继承模板定义处的可见性，Clang 又不认 template class 上的
+        # attribute；这个 TU 里有 AssetStore 的显式实例化，单独放回默认可见性
+        set_source_files_properties(
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/Helios/Core/AssetManager.cpp"
+            PROPERTIES COMPILE_OPTIONS "-fvisibility=default"
+        )
+    endif()
+endif()
 
 # Platform-specific settings
 if(WIN32)
     target_compile_definitions(Kernel PRIVATE PLATFORM_WINDOWS)
+    # 让 Export.h 里的 HELIOS_API 展开成 dllexport（链接方看到的是 dllimport）
+    target_compile_definitions(Kernel PRIVATE HELIOS_KERNEL_BUILD)
 elseif(APPLE)
     target_compile_definitions(Kernel PRIVATE PLATFORM_MACOS)
     # Files that need to be compiled as Objective-C++ on macOS

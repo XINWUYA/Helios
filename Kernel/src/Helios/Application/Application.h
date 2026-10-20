@@ -5,7 +5,7 @@
 
 namespace Helios
 {
-	class Application 
+	class HELIOS_API Application 
 	{
 	public:
 		/* ui_style_installer：应用自带的界面字体 / 风格安装器（缺省 = ImGui 默认外观）。

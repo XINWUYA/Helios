@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -15,7 +15,7 @@ namespace Helios
 	 * transient 归还缓存后引用会干扰轮转。支持 2D / 2D 数组附件（数组默认取第 0 层，注册过
 	 * 逐层显示名的按层展开，见 SetLayerNames）；禁用期间不清快照（面板冻结）。深度输出额外
 	 * 按帧刷新逐层显示范围（写过像素的 [min,max]），供深度预览逐层归一化显示（对齐 Xcode 抓帧）。 */
-	class FrameGraphCapture
+	class HELIOS_API FrameGraphCapture
 	{
 	public:
 		/* 某个 Pass 抓取到的一路输出 */

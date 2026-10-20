@@ -1,4 +1,5 @@
-#pragma once
+﻿#pragma once
+#include "Helios/Common/Export.h"
 #include <string>
 #include <vector>
 #include "Material.h"
@@ -25,6 +26,6 @@ namespace Helios
 		bool Read(const std::string& path, std::string& out_geometry, std::vector<Slot>& out_slots);
 
 		/* 写清单：几何路径按资产根写成相对形式，目录不存在时自动创建。 */
-		bool Write(const std::string& path, const std::string& geometry_path, const std::vector<Slot>& slots);
+		HELIOS_API bool Write(const std::string& path, const std::string& geometry_path, const std::vector<Slot>& slots);
 	}
 }

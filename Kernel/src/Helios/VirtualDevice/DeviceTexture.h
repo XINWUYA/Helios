@@ -6,7 +6,7 @@
 namespace Helios
 {
 	/* 纹理信息描述 */
-	struct TextureDesc
+	struct HELIOS_API TextureDesc
 	{
 		uint32_t Width{ 1 };								/* 宽度 */
 		uint32_t Height{ 1 };								/* 高度 */
@@ -26,7 +26,7 @@ namespace Helios
 	};
 
 	/* 纹理加载配置 */
-	struct TextureLoadConfig
+	struct HELIOS_API TextureLoadConfig
 	{
 		bool IsFlipV = true;
 		bool IsGenMips = true;
@@ -57,7 +57,7 @@ namespace Helios
 
 
 	/* 通用纹理类，根据描述和用途创建不同类型的纹理 */
-	class DeviceTexture
+	class HELIOS_API DeviceTexture
 	{
 	public:
 		DeviceTexture(std::string name, const TextureDesc& texture_desc);

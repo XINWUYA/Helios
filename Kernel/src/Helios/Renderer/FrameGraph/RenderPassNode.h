@@ -24,7 +24,7 @@ namespace Helios
 	};
 
 	/* RenderPassNode类，作为FrameGraph依赖关系图中的一个节点 */
-	class RenderPassNode : public DependencyGraph::Node, public std::enable_shared_from_this<RenderPassNode>
+	class HELIOS_API RenderPassNode : public DependencyGraph::Node, public std::enable_shared_from_this<RenderPassNode>
 	{
 	public:
 		RenderPassNode(const std::string& name, FrameGraph& frame_graph, const SharedPtr<IFrameGraphPass>& frame_graph_pass);

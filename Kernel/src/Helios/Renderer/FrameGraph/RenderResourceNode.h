@@ -13,7 +13,7 @@ namespace Helios
 	 * 目前一个资源节点可对应多个使用Pass（作为当前资源节点的输出）；
 	 * 但仅支持一个写入Pass（作为当前资源节点的输入）。
 	 */
-	class RenderResourceNode : public DependencyGraph::Node
+	class HELIOS_API RenderResourceNode : public DependencyGraph::Node
 	{
 	public:
 		RenderResourceNode(const std::string& name, FrameGraph& frame_graph, FrameGraphResourceHandle handle);

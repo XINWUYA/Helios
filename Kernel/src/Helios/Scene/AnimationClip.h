@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -33,7 +33,7 @@ namespace Helios
 		std::string Name;
 	};
 
-	struct AnimationKey
+	struct HELIOS_API AnimationKey
 	{
 		float     Time{ 0.0f };
 		glm::vec4 Value{ 0.0f };
@@ -48,7 +48,7 @@ namespace Helios
 
 	/* 一条轨道：目标 = 相对 Animator 实体的层级路径 + 组件名 + 字段名。
 	 * 字段名和 ComponentRegistry 里的注册名一致，读写都走那张表（含访问器字段）。 */
-	struct AnimationTrack
+	struct HELIOS_API AnimationTrack
 	{
 		std::string    Path;       /* 空 = Animator 自己；"Arm/Hand" = 逐级子节点 */
 		std::string    Component;  /* "Transform" / "Light" / "Camera" */
@@ -61,7 +61,7 @@ namespace Helios
 	};
 
 	/* 动画片段资产（.anim）。只放数据与采样，播放与写值在 AnimationRuntime 里。 */
-	class AnimationClip
+	class HELIOS_API AnimationClip
 	{
 	public:
 		AnimationClip() = default;

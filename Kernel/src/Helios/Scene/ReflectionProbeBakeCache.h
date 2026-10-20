@@ -1,4 +1,5 @@
-#pragma once
+﻿#pragma once
+#include "Helios/Common/Export.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -50,7 +51,7 @@ namespace Helios::ReflectionProbeBakeCache
 	};
 
 	/* 写出缓存文件；目录不存在时会尝试创建 */
-	bool Write(const std::string& path, const Data& data);
+	HELIOS_API bool Write(const std::string& path, const Data& data);
 	/* 读入缓存文件；magic / 版本 / 尺寸校验不通过时返回 false 并保持 out_data 不变 */
-	bool Read(const std::string& path, Data& out_data);
+	HELIOS_API bool Read(const std::string& path, Data& out_data);
 }

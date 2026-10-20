@@ -7,7 +7,7 @@ namespace Helios
 	 * 用于罗列和收集FrameGraph中后面Pass需要用到的资源Handle
 	 * 可通过资源Name获取
 	 */
-	class Blackboard
+	class HELIOS_API Blackboard
 	{
 	public:
 		Blackboard() = default;

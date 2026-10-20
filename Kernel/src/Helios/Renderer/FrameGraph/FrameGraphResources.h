@@ -12,7 +12,7 @@ namespace Helios
 	class FrameGraphResourceCache;
 
 	/* FrameGraph中一个RenderPassNode中使用的资源 */
-	class FrameGraphResources
+	class HELIOS_API FrameGraphResources
 	{
 	public:
 		FrameGraphResources(FrameGraph& frame_graph, RenderPassNode& render_pass_node);

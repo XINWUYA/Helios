@@ -4,7 +4,7 @@
 
 namespace Helios
 {
-	class Entity
+	class HELIOS_API Entity
 	{
 	public:
 		Entity() = default;

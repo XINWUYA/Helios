@@ -8,7 +8,7 @@ namespace Helios
 	class FrameGraphResourceCache;
 
 	/* 资源类基类 */
-	class IResource
+	class HELIOS_API IResource
 	{
 	public:
 		IResource(std::string name);

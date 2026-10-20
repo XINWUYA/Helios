@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstddef>
 #include <entt/entt.hpp>
 #include <functional>
@@ -13,7 +13,7 @@ namespace Helios
 
 	/* 脚本运行时：Runtime 模式下驱动场景里所有 ScriptComponent 的每个挂载点。
 	 * 进 Runtime 才建实例，退出来就全部销毁 —— Edit 模式不跑脚本，场景里只留类名和参数。 */
-	class ScriptRuntime
+	class HELIOS_API ScriptRuntime
 	{
 	public:
 		/* 给每个挂载点建实例并调 OnCreate（类缺失的跳过） */

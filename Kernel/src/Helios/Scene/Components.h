@@ -24,7 +24,7 @@ namespace Helios
 	class Script;
 
 	/* 组件基类 */
-	struct ComponentBase
+	struct HELIOS_API ComponentBase
 	{
 		virtual ~ComponentBase() = default;
 
@@ -244,7 +244,7 @@ namespace Helios
 	};
 
 	/* 反射探针组件 */
-	struct ReflectionProbeComponent : ComponentBase
+	struct HELIOS_API ReflectionProbeComponent : ComponentBase
 	{
 		SharedPtr<ReflectionProbe> m_ReflectionProbe;
 
@@ -335,7 +335,7 @@ namespace Helios
 	};
 
 	/* 一个脚本挂载点：类名 + 参数，实例只在 Runtime 模式下存在 */
-	struct ScriptSlot
+	struct HELIOS_API ScriptSlot
 	{
 		std::string                 ClassName;
 		std::vector<ScriptProperty> Properties;
@@ -350,7 +350,7 @@ namespace Helios
 
 	/* 脚本组件：一个实体可以挂多个脚本，按添加顺序执行。
 	 * 只记类名与参数，实例进 Runtime 才建，退出就销毁。 */
-	struct ScriptComponent : ComponentBase
+	struct HELIOS_API ScriptComponent : ComponentBase
 	{
 		std::vector<ScriptSlot> m_Scripts;
 

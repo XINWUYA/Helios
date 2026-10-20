@@ -40,7 +40,7 @@ namespace Helios
 
 	/* 模型类：默认静态模型，仅支持 .mesh（由 ModelEditor 导出）。几何和材质解耦 —— 模型只描述
 	 * 几何与"材质槽表"；具体绑哪份材质由实体槽覆盖与模型默认绑定的解析链决定（见 ResolveSlotMaterial）。 */
-	class Model : public SceneObject
+	class HELIOS_API Model : public SceneObject
 	{
 	public:
 		Model(std::string path);

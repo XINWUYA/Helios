@@ -3,7 +3,7 @@
 
 namespace Helios
 {
-	class ILayer
+	class HELIOS_API ILayer
 	{
 	public:
 		ILayer(const std::string& name = "DefaultLayer");

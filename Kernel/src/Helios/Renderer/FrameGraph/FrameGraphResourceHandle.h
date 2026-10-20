@@ -4,7 +4,7 @@ namespace Helios
 	/* FrameGraphResourceHandle
 	 * 每个FrameGraph中的资源都对应一个Handle，该Handle唯一标识资源
 	 */
-	class FrameGraphResourceHandle
+	class HELIOS_API FrameGraphResourceHandle
 	{
 		static constexpr uint16_t UNINITIALIZED_IDX = std::numeric_limits<uint16_t>::max();
 

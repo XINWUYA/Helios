@@ -19,7 +19,7 @@ namespace Helios
 	};
 
 	// 耗时分析
-	class TimeCostProfiler
+	class HELIOS_API TimeCostProfiler
 	{
 	public:
 		TimeCostProfiler(const TimeCostProfiler&) = delete;
@@ -57,7 +57,7 @@ namespace Helios
 	};
 
 	// 分析计时器
-	class ProfilerTimer
+	class HELIOS_API ProfilerTimer
 	{
 	public:
 		ProfilerTimer(const char* name);

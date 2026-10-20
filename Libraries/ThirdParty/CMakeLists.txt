@@ -5,7 +5,7 @@
 # GLFW
 project(GLFW C)
 
-add_library(GLFW STATIC)
+add_library(GLFW SHARED)
 
 # Common GLFW sources
 set(GLFW_COMMON_SOURCES
@@ -95,7 +95,7 @@ set_target_properties(GLFW PROPERTIES
 # Glad
 project(Glad C)
 
-add_library(Glad STATIC)
+add_library(Glad SHARED)
 
 target_sources(Glad PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/glad/include/glad/glad.h
@@ -112,7 +112,7 @@ set_target_properties(Glad PROPERTIES
 # ImGui
 project(ImGui CXX)
 
-add_library(ImGui STATIC)
+add_library(ImGui SHARED)
 
 set(IMGUI_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui/imconfig.h
@@ -147,12 +147,13 @@ set_target_properties(ImGui PROPERTIES
 # ImGuizmo
 project(ImGuizmo CXX)
 
-add_library(ImGuizmo STATIC)
+add_library(ImGuizmo SHARED)
 
-# Only include core ImGuizmo files, exclude example directories
+# 只编核心：GraphEditor / ImSequencer / ImGradient / ImCurveEdit 是它自带的动画编辑器
+# 辅助组件，本项目没用到；example / vcpkg-example 目录也一并排除
 file(GLOB IMGUIZMO_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/ImGuizmo/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ImGuizmo/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ImGuizmo/ImGuizmo.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ImGuizmo/ImGuizmo.h"
 )
 
 target_sources(ImGuizmo PRIVATE ${IMGUIZMO_SOURCES})
@@ -166,7 +167,7 @@ set_target_properties(ImGuizmo PROPERTIES
 # tinyxml2
 project(tinyxml2 CXX)
 
-add_library(tinyxml2 STATIC)
+add_library(tinyxml2 SHARED)
 
 file(GLOB TINYXML2_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/tinyxml2/*.cpp"
@@ -183,7 +184,7 @@ set_target_properties(tinyxml2 PROPERTIES
 # xxHash
 project(xxHash C)
 
-add_library(xxHash STATIC)
+add_library(xxHash SHARED)
 
 file(GLOB XXHASH_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/xxHash/*.c"
@@ -211,6 +212,30 @@ target_include_directories(magic_enum INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/magi
 
 # Set folder for interface libraries
 set_target_properties(magic_enum PROPERTIES 
+    FOLDER "Libraries/ThirdParty"
+)
+
+# spdlog（编译模式 + 动态库）
+# header-only 模式下 fmt 的格式化模板全部在 Kernel 的每个调用点实例化，光是日志就贡献了一千多个
+# 导出符号；编成库之后这些只在 spdlog 自己的 dylib 里存在。
+# SPDLOG_COMPILED_LIB 要全局一致，靠 PUBLIC 往使用方传。
+project(spdlog CXX)
+
+add_library(spdlog SHARED)
+
+file(GLOB SPDLOG_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/spdlog/src/*.cpp"
+)
+
+target_sources(spdlog PRIVATE ${SPDLOG_SOURCES})
+target_include_directories(spdlog PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/spdlog/include"
+)
+target_compile_definitions(spdlog PUBLIC
+    SPDLOG_COMPILED_LIB
+    SPDLOG_SHARED_LIB
+)
+set_target_properties(spdlog PROPERTIES
     FOLDER "Libraries/ThirdParty"
 )
 
@@ -249,7 +274,7 @@ configure_file(
     @ONLY
 )
 
-add_library(assimp STATIC)
+add_library(assimp SHARED)
 
 # zlib strategy:
 # - Windows: use assimp's built-in zlib (system usually has no ZLIB dev package)
@@ -264,10 +289,14 @@ endif()
 file(GLOB_RECURSE ASSIMP_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/assimp/code/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/assimp/code/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assimp/code/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/pugixml/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/pugixml/src/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/Open3DGC/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/openddlparser/code/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/poly2tri/poly2tri/*/*.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/zip/src/zip.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/clipper/clipper.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/unzip/*.c"
 )
 
@@ -275,6 +304,10 @@ if(ASSIMP_USE_SYSTEM_ZLIB)
     # Exclude built-in zlib sources - use system zlib instead
     # This avoids fdopen macro redefinition issues on macOS
     list(FILTER ASSIMP_SOURCES EXCLUDE REGEX ".*/contrib/zlib/.*")
+    # minizip 的写功能（D3MF 等导出用）系统 zlib 里没有，单独收进来；
+    # 静态库时这段代码没被引用所以看不出缺，动态库要求所有符号都有定义
+    list(APPEND ASSIMP_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/assimp/contrib/zlib/contrib/minizip/zip.c")
 else()
     # Include built-in zlib top-level sources (exclude contrib/ subdirectory)
     file(GLOB ASSIMP_ZLIB_SOURCES
@@ -342,14 +375,17 @@ set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
 set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
 set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
 set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+# glslang 自带 CMake，用 BUILD_SHARED_LIBS 控制库类型；只在这个子目录生效
+set(BUILD_SHARED_LIBS ON)
 add_subdirectory(glslang)
+unset(BUILD_SHARED_LIBS)
 set_target_properties(glslang PROPERTIES FOLDER "Libraries/ThirdParty")
 set_target_properties(SPIRV PROPERTIES FOLDER "Libraries/ThirdParty")
 
 # SPIRV-Cross (MSL backend only, no CLI/tests)
 project(SPIRV-Cross CXX)
 
-add_library(spirv-cross STATIC)
+add_library(spirv-cross SHARED)
 
 target_sources(spirv-cross PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_cross.cpp

@@ -27,7 +27,7 @@ namespace Helios
 		UByte4    // 4 bytes, normalized unsigned byte [0, 255] -> [0.0, 1.0]
 	};
 
-	struct BufferElement
+	struct HELIOS_API BufferElement
 	{
 		std::string Name;
 		BufferDataType Type;
@@ -41,7 +41,7 @@ namespace Helios
 		uint32_t GetComponentCount() const;
 	};
 
-	class VertexBufferLayout
+	class HELIOS_API VertexBufferLayout
 	{
 	public:
 		VertexBufferLayout() = default;
@@ -68,7 +68,7 @@ namespace Helios
 	class DeviceStorageBuffer;
 
 	// Vertex Buffer
-	class DeviceVertexBuffer
+	class HELIOS_API DeviceVertexBuffer
 	{
 	public:
 		DeviceVertexBuffer() = default;
@@ -115,7 +115,7 @@ namespace Helios
 		static SharedPtr<DeviceStorageBuffer> Create(const std::string& name, uint32_t size);
 	};
 
-	class IndexBuffer
+	class HELIOS_API IndexBuffer
 	{
 	public:
 		IndexBuffer() = default;

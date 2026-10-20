@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "Helios/Common/Export.h"
 #include <any>
 #include <optional>
 #include <vector>
@@ -39,7 +40,7 @@ namespace Helios
 	/*
 	 * 材质类
 	 */
-	class Material
+	class HELIOS_API Material
 	{
 		using ParameterMap = std::unordered_map<uint32_t, MaterialParamInfo>;
 
@@ -169,17 +170,17 @@ namespace Helios
 	namespace MaterialIO
 	{
 		/* 读 / 写一个 .mtl 文件：根元素就是 <Material> */
-		bool ReadFile(const std::string& path, Material& material);
-		bool WriteFile(const std::string& path, const Material& material);
+		HELIOS_API bool ReadFile(const std::string& path, Material& material);
+		HELIOS_API bool WriteFile(const std::string& path, const Material& material);
 
 		/* 把材质引用的贴图收进 texture_dir 并改写 Path：导出的模型目录自包含 */
-		bool MakeTexturesLocal(const std::string& material_path, const std::string& texture_dir);
+		HELIOS_API bool MakeTexturesLocal(const std::string& material_path, const std::string& texture_dir);
 
 		/* 把材质的定义写进一个元素（<Material> 或实例覆盖元素）；write_raster_state = false
 		 * 时只写参数（引用条目的参数覆盖用，光栅状态沿用基材质） */
-		void WriteBody(tinyxml2::XMLElement* material_element, const Material& material,
+		HELIOS_API void WriteBody(tinyxml2::XMLElement* material_element, const Material& material,
 			bool write_raster_state = true);
 		/* 从一个元素读回材质定义；失败返回 false（材质保持默认构造） */
-		bool ReadBody(const tinyxml2::XMLElement* material_element, Material& material);
+		HELIOS_API bool ReadBody(const tinyxml2::XMLElement* material_element, Material& material);
 	}
 }

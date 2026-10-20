@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <memory>
+#include "Export.h"
 
 #define BIT(x) (1 << (x))
 #define EXPAND_MACRO(x) x

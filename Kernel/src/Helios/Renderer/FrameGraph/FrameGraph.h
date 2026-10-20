@@ -17,7 +17,7 @@ namespace Helios
 	struct FrameBufferDesc;
 
 	/* FrameGraph类 */
-	class FrameGraph final
+	class HELIOS_API FrameGraph final
 	{
 	public:
 		explicit FrameGraph(const std::string& name);
@@ -152,7 +152,7 @@ namespace Helios
 	 * 每个RenderPass对应对应一个Builder
 	 * 用于创建或绑定当前RenderPass所需的资源
 	 */
-	class FrameGraphBuilder
+	class HELIOS_API FrameGraphBuilder
 	{
 	public:
 		explicit FrameGraphBuilder(FrameGraphBuilder&) = delete;

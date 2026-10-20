@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -88,7 +88,7 @@ namespace Helios
 	/* 函数级 CPU 耗时采集（仅 owner 线程，主线程用）：作用域 RAII 把「标签 + 区间」
 	 * 写进预分配节点池，帧末结算 —— EMA 实时树（面板 Live）+ 原始值录制（逐帧回放）。
 	 * 对偶 RenderQueryProfiler：GPU 是异步查询，这里是同步区间，模型更简单。 */
-	class CPUTimerProfiler
+	class HELIOS_API CPUTimerProfiler
 	{
 	public:
 		static CPUTimerProfiler& Instance();
@@ -161,7 +161,7 @@ namespace Helios
 	/* 作用域 RAII（PROFILE_SCOPE / PROFILE_FUNCTION 宏的落点）：构造进入、析构退出；
 	 * 标签须指向静态存储（宏经 PROFILE_LABEL_LINE 裁剪并落 static constexpr）；
 	 * file / line = 插桩点位置（宏给 __FILE__ / __LINE__；也可传 nullptr / 0 = 无位置）。 */
-	class ScopedCPUTimerScope
+	class HELIOS_API ScopedCPUTimerScope
 	{
 	public:
 		ScopedCPUTimerScope(const char* label, const char* file, uint32_t line);

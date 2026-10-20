@@ -33,7 +33,7 @@ namespace Helios
 	/*
 	* 事件基类
 	*/
-	class IEvent
+	class HELIOS_API IEvent
 	{
 	public:
 		virtual ~IEvent() = default;
