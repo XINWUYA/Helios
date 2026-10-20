@@ -1,6 +1,6 @@
 #pragma once
 /* 场景 gizmo（编辑器视口叠加层）：地面刻度网格 / 世界坐标轴 / 各类型实体图标。职责边界：
- * 只画"场景辅助和实体图标"；操作 gizmo（ImGuizmo）和视图指示器（ViewGizmo.h）不在本模块。
+ * 只画"场景辅助和实体图标"；操作 gizmo（TransformGizmo.h）和视图指示器（ViewGizmo.h）不在本模块。
  * 新增实体图标 = 加几何 + 提交函数 + 在 Submit 里挂一行；相机只在 AxisPass 里接一行。 */
 
 #include <glm/glm.hpp>

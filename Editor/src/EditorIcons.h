@@ -60,6 +60,8 @@ namespace Helios
 			FileCppHeader, FileCppSource,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */
 			Gizmos, Grid, WorldAxis,
+			/* 变换坐标空间（工具栏下拉框）：局部 = 随实体旋转的方框，世界 = 固定朝向的球体 */
+			LocalSpace, WorldSpace,
 			/* 调试视图（工具栏按钮 + 弹层档位） */
 			DebugView,
 			/* 调试视图弹层的档位图形（分区各成族：Surface = 圆角方块、Lighting = 圆盘、

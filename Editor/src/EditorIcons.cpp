@@ -1560,6 +1560,41 @@ namespace Helios::Icons
 			dl->AddCircleFilled(origin, c.Len(0.028f), mint);
 		}
 
+		/* 局部坐标空间：虚线方框跟着实体转，三根轴从中心伸出 */
+		void DrawLocalSpace(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 gray = PaletteColor(color, kGray);
+
+			dl->AddRect(c.At(0.17f, 0.17f), c.At(0.83f, 0.83f), gray, 0.0f, 0, t * 0.7f);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.12f), mint, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.88f, 0.50f), mint, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.88f), mint, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.07f), gray);
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.035f), mint);
+		}
+
+		/* 世界坐标空间：地平线 + 虚线球体，三根轴朝向固定 */
+		void DrawWorldSpace(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 gray = PaletteColor(color, kGray);
+			const ImVec2 origin = c.At(0.44f, 0.53f);
+
+			dl->AddLine(c.At(0.06f, 0.88f), c.At(0.94f, 0.88f), gray, t * 0.7f);
+			StrokeDashedCircle(dl, origin, c.Len(0.33f), gray, t * 0.7f, c.Len(0.04f), c.Len(0.07f));
+			dl->AddLine(origin, c.At(0.44f, 0.12f), violet, t);
+			dl->AddLine(origin, c.At(0.88f, 0.53f), violet, t);
+			dl->AddLine(origin, c.At(0.44f, 0.94f), violet, t);
+			dl->AddCircleFilled(origin, c.Len(0.08f), gray);
+			dl->AddCircleFilled(origin, c.Len(0.04f), mint);
+		}
+
 		/* 调试视图：带网格的监视器 + 折线读数 + 标记点（右侧两道红杠是"标定"）——
 		 * 对齐设计稿 all_icons.svg 的 debug-view。 */
 		void DrawDebugView(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -2593,6 +2628,8 @@ namespace Helios::Icons
 			{ "Gizmos",            &DrawGizmos },
 			{ "Grid",              &DrawGrid },
 			{ "WorldAxis",         &DrawWorldAxis },
+			{ "LocalSpace",        &DrawLocalSpace },
+			{ "WorldSpace",        &DrawWorldSpace },
 			{ "DebugView",         &DrawDebugView },
 			{ "Albedo",            &DrawAlbedo },
 			{ "Normal",            &DrawNormal },

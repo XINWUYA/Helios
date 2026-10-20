@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "EditorCommon.h"
 #include "Helios/Command/Command.h"
 #include "Helios/Common/Common.h"
@@ -51,6 +51,8 @@ namespace Helios
 		/* ---- 运行 / Gizmo 状态（本类持有权威值，再转发给场景面板）---- */
 		[[nodiscard]] int GetGizmoType() const { return m_GizmoType; }
 		void SetGizmoType(int type);
+		/* Gizmo 拖拽进行中：主壳层据此屏蔽快捷键（拖拽期间不切工具、不撤销） */
+		/* Gizmo 坐标空间：0 = Local（轴跟实体旋转）、1 = World（轴恒为世界轴） */
 
 		[[nodiscard]] PlayMode GetPlayMode() const { return m_PlayMode; }
 		void SetPlayMode(PlayMode mode);
