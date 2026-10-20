@@ -7,6 +7,7 @@
 #include "TimelinePanel.h"
 #include "EditorBuiltinCamera.h"
 #include "EditorCommon.h"
+#include "TransformGizmo.h"
 #include "Helios/Command/CommandStack.h"
 
 namespace Helios
@@ -79,6 +80,13 @@ namespace Helios
 		[[nodiscard]] bool IsScriptOrderVisible() const { return m_IsScriptOrderVisible; }
 
 		void SetGizmoType(int type) { m_GizmoType = type; }
+		/* 操作 gizmo 的轴基：true = 实体局部轴，false = 世界轴 */
+		void SetGizmoLocalSpace(bool local) { m_GizmoLocalSpace = local; }
+		[[nodiscard]] bool IsGizmoLocalSpace() const { return m_GizmoLocalSpace; }
+		/* 操作 gizmo 拖拽中 / 指针停在手柄上：主壳层据此屏蔽快捷键与相机导航
+		 * （与原 ImGuizmo::IsUsing / IsOver 同义） */
+		[[nodiscard]] bool IsGizmoDragging() const { return m_GizmoDrag.Active; }
+		[[nodiscard]] bool IsGizmoHovered() const { return m_GizmoHoveredHandle >= 0; }
 		void SetPlayMode(PlayMode mode);
 		/* 热重载脚本：运行中的实例按字段迁移到新库，不需要退出 Runtime */
 		void ReloadScripts(const std::function<bool()>& swap_module);
@@ -152,6 +160,8 @@ namespace Helios
 		void ShowStatisticInfoUI();
 		/* 选中Entity时显示操作Gizmo */
 		void ShowOperationGizmoUI();
+		/* 收尾一次 Gizmo 拖拽：关掉合并窗口，整段拖拽在历史里只留一条 */
+		void EndGizmoDrag();
 		/* 视口右上角的视图指示器：六轴盘，点击切视角 / 拖拽转视角 */
 		void ShowViewGizmoUI();
 
@@ -178,8 +188,15 @@ namespace Helios
 		size_t m_SavedSceneEditCount{ 0 };
 		/* 发生过不走命令栈的场景改动（如拖入模型） */
 		bool m_HasUnrecordedChange{ false };
-		/* Gizmo 拖拽进行中（拖拽期间的逐帧改动合并为一条历史） */
-		bool m_IsGizmoDragging{ false };
+		/* 操作 Gizmo：本帧布局（拾取 / 拖拽共用）、悬停手柄与拖拽状态。
+		 * 几何与数学在 TransformGizmo.h，这里只保存跨帧状态。 */
+		TransformGizmo::Layout m_GizmoLayout{};
+		TransformGizmo::Drag m_GizmoDrag{};
+		int32_t m_GizmoHoveredHandle{ -1 };
+		/* 拖拽起点快照：每帧都从它重算世界矩阵，长距离拖拽不会累积误差 */
+		Entity m_GizmoEntity{};
+		TransformComponent m_GizmoStartTransform{};
+		glm::mat4 m_GizmoStartWorld{ 1.0f };
 		/* 选中实体 */
 		Entity m_HoveredEntity;
 		/* 视口范围: x: width_min; y: height_min; z: width_max; w: height_max */
@@ -190,6 +207,7 @@ namespace Helios
 		bool m_IsViewportHovered{ false };
 		/* 移动，旋转，缩放UI */
 		int m_GizmoType = -1;
+		bool m_GizmoLocalSpace{ true };
 		/* 视图指示器手势：按下沿命中的轴盘序号（-1 = 未命中）；累计位移用于区分点击 / 拖拽 */
 		int32_t m_ViewGizmoPressedDisc{ -1 };
 		float m_ViewGizmoDraggedDistance{ 0.0f };

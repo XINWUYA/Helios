@@ -51,8 +51,10 @@ namespace Helios
 		/* ---- 运行 / Gizmo 状态（本类持有权威值，再转发给场景面板）---- */
 		[[nodiscard]] int GetGizmoType() const { return m_GizmoType; }
 		void SetGizmoType(int type);
+		[[nodiscard]] bool IsGizmoLocalSpace() const { return m_GizmoLocalSpace; }
+		void SetGizmoLocalSpace(bool local);
 		/* Gizmo 拖拽进行中：主壳层据此屏蔽快捷键（拖拽期间不切工具、不撤销） */
-		/* Gizmo 坐标空间：0 = Local（轴跟实体旋转）、1 = World（轴恒为世界轴） */
+		[[nodiscard]] bool IsGizmoDragging();
 
 		[[nodiscard]] PlayMode GetPlayMode() const { return m_PlayMode; }
 		void SetPlayMode(PlayMode mode);
@@ -107,6 +109,7 @@ namespace Helios
 		ModelEditorLayer* m_pModel{ nullptr };
 
 		int      m_GizmoType{ -1 };
+		bool     m_GizmoLocalSpace{ true };
 		PlayMode m_PlayMode{ PlayMode::Edit };
 	};
 }

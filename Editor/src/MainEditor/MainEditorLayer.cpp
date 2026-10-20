@@ -5,7 +5,6 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
-#include "ImGuizmo.h"
 #include "Helios/Application/FileDialog.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/ImGui/EditorTheme.h"
@@ -145,20 +144,20 @@ namespace Helios
 				m_Context.Redo();
 			break;
 		case Key::Q: /* Q/W/E/R：切换 Gizmo 操作 */
-			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
+			if (!m_Context.IsGizmoDragging() && !is_button_right_pressed)
 				m_Context.SetGizmoType(-1);
 			break;
 		case Key::W:
-			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
-				m_Context.SetGizmoType(ImGuizmo::OPERATION::TRANSLATE);
+			if (!m_Context.IsGizmoDragging() && !is_button_right_pressed)
+				m_Context.SetGizmoType(0);
 			break;
 		case Key::E:
-			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
-				m_Context.SetGizmoType(ImGuizmo::OPERATION::ROTATE);
+			if (!m_Context.IsGizmoDragging() && !is_button_right_pressed)
+				m_Context.SetGizmoType(1);
 			break;
 		case Key::R:
-			if (!ImGuizmo::IsUsing() && !is_button_right_pressed)
-				m_Context.SetGizmoType(ImGuizmo::OPERATION::SCALE);
+			if (!m_Context.IsGizmoDragging() && !is_button_right_pressed)
+				m_Context.SetGizmoType(2);
 			break;
 		default:
 			break;
@@ -643,16 +642,59 @@ namespace Helios
 			ToolbarSeparator(kButtonSize, kGroupGap);
 
 			const int gizmo_type = m_Context.GetGizmoType();
-			if (Icons::IconButton(Icons::Id::Translate, button_size, gizmo_type == ImGuizmo::OPERATION::TRANSLATE, "Translate  (W)"))
-				m_Context.SetGizmoType(ImGuizmo::OPERATION::TRANSLATE);
+			if (Icons::IconButton(Icons::Id::Translate, button_size, gizmo_type == 0, "Translate  (W)"))
+				m_Context.SetGizmoType(0);
 
 			ImGui::SameLine();
-			if (Icons::IconButton(Icons::Id::Rotate, button_size, gizmo_type == ImGuizmo::OPERATION::ROTATE, "Rotate  (E)"))
-				m_Context.SetGizmoType(ImGuizmo::OPERATION::ROTATE);
+			if (Icons::IconButton(Icons::Id::Rotate, button_size, gizmo_type == 1, "Rotate  (E)"))
+				m_Context.SetGizmoType(1);
 
 			ImGui::SameLine();
-			if (Icons::IconButton(Icons::Id::Scale, button_size, gizmo_type == ImGuizmo::OPERATION::SCALE, "Scale  (R)"))
-				m_Context.SetGizmoType(ImGuizmo::OPERATION::SCALE);
+			if (Icons::IconButton(Icons::Id::Scale, button_size, gizmo_type == 2, "Scale  (R)"))
+				m_Context.SetGizmoType(2);
+
+			ImGui::SameLine();
+			const bool gizmo_local = m_Context.IsGizmoLocalSpace();
+			const ImVec2 combo_origin = ImGui::GetCursorScreenPos();
+			const float combo_width = kButtonSize * 4.2f;
+			ImGui::SetNextItemWidth(combo_width);
+			const bool space_open = ImGui::BeginCombo("##GizmoSpace", "");
+			if (space_open)
+			{
+				for (int32_t space_index = 0; space_index < 2; ++space_index)
+				{
+					const bool is_local = (space_index == 0);
+					const bool selected = (is_local == gizmo_local);
+					const ImVec2 item_min = ImGui::GetCursorScreenPos();
+					if (ImGui::Selectable(is_local ? "##LocalItem" : "##WorldItem", selected, 0,
+						ImVec2(0.0f, kButtonSize * 0.9f)))
+						m_Context.SetGizmoLocalSpace(is_local);
+
+					ImDrawList* item_draw_list = ImGui::GetWindowDrawList();
+					const float item_mid_y = item_min.y + kButtonSize * 0.45f;
+					Icons::Draw(item_draw_list,
+						is_local ? Icons::Id::LocalSpace : Icons::Id::WorldSpace,
+						ImVec2(item_min.x + 10.0f, item_mid_y), 13.0f,
+						ImGui::GetColorU32(ImGuiCol_Text));
+					item_draw_list->AddText(
+						ImVec2(item_min.x + 26.0f, item_mid_y - ImGui::GetTextLineHeight() * 0.5f),
+						ImGui::GetColorU32(ImGuiCol_Text), is_local ? "Local" : "World");
+				}
+				ImGui::EndCombo();
+			}
+
+			/* 预览：弹层打开时 GetItemRect 指向弹层项，所以用按下前的光标位置自己算 */
+			{
+				ImDrawList* preview_draw_list = ImGui::GetWindowDrawList();
+				const float preview_mid_y = combo_origin.y + kButtonSize * 0.5f;
+				Icons::Draw(preview_draw_list,
+					gizmo_local ? Icons::Id::LocalSpace : Icons::Id::WorldSpace,
+					ImVec2(combo_origin.x + 10.0f, preview_mid_y), 13.0f,
+					ImGui::GetColorU32(ImGuiCol_Text));
+				preview_draw_list->AddText(
+					ImVec2(combo_origin.x + 26.0f, preview_mid_y - ImGui::GetTextLineHeight() * 0.5f),
+					ImGui::GetColorU32(ImGuiCol_Text), gizmo_local ? "Local" : "World");
+			}
 
 			/* ---- 运行控制：水平居中 ---- */
 			const float previous_right = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;

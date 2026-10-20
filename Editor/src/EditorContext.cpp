@@ -126,6 +126,19 @@ namespace Helios
 			layer->SetGizmoType(type);
 	}
 
+	void EditorContext::SetGizmoLocalSpace(bool local)
+	{
+		m_GizmoLocalSpace = local;
+		if (auto* layer = GetSceneLayer())
+			layer->SetGizmoLocalSpace(local);
+	}
+
+	bool EditorContext::IsGizmoDragging()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->IsGizmoDragging();
+	}
+
 	void EditorContext::SetPlayMode(PlayMode mode)
 	{
 		m_PlayMode = mode;

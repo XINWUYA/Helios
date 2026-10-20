@@ -48,7 +48,6 @@ set(INCLUDE_DIRS
     stb           ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/stb
     entt          ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
     tinyxml2      ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
-    ImGuizmo      ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/ImGuizmo
     xxHash        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/xxHash
     magic_enum    ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
     assimp        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include

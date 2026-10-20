@@ -1,8 +1,10 @@
 ﻿#include "Pch.h"
 #include "SceneEditorLayer.h"
+#include <cstdio>
 #include <glm/gtc/type_ptr.hpp>
 #include "EditorBuiltinCamera.h"
 #include "EditorIcons.h"
+#include "SceneGizmos.h"
 #include "ViewGizmo.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
@@ -15,7 +17,6 @@
 #include "Helios/Scene/ModelImporter.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Script/ScriptRuntime.h"
-#include "ImGuizmo.h"
 
 namespace Helios
 {
@@ -318,7 +319,7 @@ namespace Helios
 		{
 			/* 这一击真落在场景视口上才拾取：指针不在视口上（如 Frame Graph 页签
 			 * 顶替视口时）、飞行 / Alt 轨道中、落在 Gizmo 或视图指示器上都不拾取 */
-			if (m_IsViewportHovered && !ImGuizmo::IsOver() && !Input::IsKeyPressed(Key::LeftAlt)
+			if (m_IsViewportHovered && !IsGizmoHovered() && !Input::IsKeyPressed(Key::LeftAlt)
 				&& !m_pEditorCamera->IsFlying() && !ImGui::IsAnyItemHovered())
 			{
 				CheckMouseSelectEntity();
@@ -531,8 +532,8 @@ namespace Helios
 
 		/* 场景内容已整体替换：缓存的实体句柄（悬停 / 选中）与旧命令都不再有效 */
 		m_HoveredEntity = {};
+		EndGizmoDrag();
 		m_CommandStack.Clear();
-		m_IsGizmoDragging = false;
 		/* 顺序表的草稿指的是旧场景的槽位，一起丢掉 */
 		m_ScriptOrderDraft.clear();
 
@@ -820,7 +821,7 @@ namespace Helios
 			 * 干净点不动 —— 进运行前本来没保存的改动，还原后仍显示为未保存。 */
 			m_CommandStack.Clear();
 			m_HoveredEntity = {};
-			m_IsGizmoDragging = false;
+			EndGizmoDrag();
 			m_SceneHierarchy.SetSelectedEntity(Entity{});
 		}
 	}
@@ -935,9 +936,11 @@ namespace Helios
 		else
 		{
 			/* 视口窗口不可见：清掉交互标志，否则残留的 hover 会继续给相机授权、
-			 * 点击也会被误判成视口内选择。 */
+			 * 点击也会被误判成视口内选择。Gizmo 的帧状态一并清掉（本帧不再写）。 */
 			m_IsViewportFocused = false;
 			m_IsViewportHovered = false;
+			GetTransformGizmoState() = TransformGizmoState{};
+			m_GizmoHoveredHandle = -1;
 		}
 
 		ImGui::End();
@@ -956,78 +959,275 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		// Editor camera
-		const glm::mat4& projection_mat = m_pEditorCamera->GetProjectionMatrix();
-		glm::mat4 view_mat = m_pEditorCamera->GetViewMatrix();
-
-		ImGuizmo::SetOrthographic(false);
-		ImGuizmo::SetDrawlist();
-		ImGuizmo::SetRect(m_ViewportRegion.MinX, m_ViewportRegion.MinY, m_ViewportRegion.Width, m_ViewportRegion.Height);
+		/* 手柄是实体网格、由渲染 Pass 画（见 SceneGizmos::SubmitTransformGizmo）：
+		 * 这里只做"本帧布局 + 命中 + 拖拽"，把结果写进 GetTransformGizmoState()。 */
+		TransformGizmoState& gizmo_state = GetTransformGizmoState();
+		gizmo_state = TransformGizmoState{};
 
 		Entity selected_entity = m_SceneHierarchy.GetSelectedEntity();
-		/* 组件可能被移除，缺 Transform 的话本帧就不画 Gizmo。轨道旋转（Alt+LMB）期间整块跳过：
-		 * ImGuizmo 只认左键，不跳过的话 Alt+LMB 起手落到轴上会同时拖动物体 —— 导航优先（跟 Godot /
-		 * Blender 一致）。 */
-		if (!m_pEditorCamera->IsOrbiting() && selected_entity && m_GizmoType != -1
-			&& m_pMainScene && selected_entity.HasComponent<TransformComponent>())
+		/* 选择变了要先把进行中的拖拽收尾：事务窗口开着的话，下一次编辑会跟这次拖拽
+		 * 被合并成同一条历史。 */
+		if (selected_entity != m_GizmoEntity)
+			EndGizmoDrag();
+
+		/* 组件可能被移除；轨道旋转（Alt+LMB）期间整块跳过 —— 导航优先（跟 Godot / Blender 一致）。
+		 * 缺 Transform 的话本帧就不画 Gizmo。 */
+		const bool can_draw = !m_pEditorCamera->IsOrbiting() && selected_entity && m_GizmoType != -1
+			&& m_pMainScene != nullptr && selected_entity.HasComponent<TransformComponent>();
+
+		if (!can_draw)
 		{
-			// Entity transform
-			auto& transform_component = selected_entity.GetComponent<TransformComponent>();
+			EndGizmoDrag();
+			m_GizmoLayout = {};
+			m_GizmoHoveredHandle = -1;
+			return;
+		}
 
-			/* Gizmo 作用在世界变换上：实体挂在父节点下时，本地变换不能直接当世界位置用。
-			 * 无父节点时父世界变换是单位阵，与既有行为完全一致。 */
-			glm::mat4 transform_mat = m_pMainScene->GetWorldTransform(selected_entity);
-			const glm::mat4 parent_world = m_pMainScene->GetWorldTransform(m_pMainScene->GetParent(selected_entity));
+		const auto operation = static_cast<TransformGizmo::Operation>(m_GizmoType);
+		auto& transform_component = selected_entity.GetComponent<TransformComponent>();
 
-			// Snapping
-			bool snap = Input::IsKeyPressed(Key::LeftControl);
-			float snap_value = 0.5f; // Snap to 0.5m for translation/scale
-			// Snap to 45 degrees for rotation
-			if (m_GizmoType == ImGuizmo::OPERATION::ROTATE)
-				snap_value = 45.0f;
+		/* Gizmo 作用在世界变换上：实体挂在父节点下时，本地变换不能直接当世界位置用。 */
+		const glm::mat4 world_transform = m_pMainScene->GetWorldTransform(selected_entity);
 
-			float snap_values[3] = { snap_value, snap_value, snap_value };
+		/* 轴基：世界变换的三列（去掉缩放）。缩放也走局部轴 —— 沿世界轴缩放会引入切变，
+		 * TRS 表达不了。 */
+		glm::mat3 basis(1.0f);
+		for (glm::length_t axis = 0; axis < 3; ++axis)
+		{
+			if (!m_GizmoLocalSpace)
+				continue;
 
-			ImGuizmo::Manipulate(glm::value_ptr(view_mat), glm::value_ptr(projection_mat),
-				(ImGuizmo::OPERATION)m_GizmoType, ImGuizmo::LOCAL, glm::value_ptr(transform_mat),
-				nullptr, snap ? snap_values : nullptr); /* ImGuizmo::LOCAL/ ImGuizmo::WORLD */
+			const glm::vec3 column(world_transform[axis]);
+			const float length = glm::length(column);
+			if (length > 1.0e-6f)
+				basis[axis] = column / length;
+			else
+				basis[axis] = glm::vec3(axis == 0 ? 1.0f : 0.0f, axis == 1 ? 1.0f : 0.0f,
+					axis == 2 ? 1.0f : 0.0f);
+		}
 
-			const bool is_using = ImGuizmo::IsUsing();
+		m_GizmoLayout = TransformGizmo::BuildLayout(glm::vec3(world_transform[3]), basis,
+			m_pEditorCamera->GetPosition(), m_pEditorCamera->GetForwardDir(),
+			m_pEditorCamera->GetRightDir(), m_pEditorCamera->GetUpDir(),
+			ComputeGizmoScreenScale(*m_pEditorCamera),
+			m_pEditorCamera->GetViewProjectionMatrix(),
+			glm::vec2(static_cast<float>(m_ViewportRegion.MinX), static_cast<float>(m_ViewportRegion.MinY)),
+			glm::vec2(static_cast<float>(m_ViewportRegion.Width), static_cast<float>(m_ViewportRegion.Height)));
 
-			/* 按下时开启合并窗口：整段拖拽的逐帧改动合并为一条历史 */
-			if (is_using && !m_IsGizmoDragging)
+		const glm::vec2 mouse(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
+		const bool mouse_in_viewport = m_IsViewportHovered
+			&& mouse.x >= static_cast<float>(m_ViewportRegion.MinX)
+			&& mouse.y >= static_cast<float>(m_ViewportRegion.MinY)
+			&& mouse.x <= static_cast<float>(m_ViewportRegion.MinX) + static_cast<float>(m_ViewportRegion.Width)
+			&& mouse.y <= static_cast<float>(m_ViewportRegion.MinY) + static_cast<float>(m_ViewportRegion.Height);
+
+		/* 悬停：拖拽期间手柄锁定（指针移出手柄也不换），否则只在指针位于视口内时算 */
+		if (!m_GizmoDrag.Active)
+		{
+			m_GizmoHoveredHandle = mouse_in_viewport
+				? TransformGizmo::HitTest(m_GizmoLayout, operation, mouse) : -1;
+		}
+
+		/* 起手：左键按下沿 + 指针在视口上 + 没按 Alt（Alt+LMB 是轨道导航，导航优先）+
+		 * 指针不在别的 ImGui 控件上（弹出的菜单、右上角视图指示器） */
+		bool just_started = false;
+		float gizmo_arc_sweep = 0.0f;
+		float gizmo_translate_distance = 0.0f;
+		float gizmo_scale_value = 0.0f;
+		if (!m_GizmoDrag.Active && m_GizmoHoveredHandle >= 0
+			&& ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+			&& mouse_in_viewport && !ImGui::IsAnyItemHovered()
+			&& !Input::IsKeyPressed(Key::LeftAlt))
+		{
+			if (TransformGizmo::BeginDrag(m_GizmoLayout, operation, m_GizmoHoveredHandle, mouse, m_GizmoDrag))
 			{
-				m_IsGizmoDragging = true;
+				m_GizmoEntity = selected_entity;
+				m_GizmoStartTransform = transform_component;
+				m_GizmoStartWorld = world_transform;
+				just_started = true;
+
+				/* 按下时开启合并窗口：整段拖拽的逐帧改动合并为一条历史 */
 				m_CommandStack.BeginTransaction();
-			}
-
-			if (is_using)
-			{
-				/* 从变换矩阵中恢复：ImGuizmo 给的是世界变换，先按父空间换算回本地再分解，
-				 * 否则挂在父节点下的实体会随父节点一起偏移。 */
-				glm::vec3 position, rotation, scale;
-				DecomposeTransform(glm::inverse(parent_world) * transform_mat, position, rotation, scale);
-
-				/* 旋转按增量叠加（ImGuizmo 给出的是绝对量） */
-				TransformComponent next = transform_component;
-				next.m_Position = position;
-				next.m_Rotation += rotation - transform_component.m_Rotation;
-				next.m_Scale = scale;
-
-				/* 改动经命令栈落地 */
-				m_CommandStack.Execute(CreateUniquePtr<TransformCommand>(selected_entity, transform_component, next));
-			}
-			else if (m_IsGizmoDragging)
-			{
-				m_IsGizmoDragging = false;
-				m_CommandStack.EndTransaction();
 			}
 		}
 
-		/* 坐标线框（todo：划到场景物体之后） */
-		//const auto identity_mat = glm::identity<glm::mat4>();
-		//ImGuizmo::DrawGrid(glm::value_ptr(view_mat), glm::value_ptr(projection_mat), glm::value_ptr(identity_mat), 100.f);
+		if (m_GizmoDrag.Active && !just_started)
+		{
+			if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+			{
+				EndGizmoDrag();
+			}
+			else
+			{
+				/* 拖拽期间逐帧从起点快照重算世界矩阵（不从当前值递推，长拖不会累积误差），
+				 * 再按父空间换算回本地并分解 —— 挂在父节点下的实体不会随父节点一起偏移。 */
+				TransformGizmo::Delta delta;
+				const bool snap = Input::IsKeyPressed(Key::LeftControl);
+				const bool updated = TransformGizmo::UpdateDrag(m_GizmoLayout, m_GizmoDrag, mouse, snap, delta);
 
+				/* 角度弧画的是吸附后的角度（与落到实体上的旋转量一致） */
+				if (m_GizmoDrag.Kind == TransformGizmo::Operation::Rotate)
+					gizmo_arc_sweep = delta.Rotation;
+
+				/* 缩放倍数：轴取该轴，平面取两轴之一（两轴同步），中心取整体 */
+				if (m_GizmoDrag.Kind == TransformGizmo::Operation::Scale)
+				{
+					if (m_GizmoDrag.Handle >= 0 && m_GizmoDrag.Handle < TransformGizmo::kAxisCount)
+						gizmo_scale_value = delta.Scale[m_GizmoDrag.Handle];
+					else if (m_GizmoDrag.Handle >= TransformGizmo::kPlaneHandleBase)
+						gizmo_scale_value = delta.Scale[
+							(m_GizmoDrag.Handle - TransformGizmo::kPlaneHandleBase + 1) % TransformGizmo::kAxisCount];
+					else
+						gizmo_scale_value = delta.Scale.x;
+				}
+
+				/* 平移距离：轴手柄取沿轴分量（带符号），平面与中心球取位移长度 */
+				if (m_GizmoDrag.Kind == TransformGizmo::Operation::Translate)
+				{
+					gizmo_translate_distance = m_GizmoDrag.Handle < TransformGizmo::kAxisCount
+						? glm::dot(delta.Translation,
+							TransformGizmo::AxisNormal(m_GizmoLayout, m_GizmoDrag.Handle))
+						: glm::length(delta.Translation);
+				}
+
+				if (updated && !delta.IsIdentity())
+				{
+					const glm::mat4 new_world = TransformGizmo::ApplyDelta(m_GizmoDrag, delta, m_GizmoStartWorld);
+					const glm::mat4 parent_world =
+						m_pMainScene->GetWorldTransform(m_pMainScene->GetParent(m_GizmoEntity));
+
+					glm::vec3 position, rotation, scale;
+					if (DecomposeTransform(glm::inverse(parent_world) * new_world, position, rotation, scale))
+					{
+						TransformComponent next = m_GizmoStartTransform;
+						next.m_Position = position;
+						next.m_Rotation = rotation;
+						next.m_Scale = scale;
+
+						/* 改动经命令栈落地（同一事务内的连续改动会并成一条） */
+						m_CommandStack.Execute(CreateUniquePtr<TransformCommand>(
+							m_GizmoEntity, transform_component, next));
+					}
+				}
+			}
+		}
+
+		/* 落状态给渲染侧：手柄跟着实体走（拖拽中取更新后的世界变换），高亮按按下优先。
+		 * 布局退化（实体在相机背后）时不画 —— 与命中口径一致。 */
+		gizmo_state.Visible = m_GizmoLayout.Valid;
+		gizmo_state.Camera = m_pEditorCamera.get();
+		gizmo_state.World = m_GizmoDrag.Active && m_pMainScene != nullptr
+			? m_pMainScene->GetWorldTransform(m_GizmoEntity) : world_transform;
+		gizmo_state.Operation = m_GizmoType;
+		gizmo_state.LocalSpace = m_GizmoLocalSpace;
+		gizmo_state.Highlight = m_GizmoDrag.Active ? m_GizmoDrag.Handle : m_GizmoHoveredHandle;
+
+		/* 平移拖拽：起点到当前原点画虚线，并在屏幕上标出距离 */
+		if (m_GizmoDrag.Active && m_GizmoDrag.Kind == TransformGizmo::Operation::Translate)
+		{
+			gizmo_state.DragActive = true;
+			gizmo_state.DragStart = m_GizmoDrag.Origin;
+			gizmo_state.DragCurrent = glm::vec3(gizmo_state.World[3]);
+			gizmo_state.DragDistance = gizmo_translate_distance;
+		}
+
+		/* 缩放拖拽：标签显示当前倍数 */
+		if (m_GizmoDrag.Active && m_GizmoDrag.Kind == TransformGizmo::Operation::Scale)
+			gizmo_state.DragScale = gizmo_scale_value;
+
+		/* 旋转拖拽中画角度弧：拖白色外环时弧落在加粗的外环上 */
+		if (m_GizmoDrag.Active && m_GizmoDrag.Kind == TransformGizmo::Operation::Rotate
+			&& gizmo_arc_sweep != 0.0f)
+		{
+			gizmo_state.ArcAxis = m_GizmoDrag.Axis;
+			gizmo_state.ArcAxisIndex = m_GizmoDrag.Handle >= 0
+				&& m_GizmoDrag.Handle < TransformGizmo::kAxisCount ? m_GizmoDrag.Handle : -1;
+			gizmo_state.ArcStart = m_GizmoDrag.StartAngle;
+			gizmo_state.ArcSweep = gizmo_arc_sweep;
+			gizmo_state.ArcRadius = TransformGizmo::RingRadius(m_GizmoLayout)
+				* (m_GizmoDrag.Handle == TransformGizmo::kOuterRingHandle
+					? TransformGizmo::kOuterRingRatio : 1.0f);
+		}
+
+		/* 旋转角度标签：轴名 + 度数 + 弧度，画在 gizmo 中心右上方 */
+		if (gizmo_state.ArcRadius > 0.0f && gizmo_state.ArcSweep != 0.0f && m_GizmoLayout.Valid)
+		{
+			const glm::vec4 clip = m_GizmoLayout.ViewProjection
+				* glm::vec4(m_GizmoLayout.Origin, 1.0f);
+			if (clip.w > 1.0e-4f)
+			{
+				const ImVec2 screen(
+					m_GizmoLayout.ViewportMin.x
+						+ (clip.x / clip.w * 0.5f + 0.5f) * m_GizmoLayout.ViewportSize.x,
+					m_GizmoLayout.ViewportMin.y
+						+ (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * m_GizmoLayout.ViewportSize.y);
+
+				static const char* kAxisNames[TransformGizmo::kAxisCount] = { "X", "Y", "Z" };
+				const bool axis_ring = m_GizmoDrag.Handle >= 0 && m_GizmoDrag.Handle < TransformGizmo::kAxisCount;
+				const char* axis_name = axis_ring ? kAxisNames[m_GizmoDrag.Handle] : "View";
+
+				char text[64];
+				std::snprintf(text, sizeof(text), "%s : %.1f deg,  %.2f rad", axis_name,
+					static_cast<double>(glm::degrees(gizmo_state.ArcSweep)),
+					static_cast<double>(gizmo_state.ArcSweep));
+				ImGui::GetWindowDrawList()->AddText(ImVec2(screen.x + 10.0f, screen.y - 22.0f),
+					IM_COL32(255, 158, 41, 255), text);
+			}
+		}
+
+		/* 缩放倍数标签：与平移、旋转用同一套字体和颜色 */
+		if (gizmo_state.DragScale > 0.0f && m_GizmoLayout.Valid)
+		{
+			const glm::vec4 clip = m_GizmoLayout.ViewProjection
+				* glm::vec4(m_GizmoLayout.Origin, 1.0f);
+			if (clip.w > 1.0e-4f)
+			{
+				const ImVec2 screen(
+					m_GizmoLayout.ViewportMin.x
+						+ (clip.x / clip.w * 0.5f + 0.5f) * m_GizmoLayout.ViewportSize.x,
+					m_GizmoLayout.ViewportMin.y
+						+ (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * m_GizmoLayout.ViewportSize.y);
+
+				char text[32];
+				std::snprintf(text, sizeof(text), "%.2fx", static_cast<double>(gizmo_state.DragScale));
+				ImGui::GetWindowDrawList()->AddText(ImVec2(screen.x + 10.0f, screen.y - 22.0f),
+					IM_COL32(255, 158, 41, 255), text);
+			}
+		}
+
+		/* 拖拽距离标签：起点与当前点的中点投影到屏幕，画一个小浮标（文字走 ImGui，
+		 * 几何部分仍是 3D 网格） */
+		if (gizmo_state.DragActive && m_GizmoLayout.Valid)
+		{
+			const glm::vec3 midpoint = (gizmo_state.DragStart + gizmo_state.DragCurrent) * 0.5f;
+			const glm::vec4 clip = m_GizmoLayout.ViewProjection * glm::vec4(midpoint, 1.0f);
+			if (clip.w > 1.0e-4f)
+			{
+				const ImVec2 screen(
+					m_GizmoLayout.ViewportMin.x
+						+ (clip.x / clip.w * 0.5f + 0.5f) * m_GizmoLayout.ViewportSize.x,
+					m_GizmoLayout.ViewportMin.y
+						+ (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * m_GizmoLayout.ViewportSize.y);
+
+				char text[32];
+				std::snprintf(text, sizeof(text), "%+.2f", static_cast<double>(gizmo_state.DragDistance));
+				ImGui::GetWindowDrawList()->AddText(ImVec2(screen.x + 10.0f, screen.y - 22.0f),
+					IM_COL32(255, 158, 41, 255), text);
+			}
+		}
+
+		if (m_GizmoHoveredHandle >= 0 && !m_GizmoDrag.Active)
+			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+	}
+
+	void SceneEditorLayer::EndGizmoDrag()
+	{
+		if (!m_GizmoDrag.Active)
+			return;
+
+		m_GizmoDrag = TransformGizmo::Drag{};
+		m_GizmoEntity = {};
+		m_CommandStack.EndTransaction();
 	}
 
 	/* 右上角视图指示器：六个轴盘（X / Y / Z × ±）—— 点击切视角、拖拽轨道旋转。盘面样式和
@@ -1221,7 +1421,7 @@ namespace Helios
 				/* 更新相机信息：指针悬停在视口上才授权起手导航（已起手的手势不受影响）；
 				 * Gizmo 拖拽中、指针落在视口内控件（视图指示器）上时都不让出输入 */
 				m_pEditorCamera->SetNavigationAllowed(
-					m_IsViewportHovered && !ImGuizmo::IsUsing() && !ImGui::IsAnyItemHovered());
+					m_IsViewportHovered && !IsGizmoDragging() && !ImGui::IsAnyItemHovered());
 				m_pEditorCamera->OnUpdate(delta_time);
 
 				/* 更新场景中的实体 */

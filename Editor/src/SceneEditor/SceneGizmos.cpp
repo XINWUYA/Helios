@@ -1,6 +1,7 @@
-#include "Pch.h"
+﻿#include "Pch.h"
 #include "SceneGizmos.h"
 #include "EditorBuiltinCamera.h"
+#include "TransformGizmo.h"
 #include <glm/gtx/quaternion.hpp>
 #include <cmath>
 
@@ -8,6 +9,7 @@
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/Math.h"
 #include "Helios/Common/Utils.h"
+#include "Helios/Scene/Camera.h"
 #include "Helios/Scene/Material.h"
 #include "Helios/Scene/Scene.h"
 #include "Helios/Scene/SkeletonModel.h"
@@ -424,6 +426,280 @@ namespace Helios
 			return vertices;
 		}
 
+		/* === 变换 gizmo 的实体网格（单位尺寸，绘制时由世界矩阵缩放；见 TransformGizmo.h）===
+		 * 顶点色恒为白（配色走材质的统一色），a_Dir / a_Side 填 0（那是轴带的屏幕展开参数）。
+		 * 绕序无所谓 —— gizmo 材质关面剔除。 */
+
+		/* 圆锥：底面半径 1、高 3、沿 +Z，尖端在 +Z 末端（平移箭头） */
+		std::vector<float> BuildTransformConeVertices()
+		{
+			constexpr int32_t kSegments = 32;
+			constexpr float kHeight = 3.0f;
+			const glm::vec3 color(1.0f);
+			const glm::vec3 apex(0.0f, 0.0f, kHeight);
+
+			std::vector<float> vertices;
+			vertices.reserve(static_cast<size_t>(kSegments) * 6 * 10);
+			for (int32_t segment = 0; segment < kSegments; ++segment)
+			{
+				const float angle_from = 2.0f * PI * static_cast<float>(segment) / static_cast<float>(kSegments);
+				const float angle_to = 2.0f * PI * static_cast<float>(segment + 1) / static_cast<float>(kSegments);
+				const glm::vec3 from(std::cos(angle_from), std::sin(angle_from), 0.0f);
+				const glm::vec3 to(std::cos(angle_to), std::sin(angle_to), 0.0f);
+
+				PushVertex(vertices, apex, color);
+				PushVertex(vertices, from, color);
+				PushVertex(vertices, to, color);
+
+				/* 底面封口：从背面看箭头也不漏空 */
+				PushVertex(vertices, glm::vec3(0.0f), color);
+				PushVertex(vertices, to, color);
+				PushVertex(vertices, from, color);
+			}
+			return vertices;
+		}
+
+		/* 圆柱：半径 1、长 1、从 0 到 +Z（轴杆与缩放的轴共用） */
+		std::vector<float> BuildTransformCylinderVertices()
+		{
+			constexpr int32_t kSegments = 12;
+			const glm::vec3 color(1.0f);
+			const glm::vec3 bottom_center(0.0f, 0.0f, 0.0f);
+			const glm::vec3 top_center(0.0f, 0.0f, 1.0f);
+
+			std::vector<float> vertices;
+			vertices.reserve(static_cast<size_t>(kSegments) * 12 * 10);
+			for (int32_t segment = 0; segment < kSegments; ++segment)
+			{
+				const float angle_from = 2.0f * PI * static_cast<float>(segment) / static_cast<float>(kSegments);
+				const float angle_to = 2.0f * PI * static_cast<float>(segment + 1) / static_cast<float>(kSegments);
+				const glm::vec3 bottom_from(std::cos(angle_from), std::sin(angle_from), 0.0f);
+				const glm::vec3 bottom_to(std::cos(angle_to), std::sin(angle_to), 0.0f);
+				const glm::vec3 top_from(bottom_from.x, bottom_from.y, 1.0f);
+				const glm::vec3 top_to(bottom_to.x, bottom_to.y, 1.0f);
+
+				PushVertex(vertices, bottom_from, color);
+				PushVertex(vertices, top_from, color);
+				PushVertex(vertices, bottom_to, color);
+
+				PushVertex(vertices, bottom_to, color);
+				PushVertex(vertices, top_from, color);
+				PushVertex(vertices, top_to, color);
+
+				PushVertex(vertices, top_center, color);
+				PushVertex(vertices, top_to, color);
+				PushVertex(vertices, top_from, color);
+
+				PushVertex(vertices, bottom_center, color);
+				PushVertex(vertices, bottom_from, color);
+				PushVertex(vertices, bottom_to, color);
+			}
+			return vertices;
+		}
+
+		/* 圆环：大半径 1、管半径由调用方给（彩色环 = kRingTubeRatio，白色外环更细），
+		 * 铺在 XY 平面（法线 +Z），64 个主段 × 8 个管段（整环等比缩放即可保持管径比例） */
+		/* fade_min：背侧的最低透明度（0 = 完全隐藏，1 = 不淡出）；
+		 * phase：相机在该环平面内的方位角。逐段按余弦算淡出，写进顶点色的 r 通道。 */
+		std::vector<float> BuildTransformRingVertices(float tube_radius, float fade_min, float phase)
+		{
+			constexpr int32_t kMajorSegments = TransformGizmo::kRingSegments;
+			constexpr int32_t kMinorSegments = 8;
+
+			const auto point_at = [tube_radius](float major, float minor)
+			{
+				const float radial = 1.0f + tube_radius * std::cos(minor);
+				return glm::vec3(radial * std::cos(major), radial * std::sin(major),
+					tube_radius * std::sin(minor));
+			};
+
+			std::vector<float> vertices;
+			vertices.reserve(static_cast<size_t>(kMajorSegments) * kMinorSegments * 6 * 10);
+			for (int32_t major = 0; major < kMajorSegments; ++major)
+			{
+				const float major_from = 2.0f * PI * static_cast<float>(major) / static_cast<float>(kMajorSegments);
+				const float major_to = 2.0f * PI * static_cast<float>(major + 1) / static_cast<float>(kMajorSegments);
+
+				/* 段中点相对相机的朝向：正对时满色，正背对时降到 fade_min */
+				const float near_factor = 0.5f + 0.5f * std::cos((major_from + major_to) * 0.5f - phase);
+				const glm::vec3 color(fade_min + (1.0f - fade_min) * near_factor);
+
+				for (int32_t minor = 0; minor < kMinorSegments; ++minor)
+				{
+					const float minor_from = 2.0f * PI * static_cast<float>(minor) / static_cast<float>(kMinorSegments);
+					const float minor_to = 2.0f * PI * static_cast<float>(minor + 1) / static_cast<float>(kMinorSegments);
+
+					const glm::vec3 p00 = point_at(major_from, minor_from);
+					const glm::vec3 p01 = point_at(major_from, minor_to);
+					const glm::vec3 p10 = point_at(major_to, minor_from);
+					const glm::vec3 p11 = point_at(major_to, minor_to);
+
+					/* side 存参数角：片元按它和相机方位之差做背侧淡出 */
+					PushVertex(vertices, p00, color, glm::vec3(0.0f), major_from);
+					PushVertex(vertices, p10, color, glm::vec3(0.0f), major_from);
+					PushVertex(vertices, p11, color, glm::vec3(0.0f), major_from);
+
+					PushVertex(vertices, p00, color, glm::vec3(0.0f), major_from);
+					PushVertex(vertices, p11, color, glm::vec3(0.0f), major_from);
+					PushVertex(vertices, p01, color, glm::vec3(0.0f), major_from);
+				}
+			}
+			return vertices;
+		}
+
+		/* 半环：参数角落在 [half * π, (half + 1) * π) 的管状圆环。
+		 * 拆成两个半环后，按相机在环平面内的方位决定哪一半朝前，背侧那一半用淡色。 */
+
+		/* 平面手柄的空心边框：单位正方形（XY 平面、边长 1）上四条宽 0.07 的边。
+		 * 内部完全空着，不依赖 alpha 混合也能透出背后的场景。 */
+		std::vector<float> BuildTransformPlaneFrameVertices()
+		{
+			const glm::vec3 color(1.0f);
+			std::vector<float> vertices;
+			const float h = 0.5f;
+			const float w = 0.07f;
+			const auto push_quad = [&](const glm::vec3& a, const glm::vec3& b,
+				const glm::vec3& c, const glm::vec3& d)
+			{
+				PushVertex(vertices, a, color);
+				PushVertex(vertices, b, color);
+				PushVertex(vertices, c, color);
+				PushVertex(vertices, a, color);
+				PushVertex(vertices, c, color);
+				PushVertex(vertices, d, color);
+			};
+
+			push_quad({ -h, h - w, 0.0f }, { h, h - w, 0.0f }, { h, h, 0.0f }, { -h, h, 0.0f });
+			push_quad({ -h, -h, 0.0f }, { -h, -h + w, 0.0f }, { h, -h + w, 0.0f }, { h, -h, 0.0f });
+			push_quad({ -h, -h + w, 0.0f }, { -h + w, -h + w, 0.0f }, { -h + w, h - w, 0.0f },
+				{ -h, h - w, 0.0f });
+			push_quad({ h - w, -h + w, 0.0f }, { h, -h + w, 0.0f }, { h, h - w, 0.0f },
+				{ h - w, h - w, 0.0f });
+			return vertices;
+		}
+
+		/* 中心淡圆：XY 平面上半径 1 的圆盘（trackball 区域） */
+		std::vector<float> BuildTransformDiscVertices()
+		{
+			constexpr int32_t kSegments = TransformGizmo::kRingSegments;
+			const glm::vec3 color(1.0f);
+
+			std::vector<float> vertices;
+			vertices.reserve(static_cast<size_t>(kSegments) * 3 * 10);
+			for (int32_t segment = 0; segment < kSegments; ++segment)
+			{
+				const float angle_from = 2.0f * PI * static_cast<float>(segment) / static_cast<float>(kSegments);
+				const float angle_to = 2.0f * PI * static_cast<float>(segment + 1) / static_cast<float>(kSegments);
+
+				PushVertex(vertices, glm::vec3(0.0f), color);
+				PushVertex(vertices, glm::vec3(std::cos(angle_from), std::sin(angle_from), 0.0f), color);
+				PushVertex(vertices, glm::vec3(std::cos(angle_to), std::sin(angle_to), 0.0f), color);
+			}
+			return vertices;
+		}
+
+		/* 立方体：边长 1、中心在原点（缩放手柄） */
+		std::vector<float> BuildTransformCubeVertices()
+		{
+			const glm::vec3 color(1.0f);
+			std::vector<float> vertices;
+			vertices.reserve(36 * 10);
+
+			/* 六个面：法线轴 + 正负侧，面内两个正交方向 */
+			for (int32_t axis = 0; axis < 3; ++axis)
+			{
+				const int32_t u = (axis + 1) % 3;
+				const int32_t v = (axis + 2) % 3;
+				for (int32_t side = 0; side < 2; ++side)
+				{
+					const float offset = side == 0 ? 0.5f : -0.5f;
+					const float winding = side == 0 ? 1.0f : -1.0f;
+
+					glm::vec3 corners[4];
+					for (int32_t corner = 0; corner < 4; ++corner)
+					{
+						corners[corner] = glm::vec3(0.0f);
+						corners[corner][axis] = offset;
+						corners[corner][u] = ((corner == 0 || corner == 3) ? -0.5f : 0.5f) * winding;
+						corners[corner][v] = (corner < 2 ? -0.5f : 0.5f) * winding;
+					}
+
+					PushVertex(vertices, corners[0], color);
+					PushVertex(vertices, corners[1], color);
+					PushVertex(vertices, corners[2], color);
+
+					PushVertex(vertices, corners[0], color);
+					PushVertex(vertices, corners[2], color);
+					PushVertex(vertices, corners[3], color);
+				}
+			}
+			return vertices;
+		}
+
+		/* 平行四边形：边长 1、中心在原点、铺在 XY 平面（平移的平面手柄）。
+		 * 提交时由"两根轴的方向组成的基"摆位，四条边分别平行于那两根轴 */
+		std::vector<float> BuildTransformQuadVertices()
+		{
+			const glm::vec3 color(1.0f);
+			const glm::vec3 corners[4] = {
+				{ -0.5f, -0.5f, 0.0f }, { 0.5f, -0.5f, 0.0f },
+				{ 0.5f, 0.5f, 0.0f }, { -0.5f, 0.5f, 0.0f } };
+
+			std::vector<float> vertices;
+			vertices.reserve(6 * 10);
+			for (const int32_t index : { 0, 1, 2, 0, 2, 3 })
+				PushVertex(vertices, corners[index], color);
+			return vertices;
+		}
+
+		/* 球：半径 1、中心在原点（平移的中心球）。经线 × 纬线铺满整球，
+		 * 关面剔除所以背面不补 —— 正面看是完整圆盘 */
+		std::vector<float> BuildTransformSphereVertices()
+		{
+			constexpr int32_t kLongitudes = 24;
+			constexpr int32_t kLatitudes = 12;
+			const glm::vec3 color(1.0f);
+
+			const auto point_at = [](float longitude, float latitude)
+			{
+				const float ring_radius = std::cos(latitude);
+				return glm::vec3(ring_radius * std::cos(longitude), ring_radius * std::sin(longitude),
+					std::sin(latitude));
+			};
+
+			std::vector<float> vertices;
+			vertices.reserve(static_cast<size_t>(kLongitudes) * kLatitudes * 6 * 10);
+			for (int32_t latitude = 0; latitude < kLatitudes; ++latitude)
+			{
+				const float lat_from = -0.5f * PI + PI * static_cast<float>(latitude) / static_cast<float>(kLatitudes);
+				const float lat_to = -0.5f * PI + PI * static_cast<float>(latitude + 1) / static_cast<float>(kLatitudes);
+
+				for (int32_t longitude = 0; longitude < kLongitudes; ++longitude)
+				{
+					const float lon_from = 2.0f * PI * static_cast<float>(longitude) / static_cast<float>(kLongitudes);
+					const float lon_to = 2.0f * PI * static_cast<float>(longitude + 1) / static_cast<float>(kLongitudes);
+
+					const glm::vec3 p00 = point_at(lon_from, lat_from);
+					const glm::vec3 p01 = point_at(lon_from, lat_to);
+					const glm::vec3 p10 = point_at(lon_to, lat_from);
+					const glm::vec3 p11 = point_at(lon_to, lat_to);
+
+					PushVertex(vertices, p00, color);
+					PushVertex(vertices, p10, color);
+					PushVertex(vertices, p11, color);
+
+					PushVertex(vertices, p00, color);
+					PushVertex(vertices, p11, color);
+					PushVertex(vertices, p01, color);
+				}
+			}
+			return vertices;
+		}
+
+		/* 角度弧：环平面内的一段带状圆环（世界坐标直接给出，模型矩阵取单位阵）。
+		 * 固定 kRingSegments 段、整段扫过 [start, start + sweep] —— 顶点数恒定，
+		 * 每次拖拽逐帧原地覆盖同一份缓冲（与骨骼连线同一套做法） */
+
 		SharedPtr<DeviceVertexArray> MakeGizmoVertexArray(const std::string& name, const std::vector<float>& vertices)
 		{
 			const auto vertex_array = DeviceVertexArray::Create(name);
@@ -574,6 +850,195 @@ namespace Helios
 			return vertex_array;
 		}
 
+		/* === 变换 gizmo 的顶点数组：每种单位网格各缓存一份 === */
+
+		SharedPtr<DeviceVertexArray> GetTransformConeVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoCone_VertexArray", BuildTransformConeVertices());
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformCylinderVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoCylinder_VertexArray",
+					BuildTransformCylinderVertices());
+			return vertex_array;
+		}
+
+
+		/* 白色外环用同一套圆环几何，只是管径更细 */
+
+		SharedPtr<DeviceVertexArray> GetTransformRingDynamicVertexArray(int32_t slot,
+			const std::vector<float>& vertices)
+		{
+			static SharedPtr<DeviceVertexArray> arrays[6];
+			static size_t capacities[6] = { 0, 0, 0, 0, 0, 0 };
+			const int32_t index = std::clamp(slot, 0, 5);
+
+			if (vertices.empty())
+				return nullptr;
+
+			if (!arrays[index] || vertices.size() != capacities[index])
+			{
+				arrays[index] = MakeGizmoVertexArray(
+					"EditorTransformGizmoRing_VertexArray_" + std::to_string(index), vertices);
+				capacities[index] = vertices.size();
+				return arrays[index];
+			}
+
+			arrays[index]->GetVertexBuffers().front()->SetData(vertices.data(),
+				static_cast<uint32_t>(vertices.size() * sizeof(float)));
+			return arrays[index];
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformPlaneFrameVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoPlaneFrame_VertexArray",
+					BuildTransformPlaneFrameVertices());
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformDiscVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoDisc_VertexArray",
+					BuildTransformDiscVertices());
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformOuterRingVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoOuterRing_VertexArray",
+					BuildTransformRingVertices(TransformGizmo::kOuterRingTubeRatio, 1.0f, 0.0f));
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformCubeVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoCube_VertexArray", BuildTransformCubeVertices());
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformQuadVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoQuad_VertexArray", BuildTransformQuadVertices());
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformSphereVertexArray()
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			if (!vertex_array)
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoSphere_VertexArray",
+					BuildTransformSphereVertices());
+			return vertex_array;
+		}
+
+		/* 角度弧的顶点每帧由当前拖拽角生成：顶点数恒定，只原地覆盖缓冲 */
+		/* 旋转角度扇区：圆心 + 弧上采样点组成的三角扇，铺满整块面积 */
+		std::vector<float> BuildTransformSectorVertices(const glm::vec3& origin, const glm::vec3& u,
+			const glm::vec3& v, float radius, float start, float sweep)
+		{
+			constexpr int32_t kSegments = TransformGizmo::kRingSegments;
+			const glm::vec3 color(1.0f);
+
+			std::vector<float> vertices;
+			vertices.reserve(static_cast<size_t>(kSegments) * 3 * 10);
+			for (int32_t segment = 0; segment < kSegments; ++segment)
+			{
+				const float angle_from = start + sweep * static_cast<float>(segment) / static_cast<float>(kSegments);
+				const float angle_to = start + sweep * static_cast<float>(segment + 1) / static_cast<float>(kSegments);
+				const glm::vec3 point_from = origin
+					+ (u * std::cos(angle_from) + v * std::sin(angle_from)) * radius;
+				const glm::vec3 point_to = origin
+					+ (u * std::cos(angle_to) + v * std::sin(angle_to)) * radius;
+
+				PushVertex(vertices, origin, color);
+				PushVertex(vertices, point_from, color);
+				PushVertex(vertices, point_to, color);
+			}
+			return vertices;
+		}
+
+		/* 拖拽轨迹虚线：按固定世界长度切段、段间留空 */
+		std::vector<float> BuildTransformDashVertices(const glm::vec3& from, const glm::vec3& to,
+			float dash_length)
+		{
+			std::vector<float> vertices;
+			const glm::vec3 delta = to - from;
+			const float length = glm::length(delta);
+			if (length < 1.0e-6f)
+				return vertices;
+
+			const glm::vec3 direction = delta / length;
+			const float dash = std::max(dash_length, 1.0e-6f);
+			const float gap = dash * 0.7f;
+			const glm::vec3 color(1.0f);
+
+			float cursor = 0.0f;
+			while (cursor < length)
+			{
+				const float segment_end = std::min(cursor + dash, length);
+				PushVertex(vertices, from + direction * cursor, color);
+				PushVertex(vertices, from + direction * segment_end, color);
+				cursor = segment_end + gap;
+			}
+			return vertices;
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformArcVertexArray(const std::vector<float>& vertices)
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			static size_t capacity = 0;
+
+			if (vertices.empty())
+				return nullptr;
+
+			if (!vertex_array || vertices.size() != capacity)
+			{
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoArc_VertexArray", vertices);
+				capacity = vertices.size();
+				return vertex_array;
+			}
+
+			vertex_array->GetVertexBuffers().front()->SetData(vertices.data(),
+				static_cast<uint32_t>(vertices.size() * sizeof(float)));
+			return vertex_array;
+		}
+
+		SharedPtr<DeviceVertexArray> GetTransformDashVertexArray(const std::vector<float>& vertices)
+		{
+			static SharedPtr<DeviceVertexArray> vertex_array;
+			static size_t capacity = 0;
+
+			if (vertices.empty())
+				return nullptr;
+
+			if (!vertex_array || vertices.size() != capacity)
+			{
+				vertex_array = MakeGizmoVertexArray("EditorTransformGizmoDash_VertexArray", vertices);
+				capacity = vertices.size();
+				return vertex_array;
+			}
+
+			vertex_array->GetVertexBuffers().front()->SetData(vertices.data(),
+				static_cast<uint32_t>(vertices.size() * sizeof(float)));
+			return vertex_array;
+		}
+
 		/* 骨骼连线的顶点缓冲：位置每帧随姿势变。DrawArrays 按缓冲区容量出顶点数，
 		 * 所以容量必须正好等于本帧数据 —— 数量变了重建，没变就原地覆盖。 */
 		SharedPtr<DeviceVertexArray> GetBoneLineVertexArray(const std::vector<float>& vertices)
@@ -603,6 +1068,9 @@ namespace Helios
 		{
 			auto material = CreateSharedPtr<Material>();
 			material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Overlay/Axis.glsl")));
+
+			/* 走透明队列：不透明批不参与混合，顶点色里的 alpha 只会让颜色变暗不会变透明 */
+			material->SetRenderQueue(RENDER_QUEUE_TRANSPARENT);
 
 			auto& raster_state = material->GetRasterState();
 			raster_state.CullMode = CullMode::Cull_None;
@@ -690,6 +1158,217 @@ namespace Helios
 			}
 			return material;
 		}
+
+		/* === 变换 gizmo（平移 / 旋转 / 缩放）的材质与提交 ===
+		 * 手柄是实体网格：纯色、不参与光照、关面剔除，并且关深度测试 —— 永远画在场景前面
+		 * （ImGuizmo 的行为；被物体挡住就点不到了）。 */
+
+		/* 三轴配色 + 高亮橙 + 轴心白（轴心不属于任何一根轴） */
+		const glm::vec4 kTransformGizmoAxisColors[3] = {
+			{ 0.90f, 0.22f, 0.24f, 1.0f }, { 0.42f, 0.78f, 0.20f, 1.0f }, { 0.22f, 0.48f, 0.95f, 1.0f } };
+		const glm::vec4 kTransformGizmoHighlightColor{ 1.00f, 0.62f, 0.16f, 1.0f };
+		const glm::vec4 kTransformGizmoCenterColor{ 0.82f, 0.84f, 0.88f, 1.0f };
+		/* 平面手柄 = 两根轴颜色的各半，半透明贴着场景；白环留一点透明才看得见底下的彩色环 */
+		constexpr float kTransformGizmoPlaneAlpha = 0.45f;
+		const glm::vec4 kTransformGizmoOuterRingColor{ 1.00f, 1.00f, 1.00f, 0.90f };
+
+		/* 高亮不换色相：把手柄自身颜色往白里提一档，选中后仍能看出是哪根轴 */
+		glm::vec4 LiftGizmoColor(const glm::vec4& base, float alpha)
+		{
+			constexpr float kLift = 0.45f;
+			return glm::vec4(base.r + (1.0f - base.r) * kLift,
+				base.g + (1.0f - base.g) * kLift,
+				base.b + (1.0f - base.b) * kLift, alpha);
+		}
+
+		SharedPtr<Material> CreateTransformGizmoMaterial(const glm::vec4& color)
+		{
+			auto material = CreateSharedPtr<Material>();
+			material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(
+				ABSOLUTE_PATH("Shaders/Overlay/GizmoSolid.glsl")));
+			material->SetParameters(ParamType::Vec4, "u_GizmoColor", color);
+			/* 默认不做背侧淡出：只有旋转环的材质会每帧把自己的相机方位写进来 */
+			material->SetParameters(ParamType::Float, "u_RingPhase", -1.0f);
+			material->SetParameters(ParamType::Float, "u_RingFadeMin", 0.25f);
+
+			auto& raster_state = material->GetRasterState();
+			raster_state.CullMode = CullMode::Cull_None;
+			/* 不测深度：AxisPass 的深度附件是场景深度、比较方向是 GreaterEqual（更远才通过），
+			 * 手柄压到近平面后反而会被全部剔除。手柄之间的压盖靠提交顺序。 */
+			raster_state.EnableDepthTest = false;
+			raster_state.EnableDepthWrite = false;
+			/* 平面手柄与白环带 alpha：混色走标准的 SrcAlpha / OneMinusSrcAlpha。
+			 * 不透明的颜色带 a = 1，走同一套混合公式结果不变。 */
+			raster_state.EnableBlend = true;
+			raster_state.BlendEquationRGB = BlendEquation::Add;
+			raster_state.BlendEquationA = BlendEquation::Add;
+			raster_state.BlendFuncSrcRGB = BlendFunc::SrcAlpha;
+			raster_state.BlendFuncSrcA = BlendFunc::SrcAlpha;
+			raster_state.BlendFuncDstRGB = BlendFunc::OneMinusSrcAlpha;
+			raster_state.BlendFuncDstA = BlendFunc::OneMinusSrcAlpha;
+			return material;
+		}
+
+		/* handle = 0 / 1 / 2 三轴，3 = 轴心，4 / 5 / 6 = 平面（索引 = 法线轴），7 = 白色外环 */
+		/* 旋转拖拽的角度扇区：颜色跟着被拖的轴走（Blender 的做法），半透明铺满圆心到弧。
+		 * axis < 0 时用高亮橙兜底。 */
+		/* 旋转环的亮边：轴色往白里提，管径放大一圈垫在底下，深色背景上也能看清 */
+
+		/* 平面手柄的亮边：两轴混色提亮、不透明，画在填充底下一层放大一圈 */
+		/* 参数是法线轴序号 0 / 1 / 2（调用方直接传 normal_axis，不再做 handle 换算） */
+		SharedPtr<Material> GetTransformPlaneBorderMaterial(int32_t normal_axis, bool highlighted)
+		{
+			static SharedPtr<Material> materials[3][2];
+			const int32_t axis = std::clamp(normal_axis, 0, 2);
+			const int32_t slot = highlighted ? 1 : 0;
+			if (!materials[axis][slot])
+				materials[axis][slot] = CreateTransformGizmoMaterial(
+					LiftGizmoColor(kTransformGizmoAxisColors[axis], 1.0f));
+			return materials[axis][slot];
+		}
+
+		/* 中心淡圆：默认几乎不可见（0.02），鼠标悬浮或拖拽时才明显 */
+		SharedPtr<Material> GetTransformTrackballMaterial(bool highlighted)
+		{
+			static SharedPtr<Material> materials[2];
+			const int32_t slot = highlighted ? 1 : 0;
+			if (!materials[slot])
+				materials[slot] = CreateTransformGizmoMaterial(glm::vec4(0.85f, 0.87f, 0.92f,
+					highlighted ? 0.18f : 0.09f));
+			return materials[slot];
+		}
+
+		SharedPtr<Material> GetTransformSectorMaterial(int32_t axis)
+		{
+			static SharedPtr<Material> materials[3];
+			static SharedPtr<Material> fallback;
+
+			if (axis < 0 || axis >= 3)
+			{
+				/* 白外环没有轴色：扇形用白色，和环本身一致 */
+				if (!fallback)
+					fallback = CreateTransformGizmoMaterial(
+						glm::vec4(kTransformGizmoOuterRingColor.r, kTransformGizmoOuterRingColor.g,
+							kTransformGizmoOuterRingColor.b, 0.30f));
+				return fallback;
+			}
+
+			if (!materials[axis])
+			{
+				const glm::vec4& base = kTransformGizmoAxisColors[axis];
+				materials[axis] = CreateTransformGizmoMaterial(
+					glm::vec4(base.r, base.g, base.b, 0.30f));
+			}
+			return materials[axis];
+		}
+
+		SharedPtr<Material> GetTransformGizmoMaterial(int32_t handle, bool highlighted)
+		{
+			static SharedPtr<Material> axis_materials[3];
+			static SharedPtr<Material> axis_highlight_materials[3];
+			static SharedPtr<Material> plane_materials[3];
+			static SharedPtr<Material> plane_highlight_materials[3];
+			static SharedPtr<Material> center_material;
+			static SharedPtr<Material> highlight_material;
+			static SharedPtr<Material> outer_ring_material;
+			static SharedPtr<Material> outer_ring_highlight_material;
+
+			const bool is_plane = handle >= TransformGizmo::kPlaneHandleBase
+				&& handle < TransformGizmo::kPlaneHandleBase + TransformGizmo::kAxisCount;
+			const bool is_outer_ring = handle == TransformGizmo::kOuterRingHandle;
+
+			if (highlighted)
+			{
+				/* 高亮统一走「自身颜色提亮」：轴用轴色、平面用两轴混色、轴心与白环用白 */
+				if (is_plane)
+				{
+					const int32_t normal_axis = handle - TransformGizmo::kPlaneHandleBase;
+					if (!plane_highlight_materials[normal_axis])
+						plane_highlight_materials[normal_axis] = CreateTransformGizmoMaterial(
+							LiftGizmoColor(kTransformGizmoAxisColors[normal_axis], kTransformGizmoPlaneAlpha));
+					return plane_highlight_materials[normal_axis];
+				}
+
+				if (is_outer_ring)
+				{
+					if (!outer_ring_highlight_material)
+						outer_ring_highlight_material = CreateTransformGizmoMaterial(
+							LiftGizmoColor(kTransformGizmoOuterRingColor, kTransformGizmoOuterRingColor.a));
+					return outer_ring_highlight_material;
+				}
+
+				if (handle >= 0 && handle < 3)
+				{
+					if (!axis_highlight_materials[handle])
+						axis_highlight_materials[handle] = CreateTransformGizmoMaterial(
+							LiftGizmoColor(kTransformGizmoAxisColors[handle], 1.0f));
+					return axis_highlight_materials[handle];
+				}
+
+				if (!highlight_material)
+					highlight_material = CreateTransformGizmoMaterial(
+						LiftGizmoColor(kTransformGizmoCenterColor, 1.0f));
+				return highlight_material;
+			}
+
+			if (is_plane)
+			{
+				const int32_t normal_axis = handle - TransformGizmo::kPlaneHandleBase;
+				SharedPtr<Material>& material = plane_materials[normal_axis];
+				if (!material)
+				{
+					/* 颜色取「这根法线轴」的色：XY 面是蓝色、YZ 面是红色、XZ 面是绿色 */
+					const glm::vec4& axis_color = kTransformGizmoAxisColors[normal_axis];
+					material = CreateTransformGizmoMaterial(
+						glm::vec4(axis_color.r, axis_color.g, axis_color.b, kTransformGizmoPlaneAlpha));
+				}
+				return material;
+			}
+
+			if (is_outer_ring)
+			{
+				if (!outer_ring_material)
+					outer_ring_material = CreateTransformGizmoMaterial(kTransformGizmoOuterRingColor);
+				return outer_ring_material;
+			}
+
+			if (handle >= 0 && handle < 3)
+			{
+				SharedPtr<Material>& material = axis_materials[handle];
+				if (!material)
+					material = CreateTransformGizmoMaterial(kTransformGizmoAxisColors[handle]);
+				return material;
+			}
+
+			if (!center_material)
+				center_material = CreateTransformGizmoMaterial(kTransformGizmoCenterColor);
+			return center_material;
+		}
+
+		/* 背侧半环的材质：轴色降到 42% 不透明度，做出前后层次 */
+		/* 旋转环材质：每根轴一份。选中不改色，只是把该环补成完整的圆 */
+		SharedPtr<Material> GetTransformRingMaterial(int32_t axis)
+		{
+			static SharedPtr<Material> materials[3];
+			const int32_t index = std::clamp(axis, 0, 2);
+			if (!materials[index])
+				materials[index] = CreateTransformGizmoMaterial(kTransformGizmoAxisColors[index]);
+			return materials[index];
+		}
+
+		SharedPtr<Material> GetTransformGizmoFadedMaterial(int32_t axis)
+		{
+			static SharedPtr<Material> materials[3];
+			const int32_t index = std::clamp(axis, 0, 2);
+			if (!materials[index])
+			{
+				const glm::vec4& base = kTransformGizmoAxisColors[index];
+				materials[index] = CreateTransformGizmoMaterial(
+					glm::vec4(base.r, base.g, base.b, 0.42f));
+			}
+			return materials[index];
+		}
+
 
 		/* 实体世界变换拆解出 gizmo 需要的分量：平移 / 纯旋转（去缩放）/ 各轴缩放。
 		 * "纯旋转"让图标本身不随实体缩放变形 —— 各类型对缩放的响应在响应因子里
@@ -796,6 +1475,7 @@ namespace Helios
 			Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, glm::mat4(1.0f), nullptr, nullptr });
 			Renderer::Submit(material, MeshPrimitive{ GetAxisVertexArray(), PrimitiveType::Triangles });
 		}
+
 
 		/* 光源（平行 / 点 / 聚光）：平行光 = 屏幕恒定的太阳图标；点光 / 聚光 = 真世界尺度的光照
 		 * 范围（球半径 = range、双锥延伸到 range，锥口 = 内 / 外锥角）。位置另外画一个屏幕恒定
@@ -1122,6 +1802,30 @@ namespace Helios
 		return options;
 	}
 
+	/* 操作 gizmo 的帧状态（同上：UI 侧写、绘制侧读）。状态在 ImGui 阶段落下，
+	 * 下一帧的渲染图按它画 —— 与实体变换本身的一帧延迟保持一致。 */
+	TransformGizmoState& GetTransformGizmoState()
+	{
+		static TransformGizmoState state;
+		return state;
+	}
+
+	/* 每逻辑像素在单位距离上的世界尺寸：2·tan(fov / 2)·内容缩放 / 物理视口高。
+	 * 内容缩放把"设计像素"折成物理像素（Retina 上视口高是逻辑高的两倍）。
+	 * 操作 gizmo 与实体图标的屏幕恒定尺寸共用这一口径。 */
+	float ComputeGizmoScreenScale(const EditorCamera& camera)
+	{
+		const auto& viewport_region = camera.GetViewportRegion();
+		if (viewport_region.Height == 0)
+			return 0.0f;
+
+		/* 无窗口环境（headless 检查直跑渲染图）拿不到窗口缩放，按 1 算 */
+		Application* application = Application::Instance();
+		const float content_scale = (application != nullptr) ? application->GetWindow().GetContentScale() : 1.0f;
+		return 2.0f * std::tan(glm::radians(camera.GetFov()) * 0.5f) * content_scale
+			/ static_cast<float>(viewport_region.Height);
+	}
+
 	namespace SceneGizmos
 	{
 		void Submit(RenderView& render_view, const EditorCamera& camera)
@@ -1151,10 +1855,17 @@ namespace Helios
 
 			/* 实体 gizmo 的像素→世界系数：每"逻辑像素"在单位距离上对应的世界尺寸
 			 * （= 2·tan(fov/2)·内容缩放 / 视口高；配 GizmoWorldScaleAt 的距离比例与距离使用） */
-			const float gizmo_screen_scale =
-				2.0f * std::tan(glm::radians(camera.GetFov()) * 0.5f) * content_scale
-				/ static_cast<float>(viewport_region.Height);
+			const float gizmo_screen_scale = ComputeGizmoScreenScale(camera);
 			SubmitEntityGizmos(render_view, entity_gizmo_material, camera_position, gizmo_screen_scale);
+
+			/* 操作 gizmo（选中实体的平移 / 旋转 / 缩放手柄）：最后画，压在其他 helper 之上；
+			 * 材质关深度测试，所以它也不会被场景物体挡住 */
+			const TransformGizmoState& transform_gizmo = GetTransformGizmoState();
+			if (transform_gizmo.Visible && transform_gizmo.Camera == &camera)
+			{
+				SubmitTransformGizmo(render_view, transform_gizmo.World, transform_gizmo.Operation,
+					transform_gizmo.Highlight, gizmo_screen_scale);
+			}
 
 			/* 骨骼节点预览（Debug View 的 Skeleton 档）：最后画，盖在其他 gizmo 上 */
 			if (render_view.GetDebugViewMode() == DebugViewMode::Skeleton)
@@ -1199,6 +1910,201 @@ namespace Helios
 				const glm::mat4 world_transform = scene->GetWorldTransform(entity);
 				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, world_transform, nullptr, nullptr });
 				Renderer::Submit(highlight_material, mesh_segments[segment_index]->GetMeshPrimitive());
+			}
+		}
+
+		/* 变换 gizmo：按操作类型提交实体网格。手柄尺寸由布局给出（屏幕恒定），
+		 * 高亮的那一只换橙色材质。轴基取实体世界变换的三列 —— 与拾取侧（TransformGizmo.h）
+		 * 同一份计算，画出来的位置和能点到的位置必然一致。
+		 * 提交顺序 = 压盖顺序（全部关深度测试）：轴杆 → 端点图形 → 平面手柄 → 轴心 → 白色外环。 */
+		void SubmitTransformGizmo(RenderView& render_view, const glm::mat4& entity_world,
+			int32_t operation, int32_t highlight, float gizmo_screen_scale)
+		{
+			const auto transform_operation = static_cast<TransformGizmo::Operation>(operation);
+			if (transform_operation == TransformGizmo::Operation::None)
+				return;
+
+			const Camera* camera = render_view.GetCullingCamera();
+			if (camera == nullptr)
+				return;
+
+			/* 轴基：局部空间取世界变换三列归一化，世界空间直接用单位轴 */
+			const bool local_space = GetTransformGizmoState().LocalSpace;
+			glm::mat3 basis(1.0f);
+			for (glm::length_t axis = 0; axis < 3; ++axis)
+			{
+				if (!local_space)
+					continue;
+
+				const glm::vec3 column(entity_world[axis]);
+				const float length = glm::length(column);
+				if (length > 1.0e-6f)
+					basis[axis] = column / length;
+				else
+					basis[axis] = glm::vec3(axis == 0 ? 1.0f : 0.0f, axis == 1 ? 1.0f : 0.0f,
+						axis == 2 ? 1.0f : 0.0f);
+			}
+
+			const auto& viewport_region = render_view.GetViewportRegion();
+			const TransformGizmo::Layout layout = TransformGizmo::BuildLayout(
+				glm::vec3(entity_world[3]), basis,
+				camera->GetPosition(), camera->GetForwardDir(),
+				camera->GetRightDir(), camera->GetUpDir(), gizmo_screen_scale,
+				camera->GetViewProjectionMatrix(),
+				glm::vec2(static_cast<float>(viewport_region.MinX), static_cast<float>(viewport_region.MinY)),
+				glm::vec2(static_cast<float>(viewport_region.Width), static_cast<float>(viewport_region.Height)));
+			if (!layout.Valid)
+				return;
+
+			const TransformGizmo::Handles handles = TransformGizmo::ComputeHandles(layout, transform_operation);
+
+			const auto submit = [&](const glm::mat4& model, int32_t handle,
+				const SharedPtr<DeviceVertexArray>& vertex_array, bool faded = false)
+			{
+				Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, model, nullptr, nullptr });
+				Renderer::Submit(faded ? GetTransformGizmoFadedMaterial(handle)
+					: GetTransformGizmoMaterial(handle, handle == highlight),
+					MeshPrimitive{ vertex_array, PrimitiveType::Triangles });
+			};
+
+			switch (transform_operation)
+			{
+			case TransformGizmo::Operation::Translate:
+				for (int32_t axis = 0; axis < TransformGizmo::kAxisCount; ++axis)
+				{
+					submit(handles.Shaft[axis], axis, GetTransformCylinderVertexArray());
+					submit(handles.Arrow[axis], axis, GetTransformConeVertexArray());
+				}
+				/* 平面手柄：只画空心边框，内部完全透出场景 */
+				for (int32_t normal_axis = 0; normal_axis < TransformGizmo::kAxisCount; ++normal_axis)
+				{
+					const int32_t plane_handle = TransformGizmo::kPlaneHandleBase + normal_axis;
+					Renderer::FillObjectUniformBuffer(
+						VisibleMeshObject{ -1, handles.Plane[normal_axis], nullptr, nullptr });
+					Renderer::Submit(
+						GetTransformPlaneBorderMaterial(normal_axis, plane_handle == highlight),
+						MeshPrimitive{ GetTransformPlaneFrameVertexArray(), PrimitiveType::Triangles });
+					submit(handles.Plane[normal_axis], plane_handle, GetTransformQuadVertexArray());
+				}
+				submit(handles.CenterSphere, TransformGizmo::kCenterHandle, GetTransformSphereVertexArray());
+
+				/* 拖拽轨迹：从起点到当前原点一条虚线，标出这次移动的路径 */
+				{
+					const TransformGizmoState& gizmo_state = GetTransformGizmoState();
+					if (gizmo_state.DragActive)
+					{
+						const auto dash_vertices = BuildTransformDashVertices(gizmo_state.DragStart,
+							gizmo_state.DragCurrent, 6.0f * layout.WorldPerPixel);
+						const auto dash_array = GetTransformDashVertexArray(dash_vertices);
+						if (dash_array)
+						{
+							Renderer::FillObjectUniformBuffer(
+								VisibleMeshObject{ -1, glm::mat4(1.0f), nullptr, nullptr });
+							Renderer::Submit(GetTransformGizmoMaterial(TransformGizmo::kCenterHandle, true),
+								MeshPrimitive{ dash_array, PrimitiveType::Lines });
+						}
+					}
+				}
+				break;
+			case TransformGizmo::Operation::Rotate:
+				/* 每根轴算一次相机在环平面内的方位，写进材质做背侧淡出 */
+				for (int32_t axis = 0; axis < TransformGizmo::kAxisCount; ++axis)
+				{
+					/* 选中某根环时只留它自己；选中白外环时三根彩环都不画 */
+					if (highlight == TransformGizmo::kOuterRingHandle)
+						continue;
+					if (highlight >= 0 && highlight < TransformGizmo::kAxisCount && axis != highlight)
+						continue;
+
+					/* 相位用环的实际模型矩阵取基，和网格几何严格同源（RingBasis 的相位未必一致） */
+					const glm::vec3 ring_u = glm::normalize(glm::vec3(handles.Ring[axis][0]));
+					const glm::vec3 ring_v = glm::normalize(glm::vec3(handles.Ring[axis][1]));
+					const glm::vec3 to_camera = layout.CameraPosition - layout.Origin;
+					float phase = std::atan2(glm::dot(to_camera, ring_v), glm::dot(to_camera, ring_u));
+					if (phase < 0.0f)
+						phase += glm::two_pi<float>();
+
+					const auto ring_material = GetTransformRingMaterial(axis);
+					/* 默认只显示朝向相机的半圈（背侧淡到 0），悬浮或拖拽的环显示整圈 */
+					const float ring_fade = axis == highlight ? 1.0f : 0.0f;
+
+					const auto ring_vertices = BuildTransformRingVertices(
+						TransformGizmo::kRingTubeRatio, ring_fade, phase);
+					Renderer::FillObjectUniformBuffer(
+						VisibleMeshObject{ -1, handles.Ring[axis], nullptr, nullptr });
+					Renderer::Submit(ring_material,
+						MeshPrimitive{ GetTransformRingDynamicVertexArray(axis, ring_vertices),
+							PrimitiveType::Triangles });
+				}
+
+				/* 角度弧：拖拽中才有几何，顶点在世界坐标里现算（模型矩阵取单位阵）。
+				 * 帧状态是 UI → 渲染的唯一通道，弧度取吸附后的值 */
+				{
+					const TransformGizmoState& gizmo_state = GetTransformGizmoState();
+					if (gizmo_state.ArcRadius > 0.0f && gizmo_state.ArcSweep != 0.0f)
+					{
+						glm::vec3 arc_u, arc_v;
+						TransformGizmo::RingBasis(gizmo_state.ArcAxis, arc_u, arc_v);
+						const auto arc_vertices = BuildTransformSectorVertices(layout.Origin, arc_u, arc_v,
+							gizmo_state.ArcRadius, gizmo_state.ArcStart, gizmo_state.ArcSweep);
+						const auto arc_array = GetTransformArcVertexArray(arc_vertices);
+						if (arc_array)
+						{
+							Renderer::FillObjectUniformBuffer(VisibleMeshObject{ -1, glm::mat4(1.0f), nullptr, nullptr });
+							Renderer::Submit(GetTransformSectorMaterial(gizmo_state.ArcAxisIndex),
+								MeshPrimitive{ arc_array, PrimitiveType::Triangles });
+						}
+					}
+				}
+
+				/* 白色外环最后画：压在三只彩色环之上 */
+				/* 中心淡圆：铺在环半径以内、朝相机，提示这个区域可以任意旋转 */
+				{
+					glm::vec3 disc_u, disc_v;
+					TransformGizmo::RingBasis(-layout.CameraForward, disc_u, disc_v);
+					const float disc_radius = TransformGizmo::RingRadius(layout)
+						* TransformGizmo::kTrackballRadiusRatio();
+					const glm::mat4 disc_model(
+						glm::vec4(disc_u * disc_radius, 0.0f),
+						glm::vec4(disc_v * disc_radius, 0.0f),
+						glm::vec4(glm::cross(disc_u, disc_v) * disc_radius, 0.0f),
+						glm::vec4(layout.Origin, 1.0f));
+
+					Renderer::FillObjectUniformBuffer(
+						VisibleMeshObject{ -1, disc_model, nullptr, nullptr });
+					Renderer::Submit(
+						GetTransformTrackballMaterial(highlight == TransformGizmo::kTrackballHandle),
+						MeshPrimitive{ GetTransformDiscVertexArray(), PrimitiveType::Triangles });
+				}
+
+				/* 拖某根彩色环时不画白外环（两层圈叠在一起看不清）；
+				 * 反过来拖白外环时彩环已经在上面被过滤掉了 */
+				if (highlight < 0 || highlight >= TransformGizmo::kAxisCount)
+					submit(handles.OuterRing, TransformGizmo::kOuterRingHandle,
+						GetTransformOuterRingVertexArray());
+				break;
+			case TransformGizmo::Operation::Scale:
+				for (int32_t axis = 0; axis < TransformGizmo::kAxisCount; ++axis)
+				{
+					submit(handles.Shaft[axis], axis, GetTransformCylinderVertexArray());
+					submit(handles.Cube[axis], axis, GetTransformCubeVertexArray());
+				}
+				/* 平面手柄：两轴同步缩放（与平移复用同一份四边形网格与摆位） */
+				/* 平面手柄：只画空心边框，内部完全透出场景 */
+				for (int32_t normal_axis = 0; normal_axis < TransformGizmo::kAxisCount; ++normal_axis)
+				{
+					const int32_t plane_handle = TransformGizmo::kPlaneHandleBase + normal_axis;
+					Renderer::FillObjectUniformBuffer(
+						VisibleMeshObject{ -1, handles.Plane[normal_axis], nullptr, nullptr });
+					Renderer::Submit(
+						GetTransformPlaneBorderMaterial(normal_axis, plane_handle == highlight),
+						MeshPrimitive{ GetTransformPlaneFrameVertexArray(), PrimitiveType::Triangles });
+					submit(handles.Plane[normal_axis], plane_handle, GetTransformQuadVertexArray());
+				}
+				submit(handles.Center, TransformGizmo::kCenterHandle, GetTransformCubeVertexArray());
+				break;
+			default:
+				break;
 			}
 		}
 	}

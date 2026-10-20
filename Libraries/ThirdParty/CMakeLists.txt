@@ -144,26 +144,6 @@ set_target_properties(ImGui PROPERTIES
     FOLDER "Libraries/ThirdParty"
 )
 
-# ImGuizmo
-project(ImGuizmo CXX)
-
-add_library(ImGuizmo SHARED)
-
-# 只编核心：GraphEditor / ImSequencer / ImGradient / ImCurveEdit 是它自带的动画编辑器
-# 辅助组件，本项目没用到；example / vcpkg-example 目录也一并排除
-file(GLOB IMGUIZMO_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/ImGuizmo/ImGuizmo.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ImGuizmo/ImGuizmo.h"
-)
-
-target_sources(ImGuizmo PRIVATE ${IMGUIZMO_SOURCES})
-target_include_directories(ImGuizmo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ImGuizmo)
-target_link_libraries(ImGuizmo PUBLIC ImGui)
-set_target_properties(ImGuizmo PROPERTIES 
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
-    FOLDER "Libraries/ThirdParty"
-)
-
 # tinyxml2
 project(tinyxml2 CXX)
 

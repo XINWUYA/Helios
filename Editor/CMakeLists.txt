@@ -43,7 +43,6 @@ target_include_directories(Editor
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/stb
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/ImGuizmo
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
         ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
 )
@@ -52,7 +51,6 @@ target_include_directories(Editor
 target_link_libraries(Editor
     PRIVATE
         Kernel
-        ImGuizmo
 )
 
 # 脚本模块在运行期调用引擎函数：Kernel 是动态库，符号由链接器解析，
