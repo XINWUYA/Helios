@@ -75,6 +75,11 @@ namespace Helios
 		void SetCullingMask(LayerMask mask) { m_CullingMask = mask; }
 		[[nodiscard]] LayerMask GetCullingMask() const { return m_CullingMask; }
 
+		/* 选中实体 id（ObjectId 附件里那一套）：>= 0 时视口沿它的轮廓勾一圈描边。
+		 * 编辑器每帧按层级选中项写入，缺省 -1 = 不画。 */
+		void SetSelectionId(int32_t id) { m_SelectionId = id; }
+		[[nodiscard]] int32_t GetSelectionId() const { return m_SelectionId; }
+
 		/* 本帧的后处理设置快照：由 Scene 每帧解析（后处理对象 → 逐效果采集）后写入；
 		 * 渲染侧（各效果的 Build）只读这份快照，不认识场景实体。缺省空 = 全部效果关闭。 */
 		void SetPostProcessState(const PostProcess::PostProcessState& state) { m_PostProcessState = state; }
@@ -149,6 +154,8 @@ namespace Helios
 		DebugViewMode m_DebugViewMode{ DebugViewMode::None };
 		/* 可见层掩码：与对象 LayerMask 相交为空的对象不渲染 */
 		LayerMask m_CullingMask{ Layers::All };
+		/* 选中实体 id：>= 0 时叠加层给它描边（见 SelectionOutline::AddPass） */
+		int32_t m_SelectionId{ -1 };
 		/* 后处理设置快照（每视图一份；Scene 解析写入，缺省空 = 全部效果关闭） */
 		PostProcess::PostProcessState m_PostProcessState{};
 		/* 相机 */

@@ -224,6 +224,8 @@ namespace Helios
 
 				frame_graph->GetBlackboard()["ScenePassOutput"] = scene_pass->GetData().Output;
 				frame_graph->GetBlackboard()["ScenePassDepth"] = scene_pass->GetData().Depth;
+				/* 实体 id 附件留给叠加层（选中描边）与拾取共用 */
+				frame_graph->GetBlackboard()["ScenePassObjectId"] = scene_pass->GetData().ObjectId;
 
 				return scene_pass->GetData().Output;
 			}

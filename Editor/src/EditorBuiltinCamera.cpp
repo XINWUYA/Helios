@@ -7,6 +7,7 @@
 #include "Helios/Common/Math.h"
 #include "Helios/Renderer/RenderPasses/DeferredPasses.h"
 #include "Helios/Renderer/RenderPasses/ScenePass.h"
+#include "Helios/Renderer/RenderPasses/SelectionOutlinePass.h"
 
 namespace Helios
 {
@@ -223,6 +224,13 @@ namespace Helios
 			overlay_output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("PostProcessOutput");
 			overlay_depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassDepth");
 		}
+
+		/* 选中实体描边：读场景的实体 id 附件（与拾取同一张），在输出上勾一圈强调色。
+		 * 挂在 gizmo 之前 —— 操作手柄与图标压在线条上面。 */
+		SelectionOutline::AddPass(render_view, overlay_output,
+			frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>(
+				render_view.GetRenderPipeline() == RenderPipeline::Deferred
+					? "GBufferObjectId" : "ScenePassObjectId"));
 
 		/* 场景 gizmo Pass（编辑器视口叠加层：地面网格 + 坐标轴 + 实体图标，见 SceneGizmos）。
 		 * 直接复用管线输出和场景深度：PreserveContent 不清除附件，gizmo 画进输出、与场景深度
