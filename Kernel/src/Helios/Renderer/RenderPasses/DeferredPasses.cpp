@@ -127,7 +127,9 @@ namespace Helios
 				FrameGraphTexture::Descriptor object_id_desc;
 				object_id_desc.Width = viewport_region.Width;
 				object_id_desc.Height = viewport_region.Height;
-				object_id_desc.TextureFormat = TextureFormat::R32I;
+				/* 实体 id 用浮点存：多重采样只对浮点 / 颜色格式做解析，
+				 * 整数附件在开启 MSAA 时解析结果不可靠 */
+				object_id_desc.TextureFormat = TextureFormat::R32F;
 
 				/* GBuffer Pass 使用 GBuffer.glsl；普通材质在提交前转换为该 shader 对应的临时材质。 */
 				const auto gbuffer_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
@@ -178,6 +180,9 @@ namespace Helios
 						pass_desc.ColorClearValues.resize(7);
 						pass_desc.ColorClearValues[6] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
 						pass_desc.ViewportRegion = viewport_region;
+						/* G-Buffer 不开多重采样：轮廓像素会把空采样（清零的法线 / 世界坐标）
+						 * 一起平均进来，光照拿到假数据，边缘冒白边。延迟的抗锯齿交给后处理。 */
+						pass_desc.Multisample = false;
 						builder.CreateRenderPass("GBufferPassRenderTarget", pass_desc);
 					},
 					[&render_view, gbuffer_shader](const FrameGraphResources& resources, const GBufferPassData& data)

@@ -42,6 +42,13 @@ namespace Helios
 
 		static const SharedPtr<RenderAPI>& GetRenderAPI() { return m_pRenderAPI; }
 
+		/* 视口 MSAA 全局开关：开启后场景几何通道按多重采样绘制、通道结束再解析，
+		 * 物体边缘不再出硬阶梯。改动下一帧生效（渲染目标按采样数重建）。 */
+		static void SetMSAAEnabled(bool enabled);
+		[[nodiscard]] static bool IsMSAAEnabled();
+		/* 当前生效的采样数：关闭时为 1，所有渲染通道与默认目标共用这一个值 */
+		[[nodiscard]] static uint8_t GetMSAASampleCount();
+
 		static const ResultGPUTimerNode& GetGPUTimerRoot() { return m_GPUTimerRoot; }
 
 		static SharedPtr<DeviceVertexArray> GetFullScreenVertexArray();

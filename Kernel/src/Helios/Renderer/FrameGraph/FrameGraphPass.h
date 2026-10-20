@@ -38,6 +38,9 @@ namespace Helios
 			std::vector<std::optional<glm::vec4>> ColorClearValues;
 			/* Sample */
 			uint8_t Samples{ 1 };
+			/* 多重采样：场景几何通道打开（采样数取全局 MSAA 设置，见 Renderer::GetMSAASampleCount）。
+			 * 全屏后处理、阴影图、叠加层这类没有几何边缘的通道保持关闭。 */
+			bool Multisample{ false };
 			/* 视口区域 */
 			ViewportRegion ViewportRegion{ 0,0,1,1 };
 

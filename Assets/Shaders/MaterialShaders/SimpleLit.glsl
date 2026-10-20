@@ -54,7 +54,7 @@ struct SVextex2Frag
 layout(location = 0) in SVextex2Frag vert2frag;
 
 layout(location = 0) out vec4 OutFragColor;
-layout(location = 1) out int  ObjectId;
+layout(location = 1) out float ObjectId;
 
 layout(binding = 0) uniform sampler2D u_AlbedoTexture; // @property
 
@@ -103,5 +103,5 @@ void main()
 	}
 
 	OutFragColor = vec4(color, albedo_sample.a * u_Opacity);
-	ObjectId = u_ObjectId;
+	ObjectId = float(u_ObjectId);
 }

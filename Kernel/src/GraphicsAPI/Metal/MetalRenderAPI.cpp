@@ -8,6 +8,7 @@
 #include "MetalTexture.h"
 #include "MetalVertexArray.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
+#include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderQuery.h"
 
 namespace Helios
@@ -78,6 +79,14 @@ namespace Helios
         m_ActiveRenderPassDescriptor = nullptr;
         m_ActivePipelineState = nullptr;
         m_RasterStateEncoder = nullptr;
+
+        ReleaseDefaultMultisampleAttachments();
+
+        if (m_DefaultDepthTexture)
+        {
+            m_DefaultDepthTexture->release();
+            m_DefaultDepthTexture = nullptr;
+        }
 
         /* 兜底排空可能残留的帧级 autorelease pool */
         if (m_FrameAutoreleasePool)
@@ -775,14 +784,16 @@ namespace Helios
             {
                 MTL::Texture* drawable_texture = m_CurrentDrawable->texture();
 
-                color_attachment->setTexture(drawable_texture);
-                color_attachment->setLoadAction(MTL::LoadActionClear);
-                color_attachment->setStoreAction(MTL::StoreActionStore);
-
                 /* 默认渲染目标的颜色格式以 drawable 为准，供管线创建使用，
                  * 避免在引擎内固定假定某一种格式。 */
                 if (drawable_texture)
                     m_DefaultColorFormat = drawable_texture->pixelFormat();
+
+                /* 按全局 MSAA 设置决定画在哪：开则落在多重采样附件上、通道结束解析回
+                 * drawable，关则照旧直画 */
+                SyncDefaultMultisampleAttachments(m_RenderPassDescriptor, drawable_texture);
+
+                color_attachment->setLoadAction(MTL::LoadActionClear);
 
                 /* 此处写入清除色仅是兜底：SetClearColor 通常在本帧稍后调用，
                  * 真正的清除色在 BeginRenderPass 时刷新。 */
@@ -790,6 +801,150 @@ namespace Helios
                     m_ClearColor.r, m_ClearColor.g, m_ClearColor.b, m_ClearColor.a));
             }
         }
+    }
+
+    void MetalRenderAPI::ReleaseDefaultMultisampleAttachments()
+    {
+        if (m_DefaultMSAAColor)
+        {
+            m_DefaultMSAAColor->release();
+            m_DefaultMSAAColor = nullptr;
+        }
+        if (m_DefaultMSAADepth)
+        {
+            m_DefaultMSAADepth->release();
+            m_DefaultMSAADepth = nullptr;
+        }
+
+        m_DefaultMSAAWidth = 0;
+        m_DefaultMSAAHeight = 0;
+        m_DefaultMSAASamples = 0;
+        m_DefaultMSAAColorFormat = MTL::PixelFormatInvalid;
+    }
+
+    void MetalRenderAPI::SyncDefaultMultisampleAttachments(MTL::RenderPassDescriptor* descriptor,
+        MTL::Texture* drawable_texture)
+    {
+        if (!descriptor || !drawable_texture)
+            return;
+
+        MTL::RenderPassColorAttachmentDescriptor* color_attachment = descriptor->colorAttachments()->object(0);
+        MTL::RenderPassDepthAttachmentDescriptor* depth_attachment = descriptor->depthAttachment();
+        MTL::RenderPassStencilAttachmentDescriptor* stencil_attachment = descriptor->stencilAttachment();
+        if (!color_attachment)
+            return;
+
+        /* 窗口侧在创建与缩放时会往深度附件上换新的单采样纹理：附件上挂的不是我们的
+         * 多重采样纹理，就说明换了，重新记一份（解析与还原都要用回它） */
+        MTL::Texture* depth_on_attachment = depth_attachment ? depth_attachment->texture() : nullptr;
+        if (depth_on_attachment != nullptr && depth_on_attachment != m_DefaultMSAADepth)
+        {
+            if (m_DefaultDepthTexture)
+                m_DefaultDepthTexture->release();
+            m_DefaultDepthTexture = depth_on_attachment;
+            m_DefaultDepthTexture->retain();
+        }
+
+        const uint32_t samples = Renderer::GetMSAASampleCount();
+        if (samples <= 1)
+        {
+            /* 关闭：颜色回到 drawable，深度与模板回到窗口纹理 */
+            color_attachment->setTexture(drawable_texture);
+            color_attachment->setResolveTexture(nullptr);
+            color_attachment->setStoreAction(MTL::StoreActionStore);
+
+            if (depth_attachment && m_DefaultDepthTexture)
+            {
+                depth_attachment->setTexture(m_DefaultDepthTexture);
+                depth_attachment->setResolveTexture(nullptr);
+                depth_attachment->setStoreAction(MTL::StoreActionStore);
+            }
+            if (stencil_attachment && m_DefaultDepthTexture)
+                stencil_attachment->setTexture(m_DefaultDepthTexture);
+
+            ReleaseDefaultMultisampleAttachments();
+            return;
+        }
+
+        const uint32_t width = static_cast<uint32_t>(drawable_texture->width());
+        const uint32_t height = static_cast<uint32_t>(drawable_texture->height());
+        const MTL::PixelFormat color_format = drawable_texture->pixelFormat();
+        const bool need_depth = (m_DefaultDepthTexture != nullptr);
+        const bool stale = (m_DefaultMSAAColor == nullptr)
+            || m_DefaultMSAAWidth != width
+            || m_DefaultMSAAHeight != height
+            || m_DefaultMSAASamples != samples
+            || m_DefaultMSAAColorFormat != color_format
+            || (need_depth && m_DefaultMSAADepth == nullptr);
+
+        if (stale)
+        {
+            ReleaseDefaultMultisampleAttachments();
+
+            MTL::Device* device = MetalRuntime::Device();
+            if (device)
+            {
+                MTL::TextureDescriptor* color_desc = MTL::TextureDescriptor::alloc()->init();
+                color_desc->setTextureType(MTL::TextureType2DMultisample);
+                color_desc->setPixelFormat(color_format);
+                color_desc->setWidth(width);
+                color_desc->setHeight(height);
+                color_desc->setSampleCount(samples);
+                color_desc->setUsage(MTL::TextureUsageRenderTarget);
+                color_desc->setStorageMode(MTL::StorageModePrivate);
+                m_DefaultMSAAColor = device->newTexture(color_desc);
+                color_desc->release();
+
+                if (need_depth)
+                {
+                    MTL::TextureDescriptor* depth_desc = MTL::TextureDescriptor::alloc()->init();
+                    depth_desc->setTextureType(MTL::TextureType2DMultisample);
+                    depth_desc->setPixelFormat(m_DefaultDepthTexture->pixelFormat());
+                    depth_desc->setWidth(width);
+                    depth_desc->setHeight(height);
+                    depth_desc->setSampleCount(samples);
+                    depth_desc->setUsage(MTL::TextureUsageRenderTarget);
+                    depth_desc->setStorageMode(MTL::StorageModePrivate);
+                    m_DefaultMSAADepth = device->newTexture(depth_desc);
+                    depth_desc->release();
+                }
+            }
+
+            m_DefaultMSAAWidth = width;
+            m_DefaultMSAAHeight = height;
+            m_DefaultMSAASamples = samples;
+            m_DefaultMSAAColorFormat = color_format;
+        }
+
+        /* 创建失败时退回单采样直画，至少不会渲染到空附件 */
+        if (!m_DefaultMSAAColor || (need_depth && !m_DefaultMSAADepth))
+        {
+            CORE_LOG_WARN("Failed to create multisample attachments for the default target, falling back");
+
+            color_attachment->setTexture(drawable_texture);
+            color_attachment->setResolveTexture(nullptr);
+            color_attachment->setStoreAction(MTL::StoreActionStore);
+
+            if (depth_attachment && m_DefaultDepthTexture)
+                depth_attachment->setTexture(m_DefaultDepthTexture);
+            if (stencil_attachment && m_DefaultDepthTexture)
+                stencil_attachment->setTexture(m_DefaultDepthTexture);
+            return;
+        }
+
+        /* 画在多重采样附件上、通道结束解析回 drawable；深度只在通道内使用，不解析 */
+        color_attachment->setTexture(m_DefaultMSAAColor);
+        color_attachment->setResolveTexture(drawable_texture);
+        color_attachment->setStoreAction(MTL::StoreActionMultisampleResolve);
+
+        if (depth_attachment && m_DefaultMSAADepth)
+        {
+            depth_attachment->setTexture(m_DefaultMSAADepth);
+            depth_attachment->setResolveTexture(nullptr);
+            depth_attachment->setStoreAction(MTL::StoreActionStore);
+        }
+        if (stencil_attachment && m_DefaultMSAADepth)
+            stencil_attachment->setTexture(m_DefaultMSAADepth);
     }
 
     void MetalRenderAPI::ApplyDefaultClearColor()
@@ -846,7 +1001,11 @@ namespace Helios
                 return;
             }
 
-            color_attachment->setTexture(m_CurrentDrawable->texture());
+            /* 开 MSAA 时颜色画在多重采样附件上，继续在同一张附件上画就保留了前序内容；
+             * 只有单采样才需要把 drawable 重新挂回来 */
+            if (color_attachment->texture() != m_DefaultMSAAColor)
+                color_attachment->setTexture(m_CurrentDrawable->texture());
+
             color_attachment->setLoadAction(MTL::LoadActionLoad);
         }
 

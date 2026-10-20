@@ -8,6 +8,9 @@
         <Entity ID="1" Name="Camera">
             <Transform Position="0.361787 1.847466 7.667938" Rotation="-0.113852 0.077870 -0.008895" Scale="0.999990 1.000000 0.999999"/>
             <Camera IsPrimary="true" IsFixedAspectRatio="false" ProjectionType="0" RenderPipeline="0" CullingMask="4294967295" Fov="45" Near="0.1" Far="1000"/>
+            <Script>
+                <Entry Class="Mover" Order="0" Speed="2.000000" Space="0"/>
+            </Script>
         </Entity>
         <Entity ID="2" Name="Directional Light">
             <Transform Position="-4.436856 3.931013 0.000000" Rotation="0.555050 0.688880 1.209722" Scale="6.299987 1.000000 1.000000"/>
@@ -36,12 +39,12 @@
             <Model ModelPath="BuiltinPlane" CastShadow="true" ReceiveShadow="true" EnableSkinning="true">
                 <MaterialOverride Slot="Default" Instance="true" Source="Materials/Ground.mtl" ShaderPath="Shaders/MaterialShaders/SimpleLit.glsl" RenderQueue="2000">
                     <Parameters>
-                        <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.120000 4.000000 0.000000 0.000000"/>
                         <ParamInfo Type="0" Name="u_AlbedoTexture">
                             <Texture Path="Textures/Grass2.png" Slot="0">
                                 <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0" IsHdr="false"/>
                             </Texture>
                         </ParamInfo>
+                        <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.120000 4.000000 0.000000 0.000000"/>
                     </Parameters>
                     <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthTest="true" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
                 </MaterialOverride>

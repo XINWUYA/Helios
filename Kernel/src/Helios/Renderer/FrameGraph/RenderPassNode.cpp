@@ -106,7 +106,10 @@ namespace Helios
 			/* 构造FrameBuffer描述 */
 			FrameBufferDesc desc;
 			desc.ViewportRegion = render_pass_data->Descriptor.ViewportRegion;
-			desc.Samples = render_pass_data->Descriptor.Samples;
+			/* 采样数：场景几何通道跟全局 MSAA 设置走，其余通道保持描述里的单采样 */
+			desc.Samples = render_pass_data->Descriptor.Multisample
+				? Renderer::GetMSAASampleCount()
+				: std::max<uint32_t>(1, render_pass_data->Descriptor.Samples);
 			desc.Usage = render_pass_data->RenderBufferUsage;
 			desc.ColorClearValues = render_pass_data->Descriptor.ColorClearValues;
 			desc.PreserveContent = render_pass_data->Descriptor.PreserveContent;

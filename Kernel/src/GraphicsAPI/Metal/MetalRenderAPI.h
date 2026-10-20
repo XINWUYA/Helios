@@ -108,6 +108,12 @@ namespace Helios
         [[nodiscard]] MetalPipelineDesc BuildPipelineDesc(uint64_t vertex_layout_hash) const;
 
     private:
+        /* 默认目标的多重采样附件：按全局 MSAA 设置创建，绘制落在它们上面，
+         * 通道结束解析回 drawable 与窗口深度纹理；关闭时整体释放、回到单采样直画。 */
+        void SyncDefaultMultisampleAttachments(MTL::RenderPassDescriptor* descriptor,
+            MTL::Texture* drawable_texture);
+        void ReleaseDefaultMultisampleAttachments();
+
         /* 依据深度比较方式/深度写入开关获取（并缓存）DepthStencilState */
         MTL::DepthStencilState* GetOrCreateDepthStencilState(CompareFunc compare_func, bool depth_write_enabled);
 
@@ -149,6 +155,16 @@ namespace Helios
         /* 默认目标快照的常驻预览纹理（AcquireDefaultTargetSnapshot 用；随 drawable
          * 尺寸变化重建、跨帧复用）。行序 = drawable 行序（顶行在前） */
         SharedPtr<DeviceTexture> m_DefaultTargetSnapshot;
+
+        /* 默认目标的多重采样颜色 / 深度附件（全局 MSAA 关闭时为空） */
+        MTL::Texture* m_DefaultMSAAColor{ nullptr };
+        MTL::Texture* m_DefaultMSAADepth{ nullptr };
+        /* 窗口侧的单采样深度纹理（MetalContext 持有，这里 retain 一份用于解析与还原） */
+        MTL::Texture* m_DefaultDepthTexture{ nullptr };
+        uint32_t m_DefaultMSAAWidth{ 0 };
+        uint32_t m_DefaultMSAAHeight{ 0 };
+        uint32_t m_DefaultMSAASamples{ 0 };
+        MTL::PixelFormat m_DefaultMSAAColorFormat{ MTL::PixelFormatInvalid };
 
         /* 帧级 autorelease pool：Metal-CPP 的便捷工厂返回的是 autoreleased 对象、注册进主线程的隐式
          * pool；而引擎渲染循环不经过 AppKit 事件循环、隐式 pool 永远不排空，对象逐帧堆积、内存暴涨。

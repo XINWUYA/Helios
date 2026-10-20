@@ -295,7 +295,11 @@ namespace Helios
 			deferred ? "GBufferPass" : "ScenePass");
 		if (pass_framebuffer)
 		{
-			pass_framebuffer->ReadPixel(deferred ? 6 : 1, x, y, { PixelFormat::R_Integer, PixelType::Int }, &entity_id);
+			/* id 以浮点存在纹理里（见 ScenePass / DeferredPasses 的附件格式），
+			 * 四舍五入回整数；空像素是 -1 */
+			float raw_id = -1.0f;
+			pass_framebuffer->ReadPixel(deferred ? 6 : 1, x, y, { PixelFormat::R, PixelType::Float }, &raw_id);
+			entity_id = static_cast<int32_t>(std::lround(raw_id));
 		}
 		return entity_id;
 	}

@@ -170,7 +170,9 @@ namespace Helios
 				FrameGraphTexture::Descriptor object_id_desc;
 				object_id_desc.Width = viewport_region.Width;
 				object_id_desc.Height = viewport_region.Height;
-				object_id_desc.TextureFormat = TextureFormat::R32I;
+				/* 实体 id 用浮点存：多重采样只对浮点 / 颜色格式做解析，
+				 * 整数附件在开启 MSAA 时解析结果不可靠 */
+				object_id_desc.TextureFormat = TextureFormat::R32F;
 
 				FrameGraphTexture::Descriptor depth_desc;
 				depth_desc.Width = viewport_region.Width;
@@ -198,6 +200,9 @@ namespace Helios
 						pass_desc.ColorClearValues.resize(2);
 						pass_desc.ColorClearValues[1] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
 						pass_desc.ViewportRegion = viewport_region;
+						/* 场景几何开多重采样：物体边缘的锯齿靠它抹平。输出纹理本身仍是
+						 * 单采样，通道结束由后端解析过去，叠加层与拾取照常读取 */
+						pass_desc.Multisample = true;
 						builder.CreateRenderPass("ScenePassRenderTarget", pass_desc);
 
 						/* 输出纹理留给视图显示与拾取回读：不能被图裁剪剔除 */

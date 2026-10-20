@@ -148,12 +148,17 @@ namespace Helios
         if (!data || attachment_index >= m_ColorAttachments.size())
             return;
 
-        MTL::Texture* texture = m_ColorAttachments[attachment_index];
+        /* 多重采样通道的绘制发生在临时附件上、通道结束才解析回纹理：
+         * 回读一律取解析后的那一张，拾取与截图拿到的就是屏幕上的结果。 */
+        MTL::Texture* texture = (attachment_index < m_ColorResolveTextures.size()
+            && m_ColorResolveTextures[attachment_index] != nullptr)
+            ? m_ColorResolveTextures[attachment_index]
+            : m_ColorAttachments[attachment_index];
         if (!texture)
             return;
 
-        /* 多重采样附件与私有存储都不支持 CPU 直接回读。
-         * 前者需要先解析，后者需要经由 blit 拷贝到可读纹理，此处明确报错而不是静默返回。 */
+        /* 未被解析的多重采样附件与私有存储都不支持 CPU 直接回读。前者需要先解析，
+         * 后者需要经由 blit 拷贝到可读纹理，此处明确报错而不是静默返回。 */
         if (texture->sampleCount() > 1)
         {
             CORE_LOG_ERROR("MetalFrameBuffer::ReadPixel: attachment {} is multisampled, resolve it first",

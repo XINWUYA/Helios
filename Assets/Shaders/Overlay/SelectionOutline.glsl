@@ -20,7 +20,7 @@ layout(location = 0) out vec4 OutFragColor;
 layout(location = 0) in vec2 v_TexCoord;
 
 /* 场景的实体 id 附件（与拾取同一张），空像素为 -1 */
-layout(binding = 0) uniform isampler2D u_ObjectId;
+layout(binding = 0) uniform sampler2D u_ObjectId;
 /* 选中实体 id：描边只落在它外侧的一圈 */
 layout(location = 0) uniform int u_SelectedId;
 layout(location = 1) uniform vec4 u_OutlineColor;
@@ -35,7 +35,7 @@ void main()
 	const ivec2 pixel = clamp(ivec2(v_TexCoord * vec2(size)), ivec2(0), size - ivec2(1));
 
 	/* 选中像素自己不落笔：轮廓是它外侧的一圈 */
-	if (texelFetch(u_ObjectId, pixel, 0).r == u_SelectedId)
+	if (int(floor(texelFetch(u_ObjectId, pixel, 0).r + 0.5f)) == u_SelectedId)
 	{
 		OutFragColor = vec4(0.0f);
 		return;
@@ -51,7 +51,7 @@ void main()
 			if (sample_pixel.x < 0 || sample_pixel.y < 0
 				|| sample_pixel.x >= size.x || sample_pixel.y >= size.y)
 				continue;
-			if (texelFetch(u_ObjectId, sample_pixel, 0).r != u_SelectedId)
+			if (int(floor(texelFetch(u_ObjectId, sample_pixel, 0).r + 0.5f)) != u_SelectedId)
 				continue;
 
 			nearest = min(nearest, length(vec2(x, y)));

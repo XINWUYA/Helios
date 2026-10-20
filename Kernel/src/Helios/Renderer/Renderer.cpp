@@ -95,6 +95,29 @@ namespace Helios
 	ResultGPUTimerNode Renderer::m_GPUTimerRoot{};
 	SharedPtr<DeviceTexture> Renderer::m_pCurrentShadowMap{};
 
+	namespace
+	{
+		/* 视口 MSAA 的单一数据源：开关与采样数。采样数固定 4x，再往上收益很小，
+		 * 4x 在集显到独显上都能稳定跑满。 */
+		constexpr uint8_t MSAA_SAMPLE_COUNT = 4;
+		bool s_MSAAEnabled = true;
+	}
+
+	void Renderer::SetMSAAEnabled(bool enabled)
+	{
+		s_MSAAEnabled = enabled;
+	}
+
+	bool Renderer::IsMSAAEnabled()
+	{
+		return s_MSAAEnabled;
+	}
+
+	uint8_t Renderer::GetMSAASampleCount()
+	{
+		return s_MSAAEnabled ? MSAA_SAMPLE_COUNT : 1;
+	}
+
 	void Renderer::Init()
 	{
 		PROFILE_FUNCTION();

@@ -2796,4 +2796,71 @@ namespace Helios::Icons
 		ImGui::PopID();
 		return clicked;
 	}
+
+	int IconToggleGroup(const char* id, const Id* icons, const char* const* tooltips,
+		int count, int selected, const ImVec2& size)
+	{
+		if (count <= 0 || icons == nullptr)
+			return -1;
+
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float seg_width = size.x / static_cast<float>(count);
+		const ImVec2 pos = ImGui::GetCursorScreenPos();
+		const ImVec2 end(pos.x + size.x, pos.y + size.y);
+		ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+		/* 底槽：控件底色 + 一档边框，与属性面板的分段开关同一套画法 */
+		draw_list->AddRectFilled(pos, end, ImGui::GetColorU32(EditorTheme::Token::Neutral4), style.FrameRounding);
+		draw_list->AddRect(pos, end, ImGui::GetColorU32(EditorTheme::Token::Border),
+			style.FrameRounding, 0, EditorTheme::Scaled(1.0f));
+
+		/* 选中块：往里收一点，强调色淡填充 + 描边 */
+		const float inset = EditorTheme::Scaled(2.0f);
+		const float block_rounding = std::max(EditorTheme::Scaled(1.0f), style.FrameRounding - EditorTheme::Scaled(1.0f));
+		if (selected >= 0 && selected < count)
+		{
+			const float block_x = pos.x + seg_width * static_cast<float>(selected);
+			const ImVec2 block_min(block_x + inset, pos.y + inset);
+			const ImVec2 block_max(block_x + seg_width - inset, pos.y + size.y - inset);
+			draw_list->AddRectFilled(block_min, block_max,
+				ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.17f)), block_rounding);
+			draw_list->AddRect(block_min, block_max,
+				ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.65f)),
+				block_rounding, 0, EditorTheme::Scaled(1.0f));
+		}
+
+		int clicked = -1;
+		ImGui::PushID(id);
+		for (int index = 0; index < count; ++index)
+		{
+			ImGui::PushID(index);
+			ImGui::InvisibleButton("##segment", ImVec2(seg_width, size.y));
+			const bool hovered = ImGui::IsItemHovered();
+			if (ImGui::IsItemClicked())
+				clicked = index;
+			if (hovered && tooltips != nullptr && tooltips[index] != nullptr)
+				ImGui::SetTooltip("%s", tooltips[index]);
+			ImGui::PopID();
+
+			/* 未选中格的悬停提亮：只在没被选中块盖住的地方画 */
+			const float seg_x = pos.x + seg_width * static_cast<float>(index);
+			if (hovered && index != selected)
+			{
+				draw_list->AddRectFilled(ImVec2(seg_x, pos.y), ImVec2(seg_x + seg_width, pos.y + size.y),
+					ImGui::GetColorU32(EditorTheme::Token::Neutral5), style.FrameRounding);
+			}
+
+			const float icon_size = std::min(seg_width, size.y) * 0.66f;
+			const ImU32 color = ImGui::GetColorU32(index == selected || hovered
+				? EditorTheme::Token::Text : EditorTheme::Token::TextDim);
+			Draw(draw_list, icons[index],
+				ImVec2(seg_x + seg_width * 0.5f, pos.y + size.y * 0.5f), icon_size, color);
+
+			if (index + 1 < count)
+				ImGui::SameLine(0.0f, 0.0f);
+		}
+		ImGui::PopID();
+
+		return clicked;
+	}
 }

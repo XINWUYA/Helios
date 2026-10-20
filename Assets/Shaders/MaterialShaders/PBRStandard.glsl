@@ -65,7 +65,7 @@ struct SVextex2Frag
 layout(location = 0) in SVextex2Frag vert2frag;
 
 layout(location = 0) out vec4 OutFragColor;
-layout(location = 1) out int  ObjectId;
+layout(location = 1) out float ObjectId;
 
 void main()
 {
@@ -100,5 +100,5 @@ void main()
 	}
 
 	OutFragColor = vec4(color, mtl.Opacity * u_Opacity);
-	ObjectId = u_ObjectId;
+	ObjectId = float(u_ObjectId);
 }

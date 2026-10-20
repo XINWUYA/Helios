@@ -15,7 +15,7 @@ void main()
 #version 410 core
 
 layout(location = 0) out vec4 OutFragColor;
-layout(location = 5) out int  ObjectId;
+layout(location = 5) out float ObjectId;
 
 #include "Uniforms.glsl"
 
@@ -24,5 +24,5 @@ void main()
 	/* 错误材质：材质 / 贴图没配好或加载失败的模型显示品红，方便一眼定位 */
 	OutFragColor = vec4(1.0f, 0.0f, 1.0f, 1.0f);
 
-	ObjectId = u_ObjectId;
+	ObjectId = float(u_ObjectId);
 }

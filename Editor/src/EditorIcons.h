@@ -60,7 +60,7 @@ namespace Helios
 			FileCppHeader, FileCppSource,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */
 			Gizmos, Grid, WorldAxis,
-			/* 变换坐标空间（工具栏下拉框）：局部 = 随实体旋转的方框，世界 = 固定朝向的球体 */
+			/* 变换坐标空间（工具栏分段开关）：局部 = 随实体旋转的方框，世界 = 固定朝向的球体 */
 			LocalSpace, WorldSpace,
 			/* 调试视图（工具栏按钮 + 弹层档位） */
 			DebugView,
@@ -116,5 +116,10 @@ namespace Helios
 
 		/* 统一图标按钮：集中尺寸、扁平底色、checked 高亮与 tooltip */
 		bool IconButton(Id id, const ImVec2& size, bool checked = false, const char* tooltip = nullptr);
+
+		/* 分段图标开关：一条底槽并排若干格，选中格描边高亮。返回本帧被点的格，没点返回 -1。
+		 * tooltips 逐格对应，可传 nullptr。 */
+		int IconToggleGroup(const char* id, const Id* icons, const char* const* tooltips,
+			int count, int selected, const ImVec2& size);
 	}
 }

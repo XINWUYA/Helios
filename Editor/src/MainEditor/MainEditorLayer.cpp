@@ -8,6 +8,7 @@
 #include "Helios/Application/FileDialog.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/ImGui/EditorTheme.h"
+#include "Helios/Renderer/Renderer.h"
 #include <cctype>
 #include <fstream>
 
@@ -518,9 +519,17 @@ namespace Helios
 					ImGui::EndMenu();
 				}
 
-				/* Settings：全局设置（对所有骨骼模型生效） */
+				/* Settings：全局开关（对所有视口生效） */
 				if (ImGui::BeginMenu("Settings"))
 				{
+					bool msaa = Renderer::IsMSAAEnabled();
+					if (ImGui::MenuItem("MSAA", nullptr, &msaa))
+						Renderer::SetMSAAEnabled(msaa);
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("开：场景通道 4x 多重采样，物体边缘更平滑；关：退回单采样");
+
+					ImGui::Separator();
+
 					bool gpu_skinning = SkeletonModel::IsGlobalGpuSkinningEnabled();
 					if (ImGui::MenuItem("GPU Skinning", nullptr, &gpu_skinning))
 						SkeletonModel::SetGlobalGpuSkinningEnabled(gpu_skinning);
@@ -653,47 +662,16 @@ namespace Helios
 			if (Icons::IconButton(Icons::Id::Scale, button_size, gizmo_type == 2, "Scale  (R)"))
 				m_Context.SetGizmoType(2);
 
-			ImGui::SameLine();
-			const bool gizmo_local = m_Context.IsGizmoLocalSpace();
-			const ImVec2 combo_origin = ImGui::GetCursorScreenPos();
-			const float combo_width = kButtonSize * 4.2f;
-			ImGui::SetNextItemWidth(combo_width);
-			const bool space_open = ImGui::BeginCombo("##GizmoSpace", "");
-			if (space_open)
+			/* 坐标空间：局部 / 世界两格图标开关，比下拉框少一次点击 */
+			ImGui::SameLine(0.0f, Scaled(6.0f));
 			{
-				for (int32_t space_index = 0; space_index < 2; ++space_index)
-				{
-					const bool is_local = (space_index == 0);
-					const bool selected = (is_local == gizmo_local);
-					const ImVec2 item_min = ImGui::GetCursorScreenPos();
-					if (ImGui::Selectable(is_local ? "##LocalItem" : "##WorldItem", selected, 0,
-						ImVec2(0.0f, kButtonSize * 0.9f)))
-						m_Context.SetGizmoLocalSpace(is_local);
-
-					ImDrawList* item_draw_list = ImGui::GetWindowDrawList();
-					const float item_mid_y = item_min.y + kButtonSize * 0.45f;
-					Icons::Draw(item_draw_list,
-						is_local ? Icons::Id::LocalSpace : Icons::Id::WorldSpace,
-						ImVec2(item_min.x + 10.0f, item_mid_y), 13.0f,
-						ImGui::GetColorU32(ImGuiCol_Text));
-					item_draw_list->AddText(
-						ImVec2(item_min.x + 26.0f, item_mid_y - ImGui::GetTextLineHeight() * 0.5f),
-						ImGui::GetColorU32(ImGuiCol_Text), is_local ? "Local" : "World");
-				}
-				ImGui::EndCombo();
-			}
-
-			/* 预览：弹层打开时 GetItemRect 指向弹层项，所以用按下前的光标位置自己算 */
-			{
-				ImDrawList* preview_draw_list = ImGui::GetWindowDrawList();
-				const float preview_mid_y = combo_origin.y + kButtonSize * 0.5f;
-				Icons::Draw(preview_draw_list,
-					gizmo_local ? Icons::Id::LocalSpace : Icons::Id::WorldSpace,
-					ImVec2(combo_origin.x + 10.0f, preview_mid_y), 13.0f,
-					ImGui::GetColorU32(ImGuiCol_Text));
-				preview_draw_list->AddText(
-					ImVec2(combo_origin.x + 26.0f, preview_mid_y - ImGui::GetTextLineHeight() * 0.5f),
-					ImGui::GetColorU32(ImGuiCol_Text), gizmo_local ? "Local" : "World");
+				const Icons::Id space_icons[2] = { Icons::Id::LocalSpace, Icons::Id::WorldSpace };
+				const char* space_tips[2] = { "Local Space", "World Space" };
+				const int space_index = Icons::IconToggleGroup("##GizmoSpace", space_icons, space_tips, 2,
+					m_Context.IsGizmoLocalSpace() ? 0 : 1,
+					ImVec2(kButtonSize * 2.0f + Scaled(6.0f), kButtonSize));
+				if (space_index >= 0)
+					m_Context.SetGizmoLocalSpace(space_index == 0);
 			}
 
 			/* ---- 运行控制：水平居中 ---- */
