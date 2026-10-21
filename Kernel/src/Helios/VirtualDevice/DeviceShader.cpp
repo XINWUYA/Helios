@@ -449,4 +449,32 @@ namespace Helios
 				m_Reflection.UniformBlockBindings.insert(static_cast<uint32_t>(std::stoul(binding_match[1].str())));
 		}
 	}
+
+	/* 顶点属性：layout(location = N) in <type> <name>; —— 位置由着色器给出，
+	 * 顶点布局按名字认领，不再依赖元素在缓冲里的先后顺序 */
+	void DeviceShader::ReflectVertexAttributes(const std::string& source)
+	{
+		if (source.empty())
+			return;
+
+		static const std::regex attribute_regex(
+			R"(layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*in\s+([^;]+);)");
+
+		for (auto it = std::sregex_iterator(source.begin(), source.end(), attribute_regex);
+			it != std::sregex_iterator(); ++it)
+		{
+			const std::string declaration = (*it)[2].str();
+			const size_t name_end = declaration.find_last_not_of(" \t\r\n");
+			if (name_end == std::string::npos)
+				continue;
+
+			const size_t name_start = declaration.find_last_of(" \t\r\n", name_end);
+			const std::string name = (name_start == std::string::npos)
+				? declaration.substr(0, name_end + 1)
+				: declaration.substr(name_start + 1, name_end - name_start);
+
+			if (!name.empty())
+				m_Reflection.VertexAttributeLocations[name] = static_cast<uint32_t>(std::stoul((*it)[1].str()));
+		}
+	}
 }

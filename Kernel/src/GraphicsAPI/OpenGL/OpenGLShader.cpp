@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "OpenGLShader.h"
+#include "OpenGLVertexArray.h"
 
 #ifdef PLATFORM_WINDOWS
 #include <shaderc/shaderc.hpp>
@@ -161,6 +162,15 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		glUseProgram(0);
+	}
+
+	void OpenGLShader::BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array)
+	{
+		auto gl_vertex_array = std::dynamic_pointer_cast<OpenGLVertexArray>(vertex_array);
+		if (!gl_vertex_array)
+			return;
+
+		gl_vertex_array->ConfigureAttributes(m_Reflection);
 	}
 
 	int OpenGLShader::GetUniformLocation(const std::string& name)
@@ -466,6 +476,8 @@ namespace Helios
 		for (auto&& [shader_type, source] : m_OpenGLSourceCodes)
 		{
 			ReflectFromGLSLSource(source);
+			if (shader_type == GL_VERTEX_SHADER)
+				ReflectVertexAttributes(source);
 		}
 	}
 #endif
@@ -508,6 +520,8 @@ namespace Helios
 		for (auto& source_code : m_OpenGLSourceCodes)
 		{
 			ReflectFromGLSLSource(source_code.second);
+			if (source_code.first == GL_VERTEX_SHADER)
+				ReflectVertexAttributes(source_code.second);
 		}
 
 		// Use traditional GLSL compilation on macOS/Linux

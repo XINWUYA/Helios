@@ -26,18 +26,16 @@ namespace Helios
 
         /* Metal特有接口 */
         void Bind(MTL::RenderCommandEncoder* encoder);
-        MTL::VertexDescriptor* GetVertexDescriptor() const { return m_VertexDescriptor; }
         /* 顶点布局的结构化哈希（含 buffer stride 与各 attribute 的类型/偏移）。
-         * MetalShader 用它作为 PipelineState 的缓存键，避免每帧重建管线。 */
+         * 顶点描述符由 MetalShader 按着色器声明的属性位置生成，这里只提供缓存键。 */
         uint64_t GetVertexDescriptorHash() const { return m_VertexDescriptorHash; }
         uint32_t GetVertexCount() const override;
 
     private:
-        void BuildVertexDescriptor();
+        void BuildVertexLayoutHash();
 
         std::vector<SharedPtr<DeviceVertexBuffer>> m_VertexBuffers;
         SharedPtr<IndexBuffer> m_IndexBuffer{ nullptr };
-        MTL::VertexDescriptor* m_VertexDescriptor{ nullptr };
         uint64_t m_VertexDescriptorHash{ 0 };
     };
 }

@@ -250,6 +250,24 @@ namespace Helios
                 return false;
             }
         }
+
+        /* 不能参与混合的颜色格式：整型以外，32 位浮点也不支持。开启 blendingEnabled
+         * 会让管线创建直接失败，表现为该材质的物体整批不画。 */
+        [[nodiscard]] bool IsBlendUnsupportedFormat(MTL::PixelFormat format)
+        {
+            if (IsIntegerColorFormat(format))
+                return true;
+
+            switch (format)
+            {
+            case MTL::PixelFormatR32Float:
+            case MTL::PixelFormatRG32Float:
+            case MTL::PixelFormatRGBA32Float:
+                return true;
+            default:
+                return false;
+            }
+        }
     }
 
     uint64_t MetalPipelineDesc::Hash() const
@@ -344,6 +362,7 @@ namespace Helios
         m_Reflection.Clear();
         ReflectFromGLSLSource(vertex_src);
         ReflectFromGLSLSource(fragment_src);
+        ReflectVertexAttributes(vertex_src);
 
         /* 解析 GLSL 裸 uniform 的默认初始值：MSL 丢失源码默认值，
          * 创建材质块时需借此还原（详见 CollectDefaultUniformValues） */
@@ -417,7 +436,17 @@ namespace Helios
         m_PipelineStates.clear();
 
         if (m_VertexDescriptor)
+        {
             m_VertexDescriptor->release();
+            m_VertexDescriptor = nullptr;
+        }
+
+        for (auto& [layout_hash, descriptor] : m_VertexDescriptors)
+        {
+            if (descriptor)
+                descriptor->release();
+        }
+        m_VertexDescriptors.clear();
 
         ReleaseMaterialBlocks();
     }
@@ -452,9 +481,108 @@ namespace Helios
     void MetalShader::BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array)
     {
         auto metal_vertex_array = std::dynamic_pointer_cast<MetalVertexArray>(vertex_array);
-        if (metal_vertex_array)
-            SetVertexDescriptor(metal_vertex_array->GetVertexDescriptor(),
-                metal_vertex_array->GetVertexDescriptorHash());
+        if (!metal_vertex_array)
+            return;
+
+        const uint64_t layout_hash = metal_vertex_array->GetVertexDescriptorHash();
+        auto it = m_VertexDescriptors.find(layout_hash);
+        if (it == m_VertexDescriptors.end())
+        {
+            MTL::VertexDescriptor* descriptor = BuildVertexDescriptor(*metal_vertex_array);
+            if (descriptor == nullptr)
+            {
+                /* 布局和着色器对不上：这条绘制不成立，错误在 BuildVertexDescriptor 里已写明 */
+                return;
+            }
+
+            it = m_VertexDescriptors.emplace(layout_hash, descriptor).first;
+        }
+
+        SetVertexDescriptor(it->second, layout_hash);
+    }
+
+    MTL::VertexDescriptor* MetalShader::BuildVertexDescriptor(const MetalVertexArray& vertex_array)
+    {
+        MTL::VertexDescriptor* descriptor = MTL::VertexDescriptor::alloc()->init();
+        if (descriptor == nullptr)
+            return nullptr;
+
+        const auto& buffers = vertex_array.GetVertexBuffers();
+        std::unordered_map<uint32_t, std::string> filled;
+        /* 被属性引用到的缓冲槽：没被引用的槽不能设 stride，Metal 会判为配置错误 */
+        std::unordered_map<uint32_t, const VertexBufferLayout*> used_layouts;
+
+        /* 内嵌 MSL 的着色器（如 ImGui）没有 GLSL 声明可反射，退回按出现顺序分配 */
+        const bool named = !m_Reflection.VertexAttributeLocations.empty();
+        if (!named)
+            CORE_LOG_WARN("Shader '{}' has no vertex attribute reflection, falling back to element order", m_DebugName);
+
+        uint32_t sequential_location = 0;
+
+        for (size_t buffer_index = 0; buffer_index < buffers.size(); ++buffer_index)
+        {
+            const SharedPtr<DeviceVertexBuffer>& buffer = buffers[buffer_index];
+            if (buffer == nullptr)
+                continue;
+
+            const VertexBufferLayout& layout = buffer->GetLayout();
+
+            for (const BufferElement& element : layout.GetElements())
+            {
+                uint32_t location = sequential_location;
+                if (named)
+                {
+                    const int reflected = m_Reflection.FindVertexAttributeLocation(element.Name);
+
+                    /* 布局里多出来的属性（着色器不读）直接忽略 */
+                    if (reflected < 0)
+                        continue;
+                    location = static_cast<uint32_t>(reflected);
+                }
+                else
+                {
+                    ++sequential_location;
+                }
+
+                const auto inserted = filled.emplace(location, element.Name);
+                if (!inserted.second)
+                {
+                    CORE_LOG_ERROR("Shader '{}' gets two attributes for location {}: '{}' and '{}'",
+                        m_DebugName, location, inserted.first->second, element.Name);
+                    continue;
+                }
+
+                MTL::VertexAttributeDescriptor* attribute =
+                    descriptor->attributes()->object(static_cast<NS::UInteger>(location));
+                attribute->setFormat(ToMetalVertexFormat(element.Type));
+                attribute->setBufferIndex(static_cast<NS::UInteger>(MetalBinding::VertexBufferBase + buffer_index));
+                attribute->setOffset(element.Offset);
+
+                used_layouts[static_cast<uint32_t>(buffer_index)] = &layout;
+            }
+        }
+
+        for (const auto& [buffer_index, layout] : used_layouts)
+        {
+            MTL::VertexBufferLayoutDescriptor* layout_descriptor =
+                descriptor->layouts()->object(static_cast<NS::UInteger>(buffer_index));
+            layout_descriptor->setStride(layout->GetStride());
+            layout_descriptor->setStepFunction(MTL::VertexStepFunctionPerVertex);
+        }
+
+        /* 着色器声明了、布局给不出：管线建不出来，这里说清楚缺哪个 */
+        for (const auto& [name, location] : m_Reflection.VertexAttributeLocations)
+        {
+            if (filled.find(location) != filled.end())
+                continue;
+
+            CORE_LOG_ERROR("Shader '{}' declares '{}' at location {}, but the vertex layout has no such attribute",
+                m_DebugName, name, location);
+            descriptor->release();
+            return nullptr;
+        }
+
+        return descriptor;
     }
 
     void MetalShader::ParseShaderResources(const std::string& msl_source, bool is_vertex_stage)
@@ -831,10 +959,10 @@ namespace Helios
             attachment->setWriteMask(desc.RasterState.EnableColorWrite
                 ? MTL::ColorWriteMaskAll : MTL::ColorWriteMaskNone);
 
-            /* Metal 不支持整型颜色附件混合（如 GBuffer 的 R32Sint ObjectId），
-             * 即使材质开启全局混合，也必须按附件格式单独关闭。 */
+            /* Metal 的整型与 32 位浮点颜色附件都不支持混合（如 ObjectId 这类附加通道），
+             * 即使材质开启全局混合，也要按附件格式单独关掉。 */
             const bool enable_blend = desc.RasterState.EnableBlend
-                && !IsIntegerColorFormat(desc.ColorFormats[i]);
+                && !IsBlendUnsupportedFormat(desc.ColorFormats[i]);
             attachment->setBlendingEnabled(enable_blend);
             if (enable_blend)
             {

@@ -78,6 +78,11 @@ namespace Helios
 					 * 要用默认贴图补上，缺一个声明过的采样器 Metal 就会直接断言。 */
 					per_draw.Overrides = material->CollectMissingTextureParamDefaults();
 
+					/* 值参数也要补齐：裸 uniform 是 per-program 状态，材质没写就会沿用
+					 * 上一个材质留下的值（场景里别处的 tiling 会把 UV 带歪）。 */
+					const auto value_fills = material->CollectMissingValueParamDefaults();
+					per_draw.Overrides.insert(per_draw.Overrides.end(), value_fills.begin(), value_fills.end());
+
 					if (material->SupportsIBL())
 					{
 						const glm::vec3 world_pos = glm::vec3(mesh_object->Local2WorldMat[3]);

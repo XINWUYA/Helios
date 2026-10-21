@@ -14,8 +14,8 @@ namespace Helios
 		void Bind() override;
 		void Unbind() override;
 
-		/* OpenGL 无此需求，空实现 */
-		void BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array) override {}
+		/* 按着色器声明的属性位置配置顶点属性指针（GL 的指针挂在 VAO 上，绑定前重设） */
+		void BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array) override;
 
 		int GetUniformLocation(const std::string& name) override;
 		void SetInt(const std::string& name, int value) override;

@@ -58,6 +58,9 @@ namespace Helios
 		std::vector<ReflectedMaterialParam> MaterialParams{};
 		/* 声明为 uniform 块（std140）的 binding：计算派发据此区分 uniform 缓冲与 storage 缓冲 */
 		std::unordered_set<uint32_t> UniformBlockBindings{};
+		/* 顶点阶段声明的 attribute：名字 → layout(location = N) 的 N。
+		 * 顶点布局按名字认领位置，不再依赖元素在缓冲里的先后顺序。 */
+		std::unordered_map<std::string, uint32_t> VertexAttributeLocations{};
 
 		void Clear()
 		{
@@ -65,6 +68,7 @@ namespace Helios
 			SamplerStateBindings.clear();
 			MaterialParams.clear();
 			UniformBlockBindings.clear();
+			VertexAttributeLocations.clear();
 		}
 
 		[[nodiscard]] int FindSamplerBinding(const std::string& name) const
@@ -87,6 +91,13 @@ namespace Helios
 					return &param;
 			}
 			return nullptr;
+		}
+
+		/* 顶点属性名对应的 location；着色器没声明该属性时返回 -1 */
+		[[nodiscard]] int FindVertexAttributeLocation(const std::string& name) const
+		{
+			const auto it = VertexAttributeLocations.find(name);
+			return it == VertexAttributeLocations.end() ? -1 : static_cast<int>(it->second);
 		}
 	};
 
@@ -145,6 +156,8 @@ namespace Helios
 	protected:
 		void ReflectFromSPIRV(const std::vector<uint32_t>& spirv);
 		void ReflectFromGLSLSource(const std::string& source);
+		/* 从顶点阶段源码收集 layout(location = N) in 的属性声明 */
+		void ReflectVertexAttributes(const std::string& source);
 
 		/* 文件路径 */
 		std::string m_Path{};

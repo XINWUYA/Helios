@@ -474,11 +474,11 @@ namespace Helios
             m_VertexBuffers[slot] = DeviceVertexBuffer::Create("ImGui_VertexBuffer",
                 static_cast<uint32_t>(m_VertexBufferSize) * sizeof(ImDrawVert));
 
-            /* 设置顶点布局 */
+            /* 设置顶点布局：名字要和 ImGuiUI.glsl 的 in 声明一致，顶点属性按名字对位 */
             VertexBufferLayout layout;
-            layout.EmplaceElement(BufferElement{"Position", BufferDataType::Float2});
-            layout.EmplaceElement(BufferElement{"TexCoord", BufferDataType::Float2});
-            layout.EmplaceElement(BufferElement{"Color", BufferDataType::UByte4, true});  // normalized
+            layout.EmplaceElement(BufferElement{"a_Position", BufferDataType::Float2});
+            layout.EmplaceElement(BufferElement{"a_TexCoord", BufferDataType::Float2});
+            layout.EmplaceElement(BufferElement{"a_Color", BufferDataType::UByte4, true});  // normalized
             m_VertexBuffers[slot]->SetLayout(layout);
 
             m_IndexBuffers[slot] = IndexBuffer::Create("ImGui_IndexBuffer",

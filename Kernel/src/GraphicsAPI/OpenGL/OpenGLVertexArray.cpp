@@ -70,89 +70,133 @@ namespace Helios
 
 		ASSERT(vertex_buffer && !vertex_buffer->GetLayout().GetElements().empty(), "Vertex buffer has no layout!");
 
-		glBindVertexArray(m_VertexArrayId);
-		vertex_buffer->Bind();
+		m_VertexCount += vertex_buffer->GetVertexCount();
+		m_VertexBuffers.push_back(vertex_buffer);
 
-		const auto& layout = vertex_buffer->GetLayout();
-		for (const auto& element : layout)
+		/* 属性指针要等知道着色器声明的 location 才能配，见 ConfigureAttributes */
+		m_AttributeFingerprint = 0;
+	}
+
+	void OpenGLVertexArray::ConfigureAttributes(const ShaderReflectionData& reflection)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_VertexBuffers.empty())
+			return;
+
+		/* 着色器反射为空（内嵌源码等）时退回按元素顺序分配 */
+		const bool named = !reflection.VertexAttributeLocations.empty();
+
+		uint64_t fingerprint = 0xCBF29CE484222325ULL;
+		const auto mix = [&fingerprint](uint64_t value)
 		{
-			switch (element.Type)
-			{
-			case BufferDataType::Int:
-			case BufferDataType::Int2:
-			case BufferDataType::Int3:
-			case BufferDataType::Int4:
-			case BufferDataType::Bool:
-			{
-				glEnableVertexAttribArray(m_VertexBufferIdx);
-				glVertexAttribIPointer(m_VertexBufferIdx,
-					element.GetComponentCount(),
-					TranslateBufferDataTypeToOpenGLBaseType(element.Type),
-					layout.GetStride(),
-					(const void*)element.Offset
-				);
+			fingerprint ^= value;
+			fingerprint *= 1099511628211ULL;
+		};
 
-				m_VertexBufferIdx++;
-				break;
-			}
-			case BufferDataType::Float:
-			case BufferDataType::Float2:
-			case BufferDataType::Float3:
-			case BufferDataType::Float4:
+		for (size_t buffer_index = 0; buffer_index < m_VertexBuffers.size(); ++buffer_index)
+		{
+			const auto& layout = m_VertexBuffers[buffer_index]->GetLayout();
+			for (const auto& element : layout.GetElements())
 			{
-				glEnableVertexAttribArray(m_VertexBufferIdx);
-				glVertexAttribPointer(m_VertexBufferIdx,
-					element.GetComponentCount(),
-					TranslateBufferDataTypeToOpenGLBaseType(element.Type),
-					element.Normalized ? GL_TRUE : GL_FALSE,
-					layout.GetStride(),
-					(const void*)element.Offset
-				);
+				if (named && reflection.FindVertexAttributeLocation(element.Name) < 0)
+					continue;
 
-				m_VertexBufferIdx++;
-				break;
-			}
-			case BufferDataType::UByte4:
-			{
-				glEnableVertexAttribArray(m_VertexBufferIdx);
-				glVertexAttribPointer(m_VertexBufferIdx,
-					element.GetComponentCount(),
-					TranslateBufferDataTypeToOpenGLBaseType(element.Type),
-					GL_TRUE,  // Always normalize UByte4 [0,255] -> [0.0,1.0]
-					layout.GetStride(),
-					(const void*)element.Offset
-				);
-
-				m_VertexBufferIdx++;
-				break;
-			}
-			case BufferDataType::Mat3:
-			case BufferDataType::Mat4:
-			{
-				const auto count = element.GetComponentCount();
-				for (uint32_t i = 0; i < count; ++i)
-				{
-					glEnableVertexAttribArray(m_VertexBufferIdx);
-					glVertexAttribPointer(m_VertexBufferIdx,
-						count,
-						TranslateBufferDataTypeToOpenGLBaseType(element.Type),
-						element.Normalized ? GL_TRUE : GL_FALSE,
-						layout.GetStride(),
-						(const void*)(element.Offset + sizeof(float) * count * i)
-					);
-					glVertexAttribDivisor(m_VertexBufferIdx, 1); // Ref: https://learnopengl-cn.github.io/04%20Advanced%20OpenGL/10%20Instancing/
-
-					m_VertexBufferIdx++;
-				}
-				break;
-			}
-			default: 
-				ASSERT(false, "Unknown BufferDataType!");
+				mix(static_cast<uint64_t>(element.Type));
+				mix(static_cast<uint64_t>(element.Offset));
+				mix(static_cast<uint64_t>(buffer_index));
+				mix(static_cast<uint64_t>(named ? reflection.FindVertexAttributeLocation(element.Name) : 0));
 			}
 		}
 
-		m_VertexCount += vertex_buffer->GetVertexCount();
-		m_VertexBuffers.push_back(vertex_buffer);
+		/* 布局和着色器都没变：属性指针还挂着，直接跳过 */
+		if (fingerprint == m_AttributeFingerprint)
+			return;
+
+		glBindVertexArray(m_VertexArrayId);
+
+		/* 先清掉上一次的配置：同一份 VAO 可能被不同着色器用过 */
+		GLint max_attributes = 0;
+		glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &max_attributes);
+		for (GLint index = 0; index < max_attributes; ++index)
+			glDisableVertexAttribArray(static_cast<GLuint>(index));
+
+		uint32_t sequential_location = 0;
+
+		for (size_t buffer_index = 0; buffer_index < m_VertexBuffers.size(); ++buffer_index)
+		{
+			m_VertexBuffers[buffer_index]->Bind();
+
+			const auto& layout = m_VertexBuffers[buffer_index]->GetLayout();
+			for (const auto& element : layout.GetElements())
+			{
+				uint32_t location = sequential_location;
+				if (named)
+				{
+					const int reflected = reflection.FindVertexAttributeLocation(element.Name);
+
+					/* 布局里多出来的属性（着色器不读）直接忽略 */
+					if (reflected < 0)
+						continue;
+					location = static_cast<uint32_t>(reflected);
+				}
+
+				const auto count = element.GetComponentCount();
+				const auto stride = layout.GetStride();
+				const auto base_type = TranslateBufferDataTypeToOpenGLBaseType(element.Type);
+
+				switch (element.Type)
+				{
+				case BufferDataType::Int:
+				case BufferDataType::Int2:
+				case BufferDataType::Int3:
+				case BufferDataType::Int4:
+				case BufferDataType::Bool:
+					glEnableVertexAttribArray(location);
+					glVertexAttribIPointer(location, count, base_type, stride, (const void*)element.Offset);
+					break;
+				case BufferDataType::Float:
+				case BufferDataType::Float2:
+				case BufferDataType::Float3:
+				case BufferDataType::Float4:
+					glEnableVertexAttribArray(location);
+					glVertexAttribPointer(location, count, base_type,
+						element.Normalized ? GL_TRUE : GL_FALSE, stride, (const void*)element.Offset);
+					break;
+				case BufferDataType::UByte4:
+					glEnableVertexAttribArray(location);
+					glVertexAttribPointer(location, count, base_type,
+						GL_TRUE,  /* UByte4 恒定归一化 [0,255] -> [0,1] */
+						stride, (const void*)element.Offset);
+					break;
+				case BufferDataType::Mat3:
+				case BufferDataType::Mat4:
+					/* 矩阵按列各占一个 location，四元数实例化还要按实例步进 */
+					for (uint32_t column = 0; column < count; ++column)
+					{
+						glEnableVertexAttribArray(location + column);
+						glVertexAttribPointer(location + column, count, base_type,
+							element.Normalized ? GL_TRUE : GL_FALSE, stride,
+							(const void*)(element.Offset + sizeof(float) * count * column));
+						glVertexAttribDivisor(location + column, 1);
+					}
+					break;
+				default:
+					ASSERT(false, "Unknown BufferDataType!");
+					break;
+				}
+
+				if (!named)
+				{
+					const uint32_t slots = (element.Type == BufferDataType::Mat3) ? 3u
+						: (element.Type == BufferDataType::Mat4) ? 4u : 1u;
+					sequential_location += slots;
+				}
+			}
+		}
+
+		glBindVertexArray(0);
+		m_AttributeFingerprint = fingerprint;
 	}
 
 	void OpenGLVertexArray::SetIndexBuffer(const SharedPtr<IndexBuffer>& index_buffer)

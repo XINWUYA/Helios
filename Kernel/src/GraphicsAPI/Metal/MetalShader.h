@@ -11,6 +11,8 @@
 
 namespace Helios
 {
+    class MetalVertexArray;
+
     /* 创建管线状态所需的全部外部信息。
      * 由 MetalRenderAPI 在绘制时依据当前 RenderPass 的附件格式、采样数与
      * 光栅状态填充。 */
@@ -103,6 +105,10 @@ namespace Helios
         MTL::RenderPipelineState* GetOrCreatePipelineState(const MetalPipelineDesc& desc);
         void ReleaseMaterialBlocks();
 
+        /* 按着色器声明的属性位置把顶点布局映射成 Metal 描述符：布局里多出来的元素忽略，
+         * 着色器要而布局里没有的报错并返回空。每种布局的结果缓存复用。 */
+        MTL::VertexDescriptor* BuildVertexDescriptor(const MetalVertexArray& vertex_array);
+
         /* 在全部材质块中查找成员，命中时输出所在块与偏移 */
         MaterialBlock* FindMaterialMember(const std::string& name, uint32_t& out_offset);
         void WriteMaterialData(const std::string& name, const void* data, uint32_t size);
@@ -115,6 +121,8 @@ namespace Helios
         std::unordered_map<uint64_t, MTL::RenderPipelineState*> m_PipelineStates;
         MTL::VertexDescriptor* m_VertexDescriptor{ nullptr };
         uint64_t m_VertexDescriptorHash{ 0 };
+        /* 每个顶点布局一份描述符（键 = 布局哈希）：同一个着色器配不同布局互不干扰 */
+        std::unordered_map<uint64_t, MTL::VertexDescriptor*> m_VertexDescriptors;
 
         /* 材质参数块：顶点阶段与片元阶段各可能有一块 */
         std::vector<MaterialBlock> m_MaterialBlocks;
