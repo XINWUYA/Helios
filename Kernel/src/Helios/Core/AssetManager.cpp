@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "AssetManager.h"
+#include "TextureSettings.h"
 #include "Profiler.h"
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/Scene/Model.h>
@@ -24,6 +25,12 @@ namespace Helios
 	SharedPtr<DeviceTexture> AssetFactory<DeviceTexture>::Create(const std::string& path, const TextureLoadConfig& load_config)
 	{
 		return DeviceTexture::Create(path, load_config);
+	}
+
+	/* 缓存键用解析后的有效配置：同一张图被材质与预览请求时不会再互顶 */
+	TextureLoadConfig AssetFactory<DeviceTexture>::ResolveConfig(const std::string& path, const TextureLoadConfig& load_config)
+	{
+		return TextureSettingsStore::Instance().Resolve(path, load_config);
 	}
 
 	/* 模型: 从路径加载 */
@@ -68,36 +75,25 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const auto key = ToID(path);
+		LoadConfig effective = load_config;
+		if constexpr (requires { AssetFactory<AssetType>::ResolveConfig(path, load_config); })
+			effective = AssetFactory<AssetType>::ResolveConfig(path, load_config);
+
+		const std::string key = MakeKey(path, effective);
 		const auto iter = m_AssetMap.find(key);
 		if (iter != m_AssetMap.end())
-		{
-			if constexpr (std::is_same_v<LoadConfig, NoConfig>)
-			{
-				return iter->second.Asset;
-			}
-			else if (iter->second.Config == load_config)
-			{
-				return iter->second.Asset;
-			}
-		}
+			return iter->second.Asset;
 
+		/* 找不到, 则创建; 创建失败不入缓存, 下次调用重试 */
+		SharedPtr<AssetType> asset;
 		if constexpr (std::is_same_v<LoadConfig, NoConfig>)
-		{
-			/* 找不到, 则创建; 创建失败不入缓存, 下次调用重试 */
-			auto asset = AssetFactory<AssetType>::Create(path);
-			if (asset != nullptr)
-				m_AssetMap[key] = { asset, {} };
-			return asset;
-		}
+			asset = AssetFactory<AssetType>::Create(path);
 		else
-		{
-			/* 找不到或配置不匹配, 则创建 */
-			auto asset = AssetFactory<AssetType>::Create(path, load_config);
-			if (asset != nullptr)
-				m_AssetMap[key] = { asset, load_config };
-			return asset;
-		}
+			asset = AssetFactory<AssetType>::Create(path, effective);
+
+		if (asset != nullptr)
+			m_AssetMap[key] = { asset, effective, path, load_config };
+		return asset;
 	}
 
 	template<typename AssetType, typename LoadConfig>
@@ -124,11 +120,14 @@ namespace Helios
 				return;
 
 			std::lock_guard lock(m_Mutex);
-			const auto iter = m_AssetMap.find(ToID(path));
-			if (iter == m_AssetMap.end() || iter->second.Asset == nullptr)
-				return;
-
-			AssetFactory<AssetType>::Refresh(iter->second.Asset, incoming);
+			for (auto& [key, entry] : m_AssetMap)
+			{
+				if (entry.Path == path && entry.Asset != nullptr)
+				{
+					AssetFactory<AssetType>::Refresh(entry.Asset, incoming);
+					return;
+				}
+			}
 		}
 		else
 		{
@@ -160,7 +159,55 @@ namespace Helios
 	bool AssetStore<AssetType, LoadConfig>::Contains(const std::string& path) const
 	{
 		std::lock_guard lock(m_Mutex);
-		return m_AssetMap.find(ToID(path)) != m_AssetMap.end();
+		for (const auto& [key, entry] : m_AssetMap)
+		{
+			if (entry.Path == path)
+				return true;
+		}
+		return false;
+	}
+
+	template<typename AssetType, typename LoadConfig>
+	bool AssetStore<AssetType, LoadConfig>::ReloadByPath(const std::string& path)
+	{
+		if constexpr (!requires { std::declval<AssetType&>().Reload(); })
+		{
+			(void)path;
+			return false;
+		}
+		else
+		{
+			std::lock_guard lock(m_Mutex);
+
+			std::vector<Entry> refreshed;
+			for (auto iter = m_AssetMap.begin(); iter != m_AssetMap.end();)
+			{
+				if (iter->second.Path != path)
+				{
+					++iter;
+					continue;
+				}
+
+				Entry entry = iter->second;
+				if (entry.Asset == nullptr || !entry.Asset->Reload())
+				{
+					++iter;
+					continue;
+				}
+
+				iter = m_AssetMap.erase(iter);
+
+				if constexpr (requires { AssetFactory<AssetType>::ResolveConfig(path, entry.Requested); })
+					entry.Config = AssetFactory<AssetType>::ResolveConfig(path, entry.Requested);
+
+				refreshed.push_back(std::move(entry));
+			}
+
+			for (Entry& entry : refreshed)
+				m_AssetMap[MakeKey(path, entry.Config)] = std::move(entry);
+
+			return !refreshed.empty();
+		}
 	}
 
 	template<typename AssetType, typename LoadConfig>
@@ -182,6 +229,11 @@ namespace Helios
 	{
 		static AssetManager instance;
 		return instance;
+	}
+
+	bool AssetManager::ReloadTexture(const std::string& path)
+	{
+		return AssetStore<DeviceTexture, TextureLoadConfig>::Instance().ReloadByPath(path);
 	}
 }
 #if !defined(PLATFORM_WINDOWS)

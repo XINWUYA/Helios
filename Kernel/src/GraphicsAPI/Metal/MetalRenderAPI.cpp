@@ -932,10 +932,11 @@ namespace Helios
             return;
         }
 
-        /* 画在多重采样附件上、通道结束解析回 drawable；深度只在通道内使用，不解析 */
+        /* 画在多重采样附件上、通道结束解析回 drawable；深度只在通道内使用，不解析。
+         * 多重采样纹理要一起存：叠加层（ImGui）用 Load 接着画，只解析不存会读到未定义内容。 */
         color_attachment->setTexture(m_DefaultMSAAColor);
         color_attachment->setResolveTexture(drawable_texture);
-        color_attachment->setStoreAction(MTL::StoreActionMultisampleResolve);
+        color_attachment->setStoreAction(MTL::StoreActionStoreAndMultisampleResolve);
 
         if (depth_attachment && m_DefaultMSAADepth)
         {

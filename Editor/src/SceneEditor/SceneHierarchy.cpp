@@ -10,6 +10,7 @@
 #include "Svg.h"
 #include "Helios/Application/Application.h"
 #include "Helios/Core/AssetManager.h"
+#include "Helios/Core/TextureSettings.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Scene/SceneCommon.h"
@@ -1561,6 +1562,174 @@ namespace Helios
 			DrawMultiAssetCard();
 	}
 
+	void SceneHierarchy::DrawTextureSettingsSection(const std::string& absolute_path)
+	{
+		TextureSettingsStore& store = TextureSettingsStore::Instance();
+
+		/* 换贴图时重新取草稿；没改过就跟随磁盘，外部改动也能同步进来 */
+		if (m_TextureSettingsPath != absolute_path)
+		{
+			m_TextureSettingsPath = absolute_path;
+			m_TextureSettingsSaved = store.Load(absolute_path);
+			m_TextureSettingsEdit = m_TextureSettingsSaved;
+			m_TextureSettingsDirty = false;
+		}
+		else if (!m_TextureSettingsDirty)
+		{
+			const TextureSettings disk = store.Load(absolute_path);
+			if (disk != m_TextureSettingsSaved)
+			{
+				m_TextureSettingsSaved = disk;
+				m_TextureSettingsEdit = disk;
+			}
+		}
+
+		TextureSettings& settings = m_TextureSettingsEdit;
+		bool touched = false;
+
+		DrawCardSectionDivider();
+		ImGui::TextDisabled("Texture Settings");
+
+		static const std::vector<std::string> usage_options{ "Default", "Color", "Data", "Normal", "UI", "HDR" };
+		int usage = settings.Usage.has_value() ? static_cast<int>(*settings.Usage) : 0;
+		ImGuiExt::DrawComboUI("Usage", usage_options, usage, [&](int picked)
+		{
+			if (picked == 0)
+				settings.Usage.reset();
+			else
+				settings.Usage = static_cast<TexturePurpose>(picked);
+			touched = true;
+		});
+
+		static const std::vector<std::string> srgb_options{ "Auto", "Linear", "sRGB" };
+		int srgb = !settings.Srgb.has_value() ? 0 : (*settings.Srgb ? 2 : 1);
+		ImGuiExt::DrawComboUI("Color Space", srgb_options, srgb, [&](int picked)
+		{
+			if (picked == 0)
+				settings.Srgb.reset();
+			else
+				settings.Srgb = picked == 2;
+			touched = true;
+		});
+
+		static const std::vector<std::string> wrap_options{ "Inherit", "ClampToEdge", "Repeat", "MirroredRepeat" };
+		int wrap = settings.WrapMode.has_value() ? static_cast<int>(*settings.WrapMode) + 1 : 0;
+		ImGuiExt::DrawComboUI("Wrap", wrap_options, wrap, [&](int picked)
+		{
+			if (picked == 0)
+				settings.WrapMode.reset();
+			else
+				settings.WrapMode = static_cast<SamplerWrapMode>(picked - 1);
+			touched = true;
+		});
+
+		static const std::vector<std::string> min_filter_options{
+			"Inherit", "Nearest", "Linear", "NearestMipmapNearest",
+			"LinearMipmapNearest", "NearestMipmapLinear", "LinearMipmapLinear"
+		};
+		int min_filter = settings.MinFilter.has_value() ? static_cast<int>(*settings.MinFilter) + 1 : 0;
+		ImGuiExt::DrawComboUI("Min Filter", min_filter_options, min_filter, [&](int picked)
+		{
+			if (picked == 0)
+				settings.MinFilter.reset();
+			else
+				settings.MinFilter = static_cast<SamplerMinFilter>(picked - 1);
+			touched = true;
+		});
+
+		static const std::vector<std::string> mag_filter_options{ "Inherit", "Nearest", "Linear" };
+		int mag_filter = settings.MagFilter.has_value() ? static_cast<int>(*settings.MagFilter) + 1 : 0;
+		ImGuiExt::DrawComboUI("Mag Filter", mag_filter_options, mag_filter, [&](int picked)
+		{
+			if (picked == 0)
+				settings.MagFilter.reset();
+			else
+				settings.MagFilter = static_cast<SamplerMagFilter>(picked - 1);
+			touched = true;
+		});
+
+		static const uint8_t kAnisoValues[] = { 1, 2, 4, 8, 16 };
+		static const std::vector<std::string> aniso_options{ "Inherit", "1", "2", "4", "8", "16" };
+		int aniso = 0;
+		if (settings.AnisoLevel.has_value())
+		{
+			for (int index = 0; index < 5; ++index)
+			{
+				if (kAnisoValues[index] == *settings.AnisoLevel)
+				{
+					aniso = index + 1;
+					break;
+				}
+			}
+		}
+		ImGuiExt::DrawComboUI("Aniso", aniso_options, aniso, [&](int picked)
+		{
+			if (picked == 0)
+				settings.AnisoLevel.reset();
+			else
+				settings.AnisoLevel = kAnisoValues[picked - 1];
+			touched = true;
+		});
+
+		static const std::vector<std::string> mip_options{ "Inherit", "On", "Off" };
+		int mipmaps = settings.Mipmaps.has_value() ? (*settings.Mipmaps ? 1 : 2) : 0;
+		ImGuiExt::DrawComboUI("Mipmaps", mip_options, mipmaps, [&](int picked)
+		{
+			if (picked == 0)
+				settings.Mipmaps.reset();
+			else
+				settings.Mipmaps = picked == 1;
+			touched = true;
+		});
+
+		if (ImGui::CollapsingHeader("Advanced"))
+		{
+			static const std::vector<std::string> flip_options{ "Inherit", "On", "Off" };
+			int flip = settings.FlipV.has_value() ? (*settings.FlipV ? 1 : 2) : 0;
+			ImGuiExt::DrawComboUI("Flip V", flip_options, flip, [&](int picked)
+			{
+				if (picked == 0)
+					settings.FlipV.reset();
+				else
+					settings.FlipV = picked == 1;
+				touched = true;
+			});
+
+			static const std::vector<std::string> type_options{ "Inherit", "2D", "2DArray", "CubeMap", "3D" };
+			int type = settings.SamplerType.has_value() ? static_cast<int>(*settings.SamplerType) + 1 : 0;
+			ImGuiExt::DrawComboUI("Sampler Type", type_options, type, [&](int picked)
+			{
+				if (picked == 0)
+					settings.SamplerType.reset();
+				else
+					settings.SamplerType = static_cast<SamplerType>(picked - 1);
+				touched = true;
+			});
+		}
+
+		if (touched)
+			m_TextureSettingsDirty = settings != m_TextureSettingsSaved;
+
+		ImGui::Spacing();
+		ImGui::BeginDisabled(!m_TextureSettingsDirty);
+		if (ImGui::Button("Apply##TextureSettings"))
+		{
+			if (store.Save(absolute_path, settings))
+			{
+				AssetManager::Instance().ReloadTexture(absolute_path);
+				m_TextureSettingsSaved = settings;
+				m_TextureSettingsDirty = false;
+			}
+		}
+		ImGui::EndDisabled();
+
+		if (m_TextureSettingsDirty)
+		{
+			ImGui::SameLine();
+			ImGui::TextDisabled("Unsaved changes");
+		}
+	}
+
 	void SceneHierarchy::DrawAssetDetailsCard(const AssetSelectionEntry& entry)
 	{
 		PROFILE_FUNCTION();
@@ -1657,6 +1826,17 @@ namespace Helios
 				Svg::DrawImage(ImGui::GetWindowDrawList(), *preview, preview_min,
 					ImVec2(preview_min.x + width, preview_min.y + height));
 			}
+		}
+
+		/* 图片的采样与格式：GIF 走自己的图集，不在这里配 */
+		if (!entry.IsFolder && entry.Kind == AssetFileKind::Image)
+		{
+			std::string extension = PathToUtf8(absolute_path.extension());
+			for (char& character : extension)
+				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+
+			if (extension != ".gif")
+				DrawTextureSettingsSection(PathToUtf8(absolute_path));
 		}
 
 		/* 模型文件（.mesh / .obj / .fbx 等）：详情卡末尾直接给模型编辑器入口

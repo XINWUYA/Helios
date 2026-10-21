@@ -4,6 +4,7 @@
 
 #include "SceneCommon.h"
 #include "Helios/Core/AssetManager.h"
+#include "Helios/Core/TextureSettings.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include <cctype>
@@ -469,11 +470,10 @@ namespace Helios
 						texture_doc->SetAttribute("Slot", texture_info.second);
 
 						auto* load_config_doc = texture_doc->InsertNewChildElement("LoadConfig");
+						/* 采样与格式已经归贴图资产设置，材质只留数据布局两项 */
 						const auto load_config = texture->GetTextureLoadConfig();
 						load_config_doc->SetAttribute("IsFlipV", load_config.IsFlipV);
-						load_config_doc->SetAttribute("IsGenMips", load_config.IsGenMips);
 						load_config_doc->SetAttribute("SamplerType", static_cast<uint32_t>(load_config.SamplerType));
-						load_config_doc->SetAttribute("IsHdr", load_config.IsHdr);
 					}
 					break;
 				case ParamType::Int:
@@ -550,8 +550,14 @@ namespace Helios
 							TextureLoadConfig load_config;
 							if (const auto* load_config_doc = texture_doc->FirstChildElement("LoadConfig"))
 							{
-								load_config.IsFlipV = load_config_doc->BoolAttribute("IsFlipV");
-								load_config.IsGenMips = load_config_doc->BoolAttribute("IsGenMips");
+								/* 老资产才写 IsGenMips / IsHdr；新资产只留数据布局两项，
+								 * 缺失时按引擎默认（开 mip、按后缀判 HDR） */
+								load_config.IsFlipV = (load_config_doc->FindAttribute("IsFlipV") != nullptr)
+									? load_config_doc->BoolAttribute("IsFlipV")
+									: true;
+								load_config.IsGenMips = (load_config_doc->FindAttribute("IsGenMips") != nullptr)
+									? load_config_doc->BoolAttribute("IsGenMips")
+									: true;
 								load_config.SamplerType = static_cast<SamplerType>(load_config_doc->IntAttribute("SamplerType"));
 								load_config.IsHdr = (load_config_doc->FindAttribute("IsHdr") != nullptr)
 									? load_config_doc->BoolAttribute("IsHdr")
@@ -723,6 +729,21 @@ namespace Helios
 
 							if (copied)
 							{
+								/* 采样设置跟着贴图走，导出后也要能用（原地导出时跳过） */
+								const std::filesystem::path source_meta =
+									PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(source)));
+								std::error_code meta_error;
+								if (!same_file && std::filesystem::is_regular_file(source_meta, meta_error))
+								{
+									const std::filesystem::path destination_meta =
+										PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(destination)));
+									std::filesystem::copy_file(source_meta, destination_meta,
+										std::filesystem::copy_options::overwrite_existing, meta_error);
+									if (meta_error)
+										CORE_LOG_WARN("Failed to copy texture settings {}: {}.",
+											PathToUtf8(source_meta), meta_error.message());
+								}
+
 								element->SetAttribute("Path",
 									RELATIVE_PATH(PathToUtf8(destination)).c_str());
 							}

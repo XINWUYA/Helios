@@ -25,7 +25,8 @@ namespace Helios
 		PixelType Type{ PixelType::UnsignedByte };
 	};
 
-	/* 纹理加载配置 */
+	/* 纹理加载配置。Create 入口会先按贴图资产设置解析一次，
+	 * 之后这份配置就是全量具体值，后端不再区分"有没有配过"。 */
 	struct HELIOS_API TextureLoadConfig
 	{
 		bool IsFlipV = true;
@@ -36,6 +37,7 @@ namespace Helios
 		SamplerWrapMode SamplerWrapMode{ SamplerWrapMode::Repeat };
 		SamplerMinFilter SamplerMinFilter{ SamplerMinFilter::Linear };
 		SamplerMagFilter SamplerMagFilter{ SamplerMagFilter::Linear };
+		uint8_t AnisoLevel{ 8 };
 
 		bool operator==(const TextureLoadConfig& load_config) const
 		{
@@ -46,13 +48,17 @@ namespace Helios
 				&& SamplerType == load_config.SamplerType
 				&& SamplerWrapMode == load_config.SamplerWrapMode
 				&& SamplerMinFilter == load_config.SamplerMinFilter
-				&& SamplerMagFilter == load_config.SamplerMagFilter;
+				&& SamplerMagFilter == load_config.SamplerMagFilter
+				&& AnisoLevel == load_config.AnisoLevel;
 		}
 
 		bool operator!=(const TextureLoadConfig& load_config) const
 		{
 			return !(*this == load_config);
 		}
+
+		/* 配置指纹：资源缓存按"路径 + 指纹"分键，配置不同不再互相顶 */
+		[[nodiscard]] uint32_t Fingerprint() const;
 	};
 
 
@@ -69,6 +75,10 @@ namespace Helios
 
 		/* 生成 mipmap（驱动端 glGenerateMipmap，从 mip 0 自动填充所有低层级） */
 		virtual void GenerateMipmap() {}
+
+		/* 按当前资产设置重建 GPU 资源。对象地址不变，材质等持有者的 SharedPtr 继续有效；
+		 * 重建失败时保留旧资源并返回 false。非文件纹理返回 false。 */
+		virtual bool Reload() { return false; }
 
 		/* 填充数据 */
 		virtual void SetData(void* data, const PixelDesc& pixel_desc, uint32_t level = 0,
@@ -100,8 +110,10 @@ namespace Helios
 		[[nodiscard]] uint32_t GetHeight() const { return m_TextureDesc.Height; }
         /* 获取纹理信息描述 */
         [[nodiscard]] const TextureDesc& GetTextureDesc() const { return m_TextureDesc; }
-		/* 获取纹理加载配置 */
+		/* 获取纹理加载配置（已按资产设置解析过的有效值） */
 		[[nodiscard]] const TextureLoadConfig& GetTextureLoadConfig() const { return m_TextureLoadConfig; }
+		/* 获取调用点传入的原始配置（重载时重新解析用） */
+		[[nodiscard]] const TextureLoadConfig& GetRequestedLoadConfig() const { return m_RequestedLoadConfig; }
 
 		/* 获取纹理所在路径 */
 		[[nodiscard]] virtual const std::string& GetPath() const = 0;
@@ -137,8 +149,10 @@ namespace Helios
 		float m_DisplayRangeMax{ 0.0f };
 		/* 纹理描述 */
 		TextureDesc m_TextureDesc{};
-		/* 加载配置 */
+		/* 解析后的有效加载配置 */
 		TextureLoadConfig m_TextureLoadConfig{};
+		/* 调用点原始配置：资产设置改了以后靠它重新解析 */
+		TextureLoadConfig m_RequestedLoadConfig{};
 	};
 }
 

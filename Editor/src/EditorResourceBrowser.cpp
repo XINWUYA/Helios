@@ -10,6 +10,7 @@
 #include "Command/DeleteAssetsCommand.h"
 #include "Command/RenameAssetCommand.h"
 #include "Helios/Application/FileDialog.h"
+#include "Helios/Core/TextureSettings.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/ImGui/ImGuiExtensions.h"
 #include <utility>
@@ -2554,8 +2555,9 @@ namespace Helios
 
 			/* 以 '.' 开头的（.DS_Store、.git、项目的回收站……）一律不进资源树：
 			 * 它们不是资源，列出来只会碍事（删除资源的回收站就放在 Assets 旁边，
-			 * 万一有人把 Assets 指到别处、回收站落进去，也不会被当成资产显示出来）。 */
-			if (file_name.empty() || file_name.front() == '.')
+			 * 万一有人把 Assets 指到别处、回收站落进去，也不会被当成资产显示出来）。
+			 * .texmeta 是贴图的伴生设置，同样不算独立资源。 */
+			if (file_name.empty() || file_name.front() == '.' || TextureSettingsStore::IsMetaPath(file_name))
 				continue;
 
 			/* 创建一个文件节点 */

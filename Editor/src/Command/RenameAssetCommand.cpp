@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "Command/RenameAssetCommand.h"
+#include "Helios/Core/TextureSettings.h"
 
 namespace Helios
 {
@@ -45,6 +46,18 @@ namespace Helios
 		{
 			CORE_LOG_ERROR("Rename failed: {0} -> {1} ({2})", PathToUtf8(from), PathToUtf8(to), error.message());
 			return;
+		}
+
+		/* 贴图的伴生设置跟着走，撤销时同一函数反向搬一次 */
+		const std::filesystem::path from_meta = PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(from)));
+		std::error_code meta_error;
+		if (std::filesystem::is_regular_file(from_meta, meta_error))
+		{
+			const std::filesystem::path to_meta = PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(to)));
+			std::filesystem::rename(from_meta, to_meta, meta_error);
+			if (meta_error)
+				CORE_LOG_WARN("Failed to move texture settings: {0} -> {1} ({2})",
+					PathToUtf8(from_meta), PathToUtf8(to_meta), meta_error.message());
 		}
 
 		if (m_Sink != nullptr)

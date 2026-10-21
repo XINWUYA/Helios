@@ -1,6 +1,8 @@
 ﻿#include "Pch.h"
 #include "OpenGLTexture.h"
 #include "OpenGLCommon.h"
+#include "Helios/Core/TextureSettings.h"
+#include <cmath>
 
 /* stb 的实现编进了引擎库里，Editor 侧也要直接调用（非 Windows 默认可见，收紧可见性时要显式放开） */
 #if !defined(PLATFORM_WINDOWS)
@@ -168,33 +170,79 @@ namespace Helios
 			m_TextureTarget = GL_TEXTURE_2D;
 			{
 				int width, height, channels;
-				stbi_uc* data = stbi_load(path.c_str(), &width, &height, &channels, 0);
+				void* data = nullptr;
+				GLenum pixel_type = GL_UNSIGNED_BYTE;
+
+				/* HDR 必须按浮点读：用 8 位数据喂 16F 内部格式会整片失真 */
+				if (load_config.IsHdr)
+				{
+					data = stbi_loadf(path.c_str(), &width, &height, &channels, 0);
+					pixel_type = GL_FLOAT;
+				}
+				else
+				{
+					data = stbi_load(path.c_str(), &width, &height, &channels, 0);
+				}
 
 				if (data)
 				{
 					m_IsLoaded = true;
 					m_TextureDesc.Width = width;
 					m_TextureDesc.Height = height;
+					m_TextureDesc.MipLevels = load_config.IsGenMips
+						? static_cast<uint8_t>(std::floor(std::log2(static_cast<float>(std::max(width, height))))) + 1
+						: 1;
 
 					GLenum data_format = 0;
 					if (channels == 4)
 					{
-						m_InternalFormat = load_config.IsHdr ? GL_RGBA16F : GL_RGBA8;
+						if (load_config.IsHdr)
+						{
+							m_InternalFormat = GL_RGBA16F;
+							m_TextureDesc.Format = TextureFormat::RGBA16F;
+						}
+						else if (load_config.IsSrgb)
+						{
+							m_InternalFormat = GL_SRGB8_ALPHA8;
+							m_TextureDesc.Format = TextureFormat::s_RGBA8;
+						}
+						else
+						{
+							m_InternalFormat = GL_RGBA8;
+							m_TextureDesc.Format = TextureFormat::RGBA8;
+						}
 						data_format = GL_RGBA;
 					}
 					else if (channels == 3)
 					{
-						m_InternalFormat = load_config.IsHdr ? GL_RGB16F : GL_RGB8;
+						if (load_config.IsHdr)
+						{
+							m_InternalFormat = GL_RGB16F;
+							/* 枚举里没有 RGB16F，描述符只用来标记浮点格式 */
+							m_TextureDesc.Format = TextureFormat::RGBA16F;
+						}
+						else if (load_config.IsSrgb)
+						{
+							m_InternalFormat = GL_SRGB8;
+							m_TextureDesc.Format = TextureFormat::s_RGB8;
+						}
+						else
+						{
+							m_InternalFormat = GL_RGB8;
+							m_TextureDesc.Format = TextureFormat::RGB8;
+						}
 						data_format = GL_RGB;
 					}
 					else if (channels == 2)
 					{
 						m_InternalFormat = load_config.IsHdr ? GL_RG16F : GL_RG8;
+						m_TextureDesc.Format = load_config.IsHdr ? TextureFormat::RG16F : TextureFormat::RG8;
 						data_format = GL_RG;
 					}
 					else if (channels == 1)
 					{
 						m_InternalFormat = load_config.IsHdr ? GL_R16F : GL_R8;
+						m_TextureDesc.Format = load_config.IsHdr ? TextureFormat::R16F : TextureFormat::R8;
 						data_format = GL_RED;
 					}
 
@@ -202,17 +250,42 @@ namespace Helios
 
 					glGenTextures(1, &m_TextureId);
 					glBindTexture(m_TextureTarget, m_TextureId);
-					glTexImage2D(m_TextureTarget, 0, m_InternalFormat, width, height, 0, data_format, GL_UNSIGNED_BYTE, data);
+					glTexImage2D(m_TextureTarget, 0, m_InternalFormat, width, height, 0, data_format, pixel_type, data);
 
-				if (load_config.IsGenMips)
+					if (load_config.IsGenMips)
 					{
 						glGenerateMipmap(m_TextureTarget);
 					}
-					
-					glTexParameteri(m_TextureTarget, GL_TEXTURE_MIN_FILTER, TranslateToOpenGLSamplerMinFilter(load_config.SamplerMinFilter));
+
+					/* 没有 mip 却要求 mip 过滤会让纹理不完整，按采样意图降一档 */
+					SamplerMinFilter min_filter = load_config.SamplerMinFilter;
+					if (!load_config.IsGenMips)
+					{
+						switch (min_filter)
+						{
+						case SamplerMinFilter::NearestMipmapNearest:
+						case SamplerMinFilter::NearestMipmapLinear:
+							min_filter = SamplerMinFilter::Nearest;
+							break;
+						case SamplerMinFilter::LinearMipmapNearest:
+						case SamplerMinFilter::LinearMipmapLinear:
+							min_filter = SamplerMinFilter::Linear;
+							break;
+						default:
+							break;
+						}
+					}
+
+					glTexParameteri(m_TextureTarget, GL_TEXTURE_MIN_FILTER, TranslateToOpenGLSamplerMinFilter(min_filter));
 					glTexParameteri(m_TextureTarget, GL_TEXTURE_MAG_FILTER, TranslateToOpenGLSamplerMagFilter(load_config.SamplerMagFilter));
 					glTexParameteri(m_TextureTarget, GL_TEXTURE_WRAP_S, TranslateToOpenGLSamplerWrapMode(load_config.SamplerWrapMode));
 					glTexParameteri(m_TextureTarget, GL_TEXTURE_WRAP_T, TranslateToOpenGLSamplerWrapMode(load_config.SamplerWrapMode));
+
+					if (load_config.AnisoLevel > 1)
+					{
+						glTexParameterf(m_TextureTarget, GL_TEXTURE_MAX_ANISOTROPY,
+							static_cast<GLfloat>(load_config.AnisoLevel));
+					}
 
 					stbi_image_free(data);
 				}
@@ -252,6 +325,30 @@ namespace Helios
 			ASSERT(m_TextureTarget == GL_RENDERBUFFER);
 			glDeleteRenderbuffers(1, &m_TextureId);
 		}
+	}
+
+	bool OpenGLTexture::Reload()
+	{
+		if (m_Path.empty())
+			return false;
+
+		const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(m_Path, m_RequestedLoadConfig);
+
+		/* 新对象建好再换；换下来的旧句柄随临时对象析构释放 */
+		OpenGLTexture fresh(m_Path, resolved);
+		if (!fresh.IsLoaded())
+		{
+			CORE_LOG_ERROR("Texture reload failed, keeping previous resource: {}", m_Path);
+			return false;
+		}
+
+		std::swap(m_TextureId, fresh.m_TextureId);
+		std::swap(m_InternalFormat, fresh.m_InternalFormat);
+		std::swap(m_TextureTarget, fresh.m_TextureTarget);
+		std::swap(m_TextureDesc, fresh.m_TextureDesc);
+		std::swap(m_TextureLoadConfig, fresh.m_TextureLoadConfig);
+		std::swap(m_IsLoaded, fresh.m_IsLoaded);
+		return true;
 	}
 
 	/* 绑定当前纹理 */

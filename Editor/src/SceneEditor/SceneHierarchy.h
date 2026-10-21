@@ -11,6 +11,7 @@
 #include "Command/AssetFileOps.h"
 #include "EditorIcons.h"
 #include "Helios/Command/CommandStack.h"
+#include "Helios/Core/TextureSettings.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Entity.h"
 
@@ -183,6 +184,8 @@ namespace Helios
 		void ShowAssetProperties();
 		/* 资源的详情卡：类型（卡头）/ 路径 / 大小 / 修改时间 + 类型相关的深挖行 + 图片预览 */
 		void DrawAssetDetailsCard(const AssetSelectionEntry& entry);
+		/* 图片的采样与格式设置（写 .texmeta 并原地重载，材质等持有者立即生效） */
+		void DrawTextureSettingsSection(const std::string& absolute_path);
 		/* .mtl 的材质编辑卡：每条目一张，同级平铺在详情卡之后（与 probe 图卡同一路数）——
 		 * Shader 可选可改、参数与光栅化状态可就地编辑；改动即时热更（同步缓存里的
 		 * 共享材质 → 场景窗口立刻可见），「Apply」（没有改动时禁用）只负责序列化回文件 */
@@ -261,6 +264,11 @@ namespace Helios
 		std::string m_AssetDetailPath;
 		std::filesystem::file_time_type m_AssetDetailWriteTime{};
 		std::vector<std::pair<std::string, std::string>> m_AssetDetailRows;
+		/* 贴图设置草稿：换贴图时重新取，Apply 才落盘 */
+		std::string m_TextureSettingsPath;
+		TextureSettings m_TextureSettingsEdit;
+		TextureSettings m_TextureSettingsSaved;
+		bool m_TextureSettingsDirty{ false };
 		/* .probe 文件的烘焙结果图卡（跟深挖行用同一个缓存键刷新；同级平铺在详情卡后面）：每张烘焙图
 		 * （环境 / 辐照度 / 预滤波）一张卡（名字 + 规格 + 十字展开预览）；多层带「Mip」切换。 */
 		struct ProbeImageCard

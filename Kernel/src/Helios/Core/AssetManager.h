@@ -35,12 +35,14 @@ namespace Helios
 		static SharedPtr<DeviceShader> Create(const std::string& path);
 	};
 
-	/* 纹理: 带加载配置 */
+	/* 纹理: 带加载配置（Create 内部会按贴图资产设置解析） */
 	template<>
 	struct AssetFactory<DeviceTexture>
 	{
 		using LoadConfig = TextureLoadConfig;
 		static SharedPtr<DeviceTexture> Create(const std::string& path, const TextureLoadConfig& load_config);
+		/* 缓存键用解析后的有效配置，同一张图被不同调用点请求时仍只有一份 */
+		static TextureLoadConfig ResolveConfig(const std::string& path, const TextureLoadConfig& load_config);
 	};
 
 	/* 模型: 无加载配置 */
@@ -87,6 +89,10 @@ namespace Helios
 		/* 获取或创建资源(指定加载配置); 无配置类型时此重载被约束禁用 */
 		SharedPtr<AssetType> GetOrLoad(const std::string& path, const LoadConfig& load_config) requires (!std::is_same_v<LoadConfig, NoConfig>);
 
+		/* 按路径重载（只对提供 Reload 的资源类型生效）。加载配置可能因资产设置变化，
+		 * 重载后按新的有效配置重新分键。返回是否至少重载成功一个。 */
+		bool ReloadByPath(const std::string& path);
+
 		/* 刷新已缓存资源的内容(热重载); 仅对提供了 AssetFactory<AssetType>::Refresh 的类型生效,
 		 * 未命中缓存时什么也不做。 */
 		void Refresh(const std::string& path, const SharedPtr<AssetType>& incoming);
@@ -107,15 +113,26 @@ namespace Helios
 		/* 无锁内部实现: 调用方须已持有 m_Mutex */
 		SharedPtr<AssetType> GetOrLoadInternal(const std::string& path, const LoadConfig& load_config);
 
-		/* 资源条目: 记录资源及其创建时使用的加载配置 */
+		/* 资源条目: 记录资源、创建时的有效配置、路径与调用点原始配置 */
 		struct Entry
 		{
 			SharedPtr<AssetType> Asset;
 			LoadConfig Config;
+			std::string Path;
+			LoadConfig Requested;
 		};
 
-		/* 资源路径Hash到资源条目的映射<NameHash, Entry> */
-		std::unordered_map<uint32_t, Entry> m_AssetMap;
+		/* 缓存键：无配置类型用路径；有配置时拼上有效配置的指纹 */
+		[[nodiscard]] static std::string MakeKey(const std::string& path, const LoadConfig& config)
+		{
+			if constexpr (std::is_same_v<LoadConfig, NoConfig>)
+				return path;
+			else
+				return path + "#" + std::to_string(config.Fingerprint());
+		}
+
+		/* 资源路径 + 配置指纹 -> 资源条目的映射 */
+		std::unordered_map<std::string, Entry> m_AssetMap;
 		/* 保护资源映射的互斥锁 (mutable: const 查询接口也需加锁) */
 		mutable std::mutex m_Mutex;
 	};
@@ -194,6 +211,9 @@ namespace Helios
 			using LoadConfig = typename AssetFactory<AssetType>::LoadConfig;
 			return AssetStore<AssetType, LoadConfig>::Instance().Contains(path);
 		}
+
+		/* 贴图设置改完后按路径原地重载（材质持有的指针不变） */
+		HELIOS_API bool ReloadTexture(const std::string& path);
 
 	private:
 		AssetManager() = default;

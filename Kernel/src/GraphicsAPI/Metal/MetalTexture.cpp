@@ -4,6 +4,7 @@
 #include "MetalTexture.h"
 #include "MetalCommon.h"
 #include "MetalConversions.h"
+#include "Helios/Core/TextureSettings.h"
 #include "stb_image.h"
 
 #include <algorithm>
@@ -452,7 +453,7 @@ namespace Helios
         sampler_desc->setRAddressMode(address_mode);
 
         /* 各向异性过滤：对斜视的大面积纹理收益明显，开销可忽略 */
-        sampler_desc->setMaxAnisotropy(8);
+        sampler_desc->setMaxAnisotropy(static_cast<NS::UInteger>(std::clamp<int>(load_config.AnisoLevel, 1, 16)));
         sampler_desc->setNormalizedCoordinates(true);
         sampler_desc->setLodMinClamp(0.0f);
 
@@ -531,6 +532,29 @@ namespace Helios
         m_IsLoaded = true;
         CORE_LOG_INFO("Texture loaded: {} ({}x{}, {} mip levels, {} bytes/pixel)",
             path, width, height, m_TextureDesc.MipLevels, GetPixelDescBytesPerPixel(pixel_desc));
+    }
+
+    bool MetalTexture::Reload()
+    {
+        if (m_Path.empty())
+            return false;
+
+        const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(m_Path, m_RequestedLoadConfig);
+
+        /* 先建新的，成功了再换：失败时旧纹理原样保留 */
+        MetalTexture fresh(m_Path, resolved);
+        if (!fresh.IsLoaded())
+        {
+            CORE_LOG_ERROR("Texture reload failed, keeping previous resource: {}", m_Path);
+            return false;
+        }
+
+        std::swap(m_Texture, fresh.m_Texture);
+        std::swap(m_SamplerState, fresh.m_SamplerState);
+        std::swap(m_TextureDesc, fresh.m_TextureDesc);
+        m_TextureLoadConfig = fresh.m_TextureLoadConfig;
+        m_IsLoaded = true;
+        return true;
     }
 
     uint8_t MetalTexture::ResolveMipLevels(uint32_t width, uint32_t height, bool gen_mips)

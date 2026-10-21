@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "DeviceTexture.h"
+#include "Helios/Core/TextureSettings.h"
 #include "Helios/Renderer/Renderer.h"
 #include "GraphicsAPI/OpenGL/OpenGLTexture.h"
 #ifdef PLATFORM_MACOS
@@ -8,6 +9,32 @@
 
 namespace Helios
 {
+	uint32_t TextureLoadConfig::Fingerprint() const
+	{
+		/* FNV-1a：字段少，直接按字节混，够用且不依赖 std::hash 的实现 */
+		uint32_t hash = 2166136261u;
+		const auto mix = [&hash](const void* data, size_t size)
+		{
+			const auto* bytes = static_cast<const uint8_t*>(data);
+			for (size_t index = 0; index < size; ++index)
+			{
+				hash ^= bytes[index];
+				hash *= 16777619u;
+			}
+		};
+
+		mix(&IsFlipV, sizeof(IsFlipV));
+		mix(&IsGenMips, sizeof(IsGenMips));
+		mix(&IsHdr, sizeof(IsHdr));
+		mix(&IsSrgb, sizeof(IsSrgb));
+		mix(&SamplerType, sizeof(SamplerType));
+		mix(&SamplerWrapMode, sizeof(SamplerWrapMode));
+		mix(&SamplerMinFilter, sizeof(SamplerMinFilter));
+		mix(&SamplerMagFilter, sizeof(SamplerMagFilter));
+		mix(&AnisoLevel, sizeof(AnisoLevel));
+		return hash;
+	}
+
 	DeviceTexture::DeviceTexture(std::string name, const TextureDesc& texture_desc)
 		: m_DebugName(std::move(name)), m_TextureDesc(texture_desc)
 	{
@@ -36,21 +63,32 @@ namespace Helios
 	/* 创建纹理 */
 	SharedPtr<DeviceTexture> DeviceTexture::Create(const std::string& path, const TextureLoadConfig& load_config)
 	{
+		/* 资产设置在这里统一落地：材质、精灵、脚本、缩略图走的都是同一条路 */
+		const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(path, load_config);
+
+		SharedPtr<DeviceTexture> texture;
 		switch (Renderer::CurrentAPI())
 		{
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
 		case RenderAPI::OpenGL:
-			return CreateSharedPtr<OpenGLTexture>(path, load_config);
+			texture = CreateSharedPtr<OpenGLTexture>(path, resolved);
+			break;
 #ifdef PLATFORM_MACOS
 		case RenderAPI::Metal:
-			return CreateSharedPtr<MetalTexture>(path, load_config);
+			texture = CreateSharedPtr<MetalTexture>(path, resolved);
+			break;
 #endif
 		default:
 			CORE_LOG_ERROR("Unknown RenderAPI is unsupported!");
 			return nullptr;
 		}
+
+		/* 记下调用点原始配置：资产设置改了以后，Reload 要按它重新解析 */
+		if (texture != nullptr)
+			texture->m_RequestedLoadConfig = load_config;
+		return texture;
 	}
 
 	/* 创建一个纯色贴图 */

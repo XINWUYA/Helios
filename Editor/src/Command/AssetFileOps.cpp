@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "Command/AssetFileOps.h"
+#include "Helios/Core/TextureSettings.h"
 #include <cctype>
 
 namespace Helios
@@ -276,6 +277,18 @@ namespace Helios
 			return false;
 		}
 
+		/* 贴图设置跟着进回收站；落点用 "回收站文件 + .texmeta"，撤销时按同样规则找回 */
+		const std::filesystem::path target_meta = PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(target)));
+		std::error_code meta_error;
+		if (std::filesystem::is_regular_file(target_meta, meta_error))
+		{
+			const std::filesystem::path trashed_meta = PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(destination)));
+			std::filesystem::rename(target_meta, trashed_meta, meta_error);
+			if (meta_error)
+				CORE_LOG_WARN("Failed to move texture settings to trash: {0} ({1})",
+					PathToUtf8(target_meta), meta_error.message());
+		}
+
 		out_trashed = destination;
 		return true;
 	}
@@ -297,6 +310,18 @@ namespace Helios
 		{
 			out_error = "Restore from trash failed: " + error.message();
 			return false;
+		}
+
+		/* 回收站里的伴生设置一起搬回 */
+		const std::filesystem::path trashed_meta = PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(trashed)));
+		std::error_code meta_error;
+		if (std::filesystem::is_regular_file(trashed_meta, meta_error))
+		{
+			const std::filesystem::path target_meta = PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(target)));
+			std::filesystem::rename(trashed_meta, target_meta, meta_error);
+			if (meta_error)
+				CORE_LOG_WARN("Failed to restore texture settings: {0} ({1})",
+					PathToUtf8(trashed_meta), meta_error.message());
 		}
 
 		return true;

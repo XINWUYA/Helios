@@ -29,6 +29,9 @@ namespace Helios
         /* 回读某一 mip / 面（layer）的原始 texel 数据。纹理为私有存储时不可读。 */
         bool ReadbackPixels(std::vector<uint8_t>& out_data, uint32_t mip_level = 0, uint32_t layer = 0) override;
 
+        /* 按最新资产设置重建纹理与采样器；失败保留旧资源 */
+        bool Reload() override;
+
         [[nodiscard]] const std::string& GetPath() const override { return m_Path; }
 
         /* 硬件句柄。注意：受接口返回类型限制会被截断为 32 位，
