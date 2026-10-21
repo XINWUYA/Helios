@@ -35,7 +35,7 @@ void SampleIBLLayer::OnAttached()
 		raster_state.DepthCompareFunc = CompareFunc::GreaterEqual;
 		raster_state.CullMode = CullMode::Cull_Front;
 
-		const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/SkyBox.glsl"));
+		const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Sky/SkyBox.glsl"));
 		auto material = Material::Create(shader);
 		material->SetParameters(ParamType::Texture, "u_SkyTex", m_pSkyTexture);
 		material->SetRasterState(raster_state);
