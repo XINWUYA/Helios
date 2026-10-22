@@ -182,11 +182,7 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
-        m_CurrentWidth = width;
-        m_CurrentHeight = height;
-
-        if (m_CurrentRenderEncoder)
-            ApplyViewport(x_start, y_start, width, height);
+        ApplyViewport(x_start, y_start, width, height);
     }
 
     /* 离屏渲染时把视口 y 轴翻转（originY 取到下边界、高度取负），使纹理行序与
@@ -194,6 +190,13 @@ namespace Helios
      * 渲染到 drawable（屏幕）时不翻转：屏幕行序由系统窗口决定，且只被写入不被采样。 */
     void MetalRenderAPI::ApplyViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
     {
+        if (!m_CurrentRenderEncoder)
+            return;
+
+        /* 当前编码器上已经是这个视口就不再发（Pass 开始时刚按附件尺寸设过一次） */
+        if (!TakeViewport(x, y, width, height))
+            return;
+
         MTL::Viewport viewport;
         viewport.originX = static_cast<double>(x);
         viewport.width = static_cast<double>(width);
@@ -222,11 +225,16 @@ namespace Helios
 
         if (m_CurrentRenderEncoder)
         {
-            /* m_CurrentHeight 为当前视口高度（由 SetViewport 写入），与 y 同属
-             * framebuffer 像素坐标系；数值异常时退化为不翻转，避免下溢成巨大值。 */
-            const uint32_t flipped_y = (m_CurrentHeight > y && m_CurrentHeight - y >= height)
-                ? (m_CurrentHeight - y - height)
+            /* 视口高度取自基类记下的 applied 视口，与 y 同属 framebuffer 像素坐标系；
+             * 还没设过视口或数值异常时退化为不翻转，避免下溢成巨大值。 */
+            const uint32_t viewport_height = GetAppliedViewport().Height;
+            const uint32_t flipped_y = (viewport_height > y && viewport_height - y >= height)
+                ? (viewport_height - y - height)
                 : y;
+
+            /* 裁剪缓存按翻转后的 Metal 坐标记，重复设置直接跳过 */
+            if (!TakeScissor(x, flipped_y, width, height))
+                return;
 
             MTL::ScissorRect scissorRect;
             scissorRect.x = x;

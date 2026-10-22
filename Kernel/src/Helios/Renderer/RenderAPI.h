@@ -103,8 +103,25 @@ namespace Helios
 	/* 创建当前API */
 	static SharedPtr<RenderAPI> Create();
 
+	protected:
+		/* 已下发的视口 / 裁剪：值没变返回 false（调用方跳过下发），变了返回 true 并记下新值。
+		 * 记的是目标上当前生效的值，跟 ViewportRegion（对目标的描述）是两回事。 */
+		bool TakeViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+		bool TakeScissor(uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+
+		/* 换编码器时清空（新目标上什么都没有） */
+		void ResetAppliedViewport();
+
+		/* 当前生效的视口：Metal 的裁剪翻转要用它的高度 */
+		[[nodiscard]] const ViewportRegion& GetAppliedViewport() const { return m_AppliedViewport; }
+
 	private:
 		static int m_API;
+
+		ViewportRegion m_AppliedViewport{ 0, 0, 0, 0 };
+		ViewportRegion m_AppliedScissor{ 0, 0, 0, 0 };
+		bool m_HasAppliedViewport{ false };
+		bool m_HasAppliedScissor{ false };
 	};
 }
 

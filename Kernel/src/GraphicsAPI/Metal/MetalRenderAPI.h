@@ -96,16 +96,13 @@ namespace Helios
         void PrepareNextFrame() override;
         void PrepareNextDrawable();
 
-        uint32_t GetCurrentWidth() const { return m_CurrentWidth; }
-        uint32_t GetCurrentHeight() const { return m_CurrentHeight; }
-
         /* 默认渲染目标的颜色格式，供无法从 Pass 描述符推断的场合使用 */
         MTL::PixelFormat GetDefaultColorFormat() const { return m_DefaultColorFormat; }
 
         /* 由 MetalShader::Bind 登记当前着色器。
          * 管线状态必须在绘制时依据光栅状态与当前 Pass 的附件格式创建，
          * 因此这里只做登记，实际状态在 ApplyPipelineState 中落地。 */
-        void SetBoundShader(MetalShader* shader) { m_BoundShader = shader; }
+        void SetBoundShader(MetalShader* shader);
         MetalShader* GetBoundShader() const { return m_BoundShader; }
 
         /* 依据当前 RenderPass 附件格式、采样数与光栅状态构建管线描述 */
@@ -177,9 +174,6 @@ namespace Helios
          * pool；而引擎渲染循环不经过 AppKit 事件循环、隐式 pool 永远不排空，对象逐帧堆积、内存暴涨。
          * 做法：帧入口建池、Present 提交后排空。 */
         NS::AutoreleasePool* m_FrameAutoreleasePool{ nullptr };
-
-        uint32_t m_CurrentWidth{ 0 };
-        uint32_t m_CurrentHeight{ 0 };
 
         /* 当前 Pass 是否渲染到离屏纹理（false = 渲染到 drawable/屏幕）。
          * 离屏 Pass 需要翻转视口的 y 轴，理由见 ApplyViewport 的实现说明。 */

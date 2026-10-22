@@ -35,4 +35,35 @@ namespace Helios
 			return nullptr;
 		}
 	}
+
+	bool RenderAPI::TakeViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+	{
+		const ViewportRegion region{ static_cast<int32_t>(x), static_cast<int32_t>(y), width, height };
+		if (m_HasAppliedViewport && m_AppliedViewport == region)
+			return false;
+
+		m_AppliedViewport = region;
+		m_HasAppliedViewport = true;
+
+		/* 视口变了，"裁剪框是否等于全屏"要重判 */
+		m_HasAppliedScissor = false;
+		return true;
+	}
+
+	bool RenderAPI::TakeScissor(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+	{
+		const ViewportRegion region{ static_cast<int32_t>(x), static_cast<int32_t>(y), width, height };
+		if (m_HasAppliedScissor && m_AppliedScissor == region)
+			return false;
+
+		m_AppliedScissor = region;
+		m_HasAppliedScissor = true;
+		return true;
+	}
+
+	void RenderAPI::ResetAppliedViewport()
+	{
+		m_HasAppliedViewport = false;
+		m_HasAppliedScissor = false;
+	}
 }

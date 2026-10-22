@@ -4,6 +4,7 @@
 #include <glad/glad.h>
 
 #include "OpenGLTexture.h"
+#include <Helios/Renderer/Renderer.h>
 
 namespace Helios
 {
@@ -115,13 +116,29 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		glBindFramebuffer(GL_FRAMEBUFFER, m_FrameBufferId);
-		glViewport(m_FrameBufferDesc.ViewportRegion.MinX, m_FrameBufferDesc.ViewportRegion.MinY, (GLsizei)m_FrameBufferDesc.ViewportRegion.Width, (GLsizei)m_FrameBufferDesc.ViewportRegion.Height);
 
-		/* scissor 是上下文状态，会跨 Pass、跨帧残留。这里重置为整个 viewport 并关闭，
-		 * 未显式设置 scissor 的绘制就不会被裁剪；需要裁剪的 Pass 在绑定后自行设置 */
-		glScissor(m_FrameBufferDesc.ViewportRegion.MinX, m_FrameBufferDesc.ViewportRegion.MinY,
-			(GLsizei)m_FrameBufferDesc.ViewportRegion.Width, (GLsizei)m_FrameBufferDesc.ViewportRegion.Height);
-		glDisable(GL_SCISSOR_TEST);
+		/* 视口与裁剪框都走 RenderAPI：后端那边记着当前值，重复设置可以省掉，
+		 * SetScissor 判断"是否全屏"时也不用再向驱动查询 */
+		auto render_api = Renderer::GetRenderAPI();
+		auto& viewport_region = m_FrameBufferDesc.ViewportRegion;
+		if (render_api)
+		{
+			render_api->SetViewport(viewport_region.MinX, viewport_region.MinY,
+				viewport_region.Width, viewport_region.Height);
+
+			/* scissor 是上下文状态，会跨 Pass、跨帧残留。这里重置为整个 viewport 并关闭，
+			 * 未显式设置 scissor 的绘制就不会被裁剪；需要裁剪的 Pass 在绑定后自行设置 */
+			render_api->SetScissor(viewport_region.MinX, viewport_region.MinY,
+				viewport_region.Width, viewport_region.Height);
+		}
+		else
+		{
+			glViewport(viewport_region.MinX, viewport_region.MinY,
+				(GLsizei)viewport_region.Width, (GLsizei)viewport_region.Height);
+			glScissor(viewport_region.MinX, viewport_region.MinY,
+				(GLsizei)viewport_region.Width, (GLsizei)viewport_region.Height);
+			glDisable(GL_SCISSOR_TEST);
+		}
 
 		/* Layered模式：将指定附件重新绑定到Texture2DArray/CubeMap的指定层/面/mip：用于CSM多Cascade渲染到同一数组纹理的不同切片，或分层渲染到Color数组纹理，或烘焙到CubeMap各面各mip */
 		if (bind_info.Mode == FrameBufferBindMode::Layered)

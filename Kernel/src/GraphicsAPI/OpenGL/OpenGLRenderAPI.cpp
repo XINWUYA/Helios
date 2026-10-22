@@ -104,18 +104,25 @@ namespace Helios
 
 	void OpenGLRenderAPI::SetViewport(uint32_t x_start, uint32_t y_start, uint32_t width, uint32_t height)
 	{
+		if (!TakeViewport(x_start, y_start, width, height))
+			return;
+
 		glViewport((GLint)x_start, (GLint)y_start, (GLsizei)width, (GLsizei)height);
 	}
 
 	void OpenGLRenderAPI::SetScissor(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 	{
-		glScissor((GLint)x, (GLint)y, (GLsizei)width, (GLsizei)height);
-
 		/* 范围等于整个 viewport 时视为全屏绘制，直接关闭裁剪（与帧缓冲绑定时一致） */
-		GLint vp[4] = { 0, 0, 0, 0 };
-		glGetIntegerv(GL_VIEWPORT, vp);
-		if (x == static_cast<uint32_t>(vp[0]) && y == static_cast<uint32_t>(vp[1]) &&
-			width == static_cast<uint32_t>(vp[2]) && height == static_cast<uint32_t>(vp[3]))
+		const ViewportRegion& viewport = GetAppliedViewport();
+		const bool full_screen =
+			x == static_cast<uint32_t>(viewport.MinX) && y == static_cast<uint32_t>(viewport.MinY) &&
+			width == viewport.Width && height == viewport.Height;
+
+		if (!TakeScissor(x, y, width, height))
+			return;
+
+		glScissor((GLint)x, (GLint)y, (GLsizei)width, (GLsizei)height);
+		if (full_screen)
 			glDisable(GL_SCISSOR_TEST);
 		else
 			glEnable(GL_SCISSOR_TEST);
