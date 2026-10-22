@@ -4,6 +4,7 @@
 #include "MetalShader.h"
 #include "MetalCommon.h"
 #include "MetalRenderAPI.h"
+#include "MetalUniformBuffer.h"
 #include "MetalVertexArray.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/ShaderCompiler.h"
@@ -38,6 +39,18 @@ namespace Helios
             if (type == "packed_float3") return 12;
             if (type == "packed_float4") return 16;
             return 16;
+        }
+
+        /* 材质参数块的内容指纹（FNV-1a）：只用来判断同样的数据是否已经提交过 */
+        [[nodiscard]] uint64_t HashMaterialBytes(const uint8_t* data, uint32_t size)
+        {
+            uint64_t hash = 0xCBF29CE484222325ULL;
+            for (uint32_t i = 0; i < size; ++i)
+            {
+                hash ^= data[i];
+                hash *= 0x100000001B3ULL;
+            }
+            return hash;
         }
 
         /* MSL 形参上的 [[texture(N)]] / [[sampler(N)]] 是资源槽位的权威来源 */
@@ -821,12 +834,31 @@ namespace Helios
         if (!encoder)
             return;
 
+        const uint32_t generation = MetalRuntime::EncoderGeneration();
         for (auto& block : m_MaterialBlocks)
         {
             if (block.Size == 0 || block.Shadow.empty())
                 continue;
 
-            if (block.UseInlineBytes)
+            /* 材质每帧按名重写全部参数，值没变的块不必再传（同一编码器里那份还在） */
+            const uint64_t hash = HashMaterialBytes(block.Shadow.data(), block.Size);
+            if (block.CommittedGeneration == generation && block.CommittedHash == hash)
+                continue;
+
+            /* 优先写进环形缓冲：不占命令缓冲带宽，绑定只带偏移 */
+            uint32_t ring_offset = 0;
+            if (MetalUniformRing::Instance().Allocate(block.Size, ring_offset))
+            {
+                MTL::Buffer* ring_buffer = MetalUniformRing::Instance().GetBuffer();
+                memcpy(static_cast<uint8_t*>(ring_buffer->contents()) + ring_offset,
+                    block.Shadow.data(), block.Size);
+
+                if (block.IsVertexStage)
+                    encoder->setVertexBuffer(ring_buffer, ring_offset, block.BufferIndex);
+                else
+                    encoder->setFragmentBuffer(ring_buffer, ring_offset, block.BufferIndex);
+            }
+            else if (block.UseInlineBytes)
             {
                 /* setBytes 会把数据拷贝进命令缓冲区，每次绘制拥有独立副本，
                  * 因此同一帧内的多次提交互不干扰，也无需等待 GPU 完成。 */
@@ -844,6 +876,9 @@ namespace Helios
                 else
                     encoder->setFragmentBuffer(block.Buffer, 0, block.BufferIndex);
             }
+
+            block.CommittedHash = hash;
+            block.CommittedGeneration = generation;
         }
     }
 

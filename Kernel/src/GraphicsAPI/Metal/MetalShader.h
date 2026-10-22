@@ -91,6 +91,9 @@ namespace Helios
             MTL::Buffer* Buffer{ nullptr };                   /* 大块数据的后备缓冲区 */
             std::unordered_map<std::string, uint32_t> Offsets; /* 成员名 → 字节偏移 */
             std::vector<uint8_t> Shadow;                      /* CPU 端影子数据 */
+            /* 上次提交的内容指纹：材质参数每帧按名重写一遍，值没变就不必再传 */
+            uint64_t CommittedHash{ 0 };
+            uint32_t CommittedGeneration{ 0 };                /* 上次提交的编码器世代号 */
         };
 
         /* 编译并反射着色器：生成 MSL、提取材质参数布局与资源槽位 */

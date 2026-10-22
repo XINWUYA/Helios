@@ -21,6 +21,12 @@ namespace Helios
             /* 当前帧序号，用于选取按帧切片的资源 */
             uint32_t g_FrameIndex = 0;
 
+            /* 编码器世代号：新编码器从 1 起算，0 留给"尚未绑定过"的缓存 */
+            uint32_t g_EncoderGeneration = 1;
+
+            /* 当前绑定的着色器（MetalShader::Bind 登记），纹理绑定按它查阶段掩码 */
+            MetalShader* g_BoundShader = nullptr;
+
             /* ---- 管线编译产物缓存（MTLBinaryArchive）----
              * 懒加载单例：第一次请求时从磁盘加载，缺失 / 损坏就新建空缓存（Unavailable 标记避免反复重试）。
              * 只把真正新编译的条目写回；落盘在后续的窗口期触发。 */
@@ -84,6 +90,8 @@ namespace Helios
             g_CommandQueue = queue;
             g_Encoder = nullptr;
             g_FrameIndex = 0;
+            g_EncoderGeneration = 1;
+            g_BoundShader = nullptr;
         }
 
         void Unregister()
@@ -105,6 +113,8 @@ namespace Helios
             g_CommandQueue = nullptr;
             g_Encoder = nullptr;
             g_FrameIndex = 0;
+            g_EncoderGeneration = 1;
+            g_BoundShader = nullptr;
         }
 
         MTL::Device* Device()
@@ -124,7 +134,27 @@ namespace Helios
 
         void SetEncoder(MTL::RenderCommandEncoder* encoder)
         {
+            /* 换代只在换上真正的新编码器时发生：EndRenderPass 置空不算，
+             * 否则同一编码器的绑定缓存会被无谓地判失效。 */
+            if (encoder != nullptr && encoder != g_Encoder)
+                ++g_EncoderGeneration;
+
             g_Encoder = encoder;
+        }
+
+        uint32_t EncoderGeneration()
+        {
+            return g_EncoderGeneration;
+        }
+
+        MetalShader* BoundShader()
+        {
+            return g_BoundShader;
+        }
+
+        void SetBoundShader(MetalShader* shader)
+        {
+            g_BoundShader = shader;
         }
 
         bool IsAvailable()

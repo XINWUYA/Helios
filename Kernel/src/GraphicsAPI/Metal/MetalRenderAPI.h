@@ -7,12 +7,15 @@
 
 #include "Helios/Renderer/RenderAPI.h"
 #include "MetalShader.h"
+#include "MetalBindings.h"
 #include <Metal/Metal.hpp>
 #include <QuartzCore/QuartzCore.hpp>
 #include <unordered_map>
 
 namespace Helios
 {
+    class MetalVertexArray;
+
     class MetalRenderAPI : public RenderAPI
     {
     public:
@@ -133,6 +136,9 @@ namespace Helios
         /* 在绘制前解析并设置管线状态、深度状态与材质参数；失败时调用方必须跳过 draw */
         bool ApplyPipelineState(uint64_t vertex_layout_hash);
 
+        /* 绑定顶点缓冲：同一编码器内缓冲没换的槽位不再重复下发 */
+        void BindVertexBuffers(const MetalVertexArray& vertex_array);
+
         /* 把当前清除色写入默认渲染目标的颜色附件。
          * 必须在 Pass 开始时而非 PrepareNextDrawable 时调用：SetClearColor 通常
          * 在本帧 PrepareNextDrawable 之后才被调用，沿用旧值会导致清除滞后一帧。 */
@@ -200,6 +206,16 @@ namespace Helios
         MTL::RenderCommandEncoder* m_RasterStateEncoder{ nullptr };
         uint64_t m_AppliedRasterStateHash{ 0 };
         MTL::RenderPipelineState* m_ActivePipelineState{ nullptr };
+
+        /* 编码器内已绑定的顶点缓冲。同一 Pass 里每个绘制都重绑同一个缓冲没有意义，
+         * 按世代号判断是否还是同一个编码器。视口 / 裁剪的 applied 记录收在 RenderAPI 基类。 */
+        struct CachedVertexBuffer
+        {
+            uint32_t Generation{ 0 };
+            MTL::Buffer* Buffer{ nullptr };
+        };
+
+        CachedVertexBuffer m_AppliedVertexBuffers[MetalBinding::MaxVertexBuffers]{};
     };
 }
 

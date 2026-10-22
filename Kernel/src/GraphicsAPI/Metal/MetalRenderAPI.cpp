@@ -425,6 +425,31 @@ namespace Helios
         return true;
     }
 
+    void MetalRenderAPI::BindVertexBuffers(const MetalVertexArray& vertex_array)
+    {
+        const auto& buffers = vertex_array.GetVertexBuffers();
+        const uint32_t generation = MetalRuntime::EncoderGeneration();
+        const size_t count = std::min(buffers.size(), static_cast<size_t>(MetalBinding::MaxVertexBuffers));
+
+        for (size_t i = 0; i < count; ++i)
+        {
+            auto metal_buffer = std::dynamic_pointer_cast<MetalVertexBuffer>(buffers[i]);
+            if (!metal_buffer || !metal_buffer->GetMetalBuffer())
+                continue;
+
+            /* 槽位从 VertexBufferBase 起算，与 VertexDescriptor 及 uniform 槽位错开 */
+            const uint32_t slot = MetalBinding::VertexBufferBase + static_cast<uint32_t>(i);
+            MTL::Buffer* buffer = metal_buffer->GetMetalBuffer();
+            CachedVertexBuffer& cached = m_AppliedVertexBuffers[slot];
+            if (cached.Generation == generation && cached.Buffer == buffer)
+                continue;
+
+            m_CurrentRenderEncoder->setVertexBuffer(buffer, 0, slot);
+            cached.Generation = generation;
+            cached.Buffer = buffer;
+        }
+    }
+
     void MetalRenderAPI::DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count, uint32_t index_offset)
     {
         PROFILE_FUNCTION();
@@ -464,7 +489,7 @@ namespace Helios
         }
 
         /* 绑定顶点缓冲区（占用 MetalBinding::VertexBufferBase 起的槽位） */
-        metal_vertex_array->Bind(m_CurrentRenderEncoder);
+        BindVertexBuffers(*metal_vertex_array);
 
         /* 顶点布局决定顶点描述符，进而决定管线状态；无有效管线时不能提交 DrawCall */
         if (!ApplyPipelineState(metal_vertex_array->GetVertexDescriptorHash()))
@@ -509,7 +534,7 @@ namespace Helios
             return;
         }
 
-        metal_vertex_array->Bind(m_CurrentRenderEncoder);
+        BindVertexBuffers(*metal_vertex_array);
         if (!ApplyPipelineState(metal_vertex_array->GetVertexDescriptorHash()))
             return;
 

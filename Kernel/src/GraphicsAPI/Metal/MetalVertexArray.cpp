@@ -36,24 +36,6 @@ namespace Helios
         m_IndexBuffer = index_buffer;
     }
 
-    void MetalVertexArray::Bind(MTL::RenderCommandEncoder* encoder)
-    {
-        if (!encoder)
-            return;
-
-        /* 绑定所有顶点缓冲区。槽位从 MetalBinding::VertexBufferBase 起算，
-         * 与 VertexDescriptor 及 uniform buffer 的槽位约定保持一致。 */
-        for (size_t i = 0; i < m_VertexBuffers.size(); ++i)
-        {
-            auto metal_buffer = std::dynamic_pointer_cast<MetalVertexBuffer>(m_VertexBuffers[i]);
-            if (metal_buffer && metal_buffer->GetMetalBuffer())
-            {
-                encoder->setVertexBuffer(metal_buffer->GetMetalBuffer(), 0,
-                    static_cast<NS::UInteger>(MetalBinding::VertexBufferBase + i));
-            }
-        }
-    }
-
     uint32_t MetalVertexArray::GetVertexCount() const
     {
         if (m_VertexBuffers.empty())

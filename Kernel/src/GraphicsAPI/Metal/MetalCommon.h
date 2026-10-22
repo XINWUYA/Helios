@@ -46,6 +46,8 @@ namespace Helios
     /* ============================ 运行时上下文 ============================
      * 由 MetalRenderAPI 在初始化/销毁时注册与注销，使各 Device 子类无需
      * dynamic_cast 即可安全取得设备、命令队列与当前编码器。 */
+    class MetalShader;
+
     namespace MetalRuntime
     {
         void Register(MTL::Device* device, MTL::CommandQueue* queue);
@@ -58,6 +60,14 @@ namespace Helios
         /* 当前处于活动状态的渲染命令编码器，无活动 Pass 时返回 nullptr */
         MTL::RenderCommandEncoder* Encoder();
         void SetEncoder(MTL::RenderCommandEncoder* encoder);
+
+        /* 编码器世代号：每开一个新编码器自增。按编码器生效的绑定缓存靠它判失效，
+         * 比记编码器指针稳（编码器释放后地址会被复用）。 */
+        uint32_t EncoderGeneration();
+
+        /* 当前绑定的着色器：纹理绑定要按它查阶段掩码（MetalTexture 拿不到 RenderAPI） */
+        MetalShader* BoundShader();
+        void SetBoundShader(MetalShader* shader);
 
         /* 设备是否可用 */
         bool IsAvailable();
@@ -85,6 +95,15 @@ namespace Helios
     inline void MetalHashCombine(uint64_t& seed, uint64_t value)
     {
         seed ^= value + 0x9E3779B97F4A7C15ULL + (seed << 6) + (seed >> 2);
+    }
+
+    /* 给命令编码器打标签：抓帧时编码器列表显示这个名字，否则全是
+     * "Render Command Encoder" 之类的类型名，分不清是哪一趟。 */
+    template <typename EncoderType>
+    inline void SetMetalEncoderLabel(EncoderType* encoder, const std::string& label)
+    {
+        if (encoder != nullptr && !label.empty())
+            encoder->setLabel(NS::String::string(label.c_str(), NS::UTF8StringEncoding));
     }
 
     /* Metal 错误检查宏：记录错误并通过断言在调试期立即暴露问题 */

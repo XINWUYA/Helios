@@ -24,10 +24,9 @@ namespace Helios
         const std::vector<SharedPtr<DeviceVertexBuffer>>& GetVertexBuffers() const override { return m_VertexBuffers; }
         const SharedPtr<IndexBuffer>& GetIndexBuffer() const override { return m_IndexBuffer; }
 
-        /* Metal特有接口 */
-        void Bind(MTL::RenderCommandEncoder* encoder);
         /* 顶点布局的结构化哈希（含 buffer stride 与各 attribute 的类型/偏移）。
-         * 顶点描述符由 MetalShader 按着色器声明的属性位置生成，这里只提供缓存键。 */
+         * 顶点描述符由 MetalShader 按着色器声明的属性位置生成，这里只提供缓存键；
+         * 顶点缓冲的绑定由 MetalRenderAPI 统一负责，便于去重。 */
         uint64_t GetVertexDescriptorHash() const { return m_VertexDescriptorHash; }
         uint32_t GetVertexCount() const override;
 
