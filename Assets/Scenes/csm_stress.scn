@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scene>
+    <Entities>
+        <Entity ID="5000000" Name="Ground">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="300.000000 1.000000 300.000000"/>
+            <Model ModelPath="BuiltinPlane" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000001" Name="Sun">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.523599 0.000000 0.619592" Scale="1.000000 1.000000 1.000000"/>
+            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="3" IsCastShadow="true" ShadowSize="2048" ShadowBias="0.01" CascadeCount="4" ShadowFar="200"/>
+        </Entity>
+        <Entity ID="5000002" Name="Cottage_00">
+            <Transform Position="61.732045 0.000000 63.607895" Rotation="0.000000 3.192500 0.000000" Scale="1.300000 1.300000 1.300000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000003" Name="Cottage_01">
+            <Transform Position="0.678659 0.000000 31.799782" Rotation="0.000000 2.309400 0.000000" Scale="1.240000 1.240000 1.240000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000004" Name="Cottage_02">
+            <Transform Position="-2.824473 0.000000 60.522064" Rotation="0.000000 6.052400 0.000000" Scale="1.020000 1.020000 1.020000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000005" Name="Cottage_03">
+            <Transform Position="3.360894 0.000000 -65.329494" Rotation="0.000000 1.407600 0.000000" Scale="1.040000 1.040000 1.040000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000006" Name="Cottage_04">
+            <Transform Position="34.078618 0.000000 -28.350948" Rotation="0.000000 2.744100 0.000000" Scale="1.340000 1.340000 1.340000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000007" Name="Cottage_05">
+            <Transform Position="-29.755922 0.000000 -34.990350" Rotation="0.000000 4.466600 0.000000" Scale="1.170000 1.170000 1.170000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000008" Name="Cottage_06">
+            <Transform Position="66.036865 0.000000 -61.048623" Rotation="0.000000 3.317000 0.000000" Scale="1.150000 1.150000 1.150000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000009" Name="Cottage_07">
+            <Transform Position="-66.466998 0.000000 60.806061" Rotation="0.000000 1.869400 0.000000" Scale="1.150000 1.150000 1.150000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000010" Name="Cottage_08">
+            <Transform Position="63.892058 0.000000 -30.993455" Rotation="0.000000 3.576200 0.000000" Scale="1.160000 1.160000 1.160000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000011" Name="Cottage_09">
+            <Transform Position="-67.522492 0.000000 28.330235" Rotation="0.000000 5.378100 0.000000" Scale="1.300000 1.300000 1.300000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000012" Name="Cottage_10">
+            <Transform Position="31.029492 0.000000 -62.172396" Rotation="0.000000 5.956000 0.000000" Scale="1.360000 1.360000 1.360000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000013" Name="Cottage_11">
+            <Transform Position="-61.964239 0.000000 -2.707421" Rotation="0.000000 5.560400 0.000000" Scale="1.010000 1.010000 1.010000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000014" Name="Cottage_12">
+            <Transform Position="-31.863617 0.000000 30.957728" Rotation="0.000000 3.156500 0.000000" Scale="1.340000 1.340000 1.340000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000015" Name="Cottage_13">
+            <Transform Position="60.117089 0.000000 35.705678" Rotation="0.000000 1.936200 0.000000" Scale="1.020000 1.020000 1.020000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000016" Name="Cottage_14">
+            <Transform Position="-63.278612 0.000000 -60.722172" Rotation="0.000000 1.839100 0.000000" Scale="1.010000 1.010000 1.010000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000017" Name="Cottage_15">
+            <Transform Position="31.089856 0.000000 -1.753333" Rotation="0.000000 4.868000 0.000000" Scale="1.290000 1.290000 1.290000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000018" Name="Cottage_16">
+            <Transform Position="33.329864 0.000000 33.503370" Rotation="0.000000 4.582200 0.000000" Scale="1.010000 1.010000 1.010000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000019" Name="Cottage_17">
+            <Transform Position="-31.533601 0.000000 1.513978" Rotation="0.000000 5.549400 0.000000" Scale="1.130000 1.130000 1.130000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000020" Name="Cottage_18">
+            <Transform Position="-64.120650 0.000000 -30.020226" Rotation="0.000000 3.317100 0.000000" Scale="1.200000 1.200000 1.200000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000021" Name="Cottage_19">
+            <Transform Position="-28.416901 0.000000 -61.301496" Rotation="0.000000 1.983000 0.000000" Scale="1.340000 1.340000 1.340000"/>
+            <Model ModelPath="Models/big_cottage/Cottage.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
+        </Entity>
+        <Entity ID="5000022" Name="Tower_00">
+            <Transform Position="-110.000000 18.000000 -70.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 36.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000023" Name="Tower_01">
+            <Transform Position="-96.000000 18.000000 40.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 36.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000024" Name="Tower_02">
+            <Transform Position="-60.000000 15.000000 96.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 30.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000025" Name="Tower_03">
+            <Transform Position="30.000000 18.000000 -110.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 36.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000026" Name="Tower_04">
+            <Transform Position="86.000000 18.000000 -60.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 36.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000027" Name="Tower_05">
+            <Transform Position="110.000000 15.000000 30.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 30.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000028" Name="Tower_06">
+            <Transform Position="60.000000 12.000000 96.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 24.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000029" Name="Tower_07">
+            <Transform Position="-20.000000 12.000000 112.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 24.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000030" Name="Tower_08">
+            <Transform Position="112.000000 18.000000 -20.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 36.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000031" Name="Tower_09">
+            <Transform Position="-116.000000 12.000000 4.000000" Rotation="0.000000 0.000000 0.000000" Scale="5.000000 24.000000 5.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000032" Name="Wall_00">
+            <Transform Position="-60.000000 0.000000 20.000000" Rotation="0.000000 0.061087 0.000000" Scale="80.000000 0.000000 1.200000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000033" Name="Wall_01">
+            <Transform Position="40.000000 1.500000 -50.000000" Rotation="0.000000 0.418879 0.000000" Scale="80.000000 3.000000 1.200000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+        <Entity ID="5000034" Name="Wall_02">
+            <Transform Position="0.000000 1.250000 90.000000" Rotation="0.000000 -0.558505 0.000000" Scale="80.000000 2.500000 1.200000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false"/>
+        </Entity>
+    </Entities>
+</Scene>

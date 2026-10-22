@@ -66,6 +66,10 @@ namespace Helios
 		/* 阴影深度偏移（来自 ShadowMapInfo::ConstantBias，世界单位），缓解阴影失真（peter-panning / acne）。
 		 * 置于 Light UBO 中，避免作为独立 uniform 被遗漏赋值。 */
 		float ShadowBias{ 0.0f };
+		/* 级联过渡带带宽，取该级联视距跨度的比例（0 = 不混合）；用来抹平相邻级联之间的硬边 */
+		float CascadeBlend{ 0.0f };
+		/* 法线偏移，单位是该级联单个纹素的世界尺寸（0 = 关闭） */
+		float NormalBias{ 0.0f };
 		/* std140 对齐补齐：下面的 vec4 / mat4 数组须落在 16 字节边界（GLSL 侧自动对齐，
 		 * C++ 侧无对齐要求，不补会错位 12 字节）。顺带承载逐级联的 z 空间常数偏移：
 		 * x..w = CascadeShadowBias（见 FillLightUniformData）。 */
@@ -356,11 +360,12 @@ namespace Helios
 			data.CascadeCount = cascade_count;
 			data.CascadeSplits = cascade_splits;
 
-			/* 阴影深度偏移：来自光源的 ShadowMapInfo::ConstantBias。 */
-			if (const auto& shadow_map_info = light->GetShadowMapInfo())
-				data.ShadowBias = shadow_map_info->ConstantBias;
-			else
-				data.ShadowBias = 0.0f;
+			/* 阴影参数：常数偏移、级联过渡带带宽、法线偏移都从 ShadowMapInfo 取。
+			 * 过渡带按比例给（近层带窄、远层带宽），采样端在 split 前这段距离内混合下一层。 */
+			const auto& shadow_map_info = light->GetShadowMapInfo();
+			data.ShadowBias = shadow_map_info ? shadow_map_info->ConstantBias : 0.0f;
+			data.CascadeBlend = kCascadeBlendRatio;
+			data.NormalBias = shadow_map_info ? shadow_map_info->NormalBias : 0.0f;
 
 			/* 逐级联的 z 空间常数偏移 = 世界偏移 / 该级联的深度跨度。
 			 * 深度跨度随机型 far / ShadowFar 变化，固定 z 偏移在大跨度下会被

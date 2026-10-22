@@ -37,6 +37,10 @@ layout(std140, binding = 3) uniform LightUniformBuffer
 	uint u_CascadeCount;   /* 实际使用的级联数量（0 = 该光源无级联阴影） */
 	vec4 u_CascadeSplits;
 	float u_ShadowBias;    /* 阴影深度偏移（来自 ShadowMapInfo::ConstantBias） */
+	/* 级联过渡带宽度占该级联视距跨度的比例（0 = 不混合） */
+	float u_CascadeBlend;
+	/* 法线偏移，单位是该级联单个纹素的世界尺寸（0 = 关闭） */
+	float u_NormalBias;
 	/* 各级联的 z 空间常数偏移（世界单位 ConstantBias ÷ 该级联深度跨度，换个相机 far 也通用） */
 	vec4 u_CascadeShadowBias;
 

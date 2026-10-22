@@ -18,6 +18,10 @@ namespace Helios
 	 * 为唯一来源（经 u_PunctualLightParams.w 下发）。 */
 	inline constexpr float kPunctualShadowNearPlane = 0.05f;
 
+	/* 级联过渡带宽度占该级联视距跨度的比例：采样端在 split 前这段距离里与下一层混合，
+	 * 拟合端要为此把下一层的近端往回让出同样的距离，否则混合采样会落在盒子外。 */
+	inline constexpr float kCascadeBlendRatio = 0.1f;
+
 	/* 每个光源对应一个ShadowMap */
 	class ShadowMap
 	{

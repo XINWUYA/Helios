@@ -253,17 +253,8 @@ namespace Helios
 		// 相机世界矩阵（用于把视图空间子视锥角点变换回世界空间）；view_mat 已在脏检测处获取
 		const glm::mat4 cam_world_mat = glm::inverse(view_mat);
 
-		/* 全部投射物在光照空间的并集 AABB：级联范围收敛用（见下方逐级联求交）。
-		 * "投射物"即全部可见网格 —— 阴影的接收面也来自它们，因此并集必然包住
-		 * 所有需要采样的像素；任何能遮挡这些像素的物体也都在并集内。 */
-		glm::vec3 caster_union_min(std::numeric_limits<float>::max());
-		glm::vec3 caster_union_max(-std::numeric_limits<float>::max());
-		const bool has_caster_union = !caster_bounds.empty();
-		for (const auto& bounds : caster_bounds)
-		{
-			caster_union_min = glm::min(caster_union_min, bounds.Min);
-			caster_union_max = glm::max(caster_union_max, bounds.Max);
-		}
+		/* 覆盖范围只由子视锥自己定：不拿全场景并集去裁 XY。并集 AABB 会把远级联的盒子
+		 * 掐成一条偏离视锥的窄条，接收面直接落到盒子外（阴影缺失 / 错位）。 */
 
 		// 透视相机视锥参数（用于构造子视锥角点）；非透视（正交）相机退化为整段
 		const float fov        = camera ? camera->GetFov() : 45.0f;
@@ -273,24 +264,30 @@ namespace Helios
 		// 各级联在视图空间的分割距离（远边界），写回 UBO 供着色阶段选级联
 		glm::vec4 cascade_splits(0.0f);
 
-		// 为每级联计算投影矩阵：取该段子视锥的 8 个角点 → 世界 → 光照空间 → AABB → tight-fit 正交
+		// 每级联：子视锥角点 → 光照空间，包围球定范围、角点中点定中心
 		for (uint8_t cascade_id = 0; cascade_id < cascade_cnt; ++cascade_id)
 		{
 			const float seg_near = split_dist[cascade_id];
 			const float seg_far  = split_dist[cascade_id + 1];
 
+			/* 近端往回让出上一段的过渡带：采样端会在上一段 split 前 band 宽的范围里混采本级联，
+			 * 这段接收面必须落在本级的正交盒内（xy 与深度都要）。 */
+			const float prev_near = (cascade_id > 0) ? split_dist[cascade_id - 1] : cam_near;
+			const float blend_band = (seg_near - prev_near) * kCascadeBlendRatio;
+			const float fit_near = std::max(seg_near - blend_band, cam_near);
+
 			// 子视锥在视图空间（相机看向 -Z）的 8 个角点
-			const float half_h_near = seg_near * tan_half_fov;
+			const float half_h_near = fit_near * tan_half_fov;
 			const float half_w_near = half_h_near * aspect;
 			const float half_h_far  = seg_far  * tan_half_fov;
 			const float half_w_far  = half_h_far * aspect;
 
 			glm::vec3 corners[8];
-			// 近平面 4 角（z = -seg_near）
-			corners[0] = glm::vec3(-half_w_near, -half_h_near, -seg_near);
-			corners[1] = glm::vec3( half_w_near, -half_h_near, -seg_near);
-			corners[2] = glm::vec3( half_w_near,  half_h_near, -seg_near);
-			corners[3] = glm::vec3(-half_w_near,  half_h_near, -seg_near);
+			// 近平面 4 角（z = -fit_near）
+			corners[0] = glm::vec3(-half_w_near, -half_h_near, -fit_near);
+			corners[1] = glm::vec3( half_w_near, -half_h_near, -fit_near);
+			corners[2] = glm::vec3( half_w_near,  half_h_near, -fit_near);
+			corners[3] = glm::vec3(-half_w_near,  half_h_near, -fit_near);
 			// 远平面 4 角（z = -seg_far）
 			corners[4] = glm::vec3(-half_w_far, -half_h_far, -seg_far);
 			corners[5] = glm::vec3( half_w_far, -half_h_far, -seg_far);
@@ -308,66 +305,29 @@ namespace Helios
 				ls_max = glm::max(ls_max, ls_corner);
 			}
 
-			/* tight-fit 基础范围：子视锥在光照空间的真实 AABB；别用 CascadeRadius 去钳（几何体会被
-			 * 投到 [-1,1] 外写不进阴影图），那个值只当最小半边长下限。级联范围收敛：XY 与投射物并集求交，
-			 * 没有投射物或不相交时退回子视锥拟合。 */
-			bool range_clamped_to_casters = false;
-			if (has_caster_union)
-			{
-				const glm::vec3 clipped_min = glm::max(ls_min, caster_union_min);
-				const glm::vec3 clipped_max = glm::min(ls_max, caster_union_max);
-				if (clipped_min.x <= clipped_max.x && clipped_min.y <= clipped_max.y)
-				{
-					ls_min.x = clipped_min.x;
-					ls_max.x = clipped_max.x;
-					ls_min.y = clipped_min.y;
-					ls_max.y = clipped_max.y;
-					range_clamped_to_casters = true;
-				}
-			}
+			/* 范围用包围球而不是紧 AABB：半径只由该级联的距离区间与 fov 决定，与相机朝向、
+			 * 场景内容无关 —— 相机转动时盒子尺寸不变，配合纹素吸附不会抖。球心取角点 AABB
+			 * 的中点（角点关于子视锥轴心对称，两者等价），盒子里必然装得下整个子视锥。 */
+			const float tan_diag = tan_half_fov * std::sqrt(1.0f + aspect * aspect);
+			const float far_extent = seg_far * tan_diag;
+			const float half_depth = (seg_far - fit_near) * 0.5f;
+			float radius = std::sqrt(far_extent * far_extent + half_depth * half_depth);
+			// 下限：只放大、不缩小（CascadeRadius 是"最小半边长"）
+			if (const float min_radius = shadow_map_info->CascadeRadius[cascade_id]; min_radius > 0.0f)
+				radius = std::max(radius, min_radius);
 
-			const float radius = shadow_map_info->CascadeRadius[cascade_id];
+			/* 纹素吸附：边长固定，吸附网格也就固定，相机平移时阴影不抖 */
+			const float texel_size = (2.0f * radius) / static_cast<float>(shadow_map_info->Size);
+			const float center_x = std::round((ls_min.x + ls_max.x) * 0.5f / texel_size) * texel_size;
+			const float center_y = std::round((ls_min.y + ls_max.y) * 0.5f / texel_size) * texel_size;
 
-			// 居中并取对称正方形范围（以较长边为准），提升 PCF 采样稳定性
-			const float center_x = (ls_min.x + ls_max.x) * 0.5f;
-			const float center_y = (ls_min.y + ls_max.y) * 0.5f;
-			const float half_x = (ls_max.x - ls_min.x) * 0.5f;
-			const float half_y = (ls_max.y - ls_min.y) * 0.5f;
-			float half_extent = std::max(half_x, half_y);
-			// 下限：保证范围不小于级联半径（仅放大、不缩小真实 AABB）
-			if (radius > 0.0f)
-				half_extent = std::max(half_extent, radius);
+			const float ortho_left   = center_x - radius;
+			const float ortho_right  = center_x + radius;
+			const float ortho_bottom = center_y - radius;
+			const float ortho_top    = center_y + radius;
 
-			/* 收敛生效时加 2 纹素边距：PCF 邻接采样与光栅化边界不被卷积截断 */
-			if (range_clamped_to_casters)
-			{
-				const float texel_est = (2.0f * half_extent) / static_cast<float>(shadow_map_info->Size);
-				half_extent += 2.0f * texel_est;
-			}
-
-			float ortho_left   = center_x - half_extent;
-			float ortho_right  = center_x + half_extent;
-			float ortho_bottom = center_y - half_extent;
-			float ortho_top    = center_y + half_extent;
-
-			/* 纹素对齐：把"范围尺寸"向上量化到整纹素，中心吸附到纹素网格（正交视锥保持正方形、
-			 * PCF 更均匀）；light view 不含相机信息，网格稳定，相机移动时阴影不抖。 */
-			const float texel_size = (2.0f * half_extent) / static_cast<float>(shadow_map_info->Size);
-			if (texel_size > 0.0f)
-			{
-				half_extent = (std::floor(half_extent / texel_size) + 1.0f) * texel_size;
-				const float snapped_center_x = std::round(center_x / texel_size) * texel_size;
-				const float snapped_center_y = std::round(center_y / texel_size) * texel_size;
-
-				ortho_left   = snapped_center_x - half_extent;
-				ortho_right  = snapped_center_x + half_extent;
-				ortho_bottom = snapped_center_y - half_extent;
-				ortho_top    = snapped_center_y + half_extent;
-			}
-
-			/* 深度范围：与该级联 xy 相交的几何体的 Z 跨度；没收敛时再并入相机子视锥的 Z 跨度
-			 * （免得 near / far 板把物体切平）。收敛生效后几何体跨度就是完整依据，深度板收紧之后
-			 * Depth16 对场景深度的分辨率提升很大。 */
+			/* 深度范围：子视锥 Z 跨度 ∪ 与该级联 xy 相交的投射物 Z 跨度。近端并入投射物是为了让
+			 * 视锥外、靠光源一侧的遮挡物仍能投影进来，否则模型上半截的影子会丢。 */
 			float ls_depth_z_min = ls_min.z;
 			float ls_depth_z_max = ls_max.z;
 			float geometry_z_min = std::numeric_limits<float>::max();
@@ -383,21 +343,10 @@ namespace Helios
 				geometry_z_min = std::min(geometry_z_min, bounds.Min.z);
 				geometry_z_max = std::max(geometry_z_max, bounds.Max.z);
 			}
-			const bool has_intersecting_geometry = geometry_z_min <= geometry_z_max;
-			if (has_intersecting_geometry)
+			if (geometry_z_min <= geometry_z_max)
 			{
-				if (range_clamped_to_casters)
-				{
-					/* 收敛生效：几何体跨度即完整依据（接收面与遮挡物都在其中），
-					 * 不再并入子视锥跨度 —— 避免把包围盒外的空白空气算进深度板。 */
-					ls_depth_z_min = geometry_z_min;
-					ls_depth_z_max = geometry_z_max;
-				}
-				else
-				{
-					ls_depth_z_min = std::min(ls_depth_z_min, geometry_z_min);
-					ls_depth_z_max = std::max(ls_depth_z_max, geometry_z_max);
-				}
+				ls_depth_z_min = std::min(ls_depth_z_min, geometry_z_min);
+				ls_depth_z_max = std::max(ls_depth_z_max, geometry_z_max);
 			}
 
 			// near/far 由光照空间 Z 范围推导（视图空间 Z = -光照空间 Z）

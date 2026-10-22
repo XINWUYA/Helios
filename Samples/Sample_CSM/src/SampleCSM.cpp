@@ -1,4 +1,4 @@
-﻿#include "SampleCSM.h"
+#include "SampleCSM.h"
 #include <imgui.h>
 #include <Helios/Scene/Material.h>
 #include "SampleCameraController.h"
@@ -62,7 +62,7 @@ void SampleCSM::OnAttached()
 	{
 		auto entity = m_pScene->CreateEntity("Cottage");
 		auto& model_component = entity.AddComponent<ModelComponent>();
-		model_component.m_Model = Model::Create(ABSOLUTE_PATH("Models/big_cottage/Cottage.mesh"));
+		model_component.m_Model = Model::Create(ABSOLUTE_PATH("Models/big_cottage/Cottage.model"));
 		model_component.m_Model->SetDebugName("Cottage");
 		auto& transform_component = entity.GetComponent<TransformComponent>();
 		transform_component.m_Scale = glm::vec3(0.6f);
