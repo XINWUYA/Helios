@@ -101,10 +101,10 @@ namespace Helios
 
 	namespace
 	{
-		/* 视口 MSAA 的单一数据源：开关与采样数。采样数固定 4x，再往上收益很小，
-		 * 4x 在集显到独显上都能稳定跑满。 */
+		/* 视口 MSAA 的单一数据源：开关与采样数。采样数固定 4x，再往上收益很小。
+		 * 默认关闭，需要时在视图菜单里打开。 */
 		constexpr uint8_t MSAA_SAMPLE_COUNT = 4;
-		bool s_MSAAEnabled = true;
+		bool s_MSAAEnabled = false;
 	}
 
 	void Renderer::SetMSAAEnabled(bool enabled)
