@@ -65,6 +65,24 @@ namespace Helios
             MetalHashCombine(h, state.Wireframe ? 1u : 0u);
             return h;
         }
+
+        /* 编码器标签：把已压入的调试组名连成路径。抓帧里的编码器列表是平铺的，
+         * 只写最内层会丢掉上级 Pass；一个组都没有时用 fallback 兜底。 */
+        [[nodiscard]] std::string BuildEncoderLabel(const std::vector<std::string>& groups,
+            const char* fallback)
+        {
+            std::string label;
+            for (const std::string& group : groups)
+            {
+                if (group.empty())
+                    continue;
+                if (!label.empty())
+                    label += " / ";
+                label += group;
+            }
+
+            return label.empty() ? std::string(fallback) : label;
+        }
     }
 
     MetalRenderAPI::~MetalRenderAPI()
@@ -547,6 +565,8 @@ namespace Helios
             return;
         }
 
+        SetMetalEncoderLabel(blit, "GenerateMipmap");
+
         blit->generateMipmaps(metal_texture->GetMetalTexture());
         blit->endEncoding();
     }
@@ -613,6 +633,8 @@ namespace Helios
             CORE_LOG_ERROR("MetalRenderAPI::AcquireDefaultTargetSnapshot: failed to create blit encoder");
             return nullptr;
         }
+
+        SetMetalEncoderLabel(blit, "CaptureDefaultTarget");
 
         blit->copyFromTexture(target, 0, 0, MTL::Origin(0, 0, 0), MTL::Size(width, height, 1),
             metal_dst->GetMetalTexture(), 0, 0, MTL::Origin(0, 0, 0));
@@ -701,6 +723,8 @@ namespace Helios
             CORE_LOG_ERROR("MetalRenderAPI::CopyTexture: failed to create blit encoder");
             return;
         }
+
+        SetMetalEncoderLabel(blit, "CopyTexture");
 
         blit->copyFromTexture(src_texture, src_layer, 0, MTL::Origin(0, 0, 0),
             MTL::Size(src_texture->width(), src_texture->height(), 1),
@@ -1027,6 +1051,9 @@ namespace Helios
         if (name)
             RenderQueryProfiler::Instance().BeginGPUScope(name);
 
+        /* 组名留一份：随后创建的编码器拿它当标签 */
+        m_DebugGroupStack.emplace_back(name ? name : "");
+
         if (m_CurrentRenderEncoder && name)
         {
             m_CurrentRenderEncoder->pushDebugGroup(NS::String::string(name, NS::UTF8StringEncoding));
@@ -1036,6 +1063,9 @@ namespace Helios
     void MetalRenderAPI::PopDebugGroup()
     {
         RenderQueryProfiler::Instance().EndGPUScope();
+
+        if (!m_DebugGroupStack.empty())
+            m_DebugGroupStack.pop_back();
 
         if (m_CurrentRenderEncoder)
         {
@@ -1097,6 +1127,8 @@ namespace Helios
         MTL::ComputeCommandEncoder* encoder = m_CurrentCommandBuffer->computeCommandEncoder();
         if (encoder == nullptr)
             return false;
+
+        SetMetalEncoderLabel(encoder, std::string("Compute ") + compute_shader->GetDebugName());
 
         encoder->setComputePipelineState(pipeline);
         for (const auto& [index, buffer] : resolved)
@@ -1173,20 +1205,24 @@ namespace Helios
 
         MetalRuntime::SetEncoder(m_CurrentRenderEncoder);
 
+        /* 编码器标签取当前打开的调试组链（最内层就是本趟 Pass 的名字） */
+        SetMetalEncoderLabel(m_CurrentRenderEncoder, BuildEncoderLabel(m_DebugGroupStack, "RenderPass"));
+
         /* 区分离屏 Pass 与默认（drawable）Pass：窗口的 RenderPassDescriptor 是由
          * SetRenderPassDescriptor 登记的那一个，其余描述符都来自 FrameBuffer。 */
         m_CurrentPassIsOffscreen = (renderPassDescriptor != m_RenderPassDescriptor);
 
         /* 离屏 Pass 先按整个附件尺寸建立一次翻转视口（见 ApplyViewport 说明），
          * 使未显式调用 SetViewport 的 Pass 也不会落到 Metal 默认的"不翻转"视口上。 */
-        if (m_CurrentPassIsOffscreen)
-        {
-            uint32_t attachment_width = 0;
-            uint32_t attachment_height = 0;
-            GetRenderPassAttachmentSize(renderPassDescriptor, attachment_width, attachment_height);
-            if (attachment_width > 0 && attachment_height > 0)
-                ApplyViewport(0, 0, attachment_width, attachment_height);
-        }
+        uint32_t attachment_width = 0;
+        uint32_t attachment_height = 0;
+        GetRenderPassAttachmentSize(renderPassDescriptor, attachment_width, attachment_height);
+
+        /* 新编码器上视口和裁剪都是空的 */
+        ResetAppliedViewport();
+
+        if (m_CurrentPassIsOffscreen && attachment_width > 0 && attachment_height > 0)
+            ApplyViewport(0, 0, attachment_width, attachment_height);
 
         /* 新编码器上没有任何状态，缓存全部失效后统一重新下发一次 */
         m_RasterStateEncoder = nullptr;

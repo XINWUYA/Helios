@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <string>
 #include <vector>
 #include <utility>
 
@@ -186,6 +187,10 @@ namespace Helios
 
         RenderRasterState m_CurrentRasterState{};
         MetalShader* m_BoundShader{ nullptr };
+
+        /* 已压入的调试组名。编码器创建时按这串名字生成标签，抓帧里就能看到 Pass；
+         * 组常常先于编码器压入（Pass 先 push 再开通道），所以单独留一份栈。 */
+        std::vector<std::string> m_DebugGroupStack;
 
         /* DepthStencilState 缓存，键 = (CompareFunc << 1) | depthWriteEnabled */
         std::unordered_map<uint32_t, MTL::DepthStencilState*> m_DepthStencilStates;
