@@ -1,11 +1,12 @@
 #pragma once
-/* Helios 编辑器主题模块（header-only，只依赖 imgui.h / ImGui 1.86 API）。设计原则：中性灰阶
+/* Helios 编辑器主题模块（只依赖 imgui.h / ImGui 1.86 API，运行时状态在 EditorTheme.cpp）。设计原则：中性灰阶
  * 管"层级"、强调色只管"状态"；形状：停靠面板直角 → 控件 5px 圆角 → 浮层 8px；颜色 / 尺寸
  * 都先在 Token 定义。用法：首次 NewFrame 前调 SetupFonts + ApplyDark。 */
 
 #include <imgui.h>
 
 #include <string>
+#include "Helios/Common/Export.h"
 
 namespace Helios::EditorTheme
 {
@@ -23,11 +24,7 @@ namespace Helios::EditorTheme
      * 所有换算一律"从设计值重算"（design × UiScale），不做累乘 —— 因此可重复调用。 */
     namespace Detail
     {
-        inline float& UiScaleStorage()
-        {
-            static float s_UiScale = 1.0f;
-            return s_UiScale;
-        }
+        HELIOS_API float& UiScaleStorage();
     }
 
     /* 设计像素 → ImGui 单位的缩放系数（macOS = 1；Windows = 系统 content scale） */
@@ -127,11 +124,11 @@ namespace Helios::EditorTheme
         inline constexpr float SliderDotRadiusDesign      = 5.0f;
 
         /* 运行时值 = 设计值 × UiScale（ApplyUiScaleToTokens 落定，使用方只读） */
-        inline float PropertyLabelWidth   = PropertyLabelWidthDesign;
-        inline float PropertyRowPadY      = PropertyRowPadYDesign;
-        inline float CardPad              = CardPadDesign;
-        inline float SliderTrackThickness = SliderTrackThicknessDesign;
-        inline float SliderDotRadius      = SliderDotRadiusDesign;
+        extern HELIOS_API float PropertyLabelWidth;
+        extern HELIOS_API float PropertyRowPadY;
+        extern HELIOS_API float CardPad;
+        extern HELIOS_API float SliderTrackThickness;
+        extern HELIOS_API float SliderDotRadius;
     }
 
     /* 按 UiScale 落定 Token 尺寸（SetupFonts / 跨屏重建时调用；从设计值重算而非累乘，
@@ -317,11 +314,7 @@ namespace Helios::EditorTheme
     /* 全局字体存取：各面板用 GetFonts().Title 切换标题字体 */
     namespace Detail
     {
-        inline EditorFonts& FontsStorage()
-        {
-            static EditorFonts s_Fonts;
-            return s_Fonts;
-        }
+        HELIOS_API EditorFonts& FontsStorage();
     }
 
     inline const EditorFonts& GetFonts()

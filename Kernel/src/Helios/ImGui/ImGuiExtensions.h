@@ -33,7 +33,7 @@ namespace ImGuiExt
 	/* 绘制一个Color UI */
 	HELIOS_API void DrawColorUI(const std::string& label, glm::vec4& color, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个资源引用的UI（图片选择 + 拖入 + 悬停预览） */
-	void DrawTextureUI(const std::string& label, SharedPtr<DeviceTexture>& texture, float label_width = EditorTheme::Token::PropertyLabelWidth);
+	HELIOS_API void DrawTextureUI(const std::string& label, SharedPtr<DeviceTexture>& texture, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个可拖动的Int UI（speed = 每像素拖拽单位数，对齐 ImGui 的 v_speed） */
 	HELIOS_API void DrawDragIntUI(const char* label, int& value, float speed = 1.0f, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个可拖动的Float UI（speed = 每像素拖拽单位数，对齐 ImGui 的 v_speed） */
@@ -41,15 +41,15 @@ namespace ImGuiExt
 	/* 绘制一个可拖动的Float2 UI */
 	HELIOS_API void DrawDragFloat2UI(const char* label, glm::vec2& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个可拖动的Float3 UI */
-	void DrawDragFloat3UI(const char* label, glm::vec3& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
+	HELIOS_API void DrawDragFloat3UI(const char* label, glm::vec3& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个可拖动的Float4 UI */
-	void DrawDragFloat4UI(const char* label, glm::vec4& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
+	HELIOS_API void DrawDragFloat4UI(const char* label, glm::vec4& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个vec3 UI， 带XYZ。
 	 * uniform_scale：Scale 类字段用 —— 拖任一分量时按住 Shift = 三轴等比缩放。 */
 	HELIOS_API void DrawVec3ControlUI(const std::string& label, glm::vec3& values, float reset_value = 0.0f,
 		float label_width = EditorTheme::Token::PropertyLabelWidth, bool uniform_scale = false);
 	/* 绘制带选中的图像按钮UI */
-	void DrawCheckedImageButtonUI(const std::string& label, const SharedPtr<DeviceTexture>& texture, const ImVec2& size, bool checked = false, const std::function<void()>& button_func = []() {});
+	HELIOS_API void DrawCheckedImageButtonUI(const std::string& label, const SharedPtr<DeviceTexture>& texture, const ImVec2& size, bool checked = false, const std::function<void()>& button_func = []() {});
 	/* 绘制一个Checkbox；返回是否被改动（调用方要"改动即生效"时用它，别每帧无条件写回） */
 	HELIOS_API bool DrawCheckboxUI(const std::string& label, bool& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个Combo */
@@ -57,9 +57,9 @@ namespace ImGuiExt
 	/* 绘制一个层掩码 UI（下拉里是 32 层复选，顶部有全不选 / 全选） */
 	HELIOS_API void DrawLayerMaskUI(const std::string& label, LayerMask& mask, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个方向指示 */
-	bool DrawDirectionIndicator(const std::string& label, glm::vec3& direction, float label_width = EditorTheme::Token::PropertyLabelWidth);
+	HELIOS_API bool DrawDirectionIndicator(const std::string& label, glm::vec3& direction, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个询问弹窗UI(todo: 还不能用，需要调试) */
-	bool DrawModalUI(const std::string& label, const std::string& content_text, bool& never_ask);
+	HELIOS_API bool DrawModalUI(const std::string& label, const std::string& content_text, bool& never_ask);
 	/* 绘制「圆点在细线上」的滑动条（紧凑场景用）：交互跟 SliderFloat 一致，外观 = 细轨 + 点亮段 +
 	 * 圆点；数值文本不画在轨道上（用 tooltip，或者画在控件外面）。宽度走 SetNextItemWidth / ItemWidth。 */
 	HELIOS_API bool DrawDotSliderFloat(const char* label, float& value, float v_min, float v_max,

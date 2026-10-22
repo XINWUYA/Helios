@@ -4,7 +4,7 @@ project(Kernel LANGUAGES CXX)
 
 # 脚本模块在运行期要调用引擎里任意函数，所以 Kernel 一律编成动态库：
 #   脚本 DLL / bundle 链接它，符号由链接器解析，三个平台走同一套机制。
-# Windows 额外要全量导出符号（见下面的 WINDOWS_EXPORT_ALL_SYMBOLS）。
+# Windows 只导出标了 HELIOS_API 的符号（见 Common/Export.h），漏标就是链接错误。
 add_library(Kernel SHARED)
 
 # Source files
@@ -138,6 +138,7 @@ set_target_properties(Kernel PROPERTIES
 if(NOT WIN32)
     # macOS / Linux 默认全导出，标不标 HELIOS_API 都能跑。打开这个选项可以模拟 Windows 的
     # 约束（没标的符号不给外部用），用来检查标注有没有漏 —— 漏了就是链接错误。
+    # 只做链接检查别拿来跑：glm 这类类型的 RTTI 会被当成模块私有，跨模块 any_cast 必然失败。
     option(HELIOS_HIDDEN_VISIBILITY "Hide Kernel symbols not marked HELIOS_API" OFF)
     if(HELIOS_HIDDEN_VISIBILITY)
         set_target_properties(Kernel PROPERTIES
