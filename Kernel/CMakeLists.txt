@@ -73,6 +73,8 @@ endif()
 target_compile_definitions(Kernel
     PRIVATE
         GLFW_INCLUDE_NONE
+        # ImGui 后端源码直接编进 Kernel（见 ImGuiContext.cpp），不跟着 IMGUI_API 走导入
+        IMGUI_IMPL_API=
         # TRACY_ENABLE
 )
 

@@ -98,11 +98,9 @@ namespace Helios
 	{
 		/* 走 CMake target 而不是手拼编译器命令行：编译参数与引擎天然一致，
 		 * 少一整套"宏传丢了就随机崩"的坑。 */
-		std::string command = std::string("cmake --build \"") + HELIOS_BUILD_DIR + "\" --target HeliosScripts 2>&1";
-#ifdef PLATFORM_WINDOWS
-		/* 多配置生成器（Visual Studio）要指定配置；单配置生成器忽略这个参数也无害 */
-		command = std::string("cmake --build \"") + HELIOS_BUILD_DIR + "\" --target HeliosScripts --config Debug 2>&1";
-#endif
+		/* 按编辑器自己的配置编：脚本和编辑器得用同一个 Kernel 和 CRT，单配置生成器会忽略 --config */
+		const std::string command = std::string("cmake --build \"") + HELIOS_BUILD_DIR +
+			"\" --target HeliosScripts --config " + HELIOS_BUILD_CONFIG + " 2>&1";
 
 		CORE_LOG_INFO("[Script] {}", command);
 

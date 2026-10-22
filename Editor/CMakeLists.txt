@@ -69,6 +69,8 @@ target_compile_definitions(Editor
         # 编辑器默认开启性能插桩（HELIOS_PROFILE）；写追踪文本是运行期全局开关 ——
         # 性能面板 CPU Timings 的 "Trace Text"（不用重编）；Sample 等其它目标不定义
         HELIOS_PROFILE=1
+        # 编辑器重编脚本时用同一个配置（ScriptModule::Compile）
+        "HELIOS_BUILD_CONFIG=\"$<CONFIG>\""
 )
 
 # Output directory

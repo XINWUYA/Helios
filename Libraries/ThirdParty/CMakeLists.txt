@@ -87,6 +87,8 @@ endif()
 target_sources(GLFW PRIVATE ${GLFW_COMMON_SOURCES} ${GLFW_PLATFORM_SOURCES})
 target_include_directories(GLFW PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/glfw/include)
 target_compile_definitions(GLFW PRIVATE _CRT_SECURE_NO_WARNINGS)
+# 动态库导出：编 GLFW 自己时导出，使用方导入（宏只在 Windows 上起作用，下同）
+target_compile_definitions(GLFW PRIVATE _GLFW_BUILD_DLL INTERFACE GLFW_DLL)
 set_target_properties(GLFW PROPERTIES 
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
@@ -104,6 +106,8 @@ target_sources(Glad PRIVATE
 )
 
 target_include_directories(Glad PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/glad/include)
+# gl 函数指针是全局变量，Windows 上使用方必须按 dllimport 声明才能读到 DLL 里那一份
+target_compile_definitions(Glad PUBLIC GLAD_GLAPI_EXPORT PRIVATE GLAD_GLAPI_EXPORT_BUILD)
 set_target_properties(Glad PROPERTIES 
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
@@ -139,6 +143,12 @@ target_include_directories(ImGui PUBLIC
 # 放这里是因为 PUBLIC 一次覆盖 ImGui 自身和所有下游；imconfig.h 保持原样不动
 target_compile_definitions(ImGui PUBLIC "ImDrawIdx=unsigned int")
 target_link_libraries(ImGui PUBLIC GLFW)
+# ImGui 没有自带导出开关，Windows 上按 IMGUI_API 注入，GImGui 这类全局变量全进程只有一份
+if(WIN32)
+    target_compile_definitions(ImGui
+        PRIVATE "IMGUI_API=__declspec(dllexport)"
+        INTERFACE "IMGUI_API=__declspec(dllimport)")
+endif()
 set_target_properties(ImGui PROPERTIES 
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
@@ -156,6 +166,7 @@ file(GLOB TINYXML2_SOURCES
 
 target_sources(tinyxml2 PRIVATE ${TINYXML2_SOURCES})
 target_include_directories(tinyxml2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tinyxml2)
+target_compile_definitions(tinyxml2 PRIVATE TINYXML2_EXPORT INTERFACE TINYXML2_IMPORT)
 set_target_properties(tinyxml2 PROPERTIES 
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
@@ -178,6 +189,7 @@ endif()
 
 target_sources(xxHash PRIVATE ${XXHASH_SOURCES})
 target_include_directories(xxHash PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/xxHash)
+target_compile_definitions(xxHash PRIVATE XXH_EXPORT INTERFACE XXH_IMPORT)
 set_target_properties(xxHash PROPERTIES 
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
@@ -215,6 +227,8 @@ target_compile_definitions(spdlog PUBLIC
     SPDLOG_COMPILED_LIB
     SPDLOG_SHARED_LIB
 )
+# spdlog 自己的导出宏靠 CMake 自动定义的 spdlog_EXPORTS；内置 fmt 要单独开
+target_compile_definitions(spdlog PRIVATE FMT_EXPORT PUBLIC FMT_SHARED)
 set_target_properties(spdlog PROPERTIES
     FOLDER "Libraries/ThirdParty"
 )
@@ -323,6 +337,7 @@ if(NOT ASSIMP_USE_SYSTEM_ZLIB)
     )
 endif()
 
+target_compile_definitions(assimp PRIVATE ASSIMP_BUILD_DLL_EXPORT INTERFACE ASSIMP_DLL)
 target_compile_definitions(assimp PRIVATE
     ASSIMP_BUILD_NO_M3D_IMPORTER
     ASSIMP_BUILD_NO_M3D_EXPORTER
@@ -389,7 +404,9 @@ else()
 endif()
 
 target_compile_features(spirv-cross PRIVATE cxx_std_11)
+# SPIRV-Cross 的 C++ 接口没有导出宏，Windows 上让 CMake 把符号全部导出
 set_target_properties(spirv-cross PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
 )

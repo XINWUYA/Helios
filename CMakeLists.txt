@@ -14,11 +14,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# Output directories
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-
 # Build configurations
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release;Shipping" CACHE STRING "" FORCE)
 
@@ -29,6 +24,12 @@ endif()
 
 # Output directory format
 set(OUTPUT_DIR "${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_NAME}-x64")
+
+# Output directories
+# Windows 按 exe 所在目录找 DLL，所有 DLL 和可执行文件必须落在同一个目录
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/${OUTPUT_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Vulkan SDK (Windows only)
 if(WIN32)
@@ -77,6 +78,9 @@ if(MSVC)
         /wd4267
         /wd4312
         /wd4819
+        # 导出类里带 STL 成员或继承未导出基类，各模块共用同一套 CRT，可以忽略
+        /wd4251
+        /wd4275
     )
 
     # Dynamic runtime library：Windows 下 Kernel 是 DLL，Editor 与脚本 DLL 都要跨模块
