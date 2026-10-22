@@ -8,6 +8,7 @@
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
+#include <Helios/Renderer/RenderPasses/ObjectSorting.h>
 #include <Helios/Scene/Material.h>
 #include <Helios/Core/AssetManager.h>
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
@@ -629,35 +630,36 @@ namespace Helios
 					render_api->SetScissor(0, 0, shadow_size, shadow_size);
 					render_api->Clear();
 
-					for (const auto& mesh_object : render_view->GetVisibleMeshObjects())
+					/* 投射物按剔除方式和网格分组：同组连着画，管线和顶点缓冲都不换 */
+					const auto caster_list = RenderSorting::CollectShadowCasterList(
+						render_view->GetVisibleMeshObjects(), shadow_material->GetRasterState());
+
+					for (const VisibleMeshObject* mesh_object : caster_list)
 					{
-						/* 天空盒不产生投影：顶点着色器把它铺满全屏（z = 远平面），
-						 * 如果参与投射，整个深度图会被压成一层"天空" */
-						if (mesh_object.Material && mesh_object.Material->IsSkyBox())
-							continue;
+						Renderer::FillObjectUniformBuffer(*mesh_object);
 
-						/* 透明物体不投影：阴影图只有深度、没有半透明，投出来是一块实心影子 */
-						if (mesh_object.Material && mesh_object.Material->IsTransparent())
-							continue;
+						/* 剔除方式跟物体材质走：单面材质只画正面，背面不用光栅化；
+						 * 双面材质（Cull_None）两面都写，和主视图看到的是同一侧表面 */
+						RenderRasterState caster_state = shadow_material->GetRasterState();
+						if (mesh_object->Material != nullptr)
+						{
+							const auto& source_state = mesh_object->Material->GetRasterState();
+							caster_state.CullMode = source_state.CullMode;
+							caster_state.FrontFaceType = source_state.FrontFaceType;
+						}
 
-						/* 模型关闭「投影」后不写入阴影图（仍可接受阴影）：级联与点状共用这条 */
-						if (!mesh_object.CastShadow)
-							continue;
-
-						Renderer::FillObjectUniformBuffer(mesh_object);
-						Renderer::Submit(shadow_material, mesh_object.MeshSegment->GetMeshPrimitive());
+						DrawParams caster_draw;
+						caster_draw.RasterStateOverride = caster_state;
+						Renderer::Submit(shadow_material, mesh_object->MeshSegment->GetMeshPrimitive(), &caster_draw);
 					}
 
 					render_pass_info->Unbind();
 				};
 
-				/* 阴影投射材质：关掉背面剔除 —— 单面几何（地面 / 薄墙 / 植被）必须能写进深度，免得绕序
-				 * 约定有差异时这些 caster 直接消失；闭合几何体双面渲染的最终深度跟单面一致，只多花一点光栅化。 */
+				/* 阴影投射材质：自身保持默认单面，逐物体的剔除方式在提交时按源材质覆盖 */
 				const auto make_caster_material = [this]()
 				{
-					auto shadow_material = Material::Create(m_ShadowCasterShader);
-					shadow_material->GetRasterState().CullMode = CullMode::Cull_None;
-					return shadow_material;
+					return Material::Create(m_ShadowCasterShader);
 				};
 
 				/* 渲染每级联阴影，复用UpdateCascadeMatrices已计算好的VP矩阵与Layer */

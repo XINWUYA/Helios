@@ -175,14 +175,25 @@ namespace Helios
 
 	int OpenGLShader::GetUniformLocation(const std::string& name)
 	{
-		return glGetUniformLocation(m_ProgramID, name.c_str());
+		return FindUniformLocation(name);
+	}
+
+	GLint OpenGLShader::FindUniformLocation(const std::string& name)
+	{
+		const auto cached = m_UniformLocationCache.find(name);
+		if (cached != m_UniformLocationCache.end())
+			return cached->second;
+
+		const GLint location = glGetUniformLocation(m_ProgramID, name.c_str());
+		m_UniformLocationCache.emplace(name, location);
+		return location;
 	}
 
 	void OpenGLShader::SetInt(const std::string& name, int value)
 	{
 		PROFILE_FUNCTION();
 
-		const GLint location = glGetUniformLocation(m_ProgramID, name.c_str());
+		const GLint location = FindUniformLocation(name);
 		if (location < 0) return;
 		glUniform1i(location, value);
 	}
@@ -191,7 +202,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const GLint location = glGetUniformLocation(m_ProgramID, name.c_str());
+		const GLint location = FindUniformLocation(name);
 		if (location < 0) return;
 		glUniform1iv(location, count, values);
 	}
@@ -200,7 +211,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const GLint location = glGetUniformLocation(m_ProgramID, name.c_str());
+		const GLint location = FindUniformLocation(name);
 		if (location < 0) return;
 		glUniform1f(location, value);
 	}
@@ -209,7 +220,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const GLint location = glGetUniformLocation(m_ProgramID, name.c_str());
+		const GLint location = FindUniformLocation(name);
 		if (location < 0) return;
 		glUniform2f(location, value.x, value.y);
 	}
@@ -218,7 +229,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const GLint location = glGetUniformLocation(m_ProgramID, name.c_str());
+		const GLint location = FindUniformLocation(name);
 		if (location < 0) return;
 		glUniform3f(location, value.x, value.y, value.z);
 	}
@@ -227,7 +238,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const GLint location = glGetUniformLocation(m_ProgramID, name.c_str());
+		const GLint location = FindUniformLocation(name);
 		if (location < 0) return;
 		glUniform4f(location, value.x, value.y, value.z, value.w);
 	}
@@ -236,7 +247,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const GLint location = glGetUniformLocation(m_ProgramID, name.c_str());
+		const GLint location = FindUniformLocation(name);
 		if (location < 0) return;
 		glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(value));
 	}
@@ -587,6 +598,9 @@ namespace Helios
 			return;
 
 		const GLuint program = m_ProgramID;
+
+		/* link 之前查到的位置全是无效值，缓存一律作废 */
+		m_UniformLocationCache.clear();
 
 		glLinkProgram(program);
 

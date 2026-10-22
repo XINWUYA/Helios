@@ -198,21 +198,16 @@ namespace Helios
 						{
 							Renderer::GetRenderAPI()->Clear();
 
-							for (const auto& mesh_object : render_view.GetVisibleMeshObjects())
+							const auto gbuffer_list = RenderSorting::CollectGBufferList(render_view.GetVisibleMeshObjects());
+							for (const VisibleMeshObject* gbuffer_object : gbuffer_list)
 							{
+								const VisibleMeshObject& mesh_object = *gbuffer_object;
+
 								/* Fill object uniform buffer */
 								Renderer::FillObjectUniformBuffer(mesh_object);
 
 								const auto& material = mesh_object.Material;
 								if (material == nullptr)
-									continue;
-
-								/* 天空盒不进 G-Buffer：它输出的是最终颜色、顶点着色器把网格
-								 * 折叠成全屏天空，转成 G-Buffer 材质只会得到一颗实心球。
-								 * 由 SkyPass 在光照之后专绘背景。
-								 * 透明物体也不进：G-Buffer 只存单层表面，叠不出半透明，
-								 * 统一放到光照之后的前向透明 Pass 里画。 */
-								if (material->IsSkyBox() || material->IsTransparent())
 									continue;
 
 								auto gbuffer_material = material;

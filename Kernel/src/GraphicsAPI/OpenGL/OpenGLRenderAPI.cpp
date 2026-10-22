@@ -131,46 +131,71 @@ namespace Helios
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	}
 
-	/* 应用光栅化状态 */
+	/* 应用光栅化状态：只下发变化的字段。驱动虽然也会折叠重复配置，
+	 * 但每次调用仍要走一遍参数校验，逐 draw 累起来不划算。 */
 	void OpenGLRenderAPI::ApplyRasterState(RenderRasterState raster_state)
 	{
 		PROFILE_FUNCTION();
 
+		const bool first = !m_HasAppliedRasterState;
+		const RenderRasterState& applied = m_AppliedRasterState;
+
 		/* 设置CullMode */
-		switch (raster_state.CullMode)
+		if (first || applied.CullMode != raster_state.CullMode)
 		{
-		case CullMode::Cull_None:
-			glDisable(GL_CULL_FACE);
-			break;
-		case CullMode::Cull_Front:
-			glEnable(GL_CULL_FACE);
-			glCullFace(GL_FRONT);
-			break;
-		case CullMode::Cull_Back:
-			glEnable(GL_CULL_FACE);
-			glCullFace(GL_BACK);
-			break;
-		case CullMode::Cull_Front_And_Back:
-			glEnable(GL_CULL_FACE);
-			glCullFace(GL_FRONT_AND_BACK);
-			break;
+			switch (raster_state.CullMode)
+			{
+			case CullMode::Cull_None:
+				glDisable(GL_CULL_FACE);
+				break;
+			case CullMode::Cull_Front:
+				glEnable(GL_CULL_FACE);
+				glCullFace(GL_FRONT);
+				break;
+			case CullMode::Cull_Back:
+				glEnable(GL_CULL_FACE);
+				glCullFace(GL_BACK);
+				break;
+			case CullMode::Cull_Front_And_Back:
+				glEnable(GL_CULL_FACE);
+				glCullFace(GL_FRONT_AND_BACK);
+				break;
+			}
 		}
 
 		/* 设置正面顶点绕序方式 */
-		switch (raster_state.FrontFaceType)
+		if (first || applied.FrontFaceType != raster_state.FrontFaceType)
 		{
-		case FrontFaceType::CW:
-			glFrontFace(GL_CW);
-			break;
-		case FrontFaceType::CCW:
-			glFrontFace(GL_CCW);
-			break;
+			switch (raster_state.FrontFaceType)
+			{
+			case FrontFaceType::CW:
+				glFrontFace(GL_CW);
+				break;
+			case FrontFaceType::CCW:
+				glFrontFace(GL_CCW);
+				break;
+			}
 		}
 
 		/* 设置混合模式 */
-		if (raster_state.EnableBlend)
+		const bool blend_flag_changed = first || applied.EnableBlend != raster_state.EnableBlend;
+		if (blend_flag_changed)
 		{
-			glEnable(GL_BLEND);
+			if (raster_state.EnableBlend)
+				glEnable(GL_BLEND);
+			else
+				glDisable(GL_BLEND);
+		}
+
+		if (raster_state.EnableBlend &&
+			(blend_flag_changed ||
+			 applied.BlendEquationRGB != raster_state.BlendEquationRGB ||
+			 applied.BlendEquationA != raster_state.BlendEquationA ||
+			 applied.BlendFuncSrcRGB != raster_state.BlendFuncSrcRGB ||
+			 applied.BlendFuncSrcA != raster_state.BlendFuncSrcA ||
+			 applied.BlendFuncDstRGB != raster_state.BlendFuncDstRGB ||
+			 applied.BlendFuncDstA != raster_state.BlendFuncDstA))
+		{
 			glBlendEquationSeparate(
 				TranslateToOpenGLBlendEquation(raster_state.BlendEquationRGB),
 				TranslateToOpenGLBlendEquation(raster_state.BlendEquationA));
@@ -180,29 +205,39 @@ namespace Helios
 				TranslateToOpenGLBlendFunc(raster_state.BlendFuncSrcA), 
 				TranslateToOpenGLBlendFunc(raster_state.BlendFuncDstA));
 		}
-		else
-		{
-			glDisable(GL_BLEND);
-		}
 
 		/* 设置深度测试：测试与写入分开 —— 透明物体要测遮挡但不写深度 */
+		const bool depth_test_changed = first || applied.EnableDepthTest != raster_state.EnableDepthTest;
+		if (depth_test_changed)
+		{
+			if (raster_state.EnableDepthTest)
+				glEnable(GL_DEPTH_TEST);
+			else
+				glDisable(GL_DEPTH_TEST);
+		}
+
 		if (raster_state.EnableDepthTest)
 		{
-			glEnable(GL_DEPTH_TEST);
-			glDepthFunc(TranslateToOpenGLCompareFunc(raster_state.DepthCompareFunc));
-			glDepthMask(raster_state.EnableDepthWrite ? GL_TRUE : GL_FALSE);
-		}
-		else
-		{
-			glDisable(GL_DEPTH_TEST);
+			/* 重新开测试时比较方式和写掩码可能还停在关闭前那套，一并补上 */
+			if (depth_test_changed || applied.DepthCompareFunc != raster_state.DepthCompareFunc)
+				glDepthFunc(TranslateToOpenGLCompareFunc(raster_state.DepthCompareFunc));
+			if (depth_test_changed || applied.EnableDepthWrite != raster_state.EnableDepthWrite)
+				glDepthMask(raster_state.EnableDepthWrite ? GL_TRUE : GL_FALSE);
 		}
 
 		/* 设置颜色Mask */
-		glColorMask((GLboolean)raster_state.EnableColorWrite, (GLboolean)raster_state.EnableColorWrite, (GLboolean)raster_state.EnableColorWrite, (GLboolean)raster_state.EnableColorWrite);
+		if (first || applied.EnableColorWrite != raster_state.EnableColorWrite)
+		{
+			glColorMask((GLboolean)raster_state.EnableColorWrite, (GLboolean)raster_state.EnableColorWrite,
+				(GLboolean)raster_state.EnableColorWrite, (GLboolean)raster_state.EnableColorWrite);
+		}
 
 		/* 线框填充：三角形只画边（调试线框预览用；桌面 GL 独有，GLES 没有这个状态） */
-		glPolygonMode(GL_FRONT_AND_BACK, raster_state.Wireframe ? GL_LINE : GL_FILL);
+		if (first || applied.Wireframe != raster_state.Wireframe)
+			glPolygonMode(GL_FRONT_AND_BACK, raster_state.Wireframe ? GL_LINE : GL_FILL);
 
+		m_AppliedRasterState = raster_state;
+		m_HasAppliedRasterState = true;
 	}
 
 	void OpenGLRenderAPI::DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count, uint32_t index_offset)

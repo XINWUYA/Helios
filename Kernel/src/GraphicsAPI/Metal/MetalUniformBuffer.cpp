@@ -6,6 +6,70 @@
 
 namespace Helios
 {
+    namespace
+    {
+        /* 每帧一段：按 256 字节对齐，够 8000 多个物体块 + 材质块 */
+        constexpr uint32_t kUniformRingSliceSize = 2 * 1024 * 1024;
+        constexpr uint32_t kUniformRingAlignment = 256;
+    }
+
+    MetalUniformRing::~MetalUniformRing()
+    {
+        if (m_Buffer)
+        {
+            m_Buffer->release();
+            m_Buffer = nullptr;
+        }
+    }
+
+    MetalUniformRing& MetalUniformRing::Instance()
+    {
+        static MetalUniformRing instance;
+        return instance;
+    }
+
+    void MetalUniformRing::EnsureFrame()
+    {
+        const uint32_t frame_index = MetalRuntime::FrameIndex();
+        if (frame_index == m_FrameIndex)
+            return;
+
+        m_FrameIndex = frame_index;
+        m_Cursor = 0;
+
+        if (m_Buffer != nullptr)
+            return;
+
+        MTL::Device* device = MetalRuntime::Device();
+        if (!device)
+            return;
+
+        m_SliceSize = kUniformRingSliceSize;
+        m_Buffer = device->newBuffer(
+            static_cast<NS::UInteger>(m_SliceSize) * MetalConfig::MaxFramesInFlight,
+            MetalStorage::UniformBufferOptions);
+        if (!m_Buffer)
+        {
+            CORE_LOG_ERROR("MetalUniformRing: failed to allocate {} bytes", m_SliceSize * MetalConfig::MaxFramesInFlight);
+            m_SliceSize = 0;
+        }
+    }
+
+    bool MetalUniformRing::Allocate(uint32_t size, uint32_t& out_offset)
+    {
+        EnsureFrame();
+        if (!m_Buffer || size == 0)
+            return false;
+
+        const uint32_t aligned = (size + kUniformRingAlignment - 1) / kUniformRingAlignment * kUniformRingAlignment;
+        if (m_Cursor + aligned > m_SliceSize)
+            return false;
+
+        out_offset = MetalRuntime::FrameIndex() * m_SliceSize + m_Cursor;
+        m_Cursor += aligned;
+        return true;
+    }
+
     MetalUniformBuffer::MetalUniformBuffer(uint32_t size, uint32_t binding_point)
         : m_Size(size), m_BindingPoint(binding_point)
     {
@@ -77,6 +141,7 @@ namespace Helios
         /* 只更新 CPU 影子数据：设备端数据在 Bind 时按绘制/按帧落位，
          * 避免同帧内多次写入互相覆盖。 */
         memcpy(m_Shadow.data() + offset, data, size);
+        m_Dirty = true;
     }
 
     void MetalUniformBuffer::Bind()
@@ -87,25 +152,44 @@ namespace Helios
         if (!encoder)
             return;
 
-        if (m_UseInlineBytes)
+        /* 同一个编码器里绑过一次、数据也没改，就不用再绑：绑定在编码器上一直有效 */
+        const uint32_t generation = MetalRuntime::EncoderGeneration();
+        if (!m_Dirty && m_BoundGeneration == generation)
+            return;
+
+        /* 优先走环形缓冲：数据不拷进命令缓冲，只绑一块大缓冲加偏移 */
+        uint32_t ring_offset = 0;
+        if (MetalUniformRing::Instance().Allocate(m_Size, ring_offset))
+        {
+            MTL::Buffer* ring_buffer = MetalUniformRing::Instance().GetBuffer();
+            memcpy(static_cast<uint8_t*>(ring_buffer->contents()) + ring_offset, m_Shadow.data(), m_Size);
+
+            encoder->setVertexBuffer(ring_buffer, ring_offset, m_MetalBufferIndex);
+            encoder->setFragmentBuffer(ring_buffer, ring_offset, m_MetalBufferIndex);
+        }
+        else if (m_UseInlineBytes)
         {
             /* setBytes 把数据拷贝进当前命令缓冲区，每次绘制的数据互不干扰，
              * 可安全覆写 CPU 端影子数据。 */
             encoder->setVertexBytes(m_Shadow.data(), m_Size, m_MetalBufferIndex);
             encoder->setFragmentBytes(m_Shadow.data(), m_Size, m_MetalBufferIndex);
-            return;
+        }
+        else
+        {
+            if (!m_Buffer)
+                return;
+
+            /* 绑定当前帧对应的切片；帧数上限由 drawable 数量保证，
+             * 该切片对应的命令缓冲区已执行完毕。 */
+            const uint32_t offset = MetalRuntime::FrameIndex() * m_SliceSize;
+            memcpy(static_cast<uint8_t*>(m_Buffer->contents()) + offset, m_Shadow.data(), m_Size);
+
+            encoder->setVertexBuffer(m_Buffer, offset, m_MetalBufferIndex);
+            encoder->setFragmentBuffer(m_Buffer, offset, m_MetalBufferIndex);
         }
 
-        if (!m_Buffer)
-            return;
-
-        /* 绑定当前帧对应的切片；帧数上限由 drawable 数量保证，
-         * 该切片对应的命令缓冲区已执行完毕。 */
-        const uint32_t offset = MetalRuntime::FrameIndex() * m_SliceSize;
-        memcpy(static_cast<uint8_t*>(m_Buffer->contents()) + offset, m_Shadow.data(), m_Size);
-
-        encoder->setVertexBuffer(m_Buffer, offset, m_MetalBufferIndex);
-        encoder->setFragmentBuffer(m_Buffer, offset, m_MetalBufferIndex);
+        m_BoundGeneration = generation;
+        m_Dirty = false;
     }
 }
 

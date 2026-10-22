@@ -61,5 +61,10 @@ namespace Helios
 		 * cull face 等状态差异不会触发驱动重新编译着色器 */
 		bool m_IsLinked{ false };
 		void LazyLink();
+
+		/* uniform 位置缓存：名字 → location。材质每帧按名重写全部参数，
+		 * 每次都让驱动按字符串查一遍太浪费；-1 也缓存，省掉反复的空查找。 */
+		GLint FindUniformLocation(const std::string& name);
+		std::unordered_map<std::string, GLint> m_UniformLocationCache;
 	};
 }

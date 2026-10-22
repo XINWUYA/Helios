@@ -8,9 +8,34 @@
 
 namespace Helios
 {
-    /* uniform 缓冲区的写入和绑定策略：不超过 MaxInlineBytes 的数据走 setVertexBytes /
-     * setFragmentBytes、随命令缓冲区拷贝、按绘制隔离；超过上限就用按帧切片的 MTLBuffer。
-     * 两条路径都由 Bind() 统一处理。 */
+    /* 每帧一段的常量环形缓冲：uniform 数据先写进这一大块，绘制时只传偏移。
+     * 直接 setBytes 是把数据拷进命令缓冲，逐 draw 拷一遍白占带宽。 */
+    class MetalUniformRing
+    {
+    public:
+        ~MetalUniformRing();
+
+        static MetalUniformRing& Instance();
+
+        /* 要一段对齐的空间；这一帧写满时返回 false，调用方回退到 setBytes */
+        bool Allocate(uint32_t size, uint32_t& out_offset);
+
+        [[nodiscard]] MTL::Buffer* GetBuffer() const { return m_Buffer; }
+
+    private:
+        MetalUniformRing() = default;
+
+        /* 换帧就把游标归零；缓冲在第一次用到时分配 */
+        void EnsureFrame();
+
+        MTL::Buffer* m_Buffer{ nullptr };
+        uint32_t m_SliceSize{ 0 };  /* 每帧可用字节数 */
+        uint32_t m_Cursor{ 0 };     /* 当前帧已用字节数 */
+        uint32_t m_FrameIndex{ 0xFFFFFFFFu };
+    };
+
+    /* uniform 缓冲区的写入和绑定策略：数据写进按帧切片的环形缓冲，绑定只带偏移；
+     * 环形缓冲写满或设备不可用时退回 setBytes 或独立缓冲，三条路径都由 Bind() 处理。 */
     class MetalUniformBuffer : public DeviceUniformBuffer
     {
     public:
@@ -39,6 +64,10 @@ namespace Helios
         uint32_t m_MetalBufferIndex{ 0 };       /* 映射后的 MSL buffer 索引 */
         uint32_t m_SliceSize{ 0 };              /* 单帧切片大小（对齐后） */
         bool m_UseInlineBytes{ true };          /* 是否走 setBytes 快速路径 */
+        /* 数据没改、又在同一个编码器里，就没有再下发的必要：视图 / 光照这类
+         * 整帧不变的块每个绘制都重传一次纯属浪费。 */
+        bool m_Dirty{ true };
+        uint32_t m_BoundGeneration{ 0 };        /* 上次下发的编码器世代号 */
     };
 }
 

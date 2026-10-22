@@ -74,6 +74,11 @@ namespace Helios
 		uint32_t m_ComputeParamBuffer{ 0 };
 		uint32_t m_ComputeParamBufferSize{ 0 };
 
+		/* GL 是单线程状态机，记一份已下发的光栅状态就够：重复的设置直接跳过。
+		 * 视口与裁剪框的 applied 记录收在 RenderAPI 基类，两个后端共用。 */
+		RenderRasterState m_AppliedRasterState;
+		bool m_HasAppliedRasterState{ false };
+
 		/* 扩展支持标记 */
 		struct
 		{
