@@ -16,6 +16,41 @@
 
 namespace Helios
 {
+	namespace
+	{
+		/* 当前激活的纹理单元与各单元绑了什么：同单元同纹理不再重复下发。
+		 * 所有 glBindTexture / glActiveTexture 都走下面两个函数，缓存才不会和真实状态脱节。 */
+		uint32_t g_ActiveTextureUnit = 0;
+		bool g_CubeMapSeamless = false;
+
+		struct BoundTexture
+		{
+			GLenum Target{ 0 };
+			GLuint Texture{ 0 };
+		};
+		std::unordered_map<uint32_t, BoundTexture> g_BoundTextures;
+
+		void ActiveTexture(uint32_t slot)
+		{
+			if (g_ActiveTextureUnit == slot)
+				return;
+
+			glActiveTexture(GL_TEXTURE0 + slot);
+			g_ActiveTextureUnit = slot;
+		}
+
+		void BindTexture(GLenum target, GLuint texture)
+		{
+			BoundTexture& bound = g_BoundTextures[g_ActiveTextureUnit];
+			if (bound.Target == target && bound.Texture == texture)
+				return;
+
+			glBindTexture(target, texture);
+			bound.Target = target;
+			bound.Texture = texture;
+		}
+	}
+
 	OpenGLTexture::OpenGLTexture(const std::string& name, const TextureDesc& texture_desc)
 		: DeviceTexture(name, texture_desc), m_InternalFormat(TranslateToOpenGLTextureFormat(texture_desc.Format))
 	{
@@ -43,8 +78,8 @@ namespace Helios
 
 			/* 创建纹理 */
 			glGenTextures(1, &m_TextureId);
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(m_TextureTarget, m_TextureId);
+			ActiveTexture(0);
+			BindTexture(m_TextureTarget, m_TextureId);
 #ifdef HELIOS_DEBUG
 			glObjectLabel(GL_TEXTURE, m_TextureId, -1, name.c_str());
 #endif
@@ -249,7 +284,7 @@ namespace Helios
 					ASSERT(m_InternalFormat & data_format, "Format not supported!");
 
 					glGenTextures(1, &m_TextureId);
-					glBindTexture(m_TextureTarget, m_TextureId);
+					BindTexture(m_TextureTarget, m_TextureId);
 					glTexImage2D(m_TextureTarget, 0, m_InternalFormat, width, height, 0, data_format, pixel_type, data);
 
 					if (load_config.IsGenMips)
@@ -325,6 +360,10 @@ namespace Helios
 			ASSERT(m_TextureTarget == GL_RENDERBUFFER);
 			glDeleteRenderbuffers(1, &m_TextureId);
 		}
+
+		/* 纹理 id 会被复用，缓存里记着同 id 的单元必须清掉，否则下次绑新纹理会误跳过 */
+		for (auto it = g_BoundTextures.begin(); it != g_BoundTextures.end();)
+			it = (it->second.Texture == m_TextureId) ? g_BoundTextures.erase(it) : std::next(it);
 	}
 
 	bool OpenGLTexture::Reload()
@@ -356,19 +395,22 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		glActiveTexture(GL_TEXTURE0 + slot);
-		glBindTexture(m_TextureTarget, m_TextureId);
+		ActiveTexture(slot);
+		BindTexture(m_TextureTarget, m_TextureId);
 
 		/* 检测到 cubemap 时自动开启无缝采样，消除面边界处的线性过滤缝隙 */
-		if (m_TextureTarget == GL_TEXTURE_CUBE_MAP)
+		if (m_TextureTarget == GL_TEXTURE_CUBE_MAP && !g_CubeMapSeamless)
+		{
 			glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+			g_CubeMapSeamless = true;
+		}
 	}
 	/* 解绑纹理 */
 	void OpenGLTexture::Unbind()
 	{
 		PROFILE_FUNCTION();
 
-		glBindTexture(m_TextureTarget, 0);
+		BindTexture(m_TextureTarget, 0);
 	}
 
 	/* 生成 mipmap */
@@ -378,7 +420,7 @@ namespace Helios
 
 		/* glGenerateMipmap 作用于"当前绑定在该 target 上的纹理"，因此必须先绑定自身：
 		 * 帧内被 RenderAPI::GenerateMipmap 调用时，当前绑定的很可能是别的纹理。 */
-		glBindTexture(m_TextureTarget, m_TextureId);
+		BindTexture(m_TextureTarget, m_TextureId);
 		glGenerateMipmap(m_TextureTarget);
 	}
 
@@ -386,7 +428,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		glBindTexture(m_TextureTarget, m_TextureId);
+		BindTexture(m_TextureTarget, m_TextureId);
 
 		/* 尺寸按该 mip 层的边长取（用 mip0 的尺寸会越界，GL 报错后数据被丢弃）；
 		 * 区域起点由调用方指定，尺寸取该层剩余部分，整层上传时 offset 为 0 */
@@ -496,7 +538,7 @@ namespace Helios
 
 		out_data.resize(static_cast<size_t>(level_width) * level_height * texel_size);
 
-		glBindTexture(m_TextureTarget, m_TextureId);
+		BindTexture(m_TextureTarget, m_TextureId);
 		glGetTexImage(read_target, static_cast<GLint>(mip_level), read_format, read_type, out_data.data());
 
 		CHECK_GL_ERROR;

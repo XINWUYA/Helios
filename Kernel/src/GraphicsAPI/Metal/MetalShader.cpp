@@ -373,6 +373,7 @@ namespace Helios
             ShaderCompiler::ShaderStage::Fragment, ShaderCompiler::ShaderTarget::Metal, m_DebugName);
 
         m_Reflection.Clear();
+        m_TextureStageMasks.clear();
         ReflectFromGLSLSource(vertex_src);
         ReflectFromGLSLSource(fragment_src);
         ReflectVertexAttributes(vertex_src);
@@ -604,7 +605,7 @@ namespace Helios
             return;
 
         ExtractMaterialBlocks(msl_source, is_vertex_stage);
-        ExtractTextureAndSamplerBindings(msl_source);
+        ExtractTextureAndSamplerBindings(msl_source, is_vertex_stage);
     }
 
     void MetalShader::ExtractMaterialBlocks(const std::string& msl_source, bool is_vertex_stage)
@@ -704,13 +705,17 @@ namespace Helios
         }
     }
 
-    void MetalShader::ExtractTextureAndSamplerBindings(const std::string& msl_source)
+    void MetalShader::ExtractTextureAndSamplerBindings(const std::string& msl_source, bool is_vertex_stage)
     {
+        const uint8_t stage = is_vertex_stage
+            ? ShaderReflectionData::StageVertex : ShaderReflectionData::StageFragment;
+
         for (auto it = std::sregex_iterator(msl_source.begin(), msl_source.end(), GetTextureRegex());
              it != std::sregex_iterator(); ++it)
         {
-            m_Reflection.SamplerBindings[(*it)[1].str()] =
-                static_cast<uint32_t>(std::stoul((*it)[2].str()));
+            const std::string name = (*it)[1].str();
+            m_Reflection.SamplerBindings[name] = static_cast<uint32_t>(std::stoul((*it)[2].str()));
+            m_Reflection.SamplerStages[name] |= stage;
         }
 
         const std::string suffix = kSamplerSuffix;
@@ -720,6 +725,7 @@ namespace Helios
             const std::string name = (*it)[1].str();
             const uint32_t index = static_cast<uint32_t>(std::stoul((*it)[2].str()));
             m_Reflection.SamplerStateBindings[name] = index;
+            m_Reflection.SamplerStages[name] |= stage;
 
             /* SPIRV-Cross 把 `sampler2D u_X` 生成为 `texture2d u_X` + `sampler u_XSmplr`，
              * 这里把分离出的采样器名映射回 GLSL 组合采样器名，使材质按原始名字
@@ -733,8 +739,29 @@ namespace Helios
                 {
                     m_Reflection.SamplerStateBindings[glsl_name] = index;
                 }
+                m_Reflection.SamplerStages[glsl_name] |= stage;
             }
         }
+    }
+
+    uint8_t MetalShader::GetTextureStageMask(uint32_t slot)
+    {
+        const auto cached = m_TextureStageMasks.find(slot);
+        if (cached != m_TextureStageMasks.end())
+            return cached->second;
+
+        uint8_t mask = ShaderReflectionData::StageAll;
+        for (const auto& [name, binding] : m_Reflection.SamplerBindings)
+        {
+            if (binding != slot)
+                continue;
+
+            mask = m_Reflection.FindSamplerStageMask(name);
+            break;
+        }
+
+        m_TextureStageMasks[slot] = mask;
+        return mask;
     }
 
     MetalShader::MaterialBlock* MetalShader::FindMaterialMember(const std::string& name,

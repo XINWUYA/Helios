@@ -4,6 +4,7 @@
 #include "MetalTexture.h"
 #include "MetalCommon.h"
 #include "MetalConversions.h"
+#include "MetalShader.h"
 #include "Helios/Core/TextureSettings.h"
 #include "stb_image.h"
 
@@ -65,19 +66,28 @@ namespace Helios
         if (!encoder)
             return;
 
-        /* 顶点与片元阶段都绑定：顶点纹理拾取（如高程采样）同样需要 */
+        /* 只绑真正采样它的阶段：Metal 的顶点 / 片元参数表分开，两边都发就是双倍指令。
+         * 查不到阶段信息时按两边都绑，宁多不漏。 */
+        uint8_t stage_mask = ShaderReflectionData::StageAll;
+        if (MetalShader* shader = MetalRuntime::BoundShader())
+            stage_mask = shader->GetTextureStageMask(slot);
+
         if (m_Texture)
         {
-            encoder->setVertexTexture(m_Texture, slot);
-            encoder->setFragmentTexture(m_Texture, slot);
+            if (stage_mask & ShaderReflectionData::StageVertex)
+                encoder->setVertexTexture(m_Texture, slot);
+            if (stage_mask & ShaderReflectionData::StageFragment)
+                encoder->setFragmentTexture(m_Texture, slot);
         }
 
         /* 采样器与纹理使用同一槽位：ShaderCompiler 生成 MSL 时为 combined
          * image sampler 同时输出 [[texture(N)]] 与 [[sampler(N)]]，二者索引相同。 */
         if (m_SamplerState)
         {
-            encoder->setVertexSamplerState(m_SamplerState, slot);
-            encoder->setFragmentSamplerState(m_SamplerState, slot);
+            if (stage_mask & ShaderReflectionData::StageVertex)
+                encoder->setVertexSamplerState(m_SamplerState, slot);
+            if (stage_mask & ShaderReflectionData::StageFragment)
+                encoder->setFragmentSamplerState(m_SamplerState, slot);
         }
     }
 
@@ -110,6 +120,8 @@ namespace Helios
             command_buffer->release();
             return;
         }
+
+        SetMetalEncoderLabel(blit_encoder, "GenerateMipmap");
 
         blit_encoder->generateMipmaps(m_Texture);
         blit_encoder->endEncoding();
@@ -306,6 +318,8 @@ namespace Helios
             CORE_LOG_ERROR("MetalTexture::ReadbackPixels: failed to create blit encoder");
             return false;
         }
+
+        SetMetalEncoderLabel(blit_encoder, "ReadbackPixels");
 
         blit_encoder->copyFromTexture(m_Texture, read_slice, mip_level,
             MTL::Origin(0, 0, 0), MTL::Size(level_width, level_height, 1),

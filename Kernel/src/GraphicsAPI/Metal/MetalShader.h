@@ -66,6 +66,9 @@ namespace Helios
          * 独立缓冲区。 */
         void CommitMaterialUniforms(MTL::RenderCommandEncoder* encoder);
 
+        /* 这张贴图被哪些阶段采样（按槽位反查，结果缓存）。查不到时按两个阶段都绑。 */
+        uint8_t GetTextureStageMask(uint32_t slot);
+
         /* 计算着色器（#type compute）：惰性建管线，线程组尺寸从 local_size_x 读 */
         MTL::ComputePipelineState* GetComputePipelineState();
         [[nodiscard]] bool IsCompute() const override { return m_IsCompute; }
@@ -102,7 +105,7 @@ namespace Helios
         /* 从 MSL 中解析材质参数块与纹理/采样器槽位 */
         void ParseShaderResources(const std::string& msl_source, bool is_vertex_stage);
         void ExtractMaterialBlocks(const std::string& msl_source, bool is_vertex_stage);
-        void ExtractTextureAndSamplerBindings(const std::string& msl_source);
+        void ExtractTextureAndSamplerBindings(const std::string& msl_source, bool is_vertex_stage);
 
         bool EnsureShaderLibraries();
         MTL::RenderPipelineState* GetOrCreatePipelineState(const MetalPipelineDesc& desc);
@@ -129,6 +132,9 @@ namespace Helios
 
         /* 材质参数块：顶点阶段与片元阶段各可能有一块 */
         std::vector<MaterialBlock> m_MaterialBlocks;
+
+        /* 纹理槽位 → 使用阶段掩码（首次查询时算好） */
+        std::unordered_map<uint32_t, uint8_t> m_TextureStageMasks;
 
         /* GLSL 裸 uniform 的默认初始值（名字 → 按 MSL 布局序列化的字节）。
          * MSL 的 constant 结构体成员不支持初始化器，跨编译后源码默认值会丢失，

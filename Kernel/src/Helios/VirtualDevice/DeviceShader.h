@@ -48,10 +48,17 @@ namespace Helios
 	/* Shader反射数据：从Shader中`layout(binding = X) uniform sampler2D u_xxx; ` 反射出真实的绑定点  */
 	struct ShaderReflectionData
 	{
+		/* 采样器被哪些阶段使用（位掩码）：Metal 的顶点 / 片元参数表分开，只往用到的阶段绑 */
+		static constexpr uint8_t StageVertex = 1u;
+		static constexpr uint8_t StageFragment = 2u;
+		static constexpr uint8_t StageAll = StageVertex | StageFragment;
+
 		/* Sampler变量名->binding */
 		std::unordered_map<std::string, uint32_t> SamplerBindings{};
 		/* Sampler变量名->MetalSamplerState索引（[[sampler(N)]]），仅Metal后端使用 */
 		std::unordered_map<std::string, uint32_t> SamplerStateBindings{};
+		/* Sampler变量名->使用阶段掩码（StageVertex / StageFragment 的或）。查不到按两个阶段都绑 */
+		std::unordered_map<std::string, uint8_t> SamplerStages{};
 		/* 反射到的全部材质候选参数（声明顺序）：采样器（Texture）+ 裸 uniform（int/float/vec2-4/mat4）。
 		 * 只有带 @property 标记的才归材质（见 ReflectedMaterialParam::Property），其余是引擎逐绘制
 		 * 给的值或库内部声明。空 = 拿不到声明的场合（如 SPIR-V 反射路径），调用方自行回退。 */
@@ -66,9 +73,16 @@ namespace Helios
 		{
 			SamplerBindings.clear();
 			SamplerStateBindings.clear();
+			SamplerStages.clear();
 			MaterialParams.clear();
 			UniformBlockBindings.clear();
 			VertexAttributeLocations.clear();
+		}
+
+		[[nodiscard]] uint8_t FindSamplerStageMask(const std::string& name) const
+		{
+			const auto it = SamplerStages.find(name);
+			return it == SamplerStages.end() ? StageAll : it->second;
 		}
 
 		[[nodiscard]] int FindSamplerBinding(const std::string& name) const

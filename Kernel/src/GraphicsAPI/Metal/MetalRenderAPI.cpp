@@ -353,6 +353,14 @@ namespace Helios
         m_AppliedRasterStateHash = state_hash;
     }
 
+    void MetalRenderAPI::SetBoundShader(MetalShader* shader)
+    {
+        m_BoundShader = shader;
+
+        /* 纹理绑定（MetalTexture）拿不到 RenderAPI，按运行时上下文里这份查阶段掩码 */
+        MetalRuntime::SetBoundShader(shader);
+    }
+
     MetalPipelineDesc MetalRenderAPI::BuildPipelineDesc(uint64_t vertex_layout_hash) const
     {
         MetalPipelineDesc desc;
