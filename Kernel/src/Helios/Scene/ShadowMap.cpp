@@ -203,21 +203,13 @@ namespace Helios
 		if (cam_far <= cam_near)
 			cam_far = cam_near + 1.0f;
 
-		std::vector<float> split_dist(cascade_cnt + 1);
-		split_dist[0] = cam_near;
-		for (uint8_t i = 1; i <= cascade_cnt; ++i)
-		{
-			const float f = static_cast<float>(i) / static_cast<float>(cascade_cnt);
-			const float log_split = cam_near * std::pow(cam_far / cam_near, f);
-			const float uni_split = cam_near + (cam_far - cam_near) * f;
-			split_dist[i] = lambda * log_split + (1.0f - lambda) * uni_split;
-		}
-
 		/* 收集场景几何体在光照空间的 AABB（每个 MeshSegment 一个）。级联的深度板不能只看相机
 		 * 子视锥：空气和近相机那一段会把 z 跨度撑大，深度图偏黑、精度变差；所以要按"与该级联 xy
-		 * 相交的几何体"来拟合 near / far。 */
+		 * 相交的几何体"来拟合 near / far。顺带记下几何在视线方向的深度区间，分割按它取界。 */
 		struct LightSpaceBounds { glm::vec3 Min; glm::vec3 Max; };
 		std::vector<LightSpaceBounds> caster_bounds;
+		float scene_near = std::numeric_limits<float>::max();
+		float scene_far = -std::numeric_limits<float>::max();
 		if (mesh_objects)
 		{
 			caster_bounds.reserve(mesh_objects->size());
@@ -246,9 +238,36 @@ namespace Helios
 					const glm::vec3 ls_corner = glm::vec3(light_view_mat * glm::vec4(world_corner, 1.0f));
 					bounds.Min = glm::min(bounds.Min, ls_corner);
 					bounds.Max = glm::max(bounds.Max, ls_corner);
+
+					/* 深度是线性函数，极值必在角点上 */
+					const float depth = -(view_mat * glm::vec4(world_corner, 1.0f)).z;
+					scene_near = std::min(scene_near, depth);
+					scene_far = std::max(scene_far, depth);
 				}
 				caster_bounds.emplace_back(bounds);
 			}
+		}
+
+		/* 分割区间贴着可见几何的实际深度：相机离场景很远时起点后移到最近几何，级联不会整段
+		 * 落在空气里；相机 far 或 ShadowFar 比场景大很多时终点也收回来，免得盒子摊到上千单位、
+		 * 物体在阴影图里只剩几个像素。几何全在阴影距离外或没有几何时，退回相机区间。 */
+		float range_near = cam_near;
+		float range_far = cam_far;
+		if (scene_near <= scene_far && scene_near < cam_far)
+		{
+			range_near = std::min(std::max(scene_near, cam_near), cam_far);
+			range_far = std::min(std::max(scene_far, range_near), cam_far);
+		}
+
+		std::vector<float> split_dist(cascade_cnt + 1);
+		range_near = std::max(range_near, 1e-3f); // 对数分割要除以起点
+		split_dist[0] = range_near;
+		for (uint8_t i = 1; i <= cascade_cnt; ++i)
+		{
+			const float f = static_cast<float>(i) / static_cast<float>(cascade_cnt);
+			const float log_split = range_near * std::pow(range_far / range_near, f);
+			const float uni_split = range_near + (range_far - range_near) * f;
+			split_dist[i] = lambda * log_split + (1.0f - lambda) * uni_split;
 		}
 
 		// 相机世界矩阵（用于把视图空间子视锥角点变换回世界空间）；view_mat 已在脏检测处获取
@@ -273,9 +292,9 @@ namespace Helios
 
 			/* 近端往回让出上一段的过渡带：采样端会在上一段 split 前 band 宽的范围里混采本级联，
 			 * 这段接收面必须落在本级的正交盒内（xy 与深度都要）。 */
-			const float prev_near = (cascade_id > 0) ? split_dist[cascade_id - 1] : cam_near;
+			const float prev_near = (cascade_id > 0) ? split_dist[cascade_id - 1] : range_near;
 			const float blend_band = (seg_near - prev_near) * kCascadeBlendRatio;
-			const float fit_near = std::max(seg_near - blend_band, cam_near);
+			const float fit_near = std::max(seg_near - blend_band, range_near);
 
 			// 子视锥在视图空间（相机看向 -Z）的 8 个角点
 			const float half_h_near = fit_near * tan_half_fov;
