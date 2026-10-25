@@ -96,6 +96,19 @@ namespace Helios
 			return target;
 		}
 
+		/* 导入工作区（Assets/Cache）里的引用只对这次编辑有效，导出时不能跟着写进清单 */
+		bool IsScratchAssetPath(const std::string& asset_path)
+		{
+			if (asset_path.empty())
+				return false;
+
+			std::error_code error;
+			const std::filesystem::path relative =
+				std::filesystem::relative(PathFromUtf8(asset_path), g_AssetsPath / "Cache", error);
+			return !error && !relative.empty()
+				&& relative.native().rfind(std::filesystem::path("..").native(), 0) != 0;
+		}
+
 		/* 模型预览网格的格距：视线里约 6 格为目标，取 1/2/5 序列里最近的一档
 		 * （格距与补丁半径同乘缩放，淡出范围跟着走 —— 见 EditorCamera::SetPreviewGrid） */
 		float ChoosePreviewGridScale(float model_radius)
@@ -1233,6 +1246,11 @@ namespace Helios
 			{
 				asset_path = slot.SourcePath;
 			}
+
+			/* 交换格式导入的材质先落在工作区：里面是目标目录该有的那份材质，
+			 * 导出时按内嵌重写，别让清单指回 Cache */
+			if (IsScratchAssetPath(asset_path))
+				asset_path.clear();
 
 			if (asset_path.empty())
 			{

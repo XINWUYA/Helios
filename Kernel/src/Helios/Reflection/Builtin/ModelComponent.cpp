@@ -326,7 +326,7 @@ namespace Helios
 				}
 			}
 
-			/* 模型引用输入框：只读展示模型名，拖放 .mesh 直接落在输入框上；
+			/* 模型引用输入框：只读展示模型名，拖放 .mesh / .model 直接落在输入框上；
 			 * 完整路径在 tooltip 里给出（输入框只放名字，长路径不进布局） */
 			const float value_width = ImGuiExt::BeginPropertyRow("Model");
 			const float frame_height = ImGui::GetFrameHeight();
@@ -338,15 +338,15 @@ namespace Helios
 				? std::max(1.0f, value_width - clear_width - gap)
 				: value_width;
 
-			DrawRefInputBox("##ModelRef", model_name, target_width, "Drop .mesh here");
+			DrawRefInputBox("##ModelRef", model_name, target_width, "Drop .mesh / .model here");
 
 			if (ImGui::IsItemHovered())
 			{
 				if (model != nullptr)
-					ImGui::SetTooltip("%s\n\nDrag a .mesh asset from the Resource Browser to assign or replace the model",
+					ImGui::SetTooltip("%s\n\nDrag a .mesh or .model asset from the Resource Browser to assign or replace the model",
 						model_path.c_str());
 				else
-					ImGui::SetTooltip("Drag a .mesh asset from the Resource Browser to assign the model");
+					ImGui::SetTooltip("Drag a .mesh or .model asset from the Resource Browser to assign the model");
 			}
 
 			if (ImGui::BeginDragDropTarget())
@@ -361,7 +361,8 @@ namespace Helios
 						std::transform(extension.begin(), extension.end(), extension.begin(),
 							[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
 
-						if (extension == ".mesh")
+						/* .mesh 是纯几何，.model 是带材质槽的清单，两种都能直接挂 */
+						if (extension == ".mesh" || extension == ".model")
 						{
 							const std::string absolute_path = PathToUtf8(g_AssetsPath / relative_path);
 							if (model == nullptr || model->GetPath() != absolute_path)
