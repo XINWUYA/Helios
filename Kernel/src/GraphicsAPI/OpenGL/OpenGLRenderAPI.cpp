@@ -47,6 +47,9 @@ namespace Helios
 		{
 			if (saved.Buffer == 0)
 				glBindBufferBase(saved.Target, saved.Binding, 0);
+			/* glBindBufferRange 要求 size > 0，size 小于等于零即 GL_INVALID_VALUE */
+			else if (saved.Size <= 0)
+				glBindBufferBase(saved.Target, saved.Binding, saved.Buffer);
 			else
 				glBindBufferRange(saved.Target, saved.Binding, saved.Buffer,
 					static_cast<GLintptr>(saved.Offset), static_cast<GLsizeiptr>(saved.Size));

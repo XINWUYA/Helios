@@ -6,8 +6,8 @@ namespace Helios
 	class HELIOS_API DependencyGraph
 	{
 	public:
-		/* 节点 */
-		struct Node
+		/* 节点（嵌套类不继承外层类的导出属性，要单独标） */
+		struct HELIOS_API Node
 		{
 			std::string DebugName{ "Unnamed Node" };	/* 标记名 */
 			const uint32_t Index;							/* 节点索引，初始化之后就不再修改 */
@@ -32,8 +32,8 @@ namespace Helios
 			[[nodiscard]] virtual std::string GraphvizifyConnectionColor() const;
 		};
 
-		/* 连线 */
-		struct Connection
+		/* 连线（同上，嵌套类要单独标导出） */
+		struct HELIOS_API Connection
 		{
 			uint32_t FromNodeIdx{ 0 };						/* 连线的起点节点 */
 			uint32_t ToNodeIdx{ 0 };						/* 连线的终点节点 */

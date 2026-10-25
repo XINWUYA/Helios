@@ -1,12 +1,25 @@
 ﻿#include "Pch.h"
 #include "FileDialog.h"
 #include "Application.h"
-#include "GLFW/glfw3.h"
 
 #ifdef PLATFORM_WINDOWS
+/* windows.h 必须排在 glfw3.h 前面，否则两者对 APIENTRY 的定义会互相覆盖 */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+/* commdlg.h / shellapi.h 依赖 windows.h 里的基础类型与调用约定 */
 #include "commdlg.h"
 #include "shellapi.h"
 #include "Helios/Common/PathUtils.h"
+#endif
+
+#include "GLFW/glfw3.h"
+
+#ifdef PLATFORM_WINDOWS
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
 #elif defined(PLATFORM_MACOS)

@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 #include "Helios/Common/Common.h"
+#include "Helios/Common/Export.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 
 namespace Helios
@@ -75,7 +76,7 @@ namespace Helios
 	 * 线程安全: 所有对资源映射的读写均受内部互斥锁保护。
 	 * 失败(返回空指针)的创建不入缓存, 下次调用会重试。 */
 	template<typename AssetType, typename LoadConfig = NoConfig>
-	class HELIOS_API AssetStore
+	class HELIOS_TEMPLATE_API AssetStore
 	{
 	public:
 		/* 单例 */
@@ -211,7 +212,7 @@ namespace Helios
 		}
 
 		/* 贴图设置改完后按路径原地重载（材质持有的指针不变） */
-		HELIOS_API bool ReloadTexture(const std::string& path);
+		bool ReloadTexture(const std::string& path);
 
 	private:
 		AssetManager() = default;

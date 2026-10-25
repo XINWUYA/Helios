@@ -162,7 +162,7 @@ namespace Helios
 		std::vector<RenderQueryContext> m_QueryContexts;
 		uint8_t m_ReadContextId{ 0 };
 		uint8_t m_WriteContextId{ 1 };
-		bool m_IsEnabled{ true }; /* 是否启用GPU耗时统计 */
+		bool m_IsEnabled{ false }; /* 是否启用GPU耗时统计 */
 		GPUTimerRecorder m_Recorder{};
 
 	};

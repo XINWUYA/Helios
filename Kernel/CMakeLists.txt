@@ -161,6 +161,12 @@ if(WIN32)
     target_compile_definitions(Kernel PRIVATE PLATFORM_WINDOWS)
     # 让 Export.h 里的 HELIOS_API 展开成 dllexport（链接方看到的是 dllimport）
     target_compile_definitions(Kernel PRIVATE HELIOS_KERNEL_BUILD)
+    # stb_image 的实现编在 Kernel 里，它的默认 extern 在 DLL 上不导出符号，
+    # Editor 侧要按 dllimport 声明才能链到 Kernel.dll 里那一份
+    target_compile_definitions(Kernel
+        PRIVATE "STBIDEF=__declspec(dllexport)"
+        INTERFACE "STBIDEF=__declspec(dllimport)"
+    )
 elseif(APPLE)
     target_compile_definitions(Kernel PRIVATE PLATFORM_MACOS)
     # Files that need to be compiled as Objective-C++ on macOS

@@ -157,12 +157,7 @@ namespace Helios
         const uint32_t index_size = (m_IndexType == IndexType::UInt16) ? sizeof(uint16_t) : sizeof(uint32_t);
         m_Count = size / index_size;
     }
-}
 
-#endif /* PLATFORM_MACOS */
-
-namespace Helios
-{
     MetalStorageBuffer::MetalStorageBuffer(const std::string& name, const void* data, uint32_t size)
         : m_Size(size)
     {
@@ -203,3 +198,5 @@ namespace Helios
         return m_Buffer != nullptr ? m_Buffer->contents() : nullptr;
     }
 }
+
+#endif /* PLATFORM_MACOS */

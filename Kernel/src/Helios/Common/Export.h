@@ -17,6 +17,10 @@
 	#else
 		#define HELIOS_API __declspec(dllimport)
 	#endif
+	/* Windows 要求 dllexport 只标在模板的显式实例化定义上，标在类上与 extern template 冲突 */
+	#define HELIOS_TEMPLATE_API
 #else
 	#define HELIOS_API __attribute__((visibility("default")))
+	/* Clang 只认类模板上的可见性标注，标在实例化点上会被忽略 */
+	#define HELIOS_TEMPLATE_API HELIOS_API
 #endif

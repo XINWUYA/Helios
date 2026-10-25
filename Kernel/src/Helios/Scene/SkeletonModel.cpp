@@ -577,7 +577,9 @@ namespace Helios
 		std::vector<glm::mat4> palette = data.BuildPalette(joint_world);
 
 		/* 姿势没变就不重算顶点、也不重传缓冲；刚切换过 GPU/CPU 则强制重算一次 */
-		const bool gpu_active = m_GpuSkinningEnabled && IsGlobalGpuSkinningEnabled();
+		/* 后端的计算能力决定是否走 GPU：不支持就退回 CPU，别把顶点停在初始值上 */
+		const bool gpu_active = m_GpuSkinningEnabled && IsGlobalGpuSkinningEnabled()
+			&& Renderer::GetRenderAPI() != nullptr && Renderer::GetRenderAPI()->SupportsCompute();
 		if (PaletteEqual(palette, m_Palette) && gpu_active == m_LastGpuActive)
 			return;
 		m_LastGpuActive = gpu_active;
@@ -751,7 +753,9 @@ namespace Helios
 
 	void SkeletonModel::AddGpuSkinPass(RenderView& render_view)
 	{
-		if (!IsGlobalGpuSkinningEnabled() || Renderer::CurrentAPI() != RenderAPI::Metal)
+		/* 蒙皮 Pass 只在后端真能派发计算着色器时才注册；派发不成的后端由 Update 走 CPU 兜底 */
+		if (!IsGlobalGpuSkinningEnabled() || Renderer::GetRenderAPI() == nullptr
+			|| !Renderer::GetRenderAPI()->SupportsCompute())
 			return;
 
 		const SharedPtr<Scene> scene = render_view.GetOwnerScene();
