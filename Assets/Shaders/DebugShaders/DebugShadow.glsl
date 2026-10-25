@@ -8,7 +8,7 @@ struct SVextex2Frag
 };
 
 layout(location = 0) in vec4 a_Position;
-layout(location = 0) out SVextex2Frag vert2frag;
+out SVextex2Frag vert2frag;
 
 void main()
 {
@@ -32,7 +32,7 @@ struct SVextex2Frag
 	vec2 TexCoord;
 };
 
-layout(location = 0) in SVextex2Frag vert2frag;
+in SVextex2Frag vert2frag;
 
 /* rg：可见度 × 权重、权重。逐光源加法累加，合成端相除得到平均可见度
  * （见 DebugShaders/DebugView.glsl 的 Shadow 档） */

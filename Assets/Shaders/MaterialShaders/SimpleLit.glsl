@@ -16,7 +16,7 @@ struct SVextex2Frag
 	vec2 TexCoord;
 };
 
-layout(location = 0) out SVextex2Frag vert2frag;
+out SVextex2Frag vert2frag;
 
 void main()
 {
@@ -51,19 +51,18 @@ struct SVextex2Frag
 	vec2 TexCoord;
 };
 
-layout(location = 0) in SVextex2Frag vert2frag;
+in SVextex2Frag vert2frag;
 
 layout(location = 0) out vec4 OutFragColor;
 layout(location = 1) out float ObjectId;
 
-layout(binding = 0) uniform sampler2D u_AlbedoTexture; // @property
+uniform sampler2D u_AlbedoTexture; // @property
 
-/* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）；
- * 非 opaque uniform 必须显式 location（Windows 走 shaderc） */
-layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @property
+/* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移） */
+uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @property
 
 /* 不透明度乘数：透明队列的材质靠它整体调淡；不透明队列不混合，改了看不见 */
-layout(location = 1) uniform float u_Opacity = 1.0f; // @property
+uniform float u_Opacity = 1.0f; // @property
 
 void main()
 {

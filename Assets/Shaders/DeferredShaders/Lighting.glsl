@@ -7,7 +7,7 @@ struct SVextex2Frag
 };
 
 layout(location = 0) in vec4 a_Position;
-layout(location = 0) out SVextex2Frag vert2frag;
+out SVextex2Frag vert2frag;
 
 void main()
 {
@@ -35,34 +35,29 @@ struct SVextex2Frag
 };
 
 layout(location = 0) out vec4 OutFragColor;
-layout(location = 0) in SVextex2Frag vert2frag;
-
-/* 采样器绑定按功能分段：GBuffer 0..5、探针漫反射 7..9、探针镜面 10..12、BRDF LUT 13；
- * 阴影图 15（跨 Pass 统一收尾槽，声明在 ShadowUtils.glsl） */
+in SVextex2Frag vert2frag;
 
 /* 反射探针 IBL：烘焙结果绑固定采样器组 —— 采样器不能动态索引，按"逐像素选择"用
  * if 链取用；u_ProbeCount = 0 不做 IBL */
-layout(binding = 7)  uniform samplerCube u_IrradianceMap0;
-layout(binding = 8)  uniform samplerCube u_IrradianceMap1;
-layout(binding = 9)  uniform samplerCube u_IrradianceMap2;
-layout(binding = 10) uniform samplerCube u_PrefilterMap0;
-layout(binding = 11) uniform samplerCube u_PrefilterMap1;
-layout(binding = 12) uniform samplerCube u_PrefilterMap2;
-layout(binding = 13) uniform sampler2D   u_BRDFLut;
+uniform samplerCube u_IrradianceMap0;
+uniform samplerCube u_IrradianceMap1;
+uniform samplerCube u_IrradianceMap2;
+uniform samplerCube u_PrefilterMap0;
+uniform samplerCube u_PrefilterMap1;
+uniform samplerCube u_PrefilterMap2;
+uniform sampler2D   u_BRDFLut;
 
-/* 非 opaque uniform 必须显式 location（Windows 走 shaderc）：探针参数占 0..3，
- * 4 = u_ComposeAmbientEmission（DirectLight.glsl）、5/6 = 调试分流（DebugLighting.glsl）、
- * 7..9 = 探针盒体、10 = 混合开关 */
-layout(location = 0) uniform int  u_ProbeCount = 0;
-layout(location = 1) uniform vec3 u_ProbePosition0 = vec3(0.0f);
-layout(location = 2) uniform vec3 u_ProbePosition1 = vec3(0.0f);
-layout(location = 3) uniform vec3 u_ProbePosition2 = vec3(0.0f);
+/* 探针数量与位置 */
+uniform int  u_ProbeCount = 0;
+uniform vec3 u_ProbePosition0 = vec3(0.0f);
+uniform vec3 u_ProbePosition1 = vec3(0.0f);
+uniform vec3 u_ProbePosition2 = vec3(0.0f);
 /* 盒体参数：xyz = 半尺寸、w = 混合距离（0 = 该探针不做过渡） */
-layout(location = 7) uniform vec4 u_ProbeExtent0 = vec4(0.0f);
-layout(location = 8) uniform vec4 u_ProbeExtent1 = vec4(0.0f);
-layout(location = 9) uniform vec4 u_ProbeExtent2 = vec4(0.0f);
+uniform vec4 u_ProbeExtent0 = vec4(0.0f);
+uniform vec4 u_ProbeExtent1 = vec4(0.0f);
+uniform vec4 u_ProbeExtent2 = vec4(0.0f);
 /* 混合开关：0 = 没有探针配过渡，走旧的"距离最近"路径 */
-layout(location = 10) uniform int u_ProbeBlendEnabled = 0;
+uniform int u_ProbeBlendEnabled = 0;
 
 /* 探针选择的完整结果：混合路径输出 top2 的归一化权重 */
 struct SProbeSelection

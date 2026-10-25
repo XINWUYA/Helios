@@ -2,7 +2,7 @@
 #version 410 core
 
 layout(location = 0) in vec3 a_Position;
-layout(location = 0) out vec3 WorldPosition;
+out vec3 WorldPosition;
 
 void main()
 {
@@ -17,13 +17,13 @@ void main()
 #include "../Builtin/Math.glsl"
 #include "BakeCommon.glsl"
 
-layout(location = 0) in vec3 WorldPosition;
+in vec3 WorldPosition;
 layout(location = 0) out vec4 OutFragColor;
 
-layout(binding = 0) uniform samplerCube u_EnvironmentMap;
-layout(location = 0) uniform int u_FaceId;
+uniform samplerCube u_EnvironmentMap;
+uniform int u_FaceId;
 /* 源环境立方图的最大 mip 层级（= log2(面尺寸)），用于换算源 texel 的立体角 */
-layout(location = 1) uniform float u_EnvironmentMapMaxMip;
+uniform float u_EnvironmentMapMaxMip;
 
 void main()
 {

@@ -2,7 +2,7 @@
 #version 410 core
 
 layout(location = 0) in vec4 a_Position;
-layout(location = 0) out vec2 v_TexCoord;
+out vec2 v_TexCoord;
 
 void main()
 {
@@ -17,15 +17,15 @@ void main()
 #version 410 core
 
 layout(location = 0) out vec4 OutFragColor;
-layout(location = 0) in vec2 v_TexCoord;
+in vec2 v_TexCoord;
 
 /* 场景的实体 id 附件（与拾取同一张），空像素为 -1 */
-layout(binding = 0) uniform sampler2D u_ObjectId;
+uniform sampler2D u_ObjectId;
 /* 选中实体 id：描边只落在它外侧的一圈 */
-layout(location = 0) uniform int u_SelectedId;
-layout(location = 1) uniform vec4 u_OutlineColor;
+uniform int u_SelectedId;
+uniform vec4 u_OutlineColor;
 /* 描边宽度（像素），配合固定的采样半径 4 使用 */
-layout(location = 2) uniform float u_Thickness;
+uniform float u_Thickness;
 
 const int kKernelRadius = 4;
 

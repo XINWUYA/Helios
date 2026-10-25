@@ -8,7 +8,7 @@ struct SVextex2Frag
 };
 
 layout(location = 0) in vec4 a_Position;
-layout(location = 0) out SVextex2Frag vert2frag;
+out SVextex2Frag vert2frag;
 
 void main()
 {
@@ -29,21 +29,21 @@ struct SVextex2Frag
 	vec2 TexCoord;
 };
 
-layout(location = 0) in SVextex2Frag vert2frag;
+in SVextex2Frag vert2frag;
 layout(location = 0) out vec4 OutFragColor;
 
 /* Overdraw 计数纹理（DebugOverdraw.glsl 的加法累加结果）：只在 Overdraw 档有效，
  * 其余档位由 CPU 补黑 —— 声明的采样器每次绘制都必须有绑定 */
-layout(binding = 6) uniform sampler2D u_OverdrawTexture;
+uniform sampler2D u_OverdrawTexture;
 
 /* 阴影累加纹理（DebugShadow.glsl 的加法累加结果，rg = 可见度 × 权重、权重）：
  * 只在 Shadow 档有效，其余档位由 CPU 补黑 */
-layout(binding = 7) uniform sampler2D u_ShadowAccumTexture;
+uniform sampler2D u_ShadowAccumTexture;
 
 /* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
  * 本 shader 处理 Surface 档（延迟：G-Buffer 直读）、Shadow 档（多光源平均可见度）
  * 与 Overdraw 热力图 */
-layout(location = 0) uniform int u_DebugMode = 0;
+uniform int u_DebugMode = 0;
 
 const int kDebugAlbedo = 1;
 const int kDebugNormal = 2;

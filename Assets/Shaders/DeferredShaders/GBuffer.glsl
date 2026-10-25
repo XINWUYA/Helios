@@ -18,7 +18,7 @@ struct SVextex2Frag
 	vec3 Tangent;
 };
 
-layout (location = 0) out SVextex2Frag vert2frag;
+out SVextex2Frag vert2frag;
 
 void main()
 {
@@ -60,7 +60,7 @@ struct SVextex2Frag
 	vec3 Tangent;
 };
 
-layout (location = 0) in SVextex2Frag vert2frag;
+in SVextex2Frag vert2frag;
 
 void main()
 {

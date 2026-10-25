@@ -246,6 +246,18 @@ namespace Helios
                             texture = m_FontTexture.get();
                         }
 
+                        /* 深度纹理（阴影图 / GBuffer 深度等预览）必须按 depth2d 采样
+                         * （深度格式不能绑到 texture2d<float>，见 Overlay/ImGuiUIDepth.glsl 与
+                         * ShaderCompiler 的 @depth-texture 标注）：按纹理格式切着色器 */
+                        const bool is_depth = texture != nullptr
+                            && IsDepthFormat(texture->GetTextureDesc().Format);
+                        DeviceShader* wanted = (is_depth && m_UIDepthShader)
+                            ? m_UIDepthShader.get() : m_UIShader.get();
+
+                        /* 采样器槽位是自动分配的，按名字查 */
+                        const char* sampler_name = wanted == m_UIDepthShader.get() ? "u_DepthTexture" : "u_FontTexture";
+                        const int sampler_slot = wanted != nullptr ? std::max(wanted->GetUniformBinding(sampler_name), 0) : 0;
+
                         if (texture)
                         {
                             /* 诊断：纹理未成功创建（加载失败/对象失效）时绑定会静默失败，
@@ -265,21 +277,13 @@ namespace Helios
                                     frame_graph_image_names += texture->GetDebugName();
                                 }
                             }
-                            texture->Bind(0);
+                            texture->Bind(static_cast<uint32_t>(sampler_slot));
                         }
 
-                        /* 深度纹理（阴影图 / GBuffer 深度等预览）必须按 depth2d 采样
-                         * （深度格式不能绑到 texture2d<float>，见 Overlay/ImGuiUIDepth.glsl 与
-                         * ShaderCompiler 的 @depth-texture 标注）：按纹理格式切着色器 */
-                        const bool is_depth = texture != nullptr
-                            && IsDepthFormat(texture->GetTextureDesc().Format);
-                        DeviceShader* wanted = (is_depth && m_UIDepthShader)
-                            ? m_UIDepthShader.get() : m_UIShader.get();
                         if (wanted != nullptr && wanted != bound_shader)
                         {
                             wanted->Bind();
-                            if (wanted == m_UIDepthShader.get())
-                                wanted->SetInt("u_DepthTexture", 0);
+                            wanted->SetInt(sampler_name, sampler_slot);
                             bound_shader = wanted;
                         }
 

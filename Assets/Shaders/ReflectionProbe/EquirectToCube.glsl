@@ -2,7 +2,7 @@
 #version 410 core
 
 layout(location = 0) in vec3 a_Position;
-layout(location = 0) out vec3 WorldPosition;
+out vec3 WorldPosition;
 
 void main()
 {
@@ -17,11 +17,11 @@ void main()
 #include "../Builtin/Math.glsl"
 #include "BakeCommon.glsl"
 
-layout(location = 0) in vec3 WorldPosition;
+in vec3 WorldPosition;
 layout(location = 0) out vec4 OutFragColor;
 
-layout(binding = 0) uniform sampler2D u_EquirectangularMap;
-layout(location = 0) uniform int u_FaceId;
+uniform sampler2D u_EquirectangularMap;
+uniform int u_FaceId;
 
 /* 方向 → 等距柱状贴图 UV（水平经度环绕 360°、垂直按纬度的 asin 映射）。
  * 必须与 SkyBox.glsl 的 SampleSphericalMap 保持一致（改一处要同步另一处），

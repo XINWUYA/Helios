@@ -18,12 +18,12 @@ struct SGBufferData
 	float ReceiveShadow;
 };
 
-layout(binding = 0) uniform sampler2D u_GBufferTexture0;
-layout(binding = 1) uniform sampler2D u_GBufferTexture1;
-layout(binding = 2) uniform sampler2D u_GBufferTexture2;
-layout(binding = 3) uniform sampler2D u_GBufferTexture3;
-layout(binding = 4) uniform sampler2D u_GBufferTexture4;
-layout(binding = 5) uniform sampler2D u_GBufferTexture5;
+uniform sampler2D u_GBufferTexture0;
+uniform sampler2D u_GBufferTexture1;
+uniform sampler2D u_GBufferTexture2;
+uniform sampler2D u_GBufferTexture3;
+uniform sampler2D u_GBufferTexture4;
+uniform sampler2D u_GBufferTexture5;
 
 void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -32,6 +33,20 @@ namespace Helios
         /* 按 #type vertex / #type fragment / #type compute 切分源码 */
         static void PreProcessShaderSrc(const std::string& source,
             std::unordered_map<ShaderStage, std::string>& shader_sources);
+
+        /* 自动分配槽位，源码里不用手写（写了也会被替换）：裸 uniform 的 location、sampler 的 binding、
+         * 顶点 out 与片元 in 的 location（按名字配对）。各阶段按首次出现的顺序编号，同名同号；
+         * write_uniform_locations 为 false 时裸 uniform 只去掉不写。出错返回 false，源码保持原样。 */
+        static bool AssignShaderSlots(std::unordered_map<ShaderStage, std::string>& stage_sources,
+            bool write_uniform_locations, std::string& error_msg);
+
+        /* 后端统一从这里拿各阶段源码：读文件、展开 include、按 #type 拆阶段，再自动分配槽位。
+         * 读取或分配失败只打日志；读不到文件时返回空表。 */
+        static std::unordered_map<ShaderStage, std::string> LoadStageSources(const std::string& filepath,
+            ShaderTarget target);
+        /* 内嵌源码只做槽位分配；裸 uniform 的 location 只有 Windows 的 GL SPIR-V 路径要写 */
+        static void PrepareStageSources(std::unordered_map<ShaderStage, std::string>& stage_sources,
+            ShaderTarget target, const std::string& name);
 
         /* 把 GLSL 源码编译到目标平台的着色器（name 只用于缓存文件名和注释）。先按 (source hash, stage,
          * target) 查缓存，命中直接返回；否则走 SPIR-V 翻译并写缓存。失败返回空字符串。 */

@@ -8,16 +8,14 @@ layout(location = 3) in float a_Side;	/* 轴带两侧：-1 / +1；网格与普�
 
 #include "../Builtin/Uniforms.glsl"
 
-layout (location = 0) out vec3 v_Color;
-layout (location = 1) out vec3 v_WorldPos;
-layout (location = 2) noperspective out float v_Side;
-layout (location = 3) out vec3 v_Dir;
+out vec3 v_Color;
+out vec3 v_WorldPos;
+noperspective out float v_Side;
+out vec3 v_Dir;
 
-/* 轴带宽度与视口尺寸（物理像素），由材质参数写入（见 EditorBuiltinCamera）。
- * 非 opaque uniform 必须显式 location，且编号是 program 级命名空间：GL 链接跨 stage
- * 查重、不同名不能撞号（Duplicate location）；u_LineWidth 与片元阶段同名共用 0 */
-layout(location = 0) uniform float u_LineWidth;
-layout(location = 1) uniform vec2 u_ViewportSize;
+/* 轴带宽度与视口尺寸（物理像素），由材质参数写入（见 EditorBuiltinCamera） */
+uniform float u_LineWidth;
+uniform vec2 u_ViewportSize;
 
 void main()
 {
@@ -51,27 +49,26 @@ void main()
 
 #include "../Builtin/Uniforms.glsl"
 
-layout (location = 0) in vec3 v_Color;
-layout (location = 1) in vec3 v_WorldPos;
-layout (location = 2) noperspective in float v_Side;
-layout (location = 3) in vec3 v_Dir;
+in vec3 v_Color;
+in vec3 v_WorldPos;
+noperspective in float v_Side;
+in vec3 v_Dir;
 
 /* 远景淡出范围（到相机的水平距离，世界单位）：[Inner, Outer] 之间线性渐隐，取值与
- * EditorBuiltinCamera 的网格常量同源。材质漏设时 smoothstep(0,0,·) 是未定义值，整片会消失。
- * location 规则同顶点阶段：本阶段自有参数从 2 起编号 */
-layout(location = 2) uniform float u_FadeInner;
-layout(location = 3) uniform float u_FadeOuter;
-/* 轴带宽度（物理像素）：与顶点着色器同名共用 location 0，用于带边缘羽化 1 像素 */
-layout(location = 0) uniform float u_LineWidth;
+ * EditorBuiltinCamera 的网格常量同源。材质漏设时 smoothstep(0,0,·) 是未定义值，整片会消失 */
+uniform float u_FadeInner;
+uniform float u_FadeOuter;
+/* 轴带宽度（物理像素）：与顶点着色器共用同一个参数，用于带边缘羽化 1 像素 */
+uniform float u_LineWidth;
 
 /* 网格的格距（世界单位）；0 = 当前绘制不是网格（坐标轴 / 实体 gizmo 不参与分类） */
-layout(location = 4) uniform float u_GridMajor;
+uniform float u_GridMajor;
 /* 网格坐标系原点（xz，世界单位）与缩放：线身份按"网格坐标 = (世界 - 原点) / 缩放"分类。
  * 场景网格 = 原点 0 / 缩放 1（与旧口径逐位一致，亮线恒在世界整数格上）；
  * 模型预览网格 = 以模型为中心、按模型尺寸缩放（补丁不再跟着相机、格距随模型放大）。
  * 缩放为 0（材质漏设）会让除法爆掉，钳一个下限兜底 */
-layout(location = 5) uniform vec2 u_GridOrigin;
-layout(location = 6) uniform float u_GridScale;
+uniform vec2 u_GridOrigin;
+uniform float u_GridScale;
 
 layout (location = 0) out vec4 OutFragColor;
 

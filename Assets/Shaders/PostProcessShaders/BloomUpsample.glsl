@@ -2,7 +2,7 @@
 #version 410 core
 
 layout(location = 0) in vec4 a_Position;
-layout(location = 0) out vec2 v_TexCoord;
+out vec2 v_TexCoord;
 
 void main()
 {
@@ -17,12 +17,12 @@ void main()
 #version 410 core
 
 layout(location = 0) out vec4 OutFragColor;
-layout(location = 0) in vec2 v_TexCoord;
+in vec2 v_TexCoord;
 
-layout(binding = 0) uniform sampler2D u_Source;
-/* 源纹素尺寸 / 散射系数：非 opaque uniform 必须显式 location（Windows 走 shaderc） */
-layout(location = 0) uniform vec2 u_TexelSize = vec2(0.0f);
-layout(location = 1) uniform float u_Scatter = 0.7f;
+uniform sampler2D u_Source;
+/* 源纹素尺寸 / 散射系数 */
+uniform vec2 u_TexelSize = vec2(0.0f);
+uniform float u_Scatter = 0.7f;
 
 void main()
 {

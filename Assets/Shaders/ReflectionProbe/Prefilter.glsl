@@ -4,7 +4,7 @@
 #include "../Builtin/Uniforms.glsl"
 
 layout(location = 0) in vec3 a_Position;
-layout(location = 0) out vec3 WorldPosition;
+out vec3 WorldPosition;
 
 void main()
 {
@@ -19,13 +19,13 @@ void main()
 #include "../Builtin/Math.glsl"
 #include "BakeCommon.glsl"
 
-layout(location = 0) in vec3 WorldPosition;
+in vec3 WorldPosition;
 layout(location = 0) out vec4 OutFragColor;
 
-layout(binding = 0) uniform samplerCube u_EnvironmentMap;
-layout(location = 0) uniform int u_FaceId;
-layout(location = 1) uniform float u_Roughness;
-layout(location = 2) uniform float u_EnvironmentMapMaxMip;
+uniform samplerCube u_EnvironmentMap;
+uniform int u_FaceId;
+uniform float u_Roughness;
+uniform float u_EnvironmentMapMaxMip;
 
 float DistributionGGX(float n_dot_h, float roughness)
 {

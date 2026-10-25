@@ -6,8 +6,8 @@
 
 /* 逐光源"笔"的合成开关：非 0 = 本笔合成环境项 / 自发光（逐笔合成时只能由第 0 笔累加）；
  * 0 = 只输出直接光。这个声明也是材质契约：渲染端按它判断 shader 是否走逐光源光照
- * （Material::SupportsDirectLighting）。非 opaque uniform 需全 stage 唯一的 location。 */
-layout(location = 4) uniform int u_ComposeAmbientEmission = 1;
+ * （Material::SupportsDirectLighting） */
+uniform int u_ComposeAmbientEmission = 1;
 
 /* 平滑范围衰减：距离在 [0, range] 内按 (1 - d/range)^2 衰减，到 range 处归零。
  * 不用物理逆平方 —— 强度没有单位体系，逆平方在 d→0 时发散会把表面打爆 */

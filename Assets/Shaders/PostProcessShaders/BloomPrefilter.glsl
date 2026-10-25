@@ -2,7 +2,7 @@
 #version 410 core
 
 layout(location = 0) in vec4 a_Position;
-layout(location = 0) out vec2 v_TexCoord;
+out vec2 v_TexCoord;
 
 void main()
 {
@@ -17,11 +17,11 @@ void main()
 #version 410 core
 
 layout(location = 0) out vec4 OutFragColor;
-layout(location = 0) in vec2 v_TexCoord;
+in vec2 v_TexCoord;
 
-layout(binding = 0) uniform sampler2D u_SceneColor;
-/* 亮部提取阈值：非 opaque uniform 必须显式 location（Windows 走 shaderc） */
-layout(location = 0) uniform float u_Threshold = 0.8f;
+uniform sampler2D u_SceneColor;
+/* 亮部提取阈值 */
+uniform float u_Threshold = 0.8f;
 
 void main()
 {

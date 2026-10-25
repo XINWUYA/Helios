@@ -6,8 +6,7 @@
 #ifndef DEBUG_LIGHTING_GLSL
 #define DEBUG_LIGHTING_GLSL
 
-/* location 与宿主 stage 联动：0..3 = 探针参数、7..10 = 探针盒体 / 混合开关，这里从 5 起 */
-layout(location = 5) uniform int u_DebugView = 0;
+uniform int u_DebugView = 0;
 
 const int kDebugDiffuse = 9;
 const int kDebugSpecular = 10;

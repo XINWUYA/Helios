@@ -10,7 +10,7 @@ layout(location = 3) in float a_Side;
 
 #include "../Builtin/Uniforms.glsl"
 
-layout (location = 0) out vec3 v_Color;
+out vec3 v_Color;
 
 void main()
 {
@@ -22,14 +22,14 @@ void main()
 #type fragment
 #version 410 core
 
-layout (location = 0) in vec3 v_Color;
+in vec3 v_Color;
 
 layout (location = 0) out vec4 OutFragColor;
 
 /* 手柄统一色（材质参数写入）：纯色、不参与光照 —— gizmo 是操作提示，不是场景物体。
  * 顶点色的 r 通道叠加透明度：旋转环用它做背侧淡出（CPU 按相机方位逐点算好），
  * 其他手柄的顶点色填 1，乘上去不改变结果。 */
-layout(location = 0) uniform vec4 u_GizmoColor;
+uniform vec4 u_GizmoColor;
 
 void main()
 {

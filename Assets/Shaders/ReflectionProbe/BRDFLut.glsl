@@ -2,7 +2,7 @@
 #version 410 core
 
 layout(location = 0) in vec2 a_Position;
-layout(location = 0) out vec2 v2f_TexCoord;
+out vec2 v2f_TexCoord;
 
 void main()
 {
@@ -17,7 +17,7 @@ void main()
 #include "../Builtin/Math.glsl"
 #include "BakeCommon.glsl"
 
-layout(location = 0) in vec2 v2f_TexCoord;
+in vec2 v2f_TexCoord;
 layout(location = 0) out vec4 OutFragColor;
 
 /* 环境 BRDF 查找表（Karis split-sum 的第一部分）：按 (NdotV, roughness) 积分出

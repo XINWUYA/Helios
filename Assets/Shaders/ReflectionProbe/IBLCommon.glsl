@@ -6,11 +6,10 @@
 /* 反射探针 IBL 的运行期契约：支持 IBL 的 shader 都声明这组参数，由 ScenePass 按"最近已
  * 烘焙探针"逐绘制绑定（不写进材质）。u_UseIBL = 0 不参与着色；= 1 时必须已绑定三张贴图。
  * 烘焙半壁在同目录（Irradiance / Prefilter / BRDFLut + BakeCommon）。 */
-layout(binding = 10) uniform samplerCube u_IrradianceMap;
-layout(binding = 11) uniform samplerCube u_PrefilterMap;
-layout(binding = 12) uniform sampler2D   u_BRDFLut;
-/* 非 opaque uniform 需全 stage 唯一的 location：宿主 stage 的 0 被材质参数占用，这里固定为 1 */
-layout(location = 1) uniform int u_UseIBL = 0;
+uniform samplerCube u_IrradianceMap;
+uniform samplerCube u_PrefilterMap;
+uniform sampler2D   u_BRDFLut;
+uniform int u_UseIBL = 0;
 
 /* 间接光：辐照度图（半球卷积）+ 粗糙度预滤波镜面（mip m 对应 roughness = m/(层数-1)），
  * 采样层级 = roughness × 最大 mip 序号；合成走公共库（与延迟侧同一份），怎么与直接光叠加由调用方决定 */

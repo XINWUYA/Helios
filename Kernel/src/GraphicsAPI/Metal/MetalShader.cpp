@@ -316,15 +316,12 @@ namespace Helios
 
         m_DebugName = ExtractFilename(filepath);
 
-        const std::string source = ShaderCompiler::ReadFile(filepath);
-        if (source.empty())
+        auto shader_sources = ShaderCompiler::LoadStageSources(filepath, ShaderCompiler::ShaderTarget::Metal);
+        if (shader_sources.empty())
         {
             CORE_LOG_ERROR("Failed to read shader file: {}", filepath);
             return;
         }
-
-        std::unordered_map<ShaderCompiler::ShaderStage, std::string> shader_sources;
-        ShaderCompiler::PreProcessShaderSrc(source, shader_sources);
 
         /* 计算着色器：只有 #type compute 一段 */
         const auto compute_source = shader_sources.find(ShaderCompiler::ShaderStage::Compute);
@@ -362,7 +359,13 @@ namespace Helios
         : DeviceShader(""), m_DebugName(std::move(name))
     {
         PROFILE_FUNCTION();
-        CompileAndReflect(vertex_src, pixel_src);
+
+        std::unordered_map<ShaderCompiler::ShaderStage, std::string> shader_sources{
+            { ShaderCompiler::ShaderStage::Vertex, vertex_src },
+            { ShaderCompiler::ShaderStage::Fragment, pixel_src } };
+        ShaderCompiler::PrepareStageSources(shader_sources, ShaderCompiler::ShaderTarget::Metal, m_DebugName);
+        CompileAndReflect(shader_sources[ShaderCompiler::ShaderStage::Vertex],
+            shader_sources[ShaderCompiler::ShaderStage::Fragment]);
     }
 
     void MetalShader::CompileAndReflect(const std::string& vertex_src, const std::string& fragment_src)

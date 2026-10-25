@@ -5,6 +5,10 @@
 #include "Helios/Scene/SceneCommon.h"
 
 #include <xxhash.h>
+#include <functional>
+#include <optional>
+#include <regex>
+#include <sstream>
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
 #include <SPIRV/GlslangToSpv.h>
@@ -18,6 +22,301 @@
 
 namespace Helios
 {
+    namespace
+    {
+        /* 自动分配槽位的几类声明 */
+        enum class SlotKind
+        {
+            LooseUniform, /* 裸 uniform（非 opaque、非块）的 location */
+            Sampler,      /* sampler 的 binding */
+            Input,        /* in 的 location */
+            Output        /* out 的 location */
+        };
+
+        /* 单行的槽位声明 */
+        struct SlotDecl
+        {
+            SlotKind Kind = SlotKind::LooseUniform;
+            std::string Indent;
+            std::string Qualifiers;  /* layout(...) 里去掉 location / binding 后剩下的部分 */
+            std::string Declaration; /* layout(...) 之后的原文 */
+            std::string Type;
+            std::string Name;
+            uint32_t ArraySize = 1;
+        };
+
+        /* 结构体名 -> 成员（类型, 数组长度） */
+        using StructTable = std::unordered_map<std::string, std::vector<std::pair<std::string, uint32_t>>>;
+
+        bool IsSamplerType(const std::string& type)
+        {
+            return type.rfind("sampler", 0) == 0 || type.rfind("isampler", 0) == 0 || type.rfind("usampler", 0) == 0;
+        }
+
+        bool IsOpaqueUniformType(const std::string& type)
+        {
+            static const char* const kPrefixes[] = { "sampler", "isampler", "usampler", "image", "iimage",
+                "uimage", "texture", "itexture", "utexture", "subpassInput", "atomic_uint" };
+            for (const char* prefix : kPrefixes)
+            {
+                if (type.rfind(prefix, 0) == 0)
+                    return true;
+            }
+            return false;
+        }
+
+        /* 逐行扫描时维护块注释状态，返回这一行结束时是否仍在块注释里 */
+        bool UpdateBlockCommentState(const std::string& line, bool in_comment)
+        {
+            size_t pos = 0;
+            while (pos < line.size())
+            {
+                if (in_comment)
+                {
+                    const size_t close = line.find("*/", pos);
+                    if (close == std::string::npos)
+                        return true;
+                    in_comment = false;
+                    pos = close + 2;
+                }
+                else
+                {
+                    const size_t open = line.find("/*", pos);
+                    const size_t line_comment = line.find("//", pos);
+                    if (open == std::string::npos || (line_comment != std::string::npos && line_comment < open))
+                        return false;
+                    in_comment = true;
+                    pos = open + 2;
+                }
+            }
+            return in_comment;
+        }
+
+        /* 注释换成空格（换行保留），给结构体解析用 */
+        std::string StripComments(const std::string& source)
+        {
+            std::string result = source;
+            size_t pos = 0;
+            while (pos < result.size())
+            {
+                const bool line_comment = result.compare(pos, 2, "//") == 0;
+                const bool block_comment = result.compare(pos, 2, "/*") == 0;
+                if (!line_comment && !block_comment)
+                {
+                    ++pos;
+                    continue;
+                }
+
+                const size_t end = line_comment ? result.find('\n', pos) : result.find("*/", pos + 2);
+                const size_t stop = end == std::string::npos ? result.size() : (line_comment ? end : end + 2);
+                for (size_t i = pos; i < stop; ++i)
+                {
+                    if (result[i] != '\n')
+                        result[i] = ' ';
+                }
+                pos = stop;
+            }
+            return result;
+        }
+
+        StructTable CollectStructs(const std::string& source)
+        {
+            static const std::regex struct_regex(R"(struct\s+([A-Za-z_]\w*)\s*\{([^}]*)\})");
+            static const std::regex member_regex(
+                R"(^\s*(?:(?:highp|mediump|lowp|flat|noperspective|smooth|centroid)\s+)*([A-Za-z_]\w*)\s+([^;]+)$)");
+            static const std::regex name_regex(R"(^\s*[A-Za-z_]\w*\s*(?:\[\s*(\d+)\s*\])?\s*$)");
+
+            StructTable structs;
+            const std::string text = StripComments(source);
+            for (auto it = std::sregex_iterator(text.begin(), text.end(), struct_regex); it != std::sregex_iterator(); ++it)
+            {
+                auto& members = structs[it->str(1)];
+                std::stringstream body(it->str(2));
+                std::string statement;
+                while (std::getline(body, statement, ';'))
+                {
+                    std::smatch member;
+                    if (!std::regex_match(statement, member, member_regex))
+                        continue;
+
+                    std::stringstream names(member.str(2));
+                    std::string name;
+                    while (std::getline(names, name, ','))
+                    {
+                        std::smatch name_match;
+                        if (std::regex_match(name, name_match, name_regex))
+                            members.emplace_back(member.str(1),
+                                name_match[1].matched ? static_cast<uint32_t>(std::stoul(name_match.str(1))) : 1u);
+                    }
+                }
+            }
+            return structs;
+        }
+
+        /* in / out 占用的 location 个数：矩阵按列算，dvec3 / dvec4 占两个，结构体按成员累加 */
+        bool CountVaryingLocations(const std::string& type, const StructTable& structs, uint32_t& count, int depth = 0)
+        {
+            static const std::regex single_regex(R"((?:bool|int|uint|float|double|[biu]?vec[234]|dvec2))");
+            static const std::regex wide_regex(R"((?:dvec[34]))");
+            static const std::regex matrix_regex(R"((d?)mat([234])(?:x([234]))?)");
+
+            std::smatch match;
+            if (std::regex_match(type, single_regex))
+            {
+                count = 1;
+                return true;
+            }
+            if (std::regex_match(type, wide_regex))
+            {
+                count = 2;
+                return true;
+            }
+            if (std::regex_match(type, match, matrix_regex))
+            {
+                const uint32_t columns = static_cast<uint32_t>(std::stoul(match.str(2)));
+                const uint32_t rows = match[3].matched ? static_cast<uint32_t>(std::stoul(match.str(3))) : columns;
+                count = columns * (match.str(1) == "d" && rows >= 3 ? 2u : 1u);
+                return true;
+            }
+
+            const auto it = structs.find(type);
+            if (it == structs.end() || depth > 8)
+                return false;
+
+            count = 0;
+            for (const auto& [member_type, array_size] : it->second)
+            {
+                uint32_t member_count = 0;
+                if (!CountVaryingLocations(member_type, structs, member_count, depth + 1))
+                    return false;
+                count += member_count * array_size;
+            }
+            return true;
+        }
+
+        /* 逐行找槽位声明，on_decl 返回替换后的整行（nullopt 原样保留），结果写进 output */
+        bool RewriteSlotDecls(const std::string& source,
+            const std::function<std::optional<std::string>(const SlotDecl&)>& on_decl,
+            std::string& output, std::string& error_msg)
+        {
+            static const std::regex uniform_regex(
+                R"(^(\s*)(?:layout\s*\(([^)]*)\)\s*)?(uniform\s+(?:(?:highp|mediump|lowp)\s+)?([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*(?:\[\s*([^\]]*?)\s*\])?\s*([=;,].*))$)");
+            static const std::regex varying_regex(
+                R"(^(\s*)(?:layout\s*\(([^)]*)\)\s*)?((?:(?:flat|noperspective|smooth|centroid|sample|invariant)\s+)*(in|out)\s+(?:(?:flat|noperspective|smooth|centroid|sample|highp|mediump|lowp)\s+)*([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*(?:\[\s*([^\]]*?)\s*\])?\s*(;.*))$)");
+            static const std::regex basic_type_regex(R"((?:bool|int|uint|float|double|[biud]?vec[234]|d?mat[234](x[234])?))");
+            static const std::regex slot_regex(R"(^\s*(location|binding)\s*=)");
+            static const std::regex digits_regex(R"(\d+)");
+
+            output.clear();
+            output.reserve(source.size());
+
+            bool in_comment = false;
+            size_t line_begin = 0;
+            while (line_begin < source.size())
+            {
+                size_t line_end = source.find('\n', line_begin);
+                if (line_end == std::string::npos)
+                    line_end = source.size();
+
+                std::string line = source.substr(line_begin, line_end - line_begin);
+                const bool commented = in_comment;
+                in_comment = UpdateBlockCommentState(line, in_comment);
+
+                const bool has_cr = !line.empty() && line.back() == '\r';
+                const std::string body = has_cr ? line.substr(0, line.size() - 1) : line;
+
+                std::smatch match;
+                SlotDecl decl;
+                bool found = false;
+                std::string qualifiers;
+                std::string array_text;
+                bool has_array = false;
+                if (!commented && body.find("uniform") != std::string::npos && std::regex_match(body, match, uniform_regex))
+                {
+                    const std::string type = match.str(4);
+                    if (IsSamplerType(type))
+                    {
+                        decl.Kind = SlotKind::Sampler;
+                        found = true;
+                    }
+                    else if (!IsOpaqueUniformType(type))
+                    {
+                        if (match.str(7)[0] == ',')
+                        {
+                            error_msg = "uniform '" + match.str(5) + "': declare one uniform per line";
+                            return false;
+                        }
+                        if (!std::regex_match(type, basic_type_regex))
+                        {
+                            error_msg = "uniform '" + match.str(5) + "': type '" + type +
+                                "' is not a basic type, use a uniform block for structs";
+                            return false;
+                        }
+                        decl.Kind = SlotKind::LooseUniform;
+                        found = true;
+                    }
+
+                    if (found)
+                    {
+                        decl.Indent = match.str(1);
+                        qualifiers = match.str(2);
+                        decl.Declaration = match.str(3);
+                        decl.Type = type;
+                        decl.Name = match.str(5);
+                        has_array = match[6].matched;
+                        array_text = match.str(6);
+                    }
+                }
+                else if (!commented && std::regex_match(body, match, varying_regex))
+                {
+                    decl.Kind = match.str(4) == "in" ? SlotKind::Input : SlotKind::Output;
+                    decl.Indent = match.str(1);
+                    qualifiers = match.str(2);
+                    decl.Declaration = match.str(3);
+                    decl.Type = match.str(5);
+                    decl.Name = match.str(6);
+                    has_array = match[7].matched;
+                    array_text = match.str(7);
+                    found = true;
+                }
+
+                if (found)
+                {
+                    if (has_array)
+                    {
+                        if (!std::regex_match(array_text, digits_regex))
+                        {
+                            error_msg = "'" + decl.Name + "': array size must be a number literal";
+                            return false;
+                        }
+                        decl.ArraySize = static_cast<uint32_t>(std::stoul(array_text));
+                    }
+
+                    /* 保留 location / binding 以外的限定符 */
+                    std::stringstream qualifier_items(qualifiers);
+                    std::string item;
+                    while (std::getline(qualifier_items, item, ','))
+                    {
+                        item.erase(0, item.find_first_not_of(" \t"));
+                        item.erase(item.find_last_not_of(" \t") + 1);
+                        if (item.empty() || std::regex_search(item, slot_regex))
+                            continue;
+                        decl.Qualifiers += (decl.Qualifiers.empty() ? "" : ", ") + item;
+                    }
+
+                    if (const std::optional<std::string> replaced = on_decl(decl))
+                        line = *replaced + (has_cr ? "\r" : "");
+                }
+
+                output += line;
+                if (line_end < source.size())
+                    output += '\n';
+                line_begin = line_end + 1;
+            }
+            return true;
+        }
+    }
+
 #ifdef PLATFORM_MACOS
     namespace
     {
@@ -159,6 +458,178 @@ namespace Helios
             pos = source.find(type_token, next_line_pos);
             shader_sources[stage] = (pos == std::string::npos) ? source.substr(next_line_pos) : source.substr(next_line_pos, pos - next_line_pos);
         }
+    }
+
+    bool ShaderCompiler::AssignShaderSlots(std::unordered_map<ShaderStage, std::string>& stage_sources,
+        bool write_uniform_locations, std::string& error_msg)
+    {
+        /* 同名共用一个槽位，按首次出现的顺序往后排 */
+        struct SlotTable
+        {
+            struct Slot
+            {
+                std::string Type;
+                uint32_t Count = 1;
+                uint32_t Index = 0;
+            };
+            std::unordered_map<std::string, Slot> Slots;
+            uint32_t Next = 0;
+
+            bool Add(const std::string& name, const std::string& type, uint32_t count, std::string& error)
+            {
+                const auto [it, inserted] = Slots.emplace(name, Slot{ type, count, Next });
+                if (inserted)
+                {
+                    Next += count;
+                    return true;
+                }
+                if (it->second.Type == type && it->second.Count == count)
+                    return true;
+                error = "'" + name + "' is declared with different types: " + it->second.Type + " vs " + type;
+                return false;
+            }
+        };
+
+        /* Metal 每个阶段最多 16 个 sampler，GL 每阶段也只保证 16 个贴图单元 */
+        static constexpr uint32_t kMaxSamplerBindings = 16;
+        static constexpr ShaderStage kStageOrder[] = { ShaderStage::Vertex, ShaderStage::Fragment, ShaderStage::Compute };
+
+        /* 顶点 out 和片元 in 按名字配对，其他 in / out（顶点输入、片元输出）保持手写 */
+        const bool link_varyings = stage_sources.count(ShaderStage::Vertex) && stage_sources.count(ShaderStage::Fragment);
+        const auto is_varying = [link_varyings](ShaderStage stage, const SlotDecl& decl)
+        {
+            return link_varyings && ((stage == ShaderStage::Vertex && decl.Kind == SlotKind::Output)
+                || (stage == ShaderStage::Fragment && decl.Kind == SlotKind::Input));
+        };
+        const auto type_key = [](const SlotDecl& decl)
+        {
+            return decl.Type + (decl.ArraySize > 1 ? "[" + std::to_string(decl.ArraySize) + "]" : "");
+        };
+
+        SlotTable uniforms;
+        SlotTable samplers;
+        SlotTable varyings;
+        std::vector<std::pair<std::string, std::pair<std::string, uint32_t>>> fragment_inputs;
+        std::string scratch;
+
+        /* 先把所有阶段的声明收齐再编号，出错时源码保持原样 */
+        for (const ShaderStage stage : kStageOrder)
+        {
+            const auto source = stage_sources.find(stage);
+            if (source == stage_sources.end())
+                continue;
+
+            const StructTable structs = CollectStructs(source->second);
+            std::string conflict;
+            const bool parsed = RewriteSlotDecls(source->second, [&](const SlotDecl& decl) -> std::optional<std::string>
+            {
+                if (!conflict.empty())
+                    return std::nullopt;
+
+                if (decl.Kind == SlotKind::LooseUniform)
+                    uniforms.Add(decl.Name, type_key(decl), decl.ArraySize, conflict);
+                else if (decl.Kind == SlotKind::Sampler)
+                    samplers.Add(decl.Name, type_key(decl), decl.ArraySize, conflict);
+                else if (is_varying(stage, decl))
+                {
+                    uint32_t count = 0;
+                    if (!CountVaryingLocations(decl.Type, structs, count))
+                        conflict = "'" + decl.Name + "': unknown varying type '" + decl.Type + "'";
+                    else if (decl.Kind == SlotKind::Output)
+                        varyings.Add(decl.Name, type_key(decl), count * decl.ArraySize, conflict);
+                    else
+                        fragment_inputs.push_back({ decl.Name, { type_key(decl), count * decl.ArraySize } });
+                }
+                return std::nullopt;
+            }, scratch, error_msg);
+
+            if (!parsed)
+                return false;
+            if (!conflict.empty())
+            {
+                error_msg = conflict;
+                return false;
+            }
+        }
+
+        for (const auto& [name, input] : fragment_inputs)
+        {
+            const auto output = varyings.Slots.find(name);
+            if (output == varyings.Slots.end())
+            {
+                error_msg = "fragment input '" + name + "' has no vertex output with the same name";
+                return false;
+            }
+            if (output->second.Type != input.first || output->second.Count != input.second)
+            {
+                error_msg = "'" + name + "' differs between stages: " + output->second.Type + " vs " + input.first;
+                return false;
+            }
+        }
+
+        if (samplers.Next > kMaxSamplerBindings)
+        {
+            error_msg = "too many samplers: " + std::to_string(samplers.Next) + " bindings, at most " +
+                std::to_string(kMaxSamplerBindings);
+            return false;
+        }
+
+        for (const ShaderStage stage : kStageOrder)
+        {
+            const auto source = stage_sources.find(stage);
+            if (source == stage_sources.end())
+                continue;
+
+            RewriteSlotDecls(source->second, [&](const SlotDecl& decl) -> std::optional<std::string>
+            {
+                std::string slot;
+                if (decl.Kind == SlotKind::LooseUniform)
+                {
+                    if (write_uniform_locations)
+                        slot = "location = " + std::to_string(uniforms.Slots.at(decl.Name).Index);
+                }
+                else if (decl.Kind == SlotKind::Sampler)
+                    slot = "binding = " + std::to_string(samplers.Slots.at(decl.Name).Index);
+                else if (is_varying(stage, decl))
+                    slot = "location = " + std::to_string(varyings.Slots.at(decl.Name).Index);
+                else
+                    return std::nullopt;
+
+                std::string qualifiers = slot;
+                if (!decl.Qualifiers.empty())
+                    qualifiers += (qualifiers.empty() ? "" : ", ") + decl.Qualifiers;
+                return decl.Indent + (qualifiers.empty() ? "" : "layout(" + qualifiers + ") ") + decl.Declaration;
+            }, scratch, error_msg);
+            source->second = std::move(scratch);
+        }
+        return true;
+    }
+
+    std::unordered_map<ShaderCompiler::ShaderStage, std::string> ShaderCompiler::LoadStageSources(
+        const std::string& filepath, ShaderTarget target)
+    {
+        std::unordered_map<ShaderStage, std::string> stage_sources;
+        const std::string source = ReadFile(filepath);
+        if (source.empty())
+            return stage_sources;
+
+        PreProcessShaderSrc(source, stage_sources);
+        PrepareStageSources(stage_sources, target, ExtractFilename(filepath));
+        return stage_sources;
+    }
+
+    void ShaderCompiler::PrepareStageSources(std::unordered_map<ShaderStage, std::string>& stage_sources,
+        ShaderTarget target, const std::string& name)
+    {
+#ifdef PLATFORM_WINDOWS
+        const bool write_uniform_locations = target == ShaderTarget::OpenGL;
+#else
+        const bool write_uniform_locations = false;
+        (void)target;
+#endif
+        std::string error_msg;
+        if (!AssignShaderSlots(stage_sources, write_uniform_locations, error_msg))
+            CORE_LOG_ERROR("Shader slot assignment failed ({}): {}", name, error_msg);
     }
 
     std::string ShaderCompiler::Compile(const std::string& source, ShaderStage stage, ShaderTarget target,

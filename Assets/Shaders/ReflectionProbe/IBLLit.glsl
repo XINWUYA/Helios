@@ -17,17 +17,17 @@ struct SVertex2Frag
 	vec3 Tangent;
 };
 
-layout (location = 0) out SVertex2Frag Output;
+out SVertex2Frag vert2frag;
 
 void main()
 {
 	vec4 world_pos = u_Local2WorldMat * vec4(a_Position, 1.0f);
 	gl_Position = u_ViewProjectionMat * world_pos;
 
-	Output.WorldPosition = world_pos.xyz;
-	Output.Normal = mat3(u_Local2WorldMat) * a_Normal;
-	Output.TexCoord = a_TexCoord.xy;
-	Output.Tangent = mat3(u_Local2WorldMat) * a_Tangent;
+	vert2frag.WorldPosition = world_pos.xyz;
+	vert2frag.Normal = mat3(u_Local2WorldMat) * a_Normal;
+	vert2frag.TexCoord = a_TexCoord.xy;
+	vert2frag.Tangent = mat3(u_Local2WorldMat) * a_Tangent;
 }
 
 
@@ -47,38 +47,38 @@ struct SVertex2Frag
 	vec3 Tangent;
 };
 
-layout (location = 0) in SVertex2Frag Input;
+in SVertex2Frag vert2frag;
 
 layout (location = 0) out vec4 OutFragColor;
 
-layout(binding = 0) uniform sampler2D u_AlbedoTexture;
-layout(binding = 1) uniform sampler2D u_RoughnessTexture;
-layout(binding = 2) uniform sampler2D u_MetalnessTexture;
-layout(binding = 3) uniform sampler2D u_NormalTexture;
+uniform sampler2D u_AlbedoTexture;
+uniform sampler2D u_RoughnessTexture;
+uniform sampler2D u_MetalnessTexture;
+uniform sampler2D u_NormalTexture;
 
 /* IBL 环境贴图 / u_UseIBL 来自同目录 IBLCommon.glsl，由渲染通道按最近探针 per-draw 绑定 */
-layout(location = 0) uniform float u_EnvironmentStrength;
+uniform float u_EnvironmentStrength;
 
 /* 法线贴图采样，TBN 由插值切线构建 */
 vec3 GetNormal()
 {
-	vec3 T = normalize(Input.Tangent);
-	vec3 N = normalize(Input.Normal);
+	vec3 T = normalize(vert2frag.Tangent);
+	vec3 N = normalize(vert2frag.Normal);
 	T = normalize(T - dot(T, N) * N);
 	mat3 TBN = mat3(T, cross(T, N), N);
 
-	vec3 tangent_normal = texture(u_NormalTexture, Input.TexCoord).xyz * 2.0f - 1.0f;
+	vec3 tangent_normal = texture(u_NormalTexture, vert2frag.TexCoord).xyz * 2.0f - 1.0f;
 	return normalize(TBN * tangent_normal);
 }
 
 void main()
 {
 	vec3 N = GetNormal();
-	vec3 V = normalize(u_ViewPos - Input.WorldPosition);
+	vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);
 
-	vec3 albedo = SrgbToLinear(texture(u_AlbedoTexture, Input.TexCoord).rgb);
-	float metallic = texture(u_MetalnessTexture, Input.TexCoord).r;
-	float roughness = clamp(texture(u_RoughnessTexture, Input.TexCoord).r, 0.04f, 1.0f);
+	vec3 albedo = SrgbToLinear(texture(u_AlbedoTexture, vert2frag.TexCoord).rgb);
+	float metallic = texture(u_MetalnessTexture, vert2frag.TexCoord).r;
+	float roughness = clamp(texture(u_RoughnessTexture, vert2frag.TexCoord).r, 0.04f, 1.0f);
 
 	/* 直接光照（单方向光） */
 	vec3 L = normalize(-u_LightDir);

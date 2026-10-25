@@ -18,7 +18,7 @@ void main()
 layout(location = 0) out vec4 OutFragColor;
 
 /* 线框颜色（材质参数写入）：纯色、不参与光照 —— 线框是"看结构"用的调试视图 */
-layout(location = 0) uniform vec4 u_WireframeColor;
+uniform vec4 u_WireframeColor;
 
 void main()
 {

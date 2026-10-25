@@ -36,8 +36,6 @@ namespace Helios
 		[[nodiscard]] static std::string AnnotateProgramHandlesInMessage(const char* message);
 
 	private:
-		std::string ReadFile(const std::string& filepath);
-		void PreProcessShaderSrc(const std::string& source, std::unordered_map<GLenum, std::string>& shader_sources /*<ShaderStage, ShaderSrc>*/);
 #ifdef PLATFORM_WINDOWS
 		void CompileShadersToOpenGL();
 #endif

@@ -19,7 +19,7 @@ struct SVextex2Frag
 	vec3 WorldTangent;
 };
 
-layout(location = 0) out SVextex2Frag vert2frag;
+out SVextex2Frag vert2frag;
 
 void main()
 {
@@ -48,18 +48,18 @@ struct SVextex2Frag
 	vec3 WorldTangent;
 };
 
-layout(location = 0) in SVextex2Frag vert2frag;
+in SVextex2Frag vert2frag;
 layout(location = 0) out vec4 OutFragColor;
 
 /* 主贴图：按调试档位在 CPU 侧从源材质选定的那张贴图（缺省补白）；
  * UV 变换与源材质同源（u_AlbedoTilingOffset，缺省不变换） */
-layout(binding = 0) uniform sampler2D u_MainTexture;
-layout(location = 0) uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
+uniform sampler2D u_MainTexture;
+uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
 
 /* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
  * 本 shader 处理 Mipmap（两条管线）与前向的 Surface 档；延迟的 Surface 档走 G-Buffer
- * 直读（DebugView.glsl）。location 0 已被 u_AlbedoTilingOffset 占用，这里取 1 */
-layout(location = 1) uniform int u_DebugMode = 0;
+ * 直读（DebugView.glsl） */
+uniform int u_DebugMode = 0;
 
 const int kDebugAlbedo = 1;
 const int kDebugNormal = 2;

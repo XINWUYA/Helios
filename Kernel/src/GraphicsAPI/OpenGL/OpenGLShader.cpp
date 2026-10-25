@@ -6,6 +6,7 @@
 #include <shaderc/shaderc.hpp>
 #endif
 
+#include "Helios/Renderer/ShaderCompiler.h"
 #include "Helios/Scene/SceneCommon.h"
 
 #include <cstring>
@@ -54,6 +55,30 @@ namespace Helios
 		default:
 			return "unknown";
 		}
+	}
+
+	/* ShaderCompiler 拆好的各阶段源码换成按 GL 着色器类型存放 */
+	static std::unordered_map<GLenum, std::string> ToGLStageSources(
+		std::unordered_map<ShaderCompiler::ShaderStage, std::string>&& stage_sources)
+	{
+		std::unordered_map<GLenum, std::string> result;
+		for (auto& [stage, source] : stage_sources)
+		{
+			if (stage == ShaderCompiler::ShaderStage::Vertex)
+				result[GL_VERTEX_SHADER] = std::move(source);
+			else if (stage == ShaderCompiler::ShaderStage::Fragment)
+				result[GL_FRAGMENT_SHADER] = std::move(source);
+			else
+			{
+#ifdef __APPLE__
+				CORE_LOG_ERROR("Compute shader is not supported on macOS (OpenGL 4.1). Consider using Metal instead.");
+				ASSERT(false, "Compute shader not supported on macOS!");
+#else
+				result[GL_COMPUTE_SHADER] = std::move(source);
+#endif
+			}
+		}
+		return result;
 	}
 
 	/* program 句柄到 shader 名的登记表：驱动警告只带句柄。GL 对象只在主线程创建销毁，无需加锁 */
@@ -107,8 +132,7 @@ namespace Helios
 
 		CreateShaderCacheDirectoryIfNeed();
 
-		const std::string shader_src = ReadFile(filepath);
-		PreProcessShaderSrc(shader_src, m_OpenGLSourceCodes);
+		m_OpenGLSourceCodes = ToGLStageSources(ShaderCompiler::LoadStageSources(filepath, ShaderCompiler::ShaderTarget::OpenGL));
 
 		const auto compute_source = m_OpenGLSourceCodes.find(GL_COMPUTE_SHADER);
 		if (compute_source != m_OpenGLSourceCodes.end())
@@ -125,9 +149,11 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		// Preprocess shader src
-		m_OpenGLSourceCodes[GL_VERTEX_SHADER] = vertex_src;
-		m_OpenGLSourceCodes[GL_FRAGMENT_SHADER] = pixel_src;
+		std::unordered_map<ShaderCompiler::ShaderStage, std::string> stage_sources{
+			{ ShaderCompiler::ShaderStage::Vertex, vertex_src },
+			{ ShaderCompiler::ShaderStage::Fragment, pixel_src } };
+		ShaderCompiler::PrepareStageSources(stage_sources, ShaderCompiler::ShaderTarget::OpenGL, m_DebugName);
+		m_OpenGLSourceCodes = ToGLStageSources(std::move(stage_sources));
 		
 		CreateShaderProgram();
 	}
@@ -252,68 +278,6 @@ namespace Helios
 		glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(value));
 	}
 
-	std::string OpenGLShader::ReadFile(const std::string& filepath)
-	{
-		PROFILE_FUNCTION();
-
-		std::string result;
-		std::ifstream in(filepath, std::ios::in | std::ios::binary); // ifstream closes itself due to RAII
-		if (in)
-		{
-			/* 处理 #include
-			 * Ref: https://community.khronos.org/t/include-in-glsl/59203
-			 */
-			static const std::regex regex("^[ ]*#[ ]*include[ ]+[\"<](.*)[\">].*");
-			std::smatch matches;
-			std::string line_str;
-			while (std::getline(in, line_str))
-			{
-				/* 找到#include指令行 */
-				if (line_str.find("#include") != line_str.npos)
-				{
-					if (std::regex_search(line_str, matches, regex))
-					{
-						/* 获取include文件路径，递归读取 */
-						std::string base_dir = ExtractFileBaseDir(filepath);
-						result += ReadFile(base_dir + matches.str(1)) + '\n';
-					}
-				}
-				else
-				{
-					result += line_str + '\n';
-				}
-			}
-		}
-		else
-		{
-			CORE_LOG_ERROR("Could not open file '{0}'", filepath);
-			ASSERT(false);
-		}
-
-		return result;
-	}
-
-	static GLenum ShaderTypeFromString(const std::string& type)
-	{
-		if (type == "vertex")
-			return GL_VERTEX_SHADER;
-		if (type == "fragment" || type == "pixel")
-			return GL_FRAGMENT_SHADER;
-		if (type == "compute")
-		{
-#ifdef __APPLE__
-			CORE_LOG_ERROR("Compute shader is not supported on macOS (OpenGL 4.1). Consider using Metal instead.");
-			ASSERT(false, "Compute shader not supported on macOS!");
-			return 0;
-#else
-			return GL_COMPUTE_SHADER;
-#endif
-		}
-
-		ASSERT(false, "Unknown shader type!");
-		return 0;
-	}
-
 #ifdef __APPLE__
 	/* macOS only supports OpenGL 4.1 (GLSL 4.10), need to convert GLSL version and features */
 	static std::string ConvertGLSLToMacOSCompatible(const std::string& source)
@@ -339,29 +303,6 @@ namespace Helios
 		return result;
 	}
 #endif
-
-	void OpenGLShader::PreProcessShaderSrc(const std::string& source, std::unordered_map<GLenum, std::string>& shader_sources)
-	{
-		PROFILE_FUNCTION();
-
-		const char* type_token = "#type";
-		const size_t type_token_length = strlen(type_token);
-		size_t pos = source.find(type_token, 0); // Start of shader type declaration line
-		while (pos != std::string::npos)
-		{
-			const size_t eol = source.find_first_of("\r\n", pos); // End of shader type declaration line
-			ASSERT(eol != std::string::npos, "Syntax error");
-			const size_t begin = pos + type_token_length + 1; // Start of shader type name (after "#type " keyword)
-			std::string type = source.substr(begin, eol - begin);
-			ASSERT(ShaderTypeFromString(type), "Invalid shader type specified");
-
-			const size_t next_line_pos = source.find_first_not_of("\r\n", eol); // Start of shader code after shader type declaration line
-			ASSERT(next_line_pos != std::string::npos, "Syntax error");
-			pos = source.find(type_token, next_line_pos); // Start of next shader type declaration line
-
-			shader_sources[ShaderTypeFromString(type)] = (pos == std::string::npos) ? source.substr(next_line_pos) : source.substr(next_line_pos, pos - next_line_pos);
-		}
-	}
 
 #ifdef PLATFORM_WINDOWS
 	static shaderc_shader_kind ShaderTypeToOpenGLShaderCKind(GLenum shader_type)
