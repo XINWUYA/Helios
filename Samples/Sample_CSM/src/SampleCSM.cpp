@@ -12,17 +12,7 @@ void SampleCSM::OnAttached()
 
 	/* 向场景中添加SkyBox */
 	{
-		constexpr TextureLoadConfig load_config{
-			true,
-			false,
-			true,
-			false,
-			SamplerType::Sampler2D,
-			SamplerWrapMode::ClampToEdge,
-			SamplerMinFilter::Linear,
-			SamplerMagFilter::Linear
-		};
-		const auto sky_texture = DeviceTexture::Create(ABSOLUTE_PATH("Textures/drakensberg_solitary_mountain_4k.hdr"), load_config);
+		const auto sky_texture = DeviceTexture::Create(ABSOLUTE_PATH("Textures/drakensberg_solitary_mountain_4k.hdr"));
 
 		RenderRasterState raster_state;
 		raster_state.EnableDepthWrite = true;

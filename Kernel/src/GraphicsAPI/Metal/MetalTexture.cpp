@@ -553,7 +553,7 @@ namespace Helios
         if (m_Path.empty())
             return false;
 
-        const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(m_Path, m_RequestedLoadConfig);
+        const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(m_Path);
 
         /* 先建新的，成功了再换：失败时旧纹理原样保留 */
         MetalTexture fresh(m_Path, resolved);

@@ -1,6 +1,5 @@
 ﻿#include "Pch.h"
 #include "AssetManager.h"
-#include "TextureSettings.h"
 #include "Profiler.h"
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/Scene/Model.h>
@@ -21,16 +20,10 @@ namespace Helios
 		return DeviceShader::Create(path);
 	}
 
-	/* 纹理: 从路径加载, 附带加载配置 */
-	SharedPtr<DeviceTexture> AssetFactory<DeviceTexture>::Create(const std::string& path, const TextureLoadConfig& load_config)
+	/* 纹理: 从路径加载（加载参数由贴图自身的 .texmeta 决定） */
+	SharedPtr<DeviceTexture> AssetFactory<DeviceTexture>::Create(const std::string& path)
 	{
-		return DeviceTexture::Create(path, load_config);
-	}
-
-	/* 缓存键用解析后的有效配置：同一张图被材质与预览请求时不会再互顶 */
-	TextureLoadConfig AssetFactory<DeviceTexture>::ResolveConfig(const std::string& path, const TextureLoadConfig& load_config)
-	{
-		return TextureSettingsStore::Instance().Resolve(path, load_config);
+		return DeviceTexture::Create(path);
 	}
 
 	/* 模型: 从路径加载 */
@@ -219,7 +212,7 @@ namespace Helios
 
 	/* 显式实例化资源缓存, 供外部链接使用 */
 	template class HELIOS_API AssetStore<DeviceShader, NoConfig>;
-	template class HELIOS_API AssetStore<DeviceTexture, TextureLoadConfig>;
+	template class HELIOS_API AssetStore<DeviceTexture, NoConfig>;
 	template class HELIOS_API AssetStore<Model, NoConfig>;
 	template class HELIOS_API AssetStore<Material, NoConfig>;
 	template class HELIOS_API AssetStore<AnimationClip, NoConfig>;
@@ -233,7 +226,7 @@ namespace Helios
 
 	bool AssetManager::ReloadTexture(const std::string& path)
 	{
-		return AssetStore<DeviceTexture, TextureLoadConfig>::Instance().ReloadByPath(path);
+		return AssetStore<DeviceTexture, NoConfig>::Instance().ReloadByPath(path);
 	}
 }
 #if !defined(PLATFORM_WINDOWS)

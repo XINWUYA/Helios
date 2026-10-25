@@ -11,6 +11,7 @@
 #include "ModelManifest.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Core/AssetManager.h"
+#include "Helios/Core/TextureSettings.h"
 #include "Helios/Scene/Material.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "SceneCommon.h"
@@ -366,7 +367,21 @@ namespace Helios
 				std::filesystem::copy_file(PathFromUtf8(texture.SourcePath), dest_texture,
 					std::filesystem::copy_options::overwrite_existing, error);
 				if (error)
+				{
 					CORE_LOG_WARN("Failed to copy texture: {}.", texture.SourcePath);
+					continue;
+				}
+
+				/* 源图自带的设置跟着一起走；目标已有一份就不动它（重复导入不覆盖手调结果） */
+				std::error_code meta_error;
+				const std::filesystem::path source_meta =
+					PathFromUtf8(TextureSettingsStore::MetaPath(texture.SourcePath));
+				if (std::filesystem::is_regular_file(source_meta, meta_error))
+				{
+					std::filesystem::copy_file(source_meta,
+						PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(dest_texture))),
+						std::filesystem::copy_options::skip_existing, meta_error);
+				}
 			}
 		}
 
@@ -393,8 +408,18 @@ namespace Helios
 			/* 着色器按资产根解析成绝对路径：相对路径直接喂文件流是相对进程工作目录的，会读不到 */
 			auto default_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(kDefaultMaterialShader));
 
-			TextureLoadConfig load_config;
-			load_config.IsFlipV = false; /* UV 在导入时已翻转，贴图按原样上传（与既有模型资产同口径） */
+			/* UV 在导入时已翻转，贴图按原样上传：这条口径记到贴图自己的设置里 */
+			const auto mark_texture_not_flipped = [](const std::string& texture_path)
+			{
+				TextureSettingsStore& store = TextureSettingsStore::Instance();
+				TextureSettings settings = store.Load(texture_path);
+				if (settings.FlipV.has_value() && !*settings.FlipV)
+					return;
+				settings.FlipV = false;
+				/* 之前按默认口径加载过的话，重建成新的行序 */
+				if (store.Save(texture_path, settings))
+					AssetManager::Instance().ReloadTexture(texture_path);
+			};
 
 			std::set<std::string> used_names;
 			for (size_t material_index = 0; material_index < model.Materials.size(); ++material_index)
@@ -412,7 +437,8 @@ namespace Helios
 					if (!std::filesystem::is_regular_file(texture_path, error))
 						continue;
 
-					auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(PathToUtf8(texture_path), load_config);
+					mark_texture_not_flipped(PathToUtf8(texture_path));
+					auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(PathToUtf8(texture_path));
 					if (texture != nullptr)
 						material->SetTexture(param_name, texture);
 				}

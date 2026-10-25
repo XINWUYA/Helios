@@ -61,10 +61,10 @@ namespace Helios
 	}
 
 	/* 创建纹理 */
-	SharedPtr<DeviceTexture> DeviceTexture::Create(const std::string& path, const TextureLoadConfig& load_config)
+	SharedPtr<DeviceTexture> DeviceTexture::Create(const std::string& path)
 	{
-		/* 资产设置在这里统一落地：材质、精灵、脚本、缩略图走的都是同一条路 */
-		const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(path, load_config);
+		/* 贴图设置在这里统一落地：材质、精灵、脚本、缩略图走的都是同一条路 */
+		const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(path);
 
 		SharedPtr<DeviceTexture> texture;
 		switch (Renderer::CurrentAPI())
@@ -85,9 +85,6 @@ namespace Helios
 			return nullptr;
 		}
 
-		/* 记下调用点原始配置：资产设置改了以后，Reload 要按它重新解析 */
-		if (texture != nullptr)
-			texture->m_RequestedLoadConfig = load_config;
 		return texture;
 	}
 

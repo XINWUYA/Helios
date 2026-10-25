@@ -1,11 +1,7 @@
-<?xml version='1.0' encoding='UTF-8'?>
-<Material ShaderPath="Shaders/MaterialShaders/PBRStandard.glsl">
-  <Parameters>
-    <ParamInfo Type="0" Name="u_AlbedoTexture">
-      <Texture Path="Models/animated-cat/textures/Material_105_baseColor.png" Slot="0">
-        <LoadConfig IsFlipV="false" IsGenMips="true" SamplerType="0" IsHdr="false" />
-      </Texture>
-    </ParamInfo>
-  </Parameters>
-  <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true" />
+<?xml version="1.0" encoding="UTF-8"?>
+<Material ShaderPath="Shaders/MaterialShaders/PBRStandard.glsl" RenderQueue="2000">
+    <Parameters>
+        <ParamInfo Type="0" Name="u_AlbedoTexture" Value="Models/animated-cat/textures/Material_105_baseColor.png"/>
+    </Parameters>
+    <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthTest="true" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
 </Material>

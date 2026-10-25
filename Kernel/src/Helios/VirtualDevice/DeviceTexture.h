@@ -25,7 +25,7 @@ namespace Helios
 		PixelType Type{ PixelType::UnsignedByte };
 	};
 
-	/* 纹理加载配置。Create 入口会先按贴图资产设置解析一次，
+	/* 纹理加载配置。只在内部按贴图资产设置解析一次，
 	 * 之后这份配置就是全量具体值，后端不再区分"有没有配过"。 */
 	struct HELIOS_API TextureLoadConfig
 	{
@@ -112,8 +112,6 @@ namespace Helios
         [[nodiscard]] const TextureDesc& GetTextureDesc() const { return m_TextureDesc; }
 		/* 获取纹理加载配置（已按资产设置解析过的有效值） */
 		[[nodiscard]] const TextureLoadConfig& GetTextureLoadConfig() const { return m_TextureLoadConfig; }
-		/* 获取调用点传入的原始配置（重载时重新解析用） */
-		[[nodiscard]] const TextureLoadConfig& GetRequestedLoadConfig() const { return m_RequestedLoadConfig; }
 
 		/* 获取纹理所在路径 */
 		[[nodiscard]] virtual const std::string& GetPath() const = 0;
@@ -127,7 +125,7 @@ namespace Helios
 
 		/* 创建纹理 */
 		static SharedPtr<DeviceTexture> Create(const std::string& name, const TextureDesc& texture_desc);
-		static SharedPtr<DeviceTexture> Create(const std::string& path, const TextureLoadConfig& load_config = {}); /* 目前仅支持加载二维纹理 */
+		static SharedPtr<DeviceTexture> Create(const std::string& path); /* 目前仅支持加载二维纹理 */
 		static SharedPtr<DeviceTexture> CreateWithSolidColor(const glm::vec3& color); /* 创建一个纯色贴图 */
 
 		/* 默认纹理 */
@@ -151,8 +149,6 @@ namespace Helios
 		TextureDesc m_TextureDesc{};
 		/* 解析后的有效加载配置 */
 		TextureLoadConfig m_TextureLoadConfig{};
-		/* 调用点原始配置：资产设置改了以后靠它重新解析 */
-		TextureLoadConfig m_RequestedLoadConfig{};
 	};
 }
 

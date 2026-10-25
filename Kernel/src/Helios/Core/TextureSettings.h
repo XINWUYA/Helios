@@ -22,7 +22,7 @@ namespace Helios
 		Hdr
 	};
 
-	/* .texmeta 的增量内容：字段为 nullopt 表示"继承"，不写进文件 */
+	/* .texmeta 的增量内容：字段为 nullopt 表示"用默认值"，不写进文件 */
 	struct HELIOS_API TextureSettings
 	{
 		std::optional<TexturePurpose> Usage;
@@ -41,7 +41,7 @@ namespace Helios
 		bool operator!=(const TextureSettings& other) const { return !(*this == other); }
 	};
 
-	/* 贴图设置仓库：按路径读写 <贴图>.texmeta，并把调用点配置解析成全量值。
+	/* 贴图设置仓库：按路径读写 <贴图>.texmeta，并把资产设置解析成全量值。
 	 * 只有这里知道 .texmeta 的存在，加载器和后端都不直接碰文件。 */
 	class HELIOS_API TextureSettingsStore
 	{
@@ -61,9 +61,9 @@ namespace Helios
 		void Invalidate(const std::string& texture_path);
 		void Clear();
 
-		/* 调用点配置 + 用途预设 + .texmeta -> 全量有效配置。
-		 * 幂等：对解析结果再解析一次结果不变（Create 与 AssetManager 都会调）。 */
-		TextureLoadConfig Resolve(const std::string& texture_path, const TextureLoadConfig& call_site);
+		/* .texmeta + 用途预设 + 引擎默认值 -> 全量有效配置。
+		 * 贴图设置是加载配置的唯一来源，引用点不再提供自己的配置。 */
+		TextureLoadConfig Resolve(const std::string& texture_path);
 
 	private:
 		TextureSettingsStore() = default;

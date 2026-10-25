@@ -33,7 +33,7 @@ namespace Helios
 			return extension == ".hdr";
 		}
 
-		/* 用途预设：只填采样、色彩、mip，数据布局（FlipV / SamplerType）不动 */
+		/* 用途预设：只填采样、色彩、mip；数据布局（FlipV / SamplerType）由 .texmeta 的显式字段决定 */
 		void ApplyUsagePreset(TextureLoadConfig& config, TexturePurpose usage)
 		{
 			switch (usage)
@@ -324,29 +324,14 @@ namespace Helios
 		m_Cache.clear();
 	}
 
-	TextureLoadConfig TextureSettingsStore::Resolve(const std::string& texture_path, const TextureLoadConfig& call_site)
+	TextureLoadConfig TextureSettingsStore::Resolve(const std::string& texture_path)
 	{
 		const TextureSettings settings = Load(texture_path);
-		const TexturePurpose usage = settings.Usage.value_or(TexturePurpose::Default);
 
+		/* 起点是引擎默认值，再按用途预设铺一遍，最后让 .texmeta 的显式字段逐项覆盖 */
 		TextureLoadConfig resolved;
-		ApplyUsagePreset(resolved, usage);
-
-		/* 没写用途时保留旧的调用点行为，老资产不受影响 */
-		if (usage == TexturePurpose::Default)
-		{
-			resolved.SamplerWrapMode = call_site.SamplerWrapMode;
-			resolved.SamplerMinFilter = call_site.SamplerMinFilter;
-			resolved.SamplerMagFilter = call_site.SamplerMagFilter;
-			resolved.IsGenMips = call_site.IsGenMips;
-			resolved.IsSrgb = call_site.IsSrgb;
-			resolved.AnisoLevel = call_site.AnisoLevel;
-		}
-
-		/* 数据布局听调用点：模型导入的 FlipV=false 不能被预设冲掉 */
-		resolved.IsFlipV = call_site.IsFlipV;
-		resolved.SamplerType = call_site.SamplerType;
-		resolved.IsHdr = call_site.IsHdr || HasHdrExtension(texture_path);
+		ApplyUsagePreset(resolved, settings.Usage.value_or(TexturePurpose::Default));
+		resolved.IsHdr = HasHdrExtension(texture_path);
 
 		if (settings.Srgb.has_value())
 			resolved.IsSrgb = *settings.Srgb;

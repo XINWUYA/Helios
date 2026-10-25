@@ -64,6 +64,7 @@ namespace Helios
 			const SharedPtr<Material>& source, const SharedPtr<DeviceShader>& gbuffer_shader)
 		{
 			auto material = Material::Create(gbuffer_shader);
+			const auto& gbuffer_reflection = gbuffer_shader->GetReflectionData();
 			for (const auto& [_, parameter] : source->GetAllParameters())
 			{
 				if (parameter.Type == ParamType::Texture)
@@ -71,10 +72,17 @@ namespace Helios
 					if (gbuffer_shader->GetUniformBinding(parameter.Name) < 0)
 						continue;
 					const auto texture = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(parameter.Value);
+					/* 没加载成功的贴图不复制，留给下面的默认贴图兜底 */
+					if (texture.first == nullptr || !texture.first->IsLoaded())
+						continue;
 					material->SetTexture(parameter.Name, texture.first);
 				}
 				else
 				{
+					/* GBuffer 没声明的参数不复制：写进去只会被丢弃，还刷一条告警 */
+					if (!gbuffer_reflection.MaterialParams.empty() &&
+						gbuffer_reflection.FindMaterialParam(parameter.Name) == nullptr)
+						continue;
 					material->SetParameters(parameter.Type, parameter.Name, parameter.Value);
 				}
 			}

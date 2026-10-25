@@ -35,14 +35,12 @@ namespace Helios
 		static SharedPtr<DeviceShader> Create(const std::string& path);
 	};
 
-	/* 纹理: 带加载配置（Create 内部会按贴图资产设置解析） */
+	/* 纹理: 无加载配置（加载参数只来自贴图自身的 .texmeta） */
 	template<>
 	struct AssetFactory<DeviceTexture>
 	{
-		using LoadConfig = TextureLoadConfig;
-		static SharedPtr<DeviceTexture> Create(const std::string& path, const TextureLoadConfig& load_config);
-		/* 缓存键用解析后的有效配置，同一张图被不同调用点请求时仍只有一份 */
-		static TextureLoadConfig ResolveConfig(const std::string& path, const TextureLoadConfig& load_config);
+		using LoadConfig = NoConfig;
+		static SharedPtr<DeviceTexture> Create(const std::string& path);
 	};
 
 	/* 模型: 无加载配置 */
@@ -139,14 +137,14 @@ namespace Helios
 
 	/* AssetStore显式实例化声明 */
 	extern template class AssetStore<DeviceShader, NoConfig>;
-	extern template class AssetStore<DeviceTexture, TextureLoadConfig>;
+	extern template class AssetStore<DeviceTexture, NoConfig>;
 	extern template class AssetStore<Model, NoConfig>;
 	extern template class AssetStore<Material, NoConfig>;
 	extern template class AssetStore<AnimationClip, NoConfig>;
 
 	/* 统一管理所有资源, 通过模板参数指定资源类型:
 	 * - auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>("Shaders/a.glsl");
-	 * - auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>("Textures/a.png", TextureLoadConfig{});
+	 * - auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>("Textures/a.png");
 	 * - auto model = AssetManager::Instance().GetOrLoad<Model>("Models/a.mesh");
 	 * - auto material = AssetManager::Instance().GetOrLoad<Material>("Materials/a.mtl");
 	 * - AssetManager::Instance().Refresh<Material>(path, edited);  (材质编辑保存后同步缓存)

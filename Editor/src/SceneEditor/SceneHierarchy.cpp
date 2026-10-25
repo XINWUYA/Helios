@@ -1684,25 +1684,20 @@ namespace Helios
 
 		if (ImGui::CollapsingHeader("Advanced"))
 		{
-			static const std::vector<std::string> flip_options{ "Inherit", "On", "Off" };
-			int flip = settings.FlipV.has_value() ? (*settings.FlipV ? 1 : 2) : 0;
+			/* 数据布局没有上层来源可继承，直接给实值（默认即不翻转、二维） */
+			static const std::vector<std::string> flip_options{ "On", "Off" };
+			int flip = settings.FlipV.value_or(true) ? 0 : 1;
 			ImGuiExt::DrawComboUI("Flip V", flip_options, flip, [&](int picked)
 			{
-				if (picked == 0)
-					settings.FlipV.reset();
-				else
-					settings.FlipV = picked == 1;
+				settings.FlipV = picked == 0;
 				touched = true;
 			});
 
-			static const std::vector<std::string> type_options{ "Inherit", "2D", "2DArray", "CubeMap", "3D" };
-			int type = settings.SamplerType.has_value() ? static_cast<int>(*settings.SamplerType) + 1 : 0;
+			static const std::vector<std::string> type_options{ "2D", "2DArray", "CubeMap", "3D" };
+			int type = settings.SamplerType.has_value() ? static_cast<int>(*settings.SamplerType) : 0;
 			ImGuiExt::DrawComboUI("Sampler Type", type_options, type, [&](int picked)
 			{
-				if (picked == 0)
-					settings.SamplerType.reset();
-				else
-					settings.SamplerType = static_cast<SamplerType>(picked - 1);
+				settings.SamplerType = static_cast<SamplerType>(picked);
 				touched = true;
 			});
 		}

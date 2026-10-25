@@ -116,9 +116,13 @@ namespace Helios
 		{
 		case ParamType::Texture:
 			{
-				/* 绑定纹理 */
 				const auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(value);
-				if (!texture_info.first)
+
+				/* 贴图缺失或加载失败时改绑默认贴图：空槽位 Metal 校验层会直接断言 */
+				SharedPtr<DeviceTexture> texture = texture_info.first;
+				if (texture == nullptr || !texture->IsLoaded())
+					texture = DefaultTextureForSampler(param_info.Name);
+				if (texture == nullptr)
 					break;
 
 				/* 反射不到绑定点时回退到槽位 0，绝不静默跳过绑定：
@@ -128,7 +132,7 @@ namespace Helios
 					slot = ResolveTextureBinding(param_info.Name);
 				if (slot == InvalidTextureSlot)
 					slot = 0u;
-				texture_info.first->Bind(slot);
+				texture->Bind(slot);
 				m_pShader->SetInt(param_info.Name, static_cast<int>(slot));
 			}
 			break;
@@ -421,23 +425,6 @@ namespace Helios
 	/* ---- 材质体读写：.mtl 条目、独立材质资产、实例覆盖共用 ---- */
 	namespace MaterialIO
 	{
-		namespace
-		{
-			/* 按扩展名识别 HDR 贴图：老资产的 LoadConfig 没有 IsHdr 字段，
-			 * 缺省按扩展名推断（.hdr 用浮点解码；按 8bit 读会先转 LDR 再上传，
-			 * 既慢又丢动态范围）。 */
-			[[nodiscard]] bool IsHdrTexturePath(const char* path)
-			{
-				if (path == nullptr)
-					return false;
-
-				std::string suffix = ExtractFileSuffix(path);
-				std::transform(suffix.begin(), suffix.end(), suffix.begin(),
-					[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-				return suffix == "hdr";
-			}
-		}
-
 		void WriteBody(tinyxml2::XMLElement* material_element, const Material& material, bool write_raster_state)
 		{
 			/* Shader */
@@ -462,18 +449,9 @@ namespace Helios
 				{
 				case ParamType::Texture:
 					{
-						auto texture_doc = param_doc->InsertNewChildElement("Texture");
+						/* 贴图参数就是路径值，和其他类型一样走 Value；采样与格式归贴图自身的 .texmeta */
 						const auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(param_info.Value);
-						const auto& texture = texture_info.first;
-
-						texture_doc->SetAttribute("Path", RELATIVE_PATH(texture->GetPath()).c_str());
-						texture_doc->SetAttribute("Slot", texture_info.second);
-
-						auto* load_config_doc = texture_doc->InsertNewChildElement("LoadConfig");
-						/* 采样与格式已经归贴图资产设置，材质只留数据布局两项 */
-						const auto load_config = texture->GetTextureLoadConfig();
-						load_config_doc->SetAttribute("IsFlipV", load_config.IsFlipV);
-						load_config_doc->SetAttribute("SamplerType", static_cast<uint32_t>(load_config.SamplerType));
+						param_doc->SetAttribute("Value", RELATIVE_PATH(texture_info.first->GetPath()).c_str());
 					}
 					break;
 				case ParamType::Int:
@@ -542,33 +520,12 @@ namespace Helios
 					{
 					case ParamType::Texture:
 						{
-							const auto* texture_doc = param_doc->FirstChildElement("Texture");
-							if (texture_doc == nullptr)
+							/* 贴图参数就是路径值；采样与格式归贴图自身的 .texmeta */
+							const char* texture_path = param_doc->Attribute("Value");
+							if (texture_path == nullptr || *texture_path == '\0')
 								break;
-							const char* texture_path = texture_doc->Attribute("Path");
 
-							TextureLoadConfig load_config;
-							if (const auto* load_config_doc = texture_doc->FirstChildElement("LoadConfig"))
-							{
-								/* 老资产才写 IsGenMips / IsHdr；新资产只留数据布局两项，
-								 * 缺失时按引擎默认（开 mip、按后缀判 HDR） */
-								load_config.IsFlipV = (load_config_doc->FindAttribute("IsFlipV") != nullptr)
-									? load_config_doc->BoolAttribute("IsFlipV")
-									: true;
-								load_config.IsGenMips = (load_config_doc->FindAttribute("IsGenMips") != nullptr)
-									? load_config_doc->BoolAttribute("IsGenMips")
-									: true;
-								load_config.SamplerType = static_cast<SamplerType>(load_config_doc->IntAttribute("SamplerType"));
-								load_config.IsHdr = (load_config_doc->FindAttribute("IsHdr") != nullptr)
-									? load_config_doc->BoolAttribute("IsHdr")
-									: IsHdrTexturePath(texture_path);
-							}
-							else
-							{
-								load_config.IsHdr = IsHdrTexturePath(texture_path);
-							}
-
-							auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(texture_path), load_config);
+							auto texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH(texture_path));
 							material.SetTexture(param_name, texture);
 						}
 						break;
@@ -701,52 +658,50 @@ namespace Helios
 			std::error_code error;
 			std::filesystem::create_directories(target_dir, error);
 
-			/* 贴图挂在 <ParamInfo> 下面：整棵树找 <Texture>，逐条搬 */
+			/* 贴图参数就是 ParamInfo 的 Value：整棵树找 Type 为贴图的条目，逐条搬 */
 			const auto relocate = [&](auto&& self, tinyxml2::XMLElement* element) -> void
 			{
-				if (std::strcmp(element->Name(), "Texture") == 0)
+				const bool is_texture_param = std::strcmp(element->Name(), "ParamInfo") == 0
+					&& element->IntAttribute("Type", -1) == static_cast<int>(ParamType::Texture);
+				const char* source_attribute = is_texture_param ? element->Attribute("Value") : nullptr;
+				if (source_attribute != nullptr && *source_attribute != '\0')
 				{
-					const char* source_attribute = element->Attribute("Path");
-					if (source_attribute != nullptr && *source_attribute != '\0')
+					const std::filesystem::path source = ResolveAssetPath(PathFromUtf8(source_attribute));
+					if (std::filesystem::is_regular_file(source, error))
 					{
-						const std::filesystem::path source = ResolveAssetPath(PathFromUtf8(source_attribute));
-						if (std::filesystem::is_regular_file(source, error))
+						const std::filesystem::path destination = target_dir / source.filename();
+						std::error_code equivalent_error;
+						const bool same_file = std::filesystem::exists(destination, equivalent_error)
+							&& std::filesystem::equivalent(source, destination, equivalent_error);
+
+						bool copied = true;
+						if (!same_file)
 						{
-							const std::filesystem::path destination = target_dir / source.filename();
-							std::error_code equivalent_error;
-							const bool same_file = std::filesystem::exists(destination, equivalent_error)
-								&& std::filesystem::equivalent(source, destination, equivalent_error);
+							std::filesystem::copy_file(source, destination,
+								std::filesystem::copy_options::overwrite_existing, error);
+							copied = !error;
+							if (error)
+								CORE_LOG_WARN("Failed to copy texture {}: {}.", PathToUtf8(source), error.message());
+						}
 
-							bool copied = true;
-							if (!same_file)
+						if (copied)
+						{
+							/* 采样设置跟着贴图走，导出后也要能用（原地导出时跳过） */
+							const std::filesystem::path source_meta =
+								PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(source)));
+							std::error_code meta_error;
+							if (!same_file && std::filesystem::is_regular_file(source_meta, meta_error))
 							{
-								std::filesystem::copy_file(source, destination,
-									std::filesystem::copy_options::overwrite_existing, error);
-								copied = !error;
-								if (error)
-									CORE_LOG_WARN("Failed to copy texture {}: {}.", PathToUtf8(source), error.message());
+								const std::filesystem::path destination_meta =
+									PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(destination)));
+								std::filesystem::copy_file(source_meta, destination_meta,
+									std::filesystem::copy_options::overwrite_existing, meta_error);
+								if (meta_error)
+									CORE_LOG_WARN("Failed to copy texture settings {}: {}.",
+										PathToUtf8(source_meta), meta_error.message());
 							}
 
-							if (copied)
-							{
-								/* 采样设置跟着贴图走，导出后也要能用（原地导出时跳过） */
-								const std::filesystem::path source_meta =
-									PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(source)));
-								std::error_code meta_error;
-								if (!same_file && std::filesystem::is_regular_file(source_meta, meta_error))
-								{
-									const std::filesystem::path destination_meta =
-										PathFromUtf8(TextureSettingsStore::MetaPath(PathToUtf8(destination)));
-									std::filesystem::copy_file(source_meta, destination_meta,
-										std::filesystem::copy_options::overwrite_existing, meta_error);
-									if (meta_error)
-										CORE_LOG_WARN("Failed to copy texture settings {}: {}.",
-											PathToUtf8(source_meta), meta_error.message());
-								}
-
-								element->SetAttribute("Path",
-									RELATIVE_PATH(PathToUtf8(destination)).c_str());
-							}
+							element->SetAttribute("Value", RELATIVE_PATH(PathToUtf8(destination)).c_str());
 						}
 					}
 				}

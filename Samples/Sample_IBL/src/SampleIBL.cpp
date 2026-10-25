@@ -18,17 +18,7 @@ void SampleIBLLayer::OnAttached()
 
 	/* 向场景中添加SkyBox */
 	{
-		constexpr TextureLoadConfig load_config{
-			.IsFlipV = true,
-			.IsGenMips = false,
-			.IsHdr = true,
-			.IsSrgb = false,
-			.SamplerType = SamplerType::Sampler2D,
-			.SamplerWrapMode = SamplerWrapMode::ClampToEdge,
-			.SamplerMinFilter = SamplerMinFilter::Linear,
-			.SamplerMagFilter = SamplerMagFilter::Linear
-		};
-		m_pSkyTexture = DeviceTexture::Create(ABSOLUTE_PATH("Textures/drakensberg_solitary_mountain_4k.hdr"), load_config);
+		m_pSkyTexture = DeviceTexture::Create(ABSOLUTE_PATH("Textures/drakensberg_solitary_mountain_4k.hdr"));
 
 		RenderRasterState raster_state;
 		raster_state.EnableDepthWrite = true;

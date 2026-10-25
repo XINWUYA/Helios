@@ -1,6 +1,6 @@
-<?xml version='1.0' encoding='UTF-8'?>
+<?xml version="1.0" encoding="UTF-8"?>
 <Model Geometry="Models/animated-cat/cat.mesh">
-  <Material Slot="Material_81" Asset="Models/animated-cat/cat_materials/Material_81.mtl" />
-  <Material Slot="Material_105" Asset="Models/animated-cat/cat_materials/Material_105.mtl" />
-  <Material Slot="Material_93" Asset="Models/animated-cat/cat_materials/Material_93.mtl" />
+    <Material Slot="Material_81" Asset="Models/animated-cat/cat_materials/Material_81.mtl"/>
+    <Material Slot="Material_105" Asset="Models/animated-cat/cat_materials/Material_105.mtl"/>
+    <Material Slot="Material_93" Asset="Models/animated-cat/cat_materials/Material_93.mtl"/>
 </Model>

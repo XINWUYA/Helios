@@ -371,7 +371,7 @@ namespace Helios
 		if (m_Path.empty())
 			return false;
 
-		const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(m_Path, m_RequestedLoadConfig);
+		const TextureLoadConfig resolved = TextureSettingsStore::Instance().Resolve(m_Path);
 
 		/* 新对象建好再换；换下来的旧句柄随临时对象析构释放 */
 		OpenGLTexture fresh(m_Path, resolved);

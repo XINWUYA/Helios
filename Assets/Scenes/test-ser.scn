@@ -14,7 +14,7 @@
         </Entity>
         <Entity ID="2" Name="Directional Light">
             <Transform Position="-4.436856 3.931013 0.000000" Rotation="0.555050 0.688880 1.209722" Scale="6.299987 1.000000 1.000000"/>
-            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="5" IsCastShadow="true" ShadowSize="1024" ShadowBias="0.0099999998" CascadeCount="1" ShadowFar="0"/>
+            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="5" IsCastShadow="true" ShadowSize="1024" ShadowBias="0.0099999998" CascadeCount="1" ShadowFar="150"/>
         </Entity>
         <Entity ID="3" Name="Reflection Probe">
             <Transform Position="1.737903 0.647669 3.682614" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
@@ -40,11 +40,7 @@
                 <MaterialOverride Slot="Default" Instance="true" Source="Materials/Ground.mtl" ShaderPath="Shaders/MaterialShaders/SimpleLit.glsl" RenderQueue="2000">
                     <Parameters>
                         <ParamInfo Type="5" Name="u_AlbedoTilingOffset" Value="4.000000 4.000000 0.000000 0.000000"/>
-                        <ParamInfo Type="0" Name="u_AlbedoTexture">
-                            <Texture Path="Textures/Grass2.png" Slot="0">
-                                <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0" IsHdr="false"/>
-                            </Texture>
-                        </ParamInfo>
+                        <ParamInfo Type="0" Name="u_AlbedoTexture" Value="Textures/Grass2.png"/>
                     </Parameters>
                     <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthTest="true" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
                 </MaterialOverride>
@@ -55,11 +51,7 @@
             <Model ModelPath="BuiltinSphere" CastShadow="false" ReceiveShadow="false" EnableSkinning="true">
                 <MaterialOverride Slot="Default" Instance="true" Source="Materials/Sky.mtl" ShaderPath="Shaders/Sky/SkyBox.glsl" RenderQueue="2000">
                     <Parameters>
-                        <ParamInfo Type="0" Name="u_SkyTex">
-                            <Texture Path="Textures/drakensberg_solitary_mountain_4k.hdr" Slot="0">
-                                <LoadConfig IsFlipV="true" IsGenMips="true" SamplerType="0" IsHdr="true"/>
-                            </Texture>
-                        </ParamInfo>
+                        <ParamInfo Type="0" Name="u_SkyTex" Value="Textures/drakensberg_solitary_mountain_4k.hdr"/>
                     </Parameters>
                     <RasterState CullMode="1" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthTest="true" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
                 </MaterialOverride>
@@ -87,7 +79,7 @@
         <Entity ID="13" Name="cat">
             <Transform Position="-0.540977 1.771212 3.423975" Rotation="0.000000 0.000000 0.000000" Scale="0.020000 0.020000 0.020000"/>
             <Model ModelPath="Models/animated-cat/cat.model" CastShadow="true" ReceiveShadow="true" EnableSkinning="true"/>
-            <Animator Clip="Models/animated-cat/scene_Take_001.anim" Speed="1" Loop="true" AutoPlay="true"/>
+            <Animator Clip="Models/animated-cat/Take_001.anim" Speed="1" Loop="true" AutoPlay="true"/>
         </Entity>
         <Entity ID="14" Name="_rootJoint" Parent="13">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 -0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
