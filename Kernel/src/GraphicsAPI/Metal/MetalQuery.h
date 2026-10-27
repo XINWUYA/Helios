@@ -18,6 +18,7 @@ namespace Helios
 
         uint32_t AttachRenderPass(void* native_render_pass_descriptor) override;
         void ClearRenderPassAttachment(void* native_render_pass_descriptor) override;
+        uint32_t AttachComputePass(void* native_compute_pass_descriptor) override;
         uint32_t GetOpenRenderPassSlot() const override { return m_OpenPassSlot; }
         void OnRenderPassEnd() override { m_OpenPassSlot = INVALID_PASS_SLOT; }
         bool TryResolvePassTimestamps(std::vector<GPUPassTimestamp>& timestamps) override;
@@ -31,6 +32,8 @@ namespace Helios
         MTL::CounterSampleBuffer* m_CounterSampleBuffer{ nullptr };
         MTL::CommandBuffer* m_CommandBuffer{ nullptr };
         uint32_t m_PassCount{ 0 };
+        /* 每个槽位是渲染通道还是计算通道（计算通道只占首尾两个采样点） */
+        bool m_SlotIsCompute[MAX_PASS_COUNT]{};
         /* 当前仍打开的采样通道（编码器已创建、尚未关闭）；无 = INVALID */
         uint32_t m_OpenPassSlot{ INVALID_PASS_SLOT };
     };

@@ -46,6 +46,8 @@ namespace Helios
 		/* 顶点 / 片元阶段的细分和（通道采样模型；其余后端保持 0）—— 诊断用 */
 		double ResultVertexUs{ 0.0 };
 		double ResultFragmentUs{ 0.0 };
+		/* 计算通道的时长和（同上；纯计算的 Pass 只落在这里） */
+		double ResultComputeUs{ 0.0 };
 
 		/* 本帧是否取到有效样本：无样本（后端不支持 / 作用域内没有可采样的通道）
 		 * 的节点在结果树里标为"无数据"由 UI 占位显示，不拖垮其它节点。 */

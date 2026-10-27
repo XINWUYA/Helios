@@ -25,6 +25,9 @@ namespace Helios
 		/* 渲染通道结束（编码器已关闭） */
 		void OnRenderPassEnd();
 
+		/* 计算通道开始（派发前转发）：与渲染通道共用槽位，时间戳计入当前打开的作用域 */
+		void OnComputePassBegin(void* native_compute_pass_descriptor, bool clear_only);
+
 		bool PrepareQueryResult();
 
 	private:
@@ -52,10 +55,11 @@ namespace Helios
 	{
 		std::string Label{ "" };
 		double GPUTime = 0.0;
-		/* 顶点 / 片元阶段的细分（与 GPUTime 同系数平滑；仅通道采样后端提供，
-		 * 其余后端保持 0 —— 是否可用看 HasStageSplit） */
+		/* 顶点 / 片元 / 计算通道的细分（与 GPUTime 同系数平滑；仅通道采样后端提供，
+		 * 其余后端保持 0 —— 是否可用看 HasStageSplit）。计算通道只有 Compute 一项。 */
 		double GPUTimeVertex = 0.0;
 		double GPUTimeFragment = 0.0;
+		double GPUTimeCompute = 0.0;
 		/* 本帧是否有有效数据（无数据节点由 UI 以占位显示；GPUTime 保留上次平滑值） */
 		bool HasData = false;
 		/* 本节点的 v/f 细分是否可用（随节点能力标记；桌面 GL 恒假，面板不显示细分） */
@@ -145,6 +149,10 @@ namespace Helios
 		/* 渲染通道结束（编码器已关闭；后端在每个渲染编码器结束处调用）。
 		 * 用于清掉"当前打开的通道"标记 —— 作用域在通道内开启时要靠它做补绑。 */
 		void OnRenderPassEnd();
+
+		/* 计算通道即将开始（后端在建计算编码器前调用）：挂上时间戳采样点，
+		 * 让纯计算的 Pass（如 GPU 蒙皮）也能统计到耗时。 */
+		void OnComputePassBegin(void* native_compute_pass_descriptor);
 
 		bool PrepareQueryResult(ResultGPUTimerNode& root_node);
 

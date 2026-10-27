@@ -150,6 +150,7 @@ namespace Helios
         attachment->setStartOfFragmentSampleIndex(pass_slot * SAMPLES_PER_PASS + 2);
         attachment->setEndOfFragmentSampleIndex(pass_slot * SAMPLES_PER_PASS + 3);
 
+        m_SlotIsCompute[pass_slot] = false; /* 槽位跨帧复用：类型每帧重新落定 */
         CaptureCommandBuffer();
         ++m_PassCount;
         m_OpenPassSlot = pass_slot;
@@ -169,6 +170,33 @@ namespace Helios
             descriptor->sampleBufferAttachments()->object(0);
         if (attachment != nullptr)
             attachment->setSampleBuffer(nullptr);
+    }
+
+    /* 计算通道（派发）：Apple GPU 同样只在通道边界采样，取编码器的首尾两个采样点。
+     * 不挂的话纯计算的 Pass（如 GPU 蒙皮）在统计面板里永远没有数据。 */
+    uint32_t MetalQueryBuffer::AttachComputePass(void* native_compute_pass_descriptor)
+    {
+        if (native_compute_pass_descriptor == nullptr || m_CounterSampleBuffer == nullptr)
+            return INVALID_PASS_SLOT;
+
+        if (m_PassCount >= MAX_PASS_COUNT)
+            return INVALID_PASS_SLOT;
+
+        auto* descriptor = static_cast<MTL::ComputePassDescriptor*>(native_compute_pass_descriptor);
+        MTL::ComputePassSampleBufferAttachmentDescriptor* attachment =
+            descriptor->sampleBufferAttachments()->object(0);
+        if (attachment == nullptr)
+            return INVALID_PASS_SLOT;
+
+        const uint32_t pass_slot = m_PassCount;
+        attachment->setSampleBuffer(m_CounterSampleBuffer);
+        attachment->setStartOfEncoderSampleIndex(pass_slot * SAMPLES_PER_PASS + 0);
+        attachment->setEndOfEncoderSampleIndex(pass_slot * SAMPLES_PER_PASS + 1);
+
+        m_SlotIsCompute[pass_slot] = true;
+        CaptureCommandBuffer();
+        ++m_PassCount;
+        return pass_slot;
     }
 
     bool MetalQueryBuffer::TryResolvePassTimestamps(std::vector<GPUPassTimestamp>& timestamps)
@@ -229,6 +257,14 @@ namespace Helios
         for (uint32_t slot = 0; slot < m_PassCount; ++slot)
         {
             const uint64_t* stage = samples + slot * SAMPLES_PER_PASS;
+
+            /* 计算通道：编码器首尾一对采样点即可，没有 v/f 之分 */
+            if (m_SlotIsCompute[slot])
+            {
+                timestamps[slot].ComputeUs = stage_duration_us(stage[0], stage[1]);
+                continue;
+            }
+
             timestamps[slot].VertexUs = stage_duration_us(stage[0], stage[1]);
 
             uint64_t fragment_begin = stage[2];
@@ -290,6 +326,7 @@ namespace Helios
         HasValidSamples = false;
         ResultTimeBegin = 0.0;
         ResultTimeEnd = 0.0;
+        ResultComputeUs = 0.0;
 
         if (m_pPassTimestamps == nullptr || m_PassSlots.empty())
             return true; /* 已解析：本帧无数据 */
@@ -301,6 +338,7 @@ namespace Helios
         double total_us = 0.0;
         double vertex_us = 0.0;
         double fragment_us = 0.0;
+        double compute_us = 0.0;
         for (const uint32_t slot : m_PassSlots)
         {
             if (slot < pass_timestamps.size())
@@ -308,6 +346,7 @@ namespace Helios
                 total_us += pass_timestamps[slot].DurationUs();
                 vertex_us += pass_timestamps[slot].VertexUs;
                 fragment_us += pass_timestamps[slot].FragmentUs;
+                compute_us += pass_timestamps[slot].ComputeUs;
             }
         }
 
@@ -318,6 +357,7 @@ namespace Helios
         ResultTimeEnd = total_us;
         ResultVertexUs = vertex_us;
         ResultFragmentUs = fragment_us;
+        ResultComputeUs = compute_us;
         HasValidSamples = true;
         return true;
     }

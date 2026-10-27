@@ -1165,7 +1165,21 @@ namespace Helios
             resolved.emplace_back(to_buffer_index(binding), storage->GetMetalBuffer());
         }
 
-        MTL::ComputeCommandEncoder* encoder = m_CurrentCommandBuffer->computeCommandEncoder();
+        /* GPU 计时（通道采样）：计算通道同样要挂时间戳采样点 —— Apple GPU 只在通道
+         * 边界采样，不挂的话纯计算的 Pass（如 GPU 蒙皮）在统计面板里永远没有数据。
+         * 描述符每次派发新建，所以只有计时开着才建。 */
+        MTL::ComputePassDescriptor* compute_descriptor = nullptr;
+        if (RenderQueryProfiler::Instance().IsEnabled())
+        {
+            compute_descriptor = MTL::ComputePassDescriptor::computePassDescriptor();
+            RenderQueryProfiler::Instance().OnComputePassBegin(compute_descriptor);
+        }
+
+        MTL::ComputeCommandEncoder* encoder = compute_descriptor != nullptr
+            ? m_CurrentCommandBuffer->computeCommandEncoder(compute_descriptor)
+            : m_CurrentCommandBuffer->computeCommandEncoder();
+        if (encoder == nullptr && compute_descriptor != nullptr)
+            encoder = m_CurrentCommandBuffer->computeCommandEncoder(); /* 带采样的通道建不出来：退回普通编码器 */
         if (encoder == nullptr)
             return false;
 

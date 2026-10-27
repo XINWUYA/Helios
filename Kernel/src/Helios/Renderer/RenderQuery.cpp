@@ -151,6 +151,26 @@ namespace Helios
 			m_pQueryBuffer->OnRenderPassEnd();
 	}
 
+	/* 计算通道开始：分配采样槽位并挂到描述符上，再把它通知给各打开的作用域。
+	 * 描述符每次派发新建，没有跨帧残留可清 —— 停用 / 不可用时直接不采样。 */
+	void RenderQueryContext::OnComputePassBegin(void* native_compute_pass_descriptor, bool clear_only)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_pQueryBuffer == nullptr || native_compute_pass_descriptor == nullptr)
+			return;
+
+		if (clear_only || !m_IsValid)
+			return;
+
+		const uint32_t pass_slot = m_pQueryBuffer->AttachComputePass(native_compute_pass_descriptor);
+		if (pass_slot == DeviceQueryBuffer::INVALID_PASS_SLOT)
+			return;
+
+		for (const uint32_t node_index : m_OpenNodeIndices)
+			m_QueryNodes[node_index]->OnRenderPassBegin(pass_slot);
+	}
+
 	bool RenderQueryContext::PrepareQueryResult()
 	{
 		PROFILE_FUNCTION();
@@ -254,6 +274,12 @@ namespace Helios
 		m_QueryContexts[m_WriteContextId].OnRenderPassEnd();
 	}
 
+	void RenderQueryProfiler::OnComputePassBegin(void* native_compute_pass_descriptor)
+	{
+		m_QueryContexts[m_WriteContextId].OnComputePassBegin(native_compute_pass_descriptor,
+			/*clear_only=*/!m_IsEnabled);
+	}
+
 	bool RenderQueryProfiler::PrepareQueryResult(ResultGPUTimerNode& root_node)
 	{
 		PROFILE_FUNCTION();
@@ -284,6 +310,7 @@ namespace Helios
 						timerNode.GPUTime = timerNode.GPUTime * 0.9 + (queryNode->ResultTimeEnd - queryNode->ResultTimeBegin) *0.1;
 						timerNode.GPUTimeVertex = timerNode.GPUTimeVertex * 0.9 + queryNode->ResultVertexUs * 0.1;
 						timerNode.GPUTimeFragment = timerNode.GPUTimeFragment * 0.9 + queryNode->ResultFragmentUs * 0.1;
+						timerNode.GPUTimeCompute = timerNode.GPUTimeCompute * 0.9 + queryNode->ResultComputeUs * 0.1;
 					}
 
 					/* 录制树（可选）：写入当帧原始值 —— 逐帧回放要看每帧真值，不做平滑 */
@@ -298,6 +325,7 @@ namespace Helios
 							recordNode->GPUTime = queryNode->ResultTimeEnd - queryNode->ResultTimeBegin;
 							recordNode->GPUTimeVertex = queryNode->ResultVertexUs;
 							recordNode->GPUTimeFragment = queryNode->ResultFragmentUs;
+							recordNode->GPUTimeCompute = queryNode->ResultComputeUs;
 						}
 					}
 

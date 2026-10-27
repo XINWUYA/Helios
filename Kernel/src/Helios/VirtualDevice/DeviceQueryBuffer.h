@@ -4,19 +4,21 @@
 
 namespace Helios
 {
-	/* 一个渲染通道的 GPU 实际工作时长（通道采样模型；单位 us）：取"各 stage 内的 work 时长"、
+	/* 一个通道的 GPU 实际工作时长（通道采样模型；单位 us）：取"各 stage 内的 work 时长"、
 	 * 而不是"通道首尾跨度"（TBDR 上阶段会交叠，首尾会把流水线等待算进来）；跟 Xcode 抓帧同口径、
-	 * 各作用域可以加。FragmentUs 含排队修正；0 = 没有采样数据。 */
+	 * 各作用域可以加。FragmentUs 含排队修正；0 = 没有采样数据。
+	 * 计算通道只有一段（ComputeUs，顶点 / 片元恒 0），与渲染通道分开记以免互相污染。 */
 	struct GPUPassTimestamp
 	{
 		double VertexUs{ 0.0 };
 		double FragmentUs{ 0.0 };
-		double DurationUs() const { return VertexUs + FragmentUs; }
+		double ComputeUs{ 0.0 };
+		double DurationUs() const { return VertexUs + FragmentUs + ComputeUs; }
 	};
 
-	/* 一帧 GPU 时间戳的后端存放处（通道采样模型）：每个通道占四个采样下标（顶点起止 + 片元
-	 * 起止），通道开始前挂到描述符上、命令完成后一次性解析成表。Apple GPU 只有通道的阶段边界
-	 * 能采样 —— 耗时以通道为单位收集再求和；跟通道无关的后端（GL）Create 返回空。 */
+	/* 一帧 GPU 时间戳的后端存放处（通道采样模型）：每个通道占四个采样下标
+	 * （顶点与片元各起止，计算通道只用前两个），开始时挂描述符、结束后解析成表。
+	 * Apple GPU 只在通道边界采样，耗时按通道收集再求和；GL 用时间戳查询，Create 返回空。 */
 	class DeviceQueryBuffer
 	{
 	public:
@@ -38,6 +40,14 @@ namespace Helios
 
 		/* 清除通道描述符上可能残留的采样附件（计时停用 / 通道不采样时调用） */
 		virtual void ClearRenderPassAttachment(void* native_render_pass_descriptor) = 0;
+
+		/* 计算通道开始（创建编码器前调用）：与渲染通道共用槽位空间，只占首尾两个采样点，
+		 * 返回采样槽位序号；不可用时返回 INVALID_PASS_SLOT（描述符照常能拿来建编码器）。
+		 * 不采样的后端（GL）保持默认实现。 */
+		virtual uint32_t AttachComputePass(void* /*native_compute_pass_descriptor*/)
+		{
+			return INVALID_PASS_SLOT;
+		}
 
 		/* 当前仍打开的采样通道序号：作用域可能在通道内才开启（如默认目标 Pass ——
 		 * 编码器先于作用域创建），Context 靠它把新节点补绑到当前通道；
