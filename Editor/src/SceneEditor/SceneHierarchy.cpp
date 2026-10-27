@@ -35,9 +35,12 @@
 #include <tinyxml2.h>
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <limits>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -47,6 +50,82 @@ namespace Helios
 	{
 		/* 层级面板内部的拖拽载荷类型：被拖动实体的句柄 */
 		constexpr const char* kEntityDragPayload = "SCENE_HIERARCHY_ENTITY";
+
+		/* ---- 树的展开状态 ----
+		 * 键 = 从根往下逐级滚出来的名字路径哈希（FNV-1a）：实体句柄会随增删实体漂移，
+		 * 名字路径跨场景、跨会话都对得上（同一父链下同名的两个节点共用一份状态，无害）。 */
+		constexpr uint64_t kTreeRootKey = 0x9e3779b97f4a7c15ull;
+
+		uint64_t HashTreeKey(uint64_t parent_key, const std::string& name)
+		{
+			uint64_t hash = parent_key ^ 0xcbf29ce484222325ull;
+			for (const char character : name)
+			{
+				hash ^= static_cast<unsigned char>(character);
+				hash *= 0x100000001b3ull;
+			}
+
+			return hash;
+		}
+
+		/* 展开记录：场景路径 -> (名字路径哈希 -> 是否展开)。按场景分段存同一个文件，整份读写。 */
+		using TreeStateTable = std::map<std::string, std::map<uint64_t, bool>>;
+
+		/* 文件格式（<项目>/.helios/hierarchy.cfg）：
+		 *   [场景路径]
+		 *   名字路径哈希(16 进制)=0/1 */
+		void ReadTreeStates(const std::filesystem::path& file, TreeStateTable& out)
+		{
+			std::ifstream stream(file);
+			if (!stream)
+				return;
+
+			std::string scene;
+			for (std::string line; std::getline(stream, line);)
+			{
+				if (!line.empty() && line.back() == '\r')
+					line.pop_back();
+				if (line.size() < 3)
+					continue;
+
+				if (line.front() == '[' && line.back() == ']')
+				{
+					scene = line.substr(1, line.size() - 2);
+					continue;
+				}
+
+				const size_t separator = line.find('=');
+				if (separator == std::string::npos || scene.empty())
+					continue;
+
+				const uint64_t key = std::strtoull(line.substr(0, separator).c_str(), nullptr, 16);
+				out[scene][key] = line.substr(separator + 1) != "0";
+			}
+		}
+
+		void WriteTreeStates(const std::filesystem::path& file, const TreeStateTable& states)
+		{
+			std::error_code error;
+			std::filesystem::create_directories(file.parent_path(), error);
+
+			std::ofstream stream(file, std::ios::trunc);
+			if (!stream)
+				return;
+
+			for (const auto& [scene, table] : states)
+			{
+				if (table.empty())
+					continue;
+
+				stream << "[" << scene << "]\n";
+				for (const auto& [key, open] : table)
+				{
+					char buffer[32] = {};
+					snprintf(buffer, sizeof(buffer), "%016llx", static_cast<unsigned long long>(key));
+					stream << buffer << "=" << (open ? 1 : 0) << "\n";
+				}
+			}
+		}
 
 		/* 卡内分区隔离线（画在材质卡那一段，详情卡与组件卡尾也要用） */
 		void DrawCardSectionDivider();
@@ -449,12 +528,15 @@ namespace Helios
 	SceneHierarchy::SceneHierarchy()
 	{
 		PROFILE_FUNCTION();
+
+		BindTreeState();
 	}
 
 	SceneHierarchy::SceneHierarchy(const SharedPtr<Scene>& scene)
 	{
 		PROFILE_FUNCTION();
 
+		BindTreeState();
 		SetOwnerScene(scene);
 	}
 
@@ -472,6 +554,57 @@ namespace Helios
 
 		/* 上一份场景里的挂接请求指向的句柄已经无效 */
 		m_PendingReparent = {};
+
+		/* 上一份场景画过的树行也不再有效 */
+		m_TreeRows.clear();
+		m_HasOpenBranch = false;
+	}
+
+	void SceneHierarchy::SetScenePath(const std::string& path)
+	{
+		if (m_ScenePath != path)
+		{
+			/* 换场景：先把上一份的改动落盘，再把这一份接上（同一路径反复设置是空操作） */
+			StoreTreeStates();
+			m_TreeRows.clear();
+		}
+
+		m_ScenePath = path;
+		BindTreeState();
+	}
+
+	void SceneHierarchy::SetTreeStatePath(const std::string& path)
+	{
+		m_TreeStatePath = path;
+		LoadTreeStates();
+	}
+
+	void SceneHierarchy::BindTreeState()
+	{
+		/* 指向状态表里的那一份：std::map 的引用稳定，换场景才重新取 */
+		m_pTreeState = &m_TreeStates[m_ScenePath];
+	}
+
+	void SceneHierarchy::LoadTreeStates()
+	{
+		if (m_TreeStatesLoaded || m_TreeStatePath.empty())
+			return;
+
+		m_TreeStatesLoaded = true;
+		ReadTreeStates(PathFromUtf8(m_TreeStatePath), m_TreeStates);
+		BindTreeState();
+	}
+
+	void SceneHierarchy::StoreTreeStates()
+	{
+		if (!m_TreeStateDirty)
+			return;
+
+		m_TreeStateDirty = false;
+		if (m_TreeStatePath.empty())
+			return;
+
+		WriteTreeStates(PathFromUtf8(m_TreeStatePath), m_TreeStates);
 	}
 
 	void SceneHierarchy::OnImGuiRender()
@@ -509,6 +642,10 @@ namespace Helios
 
 		/* 删除请求延后到遍历结束后执行：在 each 中销毁当前实体并不安全 */
 		Entity pending_delete{};
+
+		/* 展开状态的记账每帧重来：本帧画到的行就是底栏按钮能收起 / 展开的行 */
+		m_TreeRows.clear();
+		m_HasOpenBranch = false;
 
 		/* 层级关系每帧现算：子节点列表不作为第二份数据缓存 */
 		EntityChildren children;
@@ -557,7 +694,13 @@ namespace Helios
 			 * 而弹层的内边距取自开它的那一档样式 —— 不补的话首末条目紧贴弹层背景的上下边
 			 * （资源浏览器给它的弹层补的是同一笔账）。子窗口自身的内边距不受影响（走的是零内边距那一支）。 */
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, pane_padding);
-			ImGui::BeginChild("##HierarchyTree", ImVec2(0.0f, body_height));
+
+			/* 树再吃一档右内边距：右内沿贴死面板右缘，滚动条才贴着边画（不然停在离边界两档内边距的地方）。
+			 * 绘制裁剪会向内缩半格内边距，用树自己的矩形顶掉当前裁剪，滚动条最右几像素才不会被裁掉。 */
+			const ImVec2 tree_pos = ImGui::GetCursorScreenPos();
+			const ImVec2 tree_size(ImGui::GetContentRegionAvail().x + pane_padding.x, body_height);
+			ImGui::PushClipRect(tree_pos, ImVec2(tree_pos.x + tree_size.x, tree_pos.y + tree_size.y), false);
+			ImGui::BeginChild("##HierarchyTree", tree_size);
 			{
 				/* 行的高亮与命中区都按 WorkRect 算，而它会跟着横向滚动往左收 ——
 				 * 滚一下行右端就离窗口右缘差一截，眼睛那一列落在行外。把右端拉回可视区。 */
@@ -596,7 +739,12 @@ namespace Helios
 				}
 			}
 			ImGui::EndChild();
+			ImGui::PopClipRect();
 			ImGui::PopStyleVar();
+
+			/* 树是故意越过右沿、顶到面板右缘的 —— 子窗口矩形会被算进面板内容范围，
+			 * 面板就多出一截横滑区。把横向内容范围钳回内容区右内沿（纵向不动）。 */
+			panel->DC.CursorMaxPos.x = ImMin(panel->DC.CursorMaxPos.x, panel_max.x - pane_padding.x);
 
 			/* 拖到面板外松手：挂到场景根，成为一级节点。判据是"鼠标还在不在面板矩形内" ——
 			 * 不能用"有没有拖拽目标接收"（拖回原条目上松手时目标会被 ImGui 拒绝，误判成拖出去了）。 */
@@ -626,6 +774,9 @@ namespace Helios
 
 		/* 挂接同样延后到这里：遍历中改层级会让本帧的子节点列表失真 */
 		ApplyPendingReparent();
+
+		/* 展开状态有改动才落盘（点折叠箭头 / 底栏的收起展开都算） */
+		StoreTreeStates();
 	}
 
 	/* 「新建实体」菜单项：条目来自实体预设注册表，新增预设这里零改动。
@@ -761,6 +912,22 @@ namespace Helios
 		const float control_height = ImGui::GetFrameHeight();
 		const float count_width = ImGui::CalcTextSize(count_text).x;
 
+		/* ---- 左端：一键收起 / 展开 ----
+		 * 树里还有展开着的分支就收起全部，全收起了就展开全部（图标跟着动作换）。
+		 * 落的是同一份展开状态，收完再打开场景还是收着的；没有可展开的节点时置灰。 */
+		ImGui::SetCursorScreenPos(ImVec2(row.Min.x, row.Min.y + kBarInset()));
+		ImGui::BeginDisabled(!HasExpandableBranch());
+
+		const bool collapse_all = m_HasOpenBranch;
+		if (Icons::IconButton(collapse_all ? Icons::Id::CollapseAll : Icons::Id::ExpandAll,
+			ImVec2(control_height, control_height), false,
+			collapse_all ? "Collapse all" : "Expand all"))
+		{
+			SetAllNodesOpen(!collapse_all);
+		}
+
+		ImGui::EndDisabled();
+
 		/* ---- 计数贴最右端 ----
 		 * 文本自己算居中的 y（Text 把字形框顶放在光标处，"贴着行顶画"会偏高半个内边距）；
 		 * 顺带清掉"基线偏移"（同一行前面的控件会把后面的文字整体下移，居中值就被顶掉了）。 */
@@ -772,6 +939,48 @@ namespace Helios
 		ImGui::PopStyleColor();
 
 		PanelChrome::EndHeaderRow(row, false);
+	}
+
+	/* 底栏按钮：整棵树都走一遍，不只是本帧画出来的那几行 ——
+	 * 收起之后深层节点根本没画，只按可见行展开的话点「展开全部」还是只开一层。 */
+	void SceneHierarchy::SetAllNodesOpen(bool open)
+	{
+		if (m_pTreeState == nullptr)
+			return;
+
+		EntityChildren children;
+		std::vector<Entity> roots;
+		BuildHierarchy(children, roots);
+
+		const auto walk = [&](auto&& self, const Entity& entity, uint64_t parent_key) -> void
+		{
+			const auto child_entry = children.find(entity);
+			if (child_entry == children.end() || child_entry->second.empty())
+				return;
+
+			const auto& name = entity.GetComponent<NameComponent>().m_Name;
+			const uint64_t key = HashTreeKey(parent_key, name);
+			(*m_pTreeState)[key] = open;
+
+			for (const Entity& child : child_entry->second)
+				self(self, child, key);
+		};
+
+		for (const Entity& root : roots)
+			walk(walk, root, kTreeRootKey);
+
+		m_TreeStateDirty = true;
+	}
+
+	bool SceneHierarchy::HasExpandableBranch() const
+	{
+		for (const TreeRowState& row : m_TreeRows)
+		{
+			if (row.HasChildren)
+				return true;
+		}
+
+		return false;
 	}
 
 	/* 顶栏「新建」下拉：跟右键菜单同一个数据源（实体预设注册表），是个常驻入口。版式跟
@@ -1022,11 +1231,13 @@ namespace Helios
 		}
 
 		/* 右键场景名也能新建实体：和空白处用同一个菜单 */
+		PanelChrome::PushMenuStyle();
 		if (ImGui::BeginPopupContextItem())
 		{
 			ShowCreateEntityMenu();
 			ImGui::EndPopup();
 		}
+		PanelChrome::PopMenuStyle();
 
 		/* 行内只显示文件名（够短），完整路径挂在悬停提示里；从未保存过就没有路径可显示 */
 		if (!m_ScenePath.empty() && ImGui::IsItemHovered())
@@ -1040,7 +1251,7 @@ namespace Helios
 		if (is_opened)
 		{
 			for (const Entity& root : roots)
-				ShowEntityNode(root, children, pending_delete, filter);
+				ShowEntityNode(root, children, pending_delete, filter, kTreeRootKey);
 
 			ImGui::TreePop();
 		}
@@ -1083,7 +1294,7 @@ namespace Helios
 
 	/* 显示一个节点及其子树 */
 	void SceneHierarchy::ShowEntityNode(const Entity& entity, const EntityChildren& children,
-	                                    Entity& pending_delete, const FilterSet* filter)
+	                                    Entity& pending_delete, const FilterSet* filter, uint64_t parent_key)
 	{
 		PROFILE_FUNCTION();
 
@@ -1103,14 +1314,26 @@ namespace Helios
 		const std::vector<Entity>* sub_entities = (child_entry != children.end()) ? &child_entry->second : nullptr;
 		const bool has_children = (sub_entities != nullptr && !sub_entities->empty());
 
+		/* 这一行在展开状态表里的键；默认只展开一级节点 —— 模型实体的骨骼子链一进来是收着的，
+		 * 想展开哪一枝由用户点，点过的结果记下来，下次打开场景照旧。 */
+		const uint64_t tree_key = HashTreeKey(parent_key, name);
+		bool stored_open = (parent_key == kTreeRootKey);
+		if (m_pTreeState != nullptr)
+		{
+			const auto stored = m_pTreeState->find(tree_key);
+			if (stored != m_pTreeState->end())
+				stored_open = stored->second;
+		}
+
 		/* 过滤时全部展开：命中的实体挂在父链下面，父链不展开就等于没搜到 */
-		if (filter != nullptr && has_children)
-			ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+		if (has_children)
+			ImGui::SetNextItemOpen((filter != nullptr) ? true : stored_open, ImGuiCond_Always);
 
 		/* SpanFullWidth：高亮撑满整行（连缩进区）。AllowItemOverlap：行右端的可见性开关叠在行
-		 * 命中区上面，后提交的先拿到悬停和点击；行自身的选中要显式让开开关那一块。 */
+		 * 命中区上面，后提交的先拿到悬停和点击；行自身的选中要显式让开开关那一块。
+		 * 开合不设 DefaultOpen：由 SetNextItemOpen 按状态表逐帧定。 */
 		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanFullWidth
-			| ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowItemOverlap;
+			| ImGuiTreeNodeFlags_AllowItemOverlap;
 		if (m_SelectedEntity == entity)
 			flags |= ImGuiTreeNodeFlags_Selected;
 		/* 没有子节点就是叶子：不能画成可展开的节点，否则会多出一层空节点 */
@@ -1129,6 +1352,20 @@ namespace Helios
 
 		if (m_SelectedEntity == entity)
 			ImGui::PopStyleColor();
+
+		/* 记账：本帧画到了这一行（底栏的收起 / 展开全部按它落笔）。
+		 * 用户点了折叠箭头就把结果记进状态表 —— 过滤期间是强制展开的，不记。 */
+		if (has_children)
+		{
+			m_TreeRows.push_back({ tree_key, true });
+			m_HasOpenBranch = m_HasOpenBranch || is_opened;
+
+			if (filter == nullptr && m_pTreeState != nullptr && is_opened != stored_open)
+			{
+				(*m_pTreeState)[tree_key] = is_opened;
+				m_TreeStateDirty = true;
+			}
+		}
 
 		/* 行右端给可见性开关留一列：开关的命中区 = 行右端的方框（与行同高）。
 		 * 此刻"上一项"还是树节点，行高从它身上取；右端按可视区算，不跟着横向滚动跑。 */
@@ -1180,7 +1417,7 @@ namespace Helios
 						[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
 
 					if (extension == ".mesh" || extension == ".model")
-						ApplyDroppedMeshToEntity(entity, PathToUtf8(g_AssetsPath / relative_path));
+						ApplyDroppedMeshToEntity(entity, PathToUtf8(ResolveAssetPath(relative_path)));
 				}
 			}
 
@@ -1188,13 +1425,15 @@ namespace Helios
 		}
 
 		/* 右键选择删除当前节点 */
+		PanelChrome::PushMenuStyle();
 		if (ImGui::BeginPopupContextItem())
 		{
-			if (ImGui::MenuItem("Delete"))
+			if (PanelChrome::MenuItemText("Delete", "Del"))
 				pending_delete = entity;
 
 			ImGui::EndPopup();
 		}
+		PanelChrome::PopMenuStyle();
 
 		/* 交互都在上面处理完了（那时"上一项"才是树节点），这里补画行内容：
 		 * 有效隐藏的行整体压暗（名字与图标），名字裁到开关列之前（放不下用省略号收尾）。
@@ -1228,7 +1467,7 @@ namespace Helios
 		if (has_children && is_opened)
 		{
 			for (const Entity& child : *sub_entities)
-				ShowEntityNode(child, children, pending_delete, filter);
+				ShowEntityNode(child, children, pending_delete, filter, tree_key);
 
 			ImGui::TreePop();
 		}
@@ -1729,7 +1968,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		const std::filesystem::path absolute_path = g_AssetsPath / PathFromUtf8(entry.Path);
+		const std::filesystem::path absolute_path = ResolveAssetPath(PathFromUtf8(entry.Path));
 		const PanelChrome::Card card = PanelChrome::BeginCard(
 			AssetKindName(entry.Kind, entry.IsFolder), AssetIconOf(entry));
 
@@ -1968,7 +2207,7 @@ namespace Helios
 
 		/* 深挖详情要打开文件（图片读文件头 / 场景解析 XML），不必每帧做：
 		 * 只在选中项或它的写入时间变化时重算。 */
-		const std::filesystem::path absolute_path = g_AssetsPath / PathFromUtf8(entry.Path);
+		const std::filesystem::path absolute_path = ResolveAssetPath(PathFromUtf8(entry.Path));
 
 		std::error_code error;
 		const std::filesystem::file_time_type write_time =

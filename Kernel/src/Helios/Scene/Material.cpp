@@ -382,6 +382,52 @@ namespace Helios
 		return fills;
 	}
 
+	/* 材质侧的变体取值：贴图看有没有设、数值看是否非零，都归一成 0 / 1；
+	 * 外部维度不在材质里取，留给绘制端补。 */
+	ShaderVariantDefines Material::CollectVariantDefines() const
+	{
+		PROFILE_FUNCTION();
+
+		ShaderVariantDefines defines;
+		if (m_pShader == nullptr)
+			return defines;
+
+		for (const ShaderVariantSpec& spec : m_pShader->GetReflectionData().VariantSpecs)
+		{
+			if (spec.Source != ShaderVariantSource::Param || spec.ParamName.empty())
+				continue;
+
+			const auto it = m_Parameters.find(ToID(spec.ParamName));
+			if (it == m_Parameters.end())
+			{
+				defines[spec.Name] = 0;
+				continue;
+			}
+
+			const MaterialParamInfo& param = it->second;
+			int value = 0;
+			if (param.Type == ParamType::Texture)
+			{
+				const auto texture =
+					std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(&param.Value);
+				value = (texture != nullptr && texture->first != nullptr && texture->first->IsLoaded())
+					? 1 : 0;
+			}
+			else if (param.Type == ParamType::Int)
+			{
+				const int* number = std::any_cast<int>(&param.Value);
+				value = (number != nullptr && *number != 0) ? 1 : 0;
+			}
+			else if (param.Type == ParamType::Float)
+			{
+				const float* number = std::any_cast<float>(&param.Value);
+				value = (number != nullptr && *number != 0.0f) ? 1 : 0;
+			}
+			defines[spec.Name] = value;
+		}
+		return defines;
+	}
+
 	SharedPtr<DeviceTexture> Material::DefaultTextureForSampler(const std::string& sampler_name)
 	{
 		PROFILE_FUNCTION();

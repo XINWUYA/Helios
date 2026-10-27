@@ -77,7 +77,7 @@ namespace Helios
 
 						if (extension == ".anim")
 						{
-							const std::string absolute_path = PathToUtf8(g_AssetsPath / relative_path);
+							const std::string absolute_path = PathToUtf8(ResolveAssetPath(relative_path));
 							auto clip = AssetManager::Instance().GetOrLoad<AnimationClip>(absolute_path);
 							if (clip != nullptr)
 							{

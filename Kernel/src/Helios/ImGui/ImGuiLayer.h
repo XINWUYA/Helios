@@ -41,6 +41,10 @@ namespace Helios
 		 * 用于窗口最小化/尺寸退化期间冻结布局保存，避免把钳制后的 DockNode 比例写盘。 */
 		void SetLayoutSavingEnabled(bool enabled);
 
+		/* 重绑布局文件：换成当前项目的 .helios/imgui.ini，并把该项目上次的布局读回来。
+		 * 启动页在首帧之后才定项目，所以不能只靠 OnAttached 里那一次解析。 */
+		void RebindLayoutToProject();
+
 		/* 获取渲染器 */
 		ImGuiRenderer* GetRenderer() const { return m_Renderer.get(); }
 		

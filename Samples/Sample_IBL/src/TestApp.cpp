@@ -3,7 +3,7 @@
 
 namespace Helios
 {
-TestApp::TestApp() : Application("Sample_IBL")
+TestApp::TestApp() : Application("Sample_IBL", 1920, 1080, false, {}, "Sample_IBL")
 {
 	PushLayer(CreateSharedPtr<SampleIBLLayer>());
 }

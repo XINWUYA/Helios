@@ -1,4 +1,4 @@
-#include "Pch.h"
+﻿#include "Pch.h"
 #include "RenderStatsPanel.h"
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -12,7 +12,7 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
-#include "Helios/Application/FileDialog.h"
+#include "FileDialog.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Core/CPUTimerProfiler.h"
 #include "Helios/Core/FrameTimeProfiler.h"
@@ -261,7 +261,7 @@ namespace Helios
 
 			ImGui::PopStyleColor(3);
 
-			/* 行底：选中 = 强调色 40%；悬停 = 白 12%；选中被悬停仍保住紫底（RowHoverSelected，
+			/* 行底：选中 = 强调色 40%；悬停 = 白 12%；选中被悬停仍保住金底（RowHoverSelected，
 			 * 与层级 / 资源面板同一笔账）。两件套的悬停状态可能互让，取并集再画。 */
 			const bool hovered = row_hovered || tree_hovered;
 			if (selected || hovered)
@@ -2227,12 +2227,15 @@ namespace Helios
 
 						/* 悬停显示细分：顶点 / 片元阶段各自时长（与抓帧对照时
 						 * 分清"顶点瓶颈"还是"片元 / 带宽开销"）——仅通道采样后端
-						 * （Metal）提供细分；桌面 GL 无分阶段采样点，不显示此提示 */
+						 * （Metal）提供细分；桌面 GL 无分阶段采样点，不显示此提示。
+						 * 计算通道（如 GPU 蒙皮）只有 Compute 一项，有值才补一行 */
 						if (timer_node.HasData && timer_node.HasStageSplit && ImGui::IsItemHovered())
 						{
 							ImGui::BeginTooltip();
 							ImGui::Text("Vertex   %.2f us", timer_node.GPUTimeVertex);
 							ImGui::Text("Fragment %.2f us", timer_node.GPUTimeFragment);
+							if (timer_node.GPUTimeCompute > 0.0)
+								ImGui::Text("Compute  %.2f us", timer_node.GPUTimeCompute);
 							ImGui::EndTooltip();
 						}
 

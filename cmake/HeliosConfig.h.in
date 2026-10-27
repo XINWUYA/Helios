@@ -3,11 +3,19 @@
 
 #pragma once
 
-// Assets path
-#define ASSETS_PATH "@ASSETS_PATH@"
+// 引擎内置资源根：随引擎走，所有项目共享，只读
+#define ENGINE_RES_PATH "@ENGINE_RES_PATH@"
+
+// 默认项目根：CMake 配置时定，运行期可用 --project 覆盖
+#ifndef HELIOS_PROJECT_PATH
+#define HELIOS_PROJECT_PATH "@HELIOS_PROJECT_DIR@"
+#endif
 
 // Build directory: the editor uses it to rebuild the script module on demand
 #define HELIOS_BUILD_DIR "@CMAKE_BINARY_DIR@"
 
-// Script module output directory (see the HeliosScripts target)
-#define HELIOS_SCRIPT_OUTPUT_DIR "@CMAKE_BINARY_DIR@/scripts"
+// 构建产物的子目录名；多配置生成器（Xcode / Visual Studio）还会再套一层配置名
+#define HELIOS_BUILD_OUTPUT_DIR "@OUTPUT_DIR@"
+
+// 项目脚本的构建模板：编辑器用它为当前项目现场生成小工程
+#define HELIOS_SCRIPT_TEMPLATE "@CMAKE_BINARY_DIR@/HeliosScriptTemplate.cmake"

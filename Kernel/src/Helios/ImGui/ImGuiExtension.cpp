@@ -593,7 +593,7 @@ namespace Helios::ImGuiExt
 				if (payload->DataSize > 1 && TryPathFromUtf8Payload(
 					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
 				{
-					const std::filesystem::path texture_path = g_AssetsPath / relative_path;
+					const std::filesystem::path texture_path = ResolveAssetPath(relative_path);
 					const auto new_texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(
 						PathToUtf8(texture_path));
 					if (new_texture->IsLoaded())

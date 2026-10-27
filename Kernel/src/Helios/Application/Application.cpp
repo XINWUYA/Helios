@@ -13,13 +13,14 @@ namespace Helios
 	Application* Application::s_pInstance = nullptr;
 
 	Application::Application(const std::string& window_title, uint32_t width, uint32_t height, bool start_maximized,
-		ImGuiLayer::StyleInstaller ui_style_installer)
+		ImGuiLayer::StyleInstaller ui_style_installer, const std::string& config_name)
 	{
 		PROFILE_FUNCTION();
 
 		ASSERT(!s_pInstance, "Application already exist!");
 		s_pInstance = this;
 		m_Name = window_title;
+		m_ConfigName = config_name;
 
 		m_pWindow = DeviceWindow::Create({ window_title, width, height, false, start_maximized });
 		m_pWindow->SetEventCallback(BIND_EVENT_FUNC(Application::OnEvent));
@@ -111,6 +112,9 @@ namespace Helios
 							layer->OnImGuiRender();
 					}
 					m_pImGuiLayer->End();
+
+					/* 层已经画完：这时增删层不会打断上面的遍历 */
+					OnFrameEnd();
 				}
 			}
 
@@ -147,6 +151,20 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		m_LayerStack.PushOverlay(layer);
+	}
+
+	void Application::PopLayer(const SharedPtr<ILayer>& layer)
+	{
+		PROFILE_FUNCTION();
+
+		m_LayerStack.PopLayer(layer);
+	}
+
+	void Application::PopOverlay(const SharedPtr<ILayer>& layer)
+	{
+		PROFILE_FUNCTION();
+
+		m_LayerStack.PopOverlay(layer);
 	}
 
 	void Application::OnEvent(IEvent* event)

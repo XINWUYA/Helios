@@ -9,7 +9,7 @@
 #include "Command/CreateAssetFolderCommand.h"
 #include "Command/DeleteAssetsCommand.h"
 #include "Command/RenameAssetCommand.h"
-#include "Helios/Application/FileDialog.h"
+#include "FileDialog.h"
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/ImGui/ImGuiExtensions.h"
@@ -72,7 +72,7 @@ namespace Helios
 		constexpr float kPopupButtonSize = 84.0f;
 		constexpr float kPopupInputWidth = 240.0f;
 
-		/* 资源浏览器拖拽的 payload 名：负载 = 相对 Assets 的路径（UTF-8 + '\0'）。
+		/* 资源浏览器拖拽的 payload 名：负载 = 相对项目根的路径（UTF-8 + '\0'）。
 		 * 内容区拖出与目录树拖出用的是同一种身份（拖给别的面板用时接收方也只认这一种）；
 		 * 目录树的行又是它的拖放目标 —— 落点 = "搬进这一行指的目录"。 */
 		constexpr const char* kAssetDragPayload = "RESOURCE_BROWSER_ITEM";
@@ -150,11 +150,11 @@ namespace Helios
 			return ImGui::GetFrameHeight() + kBarDivider;
 		}
 
-		/* 资源根目录的显示名：取最后一级目录名（路径以分隔符结尾时 filename() 为空） */
-		std::string AssetsRootName()
+		/* 项目根目录的显示名：取最后一级目录名（路径以分隔符结尾时 filename() 为空） */
+		std::string ProjectRootName()
 		{
-			const std::string folder_name = PathToUtf8(g_AssetsPath.filename());
-			return folder_name.empty() ? PathToUtf8(g_AssetsPath) : folder_name;
+			const std::string folder_name = PathToUtf8(g_ProjectPath.filename());
+			return folder_name.empty() ? PathToUtf8(g_ProjectPath) : folder_name;
 		}
 
 		/* 网格里的文件名：逐行居中，长名字按可用宽度换行。别用 ImGui 的 CalcWordWrapPositionA：
@@ -257,10 +257,10 @@ namespace Helios
 
 			/* 资源根目录自身：直接在根下新增 / 删除文件只更新它的时间戳 */
 			out_count = 1;
-			out_newest = std::filesystem::last_write_time(g_AssetsPath, error);
+			out_newest = std::filesystem::last_write_time(g_ProjectPath, error);
 
 			for (const auto& entry : std::filesystem::recursive_directory_iterator(
-				g_AssetsPath, std::filesystem::directory_options::skip_permission_denied))
+				g_ProjectPath, std::filesystem::directory_options::skip_permission_denied))
 			{
 				std::error_code entry_error;
 				if (!entry.is_directory(entry_error))
@@ -409,7 +409,7 @@ namespace Helios
 		{
 			node.ThumbnailResolved = true;
 			node.Thumbnail = AssetManager::Instance().GetOrLoad<DeviceTexture>(
-				PathToUtf8(g_AssetsPath / PathFromUtf8(node.FilePath)));
+				PathToUtf8(ResolveAssetPath(PathFromUtf8(node.FilePath))));
 
 			if (node.Thumbnail != nullptr && !node.Thumbnail->IsLoaded())
 				node.Thumbnail = nullptr;
@@ -440,7 +440,7 @@ namespace Helios
 
 	std::string EditorResourceBrowser::DisplayNodeName(const FileNode& node)
 	{
-		return node.ParentNode.expired() ? AssetsRootName() : node.FileName;
+		return node.ParentNode.expired() ? ProjectRootName() : node.FileName;
 	}
 
 	/* 本帧的过滤结果：自底向上一次遍历，命中的节点与它们的祖先都算可见
@@ -530,7 +530,7 @@ namespace Helios
 			/* 记住浏览位置，重建后按路径找回，避免刷新把用户弹回根目录 */
 			const std::string current_path = (m_CurrentFileNode != nullptr) ? m_CurrentFileNode->FilePath : std::string();
 
-			m_RootFileNodeTree = CreateSharedPtr<FileNode>(PathToUtf8(g_AssetsPath), "", FileType::Folder, 0, -1);
+			m_RootFileNodeTree = CreateSharedPtr<FileNode>(PathToUtf8(g_ProjectPath), "", FileType::Folder, 0, -1);
 			BuildFileNodeTree(m_RootFileNodeTree);
 			UpdateDirectoryStamp();
 
@@ -729,7 +729,12 @@ namespace Helios
 					ImGui::GetContentRegionAvail().y - card.Pad,
 					ImGui::GetFrameHeight());
 
-				ImGui::BeginChild("##FolderTree", ImVec2(0.0f, tree_height));
+				/* 吃满到卡片右内沿：滚动条才贴着卡边画（不然右边还留一档卡片留白）。
+				 * 绘制裁剪会向内缩半格内边距，用树自己的矩形顶掉当前裁剪，滚动条最右几像素才不被裁掉。 */
+				const ImVec2 tree_pos = ImGui::GetCursorScreenPos();
+				const ImVec2 tree_size(ImGui::GetContentRegionAvail().x + card_pad, tree_height);
+				ImGui::PushClipRect(tree_pos, ImVec2(tree_pos.x + tree_size.x, tree_pos.y + tree_size.y), false);
+				ImGui::BeginChild("##FolderTree", tree_size);
 				DrawFolderNode(m_RootFileNodeTree);
 
 				/* 条目之下的空白区域：拖到这里 = 提升到资源根（与层级"空白 = 提升到根"同款）。
@@ -754,6 +759,7 @@ namespace Helios
 				}
 
 				ImGui::EndChild();
+				ImGui::PopClipRect();
 
 				/* 树画完，本次"把当前目录露出来"的请求已兑现 */
 				m_RevealCurrentNode = false;
@@ -887,11 +893,13 @@ namespace Helios
 
 			/* 目录树里也能新建 / 改名 / 删除：改名的目标是点到的这一项，
 			 * 与内容区的选中项无关（右键不动选中项 —— 只想改个目录名，不该把选择清掉） */
+			PanelChrome::PushMenuStyle();
 			if (ImGui::BeginPopupContextItem())
 			{
 				DrawAssetContextMenuItems(child_node->FilePath, true);
 				ImGui::EndPopup();
 			}
+			PanelChrome::PopMenuStyle();
 
 			/* 只在"跳过来"的那一帧滚过去：每帧都滚就再也拖不动滚动条了 */
 			if (is_current && m_RevealCurrentNode)
@@ -910,7 +918,7 @@ namespace Helios
 	}
 
 	/* ---- 浏览位置与它的历史 ----
-	 * 历史里存的是相对 Assets 的路径：文件树会重建，节点指针不保险
+	 * 历史里存的是相对项目根的路径：文件树会重建，节点指针不保险
 	 * （与文件操作的待办同一套理由）。游标左边是「回到上次路径」能去的，右边是「重进路径」能去的。 */
 
 	/* 用户导航（点目录树 / 点面包屑 / 双击文件夹）：落位 + 记一条历史。
@@ -934,7 +942,7 @@ namespace Helios
 		if (relative_path.empty())
 			return;
 
-		/* Assets 之外的引用（"../" 开头）没有可定位的树节点，直接忽略 */
+		/* 项目根之外的引用（"../" 开头）没有可定位的树节点，直接忽略 */
 		if (relative_path.rfind("..", 0) == 0)
 			return;
 
@@ -1241,7 +1249,7 @@ namespace Helios
 
 	std::filesystem::path EditorResourceBrowser::AbsoluteAssetPath(const std::string& relative_path)
 	{
-		return g_AssetsPath / PathFromUtf8(relative_path);
+		return ResolveAssetPath(PathFromUtf8(relative_path));
 	}
 
 	void EditorResourceBrowser::ExecuteCommand(UniquePtr<ICommand> command)
@@ -1261,7 +1269,7 @@ namespace Helios
 	}
 
 	/* 拖放目标收到 payload：只登记"把谁搬进哪"（落盘延后，见 ApplyPendingDropMove）。
-	 * payload 是相对 Assets 的路径；into_dir 空串 = 资源根。 */
+	 * payload 是相对项目根的路径；into_dir 空串 = 资源根。 */
 	void EditorResourceBrowser::RecordDropMove(const ImGuiPayload* payload, const std::string& into_dir)
 	{
 		if (payload == nullptr)
@@ -1531,7 +1539,7 @@ namespace Helios
 
 			/* 说清"删到哪儿去了"：撤销能用 Ctrl+Z，但 File 菜单 / 工具栏的 Undo 也一样管用 */
 			ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::TextDim);
-			ImGui::TextUnformatted("Will move to project trash (.helios-trash, next to Assets)");
+			ImGui::TextUnformatted("Will move to project trash (.helios-trash, next to the project)");
 			ImGui::TextUnformatted("Restore with Ctrl+Z or Undo in the toolbar");
 			ImGui::PopStyleColor();
 
@@ -1790,7 +1798,7 @@ namespace Helios
 	{
 		const std::filesystem::path absolute = AbsoluteAssetPath(path);
 
-		if (ImGui::MenuItem("Show in file explorer"))
+		if (PanelChrome::MenuItemText("Show in file explorer"))
 		{
 			std::filesystem::path shown = absolute;
 			shown = std::filesystem::absolute(shown).make_preferred();
@@ -1800,16 +1808,16 @@ namespace Helios
 
 		if (is_folder)
 		{
-			if (ImGui::MenuItem("New Folder"))
+			if (PanelChrome::MenuItemText("New Folder"))
 				OpenNewFolderPopup(path);
 		}
 
 		/* 重命名作用于点到的这一项（右键菜单本来就是"这一项"的菜单）：
 		 * 多选时也只改它一个，其余选中项不受影响 —— 不用先缩成单选才好操作 */
-		if (ImGui::MenuItem("Rename"))
+		if (PanelChrome::MenuItemText("Rename"))
 			OpenRenamePopup(path);
 
-		if (ImGui::MenuItem("Delete", "Del"))
+		if (PanelChrome::MenuItemText("Delete", "Del"))
 			OpenDeletePopup({ path });
 	}
 
@@ -1817,10 +1825,10 @@ namespace Helios
 	{
 		const std::string current = (m_CurrentFileNode != nullptr) ? m_CurrentFileNode->FilePath : std::string();
 
-		if (ImGui::MenuItem("New Folder"))
+		if (PanelChrome::MenuItemText("New Folder"))
 			OpenNewFolderPopup(current);
 
-		if (ImGui::MenuItem("Show in file explorer"))
+		if (PanelChrome::MenuItemText("Show in file explorer"))
 		{
 			std::filesystem::path shown = std::filesystem::absolute(AbsoluteAssetPath(current)).make_preferred();
 			const std::string shown_utf8 = PathToUtf8(shown);
@@ -2463,11 +2471,13 @@ namespace Helios
 						&& !IsNodeSelected(child_node.get()))
 						SelectSingle(child_node);
 
+					PanelChrome::PushMenuStyle();
 					if (ImGui::BeginPopupContextItem())
 					{
 						DrawAssetContextMenuItems(child_node->FilePath, child_node->Type == FileType::Folder);
 						ImGui::EndPopup();
 					}
+					PanelChrome::PopMenuStyle();
 
 					/* 文件名以格子中轴居中（和缩略图同轴），长名称按 name_width 换行；
 					 * 光标一起摆：绘制区与它后面那个 Dummy 都从这一档算起。
@@ -2546,10 +2556,10 @@ namespace Helios
 	void EditorResourceBrowser::BuildFileNodeTree(const SharedPtr<FileNode>& parent_node)
 	{
 		for (auto& directory_entry : std::filesystem::directory_iterator(
-			g_AssetsPath / PathFromUtf8(parent_node->FilePath)))
+			g_ProjectPath / PathFromUtf8(parent_node->FilePath)))
 		{
 			const auto& path = directory_entry.path();
-			auto relative_path = GetRelativePath(g_AssetsPath, path);
+			auto relative_path = GetRelativePath(g_ProjectPath, path);
 			auto filename = relative_path.filename();
 			const std::string file_name = PathToUtf8(filename);
 
@@ -2699,11 +2709,13 @@ namespace Helios
 				&& !is_selected)
 				SelectSingle(child_node);
 
+			PanelChrome::PushMenuStyle();
 			if (ImGui::BeginPopupContextItem())
 			{
 				DrawAssetContextMenuItems(child_node->FilePath, is_folder);
 				ImGui::EndPopup();
 			}
+			PanelChrome::PopMenuStyle();
 
 			/* 名字列的内容（图标 + 文件名）：自己画在 Selectable 之上 —— `DrawTreeRowLabel` 的
 			 * 树形让位（箭头 + 缩进）会让图标落不到列首、与表头的 Name 对不齐。

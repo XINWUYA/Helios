@@ -45,6 +45,23 @@ namespace Helios
 		MaterialPropertySpec PropertySpec{};
 	};
 
+	/* Shader 变体的取值来源。维度写在着色器源码里（配置在 shader，引擎不认识具体名字）：
+	 *   uniform sampler2D u_NormalTexture; // @property @variant(USE_NORMAL)
+	 * 行尾标注绑到那一行的参数；写成 @variant(NAME, external) 的维度不绑参数。 */
+	enum class ShaderVariantSource : uint8_t
+	{
+		Param = 0, /* 值从材质参数派生：贴图看有没有值，数值看是否非零 */
+		External   /* 值由绘制端给：光源类型这类不在材质参数表里的维度 */
+	};
+
+	/* 一条变体维度声明 */
+	struct ShaderVariantSpec
+	{
+		std::string			Name{};      /* define 名，拼成 `#define NAME 值` */
+		std::string			ParamName{}; /* Param 来源时绑定的材质参数名 */
+		ShaderVariantSource	Source{ ShaderVariantSource::Param };
+	};
+
 	/* Shader反射数据：从Shader中`layout(binding = X) uniform sampler2D u_xxx; ` 反射出真实的绑定点  */
 	struct ShaderReflectionData
 	{
@@ -68,6 +85,8 @@ namespace Helios
 		/* 顶点阶段声明的 attribute：名字 → layout(location = N) 的 N。
 		 * 顶点布局按名字认领位置，不再依赖元素在缓冲里的先后顺序。 */
 		std::unordered_map<std::string, uint32_t> VertexAttributeLocations{};
+		/* 源码里 @variant 标注的变体维度（声明顺序） */
+		std::vector<ShaderVariantSpec> VariantSpecs{};
 
 		void Clear()
 		{
@@ -77,6 +96,18 @@ namespace Helios
 			MaterialParams.clear();
 			UniformBlockBindings.clear();
 			VertexAttributeLocations.clear();
+			VariantSpecs.clear();
+		}
+
+		/* 按名字找变体维度；没声明返回 nullptr */
+		[[nodiscard]] const ShaderVariantSpec* FindVariantSpec(const std::string& name) const
+		{
+			for (const ShaderVariantSpec& spec : VariantSpecs)
+			{
+				if (spec.Name == name)
+					return &spec;
+			}
+			return nullptr;
 		}
 
 		[[nodiscard]] uint8_t FindSamplerStageMask(const std::string& name) const
@@ -162,6 +193,10 @@ namespace Helios
 
 		/* 从 GLSL 源码读 local_size_x（读不到按 64） */
 		[[nodiscard]] static uint32_t ParseThreadGroupSize(const std::string& glsl_source);
+
+		/* 解析源码里的 @variant 标注（纯文本，不依赖后端）：行尾标注绑到该行声明的参数，
+		 * 写成 external 的不绑参数；同名维度先到者定。 */
+		static std::vector<ShaderVariantSpec> ParseVariantSpecs(const std::string& source);
 
 		/* 创建Shader */
 		static SharedPtr<DeviceShader> Create(const std::string& filepath);

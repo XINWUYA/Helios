@@ -408,7 +408,11 @@ Makefile
 # 本地验证工具（不入库）
 Tools/reflect_check/
 
-# 编辑器删除资源时的项目回收站（Assets 的兄弟目录，允许撤销删除）
+# 编辑器删除资源时的项目回收站（项目根的兄弟目录，允许撤销删除）
 .helios-trash/
+# 项目级生成物：着色器缓存 / 模型导入工作区
+Projects/*/Cache/
+# 项目本地状态：布局 ini 之类，只在当前机器有效
+Projects/*/.helios/
 renderdoc-mcp-export
 .codebuddy

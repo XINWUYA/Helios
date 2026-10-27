@@ -606,7 +606,7 @@ namespace Helios
     }
 
     std::unordered_map<ShaderCompiler::ShaderStage, std::string> ShaderCompiler::LoadStageSources(
-        const std::string& filepath, ShaderTarget target)
+        const std::string& filepath, ShaderTarget target, const ShaderVariantDefines& defines)
     {
         std::unordered_map<ShaderStage, std::string> stage_sources;
         const std::string source = ReadFile(filepath);
@@ -614,8 +614,33 @@ namespace Helios
             return stage_sources;
 
         PreProcessShaderSrc(source, stage_sources);
+        InjectVariantDefines(stage_sources, defines);
         PrepareStageSources(stage_sources, target, ExtractFilename(filepath));
         return stage_sources;
+    }
+
+    void ShaderCompiler::InjectVariantDefines(std::unordered_map<ShaderStage, std::string>& stage_sources,
+        const ShaderVariantDefines& defines)
+    {
+        if (defines.empty())
+            return;
+
+        std::string prefix;
+        for (const auto& entry : defines)
+            prefix += "#define " + entry.first + " " + std::to_string(entry.second) + "\n";
+
+        for (auto& entry : stage_sources)
+        {
+            std::string& source = entry.second;
+            /* #version 必须是第一条非注释指令：前缀插在它那一行之后 */
+            size_t insert = 0;
+            if (const size_t version = source.find("#version"); version != std::string::npos)
+            {
+                const size_t line_end = source.find('\n', version);
+                insert = (line_end == std::string::npos) ? source.size() : line_end + 1;
+            }
+            source.insert(insert, prefix);
+        }
     }
 
     void ShaderCompiler::PrepareStageSources(std::unordered_map<ShaderStage, std::string>& stage_sources,
@@ -704,7 +729,7 @@ namespace Helios
 
     std::filesystem::path ShaderCompiler::GetCacheDirectory(ShaderTarget target)
     {
-        return g_AssetsPath / "Cache/Shaders" / TargetToString(target);
+        return g_ProjectPath / "Cache/Shaders" / TargetToString(target);
     }
 
     bool ShaderCompiler::TryLoadCache(const std::string& cache_path, std::string& output)

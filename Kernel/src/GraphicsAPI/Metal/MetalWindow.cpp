@@ -248,6 +248,16 @@ namespace Helios
         glfwSwapInterval(enable ? 1 : 0);
     }
 
+    /* 改窗口标题 */
+    void MetalWindow::SetWindowTitle(const std::string& title)
+    {
+        if (m_pGLFWWindow == nullptr)
+            return;
+
+        m_WindowInfo.Descriptor.Title = title;
+        glfwSetWindowTitle(m_pGLFWWindow, title.c_str());
+    }
+
     void MetalWindow::Build(const WindowDesc& desc)
     {
         /* 初始化GLFW */

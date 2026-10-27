@@ -52,6 +52,8 @@ namespace Helios
 			Maximize, Restore,
 			/* 侧边栏展开 / 收起（时间轴右侧属性栏开关） */
 			ExpandSidebar, CollapseSidebar,
+			/* 层级树一键收起 / 展开（层级面板底栏）：箭头朝中间那条线收拢 / 从线往外张开 */
+			ExpandAll, CollapseAll,
 			/* 抓取当前帧（实时视图：冻结数据供分析） */
 			Capture,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */

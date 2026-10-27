@@ -1,0 +1,56 @@
+﻿# 由引擎构建生成，编辑器编译项目脚本时 include 进来。不要在项目里改这个文件。
+# 编译条件全部来自引擎构建期，保证脚本与 Kernel 的宏、含路径、链接库一致。
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_OSX_ARCHITECTURES "@CMAKE_OSX_ARCHITECTURES@")
+
+if(NOT DEFINED HELIOS_SCRIPT_SOURCES OR HELIOS_SCRIPT_SOURCES STREQUAL "")
+    message(FATAL_ERROR "HELIOS_SCRIPT_SOURCES 为空：项目里没有可编译的脚本")
+endif()
+
+# 引擎路径允许调用方覆盖（项目工程里要用它自己那一份）
+if(NOT DEFINED HELIOS_ENGINE_ROOT)
+    set(HELIOS_ENGINE_ROOT "@HELIOS_ENGINE_ROOT@")
+endif()
+
+add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE)
+add_compile_definitions(@HELIOS_SCRIPT_PLATFORM_DEFINE@)
+if(APPLE)
+    add_compile_definitions(FMT_CONSTEVAL=)
+endif()
+if(MSVC)
+    add_compile_definitions(_ITERATOR_DEBUG_LEVEL=0)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+endif()
+
+# 必须排在 add_library 之前：link_directories 只对之后创建的目标生效。
+# 多配置生成器（Xcode）的库在配置子目录里，由编辑器运行期传进来覆盖。
+if(NOT DEFINED HELIOS_SCRIPT_KERNEL_DIR)
+    set(HELIOS_SCRIPT_KERNEL_DIR "@HELIOS_SCRIPT_KERNEL_DIR@")
+endif()
+link_directories("${HELIOS_SCRIPT_KERNEL_DIR}")
+
+add_library(HeliosScripts MODULE ${HELIOS_SCRIPT_SOURCES})
+
+# 按构建配置选宏：单配置（运行期现编）与多配置（Xcode 工程）都成立
+target_compile_definitions(HeliosScripts PRIVATE
+    $<$<CONFIG:Debug>:HELIOS_DEBUG>
+    $<$<CONFIG:Release>:HELIOS_RELEASE>
+    $<$<CONFIG:Shipping>:HELIOS_SHIPPING>)
+
+target_include_directories(HeliosScripts PRIVATE
+    "${HELIOS_ENGINE_ROOT}/Kernel/src"
+    "@CMAKE_BINARY_DIR@"
+@HELIOS_SCRIPT_INCLUDE_BLOCK@)
+
+target_precompile_headers(HeliosScripts PRIVATE
+    "${HELIOS_ENGINE_ROOT}/Kernel/src/Helios/Script/ScriptPch.h")
+
+target_link_libraries(HeliosScripts PRIVATE Kernel)
+
+set_target_properties(HeliosScripts PROPERTIES
+    PREFIX ""
+    SUFFIX ".hsmod"
+    FOLDER "Scripts"
+)

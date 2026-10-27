@@ -200,7 +200,7 @@ cmake --build build --config Debug -- -j8
 - 使用MSVC编译器
 - 静态链接运行时库
 - 支持多处理器编译（/MP）
-- 自动复制Assets目录到输出目录
+- 自动复制引擎资源目录（EngineRes）到输出目录
 
 ### macOS
 - 使用Clang/AppleClang编译器

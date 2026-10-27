@@ -18,7 +18,7 @@ file(GLOB_RECURSE KERNEL_SOURCES CONFIGURE_DEPENDS
 set(PCH_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/Pch.h")
 
 # Copy TracyClient.cpp before build and insert Pch.h
-set(TRACY_CLIENT_SRC "${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tracy/public/TracyClient.cpp")
+set(TRACY_CLIENT_SRC "${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/tracy/public/TracyClient.cpp")
 set(TRACY_CLIENT_DST "${CMAKE_CURRENT_SOURCE_DIR}/src/Helios/Tracy/TracyClient.cpp")
 
 add_custom_command(
@@ -36,14 +36,14 @@ target_sources(Kernel PRIVATE
 # Organize source files in Visual Studio by directory structure
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" FILES ${KERNEL_SOURCES} ${TRACY_CLIENT_DST})
 
-# 着色器是引擎和各 App 共用的资产，挂这里方便在 IDE 里直接查看和编辑：
-# 只进导航不参与编译，运行期仍按 ASSETS_PATH 读源文件，改完重跑即生效。
+# 着色器是引擎内置资产，挂这里方便在 IDE 里直接查看和编辑：
+# 只进导航不参与编译，运行期仍按 ENGINE_RES_PATH 读源文件，改完重跑即生效。
 file(GLOB_RECURSE HELIOS_SHADER_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/Assets/Shaders/*.glsl"
+    "${ENGINE_RES_PATH}/Shaders/*.glsl"
 )
 set_source_files_properties(${HELIOS_SHADER_SOURCES} PROPERTIES HEADER_FILE_ONLY TRUE)
 target_sources(Kernel PRIVATE ${HELIOS_SHADER_SOURCES})
-source_group(TREE "${CMAKE_SOURCE_DIR}/Assets/Shaders" PREFIX "Shaders" FILES ${HELIOS_SHADER_SOURCES})
+source_group(TREE "${ENGINE_RES_PATH}/Shaders" PREFIX "Shaders" FILES ${HELIOS_SHADER_SOURCES})
 
 # Precompiled header (CMake 3.20+ handles /Yc automatically)
 if(MSVC)
@@ -170,9 +170,8 @@ if(WIN32)
 elseif(APPLE)
     target_compile_definitions(Kernel PRIVATE PLATFORM_MACOS)
     # Files that need to be compiled as Objective-C++ on macOS
-    # (FileDialog uses Cocoa NSOpenPanel; ImGuiLayer/MetalQuery use Metal APIs)
+    # (ImGuiLayer/MetalQuery use Metal APIs)
     set(KERNEL_OBJCXX_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/Helios/Application/FileDialog.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Helios/ImGui/ImGuiLayer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsAPI/Metal/MetalQuery.cpp"
     )

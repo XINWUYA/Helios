@@ -1,7 +1,9 @@
 ﻿#pragma once
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <imgui.h>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -35,8 +37,11 @@ namespace Helios
 		/* 所属场景 */
 		void SetOwnerScene(const SharedPtr<Scene>& scene);
 		/* 当前场景的文件路径（空 = 从未保存过）：层级面板的根节点显示它的文件名。
-		 * 由所属 Layer 在「改路径」的唯一入口里同步（见 SceneEditorLayer::SetActiveScenePath）。 */
-		void SetScenePath(const std::string& path) { m_ScenePath = path; }
+		 * 由所属 Layer 在「改路径」的唯一入口里同步（见 SceneEditorLayer::SetActiveScenePath）。
+		 * 展开状态按场景分开记，换场景时从这里切。 */
+		void SetScenePath(const std::string& path);
+		/* 树的展开状态存哪（按场景分段的小文件）：由所属 Layer 注入，空 = 只记在内存里。 */
+		void SetTreeStatePath(const std::string& path);
 		/* 场景有无未保存的改动：根节点名字后面据此显示脏标记。
 		 * 由所属 Layer 每帧推送（见 SceneEditorLayer::OnImGuiRender），不缓存副本以免脱节。 */
 		void SetSceneDirty(bool dirty) { m_SceneDirty = dirty; }
@@ -114,6 +119,17 @@ namespace Helios
 			entt::entity Parent{ entt::null };
 		};
 
+		/* 展开状态表：键 = 实体在树里的名字路径哈希（见 HashTreeKey），值 = 是否展开。
+		 * 用名字路径而不是实体句柄 —— 句柄会随增删实体漂移，名字路径跨场景、跨会话都对得上。 */
+		using TreeOpenState = std::map<uint64_t, bool>;
+
+		/* 一帧里画过的树行：底栏的「收起 / 展开全部」按它落笔 */
+		struct TreeRowState
+		{
+			uint64_t Key{ 0 };
+			bool     HasChildren{ false };
+		};
+
 		/* 显示场景实体列表UI */
 		void ShowSceneHierarchyUI();
 		/* 层级里拖入 .mesh = 给实体挂 / 换模型：
@@ -169,9 +185,19 @@ namespace Helios
 		void ShowCreateEntityMenu();
 		/* 收集根节点与 父->子 列表（按句柄升序，顺序稳定） */
 		void BuildHierarchy(EntityChildren& children, std::vector<Entity>& roots) const;
-		/* 显示实体节点及其子树；pending_delete 累积删除请求，由调用方在遍历后执行 */
+		/* 显示实体节点及其子树；pending_delete 累积删除请求，由调用方在遍历后执行。
+		 * parent_key 是父节点在展开状态表里的键（树根用 kTreeRootKey）。 */
 		void ShowEntityNode(const Entity& entity, const EntityChildren& children,
-		                    Entity& pending_delete, const FilterSet* filter);
+		                    Entity& pending_delete, const FilterSet* filter, uint64_t parent_key);
+		/* 底栏「收起 / 展开全部」：把本帧画过的、有子节点的行统一置成 open */
+		void SetAllNodesOpen(bool open);
+		/* 本帧有没有能收起的行（全是没有子节点的实体时，底栏那枚按钮置灰） */
+		[[nodiscard]] bool HasExpandableBranch() const;
+		/* 换场景时把该场景的展开记录取出来（指向状态表里的那一份，引用稳定） */
+		void BindTreeState();
+		/* 展开记录读盘 / 落盘（整份读写，文件很小；没注入路径时不碰磁盘） */
+		void LoadTreeStates();
+		void StoreTreeStates();
 		/* 应用本帧请求的挂接 */
 		void ApplyPendingReparent();
 		/* 拖到面板之外松手：默认挂到场景下（成为场景的一级节点） */
@@ -252,6 +278,20 @@ namespace Helios
 		SharedPtr<Scene> m_pOwnerScene;
 		/* 当前场景文件路径（空 = 从未保存过） */
 		std::string m_ScenePath;
+		/* 展开状态文件（由 Layer 注入；空 = 只记在内存里，自检程序就是这样） */
+		std::string m_TreeStatePath;
+		/* 全部场景的展开记录：场景路径 -> 状态表（按场景分段存同一个文件） */
+		std::map<std::string, TreeOpenState> m_TreeStates;
+		/* 磁盘那份是否已经读过（首次用到时才读） */
+		bool m_TreeStatesLoaded{ false };
+		/* 当前场景的那一份（指向 m_TreeStates 里的条目，std::map 的引用稳定） */
+		TreeOpenState* m_pTreeState{ nullptr };
+		/* 本帧画过的树行（底栏按钮据此收起 / 展开） */
+		std::vector<TreeRowState> m_TreeRows;
+		/* 本帧有没有展开着的分支 —— 底栏按钮的图标与动作都由它决定 */
+		bool m_HasOpenBranch{ false };
+		/* 展开记录有改动，帧末落盘 */
+		bool m_TreeStateDirty{ false };
 		/* 场景有未保存的改动（由所属 Layer 每帧推送） */
 		bool m_SceneDirty{ false };
 		/* 选中实体 */

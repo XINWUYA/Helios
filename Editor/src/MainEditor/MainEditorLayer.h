@@ -3,6 +3,7 @@
 
 #include "EditorCommon.h"
 #include "EditorContext.h"
+#include "EditorSettings.h"
 #include "EditorResourceBrowser.h"
 #include "LogPanel.h"
 #include "PanelLayoutRestore.h"
@@ -10,6 +11,8 @@
 
 namespace Helios
 {
+	class DeviceTexture;
+
 	/* 编辑器壳层：菜单栏 / 场景控制条 / DockSpace 宿主 */
 	class MainEditorLayer final : public ILayer
 	{
@@ -72,5 +75,10 @@ namespace Helios
 		bool m_ShowStyleEditor{ false };
 		/* C++ 脚本模块：编译与加载都在这里，脚本类注册进 ScriptRegistry */
 		ScriptModule m_ScriptModule;
+		/* Settings 菜单的全局开关（跟项目本地存，见 EditorSettings） */
+		EditorSettings::State m_Settings{};
+		/* 菜单栏左端的品牌记号：白色线稿贴图，按强调色着色（与启动页同一张） */
+		SharedPtr<DeviceTexture> m_pEmblem;
+		bool m_EmblemRequested{ false };
 	};
 }

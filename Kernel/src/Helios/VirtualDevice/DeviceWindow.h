@@ -43,6 +43,9 @@ namespace Helios
 		[[nodiscard]] virtual bool IsVSync() const = 0;
 		virtual void SetVSync(bool enable) = 0;
 
+		/* 改窗口标题（换项目后要把项目名带上） */
+		virtual void SetWindowTitle(const std::string& title) = 0;
+
 		/* 获取窗口实体，如通过GLFWwindow创建的，则返回GLFWwindow* */
 		[[nodiscard]] virtual void* GetNativeWindow() const = 0;
 

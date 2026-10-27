@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include <cstdint>
+#include <map>
+#include <string>
 #include "Helios/Common/Utils.h"
 
 namespace Helios
@@ -254,6 +256,10 @@ namespace Helios
 		Vec4,
 		Mat4,
 	};
+
+	/* Shader 变体键：维度名 -> 值。有序，拼缓存键与资产键时顺序稳定。
+	 * 维度本身声明在着色器源码的 @variant 标注里，引擎侧不认识具体名字。 */
+	using ShaderVariantDefines = std::map<std::string, int>;
 
 	/* BlendEquation */
 	enum class BlendEquation : uint8_t

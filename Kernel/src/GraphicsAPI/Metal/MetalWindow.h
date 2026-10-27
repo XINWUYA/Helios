@@ -64,6 +64,7 @@ namespace Helios
         [[nodiscard]] float GetContentScale() const override { return m_WindowInfo.ContentScale; }
         [[nodiscard]] bool IsVSync() const override { return m_WindowInfo.Descriptor.IsVSync; }
         void SetVSync(bool enable) override;
+        void SetWindowTitle(const std::string& title) override;
         [[nodiscard]] void* GetNativeWindow() const override { return m_pGLFWWindow; }
         void SetEventCallback(const EventCallbackFunc& callback) override { m_WindowInfo.CallBackFunc = callback; }
         MetalContext* GetMetalContext() const { return m_pMetalContext.get(); }

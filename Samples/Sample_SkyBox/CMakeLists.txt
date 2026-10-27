@@ -21,16 +21,16 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" FILES ${SAMPLE_SOURCES})
 target_include_directories(Sample_SkyBox
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/Kernel/src
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/spdlog/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/debugbreak
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glfw/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glad/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/imgui
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glm
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
+        ${HELIOS_ENGINE_ROOT}/Kernel/src
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/spdlog/include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/debugbreak
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/glfw/include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/glad/include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/imgui
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/glm
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/entt/single_include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/tinyxml2
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/magic_enum/include
 )
 
 # Link libraries

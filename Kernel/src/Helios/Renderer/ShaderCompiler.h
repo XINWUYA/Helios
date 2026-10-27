@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "Helios/Renderer/RenderCommon.h"
 
 namespace Helios
 {
@@ -40,10 +41,11 @@ namespace Helios
         static bool AssignShaderSlots(std::unordered_map<ShaderStage, std::string>& stage_sources,
             bool write_uniform_locations, std::string& error_msg);
 
-        /* 后端统一从这里拿各阶段源码：读文件、展开 include、按 #type 拆阶段，再自动分配槽位。
+        /* 后端统一从这里拿各阶段源码：读文件、展开 include、按 #type 拆阶段，再插变体 define、
+         * 自动分配槽位。defines 为空时与不带变体的行为完全一致。
          * 读取或分配失败只打日志；读不到文件时返回空表。 */
         static std::unordered_map<ShaderStage, std::string> LoadStageSources(const std::string& filepath,
-            ShaderTarget target);
+            ShaderTarget target, const ShaderVariantDefines& defines = {});
         /* 内嵌源码只做槽位分配；裸 uniform 的 location 只有 Windows 的 GL SPIR-V 路径要写 */
         static void PrepareStageSources(std::unordered_map<ShaderStage, std::string>& stage_sources,
             ShaderTarget target, const std::string& name);
@@ -67,6 +69,11 @@ namespace Helios
         static void SaveCache(const std::string& cache_path, const std::string& output);
 
         static void PrependSourceInfo(std::string& output, const std::string& name, ShaderStage stage, ShaderTarget target);
+
+        /* 把变体维度拼成 #define 前缀插进每个阶段：#version 之后（GLSL 要求它排第一）、声明之前。
+         * #type 切分后每阶段各插一份 —— 插到文件头只有第一阶段拿得到。 */
+        static void InjectVariantDefines(std::unordered_map<ShaderStage, std::string>& stage_sources,
+            const ShaderVariantDefines& defines);
 
         static bool CompileInternal(const std::string& source, ShaderStage stage, ShaderTarget target,
             std::string& output, std::string& error_msg, const std::string& name);

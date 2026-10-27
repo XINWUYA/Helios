@@ -209,7 +209,7 @@ namespace Helios
 
 						if (extension == ".mtl")
 						{
-							const std::string absolute_path = PathToUtf8(g_AssetsPath / relative_path);
+							const std::string absolute_path = PathToUtf8(ResolveAssetPath(relative_path));
 							auto material = AssetManager::Instance().GetOrLoad<Material>(absolute_path);
 							if (material != nullptr)
 							{
@@ -364,7 +364,7 @@ namespace Helios
 						/* .mesh 是纯几何，.model 是带材质槽的清单，两种都能直接挂 */
 						if (extension == ".mesh" || extension == ".model")
 						{
-							const std::string absolute_path = PathToUtf8(g_AssetsPath / relative_path);
+							const std::string absolute_path = PathToUtf8(ResolveAssetPath(relative_path));
 							if (model == nullptr || model->GetPath() != absolute_path)
 							{
 								SharedPtr<Model> loaded_model = Model::Create(absolute_path);

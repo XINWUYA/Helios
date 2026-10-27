@@ -1,4 +1,5 @@
 ﻿#include "Pch.h"
+#include "EditorApp.h"
 
 #ifdef _WIN32
 #define _CRTDBG_MAP_ALLOC
@@ -28,15 +29,16 @@ int main(int argc, char** argv)
 {
 	StartMemoryLeakDetector();
 
-	/* todo: 根据argc/argv获取工程路径 */
-
 	Helios::Logger::Init();
 	EDITOR_LOG("Helios Kernel 1.0.0");
+
+	/* 项目根：命令行 --project <dir> 指定就直奔工程，没指定先出启动页选工程 */
+	const bool project_specified = Helios::ParseProjectArgument(argc, argv);
 
 	/* 耗时追踪文本默认不写：运行时在性能面板（Stat Info → CPU Timings）的 "Trace Text"
 	 * 开关里控制写盘；要抓启动阶段就临时用 PROFILER_BEGIN_SESSION / PROFILER_END_SESSION
 	 * 包住下面两段。 */
-	auto app = Helios::CreateApplication();
+	auto app = Helios::CreateEditorApplication(!project_specified);
 	app->Run();
 
 	Helios::Logger::Shutdown();

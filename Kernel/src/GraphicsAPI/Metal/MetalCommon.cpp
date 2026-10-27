@@ -50,7 +50,7 @@ namespace Helios
 
             std::filesystem::path PipelineArchivePath()
             {
-                return g_AssetsPath / "Cache/Shaders/PipelineArchive.binary";
+                return g_ProjectPath / "Cache/Shaders/PipelineArchive.binary";
             }
 
             /* 把未落盘的缓存条目写出；失败保留脏标记（下次窗口再试），

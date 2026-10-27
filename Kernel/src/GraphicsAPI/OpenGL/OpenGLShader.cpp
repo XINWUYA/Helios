@@ -15,7 +15,7 @@ namespace Helios
 {
 	static std::filesystem::path GetShaderCacheDirectory()
 	{
-		return g_AssetsPath / "Cache/shader/opengl";
+		return g_ProjectPath / "Cache/shader/opengl";
 	}
 
 	static void CreateShaderCacheDirectoryIfNeed()

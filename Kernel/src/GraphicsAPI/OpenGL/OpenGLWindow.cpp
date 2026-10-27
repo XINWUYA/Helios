@@ -42,6 +42,16 @@ namespace Helios
 
 	}
 
+	/* 改窗口标题 */
+	void OpenGLWindow::SetWindowTitle(const std::string& title)
+	{
+		if (m_pGLFWWindow == nullptr)
+			return;
+
+		m_WindowInfo.Descriptor.Title = title;
+		glfwSetWindowTitle(m_pGLFWWindow, title.c_str());
+	}
+
 	/* 创建窗口；创建上下文；绑定响应事件 */
 	void OpenGLWindow::Build(const WindowDesc& desc)
 	{

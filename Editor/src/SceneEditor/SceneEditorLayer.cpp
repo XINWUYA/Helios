@@ -15,7 +15,9 @@
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/ModelImporter.h"
+#include "FileDialog.h"
 #include "Helios/Common/PathUtils.h"
+#include "Helios/Common/ProjectConfig.h"
 #include "Helios/Script/ScriptRuntime.h"
 
 namespace Helios
@@ -75,15 +77,22 @@ namespace Helios
 		/* 编辑器相机登记为外部相机：初始场景也要挂上（此后随 SetActiveScene 迁移） */
 		m_pMainScene->AddExternalCamera(m_pEditorCamera.get());
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
+		/* 层级树的展开状态跟着项目走：<项目>/.helios/hierarchy.cfg，按场景分段 */
+		m_SceneHierarchy.SetTreeStatePath(PathToUtf8(g_ProjectPath / ".helios" / "hierarchy.cfg"));
 
 		/* 属性面板的字段改动与撤销重做共用同一条历史 */
 		m_SceneHierarchy.SetCommandStack(&m_CommandStack);
 
-
-
-
-
-
+		/* 项目配了启动场景就打开：换 --project 打开另一个项目，第一屏就能看出区别 */
+		const ProjectConfig config = LoadProjectConfig();
+		if (!config.StartupScene.empty())
+		{
+			const std::filesystem::path scene_path = ResolveAssetPath(PathFromUtf8(config.StartupScene));
+			if (std::filesystem::is_regular_file(scene_path))
+				OpenScene(PathToUtf8(scene_path));
+			else
+				EDITOR_LOG_WARN("Startup scene not found: {}.", PathToUtf8(scene_path));
+		}
 	}
 
 	void SceneEditorLayer::OnDetached()
@@ -415,12 +424,12 @@ namespace Helios
 			return false;
 
 		/* 已经在本项目资产里的（资源浏览器拖入 / 项目内的文件）原地转换；
-		 * 项目外的（电脑里随便拖进来的）先收进 Assets/Models/<名字>/ */
+		 * 项目外的（电脑里随便拖进来的）先收进项目 Models/<名字>/ */
 		const std::string relative_path = AssetRelativePath(path);
 		const bool in_assets = (relative_path != PathToUtf8(path));
 		std::filesystem::path dest_dir = in_assets
 			? path.parent_path()
-			: MakeUniquePath(g_AssetsPath / "Models", PathToUtf8(path.stem()));
+			: MakeUniquePath(g_ProjectPath / "Models", PathToUtf8(path.stem()));
 
 		std::string mesh_path;
 		if (exchange_format)
@@ -922,7 +931,7 @@ namespace Helios
 					std::filesystem::path relative_path;
 					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
 						payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
-						OnDragItemToScene(g_AssetsPath / relative_path);
+						OnDragItemToScene(ResolveAssetPath(relative_path));
 				}
 				ImGui::EndDragDropTarget();
 			}

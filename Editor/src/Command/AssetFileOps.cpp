@@ -7,15 +7,14 @@ namespace Helios
 {
 	namespace
 	{
-		/* 回收站里的文件名：在 Assets 内就带上相对路径（把分隔符换成 '_'，看得出它原来在哪），
+		/* 回收站里的文件名：在资源根内就带上相对路径（把分隔符换成 '_'，看得出它原来在哪），
 		 * 否则只用文件名。人工去回收站里翻的时候认得出来。 */
 		std::string TrashNameFor(const std::filesystem::path& target)
 		{
-			std::error_code error;
-			const std::filesystem::path relative = std::filesystem::relative(target, g_AssetsPath, error);
+			const std::filesystem::path relative = ToAssetRelative(target);
 
 			std::string name;
-			if (!error && !relative.empty() && relative.native().rfind(std::filesystem::path("..").native(), 0) != 0)
+			if (!relative.empty() && relative.is_relative())
 				name = PathToUtf8(relative);
 			else
 				name = PathToUtf8(target.filename());
@@ -52,8 +51,8 @@ namespace Helios
 
 	std::filesystem::path AssetTrashRoot()
 	{
-		/* 与 Assets 平级：不进资源树（浏览器只列 Assets 下面的东西），也不会被打进包 */
-		return g_AssetsPath.parent_path() / ".helios-trash";
+		/* 与项目根平级、按项目分目录：不进资源树，也不会被打进包 */
+		return g_ProjectPath.parent_path() / ".helios-trash" / g_ProjectPath.filename();
 	}
 
 	AssetFileKind AssetFileKindOf(const std::string& extension)
@@ -77,7 +76,7 @@ namespace Helios
 			{ ".SVG", AssetFileKind::Svg },
 			{ ".SCN", AssetFileKind::Scene },
 			{ ".MTLGRAPH", AssetFileKind::MtlGraph },
-			/* 着色器：.glsl 是源，.metal 是同一次编译的产物（落在 Assets/Cache/Shaders 下）——
+			/* 着色器：.glsl 是源，.metal 是同一次编译的产物（落在项目 Cache/Shaders 下）——
 			 * 两样都是"一个着色器"，筛 Shaders 时一起出来。 */
 			{ ".GLSL", AssetFileKind::Shader }, { ".METAL", AssetFileKind::Shader },
 			/* 模型：源格式 + .mesh（几何 payload）+ .model（清单：几何 + 槽表） */
@@ -91,7 +90,7 @@ namespace Helios
 			{ ".PROBE", AssetFileKind::Probe },
 			/* 动画片段（属性面板的 Animator 卡拖进去就能播） */
 			{ ".ANIM", AssetFileKind::Animation },
-			/* 脚本源码：Assets/Scripts 下的 C++ 文件，浏览器里按头文件 / 源文件分两档 */
+			/* 脚本源码：项目 Scripts 下的 C++ 文件，浏览器里按头文件 / 源文件分两档 */
 			{ ".H", AssetFileKind::CppHeader }, { ".HPP", AssetFileKind::CppHeader },
 			{ ".CPP", AssetFileKind::CppSource }, { ".CC", AssetFileKind::CppSource },
 		};
@@ -107,13 +106,8 @@ namespace Helios
 
 	std::string AssetRelativePath(const std::filesystem::path& path)
 	{
-		std::error_code error;
-		const std::filesystem::path relative = std::filesystem::relative(path, g_AssetsPath, error);
-
-		if (!error && !relative.empty() && relative.native().rfind(std::filesystem::path("..").native(), 0) != 0)
-			return PathToUtf8(relative);
-
-		return PathToUtf8(path);
+		/* 引擎内置资源同样给相对路径：项目里放同名文件就能覆盖它 */
+		return PathToUtf8(ToAssetRelative(path));
 	}
 
 	std::string AssetNameError(const std::string& name)

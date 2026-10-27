@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "TestApp.h"
+#include "Helios/Common/AssetPath.h"
 
 #ifdef _WIN32
 #define _CRTDBG_MAP_ALLOC
@@ -36,10 +37,11 @@ int main(int argc, char** argv)
 {
 	StartMemoryLeakDetector();
 
-	/* todo: 根据argc/argv获取工程路径 */
-
 	Helios::Logger::Init();
 	EDITOR_LOG("Helios Kernel 1.0.0");
+
+	/* 项目根：编译期默认值，--project 可覆盖 */
+	Helios::ParseProjectArgument(argc, argv);
 
 	{
 		// See the profiler result in: edge://tracing/

@@ -239,15 +239,14 @@ namespace Helios
         }
 
         /* 缓存子目录 = 场景相对资源根的路径（去扩展名）：镜像场景在资源树里的位置，
-         * 场景另存/搬移后缓存目录跟着走。场景不在资源根下时相对路径会带 .. ——
+         * 场景另存/搬移后缓存目录跟着走。场景不在两个资源根下时相对路径会带 .. ——
          * 不能把它拼进资源相对路径，退回只用场景文件名起一个目录。 */
         std::string scene_directory;
         std::filesystem::path scene_file;
         if (!scene_path.empty() && TryPathFromUtf8(scene_path, scene_file))
         {
-            std::error_code error;
-            const std::filesystem::path relative = std::filesystem::relative(scene_file, g_AssetsPath, error);
-            const bool under_assets_root = !error && !relative.empty()
+            const std::filesystem::path relative = ToAssetRelative(scene_file);
+            const bool under_assets_root = !relative.empty() && relative.is_relative()
                 && std::none_of(relative.begin(), relative.end(),
                     [](const std::filesystem::path& part) { return part == ".."; });
 

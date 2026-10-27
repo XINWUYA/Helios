@@ -44,8 +44,25 @@ namespace Helios::Icons
 			return (palette & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
 		}
 
-		constexpr ImU32 kViolet = IM_COL32(108, 104, 217, 255);
-		constexpr ImU32 kMint = IM_COL32(39, 173, 145, 255);
+		/* Token 颜色 → ImU32（alpha 由调用方给，图标要跟着禁用态一起变淡） */
+		inline ImU32 InkColor(const ImVec4& color, uint8_t alpha)
+		{
+			return IM_COL32(static_cast<int>(color.x * 255.0f + 0.5f),
+				static_cast<int>(color.y * 255.0f + 0.5f),
+				static_cast<int>(color.z * 255.0f + 0.5f), alpha);
+		}
+
+		/* 图标里的强调色：跟主题走（AccentInk 比 UI 强调色深一档），双色调图标的第二色 */
+		inline ImU32 AccentInkColor()
+		{
+			return InkColor(EditorTheme::Token::AccentInk, 255);
+		}
+		/* 图标里的副色：跟主题走（强调色转 150° 的对比色），双色调图标的第二色 */
+		inline ImU32 AltColor()
+		{
+			return InkColor(EditorTheme::Token::AccentAlt, 255);
+		}
+
 		constexpr ImU32 kRed = IM_COL32(213, 92, 85, 255);	/* 与调色板 #d55c55 同值 */
 		constexpr ImU32 kGray = IM_COL32(170, 178, 193, 255);	/* 与调色板 #aab2c1 同值（深浅两画布通用） */
 
@@ -122,12 +139,12 @@ namespace Helios::Icons
 
 			/* 翻起的一角：填色后一页纸才有立体感，不然只是条空心折线 */
 			dl->AddTriangleFilled(c.At(0.60f, 0.06f), c.At(0.82f, 0.28f), c.At(0.60f, 0.28f),
-				PaletteColor(color, kViolet, 0.18f));
+				PaletteColor(color, AccentInkColor(), 0.18f));
 
 			StrokePolyline(dl, c, kPage, thickness, color, true);
 
-			dl->AddLine(c.At(0.60f, 0.06f), c.At(0.60f, 0.28f), PaletteColor(color, kViolet), thickness);
-			dl->AddLine(c.At(0.60f, 0.28f), c.At(0.82f, 0.28f), PaletteColor(color, kViolet), thickness);
+			dl->AddLine(c.At(0.60f, 0.06f), c.At(0.60f, 0.28f), PaletteColor(color, AccentInkColor()), thickness);
+			dl->AddLine(c.At(0.60f, 0.28f), c.At(0.82f, 0.28f), PaletteColor(color, AccentInkColor()), thickness);
 		}
 
 		void DrawNewScene(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -141,7 +158,7 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
-			/* 打开的文件夹：后片与前片错层，前片以淡紫填充表达打开动作 */
+			/* 打开的文件夹：后片与前片错层，前片以淡金填充表达打开动作 */
 			static constexpr float kFolder[6][2] = {
 				{ 0.10f, 0.83f }, { 0.10f, 0.25f }, { 0.39f, 0.25f },
 				{ 0.50f, 0.39f }, { 0.90f, 0.39f }, { 0.90f, 0.83f }
@@ -149,10 +166,10 @@ namespace Helios::Icons
 			static constexpr float kFront[4][2] = {
 				{ 0.06f, 0.48f }, { 0.91f, 0.48f }, { 0.78f, 0.84f }, { 0.02f, 0.84f }
 			};
-			FillPoly(dl, c, kFront, PaletteColor(color, kViolet, 0.18f));
+			FillPoly(dl, c, kFront, PaletteColor(color, AccentInkColor(), 0.18f));
 			StrokePolyline(dl, c, kFolder, t, color, true);
-			StrokePolyline(dl, c, kFront, t, PaletteColor(color, kViolet), true);
-			dl->AddLine(c.At(0.16f, 0.66f), c.At(0.56f, 0.66f), PaletteColor(color, kMint), t);
+			StrokePolyline(dl, c, kFront, t, PaletteColor(color, AccentInkColor()), true);
+			dl->AddLine(c.At(0.16f, 0.66f), c.At(0.56f, 0.66f), PaletteColor(color, AltColor()), t);
 		}
 
 		void DrawSave(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -160,18 +177,18 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
-			/* 软盘轮廓：淡紫标签窗配一条薄荷色保存指示 */
-			dl->AddRectFilled(c.At(0.30f, 0.54f), c.At(0.70f, 0.83f), PaletteColor(color, kViolet, 0.18f), c.Len(0.025f));
-			dl->AddRectFilled(c.At(0.35f, 0.16f), c.At(0.65f, 0.38f), PaletteColor(color, kViolet, 0.12f));
+			/* 软盘轮廓：淡金标签窗配一条副色保存指示 */
+			dl->AddRectFilled(c.At(0.30f, 0.54f), c.At(0.70f, 0.83f), PaletteColor(color, AccentInkColor(), 0.18f), c.Len(0.025f));
+			dl->AddRectFilled(c.At(0.35f, 0.16f), c.At(0.65f, 0.38f), PaletteColor(color, AccentInkColor(), 0.12f));
 
 			static constexpr float kShell[5][2] = {
 				{ 0.15f, 0.15f }, { 0.68f, 0.15f }, { 0.85f, 0.32f }, { 0.85f, 0.85f }, { 0.15f, 0.85f }
 			};
 			StrokePolyline(dl, c, kShell, t, color, true);
 
-			dl->AddRect(c.At(0.33f, 0.15f), c.At(0.67f, 0.40f), PaletteColor(color, kViolet), 0.0f, 0, t);
+			dl->AddRect(c.At(0.33f, 0.15f), c.At(0.67f, 0.40f), PaletteColor(color, AccentInkColor()), 0.0f, 0, t);
 			dl->AddRect(c.At(0.28f, 0.55f), c.At(0.72f, 0.85f), color, c.Len(0.025f), 0, t);
-			dl->AddLine(c.At(0.37f, 0.72f), c.At(0.63f, 0.72f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.37f, 0.72f), c.At(0.63f, 0.72f), PaletteColor(color, AltColor()), t);
 		}
 
 		void DrawImport(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -184,18 +201,18 @@ namespace Helios::Icons
 				{ 0.20f, 0.08f }, { 0.56f, 0.08f }, { 0.73f, 0.25f }, { 0.73f, 0.50f }, { 0.20f, 0.50f }
 			};
 			StrokePolyline(dl, c, kPage, t, color, true);
-			dl->AddLine(c.At(0.56f, 0.08f), c.At(0.56f, 0.25f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.56f, 0.25f), c.At(0.73f, 0.25f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.56f, 0.08f), c.At(0.56f, 0.25f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.56f, 0.25f), c.At(0.73f, 0.25f), PaletteColor(color, AccentInkColor()), t);
 
-			dl->AddLine(c.At(0.50f, 0.34f), c.At(0.50f, 0.76f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.34f), c.At(0.50f, 0.76f), PaletteColor(color, AccentInkColor()), t);
 			dl->PathLineTo(c.At(0.36f, 0.62f));
 			dl->PathLineTo(c.At(0.50f, 0.76f));
 			dl->PathLineTo(c.At(0.64f, 0.62f));
-			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
 
 			dl->AddLine(c.At(0.22f, 0.84f), c.At(0.78f, 0.84f), color, t);
 			dl->AddLine(c.At(0.22f, 0.84f), c.At(0.22f, 0.73f), color, t);
-			dl->AddCircleFilled(c.At(0.22f, 0.73f), c.Len(0.055f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.22f, 0.73f), c.Len(0.055f), PaletteColor(color, AltColor()));
 		}
 
 		/* 导出：导入图标的镜像 —— 承载托盘 + 向上的导出箭头（"数据送出去"，
@@ -205,15 +222,15 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
-			dl->AddLine(c.At(0.50f, 0.66f), c.At(0.50f, 0.24f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.66f), c.At(0.50f, 0.24f), PaletteColor(color, AccentInkColor()), t);
 			dl->PathLineTo(c.At(0.36f, 0.38f));
 			dl->PathLineTo(c.At(0.50f, 0.24f));
 			dl->PathLineTo(c.At(0.64f, 0.38f));
-			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
 
 			dl->AddLine(c.At(0.22f, 0.84f), c.At(0.78f, 0.84f), color, t);
 			dl->AddLine(c.At(0.22f, 0.84f), c.At(0.22f, 0.73f), color, t);
-			dl->AddCircleFilled(c.At(0.22f, 0.73f), c.Len(0.055f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.22f, 0.73f), c.Len(0.055f), PaletteColor(color, AltColor()));
 		}
 
 		/* 新建资源：一枚加号、不加外框，用"动作"强调色（跟 Add / Return / Filter 同源）。跟通用的
@@ -224,10 +241,10 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			constexpr float kArm = 9.0f / 32.0f;                       /* 臂长 9 / 32（与 SVG 同一副几何） */
 			const float t = std::max(1.25f, size * (2.6f / 32.0f));    /* 线宽 2.6 / 32 */
-			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
 
-			dl->AddLine(c.At(0.50f, 0.50f - kArm), c.At(0.50f, 0.50f + kArm), violet, t);
-			dl->AddLine(c.At(0.50f - kArm, 0.50f), c.At(0.50f + kArm, 0.50f), violet, t);
+			dl->AddLine(c.At(0.50f, 0.50f - kArm), c.At(0.50f, 0.50f + kArm), accent, t);
+			dl->AddLine(c.At(0.50f - kArm, 0.50f), c.At(0.50f + kArm, 0.50f), accent, t);
 		}
 
 		/* ---- 编辑历史 ----
@@ -322,11 +339,11 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 			const ImVec2 origin = c.At(0.50f, 0.50f);
 			const float radius = c.Len(0.30f);
-			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
 
 			/* 两段半圆弧首尾相接：上弧终点向下、下弧终点向上，组成循环旋转 */
 			dl->PathArcTo(origin, radius, kPi, 2.0f * kPi, 24);
-			dl->PathStroke(violet, 0, t);
+			dl->PathStroke(accent, 0, t);
 			dl->PathArcTo(origin, radius, 0.0f, kPi, 24);
 			dl->PathStroke(color, 0, t);
 
@@ -334,13 +351,13 @@ namespace Helios::Icons
 			dl->PathLineTo(c.At(0.70f, 0.40f));
 			dl->PathLineTo(c.At(0.80f, 0.50f));
 			dl->PathLineTo(c.At(0.90f, 0.40f));
-			dl->PathStroke(violet, 0, t);
+			dl->PathStroke(accent, 0, t);
 
 			dl->PathLineTo(c.At(0.30f, 0.60f));
 			dl->PathLineTo(c.At(0.20f, 0.50f));
 			dl->PathLineTo(c.At(0.10f, 0.60f));
 			dl->PathStroke(color, 0, t);
-			dl->AddCircleFilled(origin, c.Len(0.075f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(origin, c.Len(0.075f), PaletteColor(color, AltColor()));
 		}
 
 		void DrawScale(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -467,7 +484,7 @@ namespace Helios::Icons
 		}
 
 		/* 追踪文本（CPU 录制选项：录制时同步写 chrome://tracing 时间线 JSON）：
-		 * 文件页（文件族语言，折角软紫）+ 波形折线（性能族语言，薄荷） */
+		 * 文件页（文件族语言，折角暖金）+ 波形折线（性能族语言，副色） */
 		void DrawTraceText(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -477,16 +494,16 @@ namespace Helios::Icons
 				{ 0.25f, 0.125f }, { 0.594f, 0.125f }, { 0.75f, 0.281f }, { 0.75f, 0.875f }, { 0.25f, 0.875f }
 			};
 			dl->AddTriangleFilled(c.At(0.594f, 0.125f), c.At(0.75f, 0.281f), c.At(0.594f, 0.281f),
-				PaletteColor(color, kViolet, 0.18f));
+				PaletteColor(color, AccentInkColor(), 0.18f));
 			StrokePolyline(dl, c, kPage, t, color, true);
-			dl->AddLine(c.At(0.594f, 0.125f), c.At(0.594f, 0.281f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.594f, 0.281f), c.At(0.75f, 0.281f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.594f, 0.125f), c.At(0.594f, 0.281f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.594f, 0.281f), c.At(0.75f, 0.281f), PaletteColor(color, AccentInkColor()), t);
 
 			static constexpr float kWave[7][2] = {
 				{ 0.344f, 0.688f }, { 0.419f, 0.688f }, { 0.475f, 0.469f }, { 0.556f, 0.797f },
 				{ 0.619f, 0.594f }, { 0.663f, 0.688f }, { 0.688f, 0.688f }
 			};
-			StrokePolyline(dl, c, kWave, t * 1.1f, PaletteColor(color, kMint), false);
+			StrokePolyline(dl, c, kWave, t * 1.1f, PaletteColor(color, AltColor()), false);
 		}
 
 		/* ---- 通用 ---- */
@@ -542,7 +559,7 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
 
 			/* 折返路径：顶栏（带左向箭头）绕右侧下行、沿底栏折回；与 SVG symbol 同一副坐标 */
 			dl->PathLineTo(c.At(22.0f / 32.0f, 7.0f / 32.0f));
@@ -555,14 +572,14 @@ namespace Helios::Icons
 			dl->PathLineTo(c.At(10.0f / 32.0f, 3.0f / 32.0f));
 			dl->PathLineTo(c.At(6.0f / 32.0f, 7.0f / 32.0f));
 			dl->PathLineTo(c.At(10.0f / 32.0f, 11.0f / 32.0f));
-			dl->PathStroke(violet, 0, t);
+			dl->PathStroke(accent, 0, t);
 
 			dl->AddLine(c.At(9.0f / 32.0f, 7.0f / 32.0f), c.At(22.0f / 32.0f, 7.0f / 32.0f),
-				PaletteColor(color, kMint), t);
+				PaletteColor(color, AltColor()), t);
 		}
 
 		/* 一键回根（Treemap 面包屑：跳过逐层返回、直接回根）：浏览器"主页"式房子 ——
-		 * 屋顶折线 + 房身（软紫底 + 描边）+ 门（薄荷），与 Return 的折返箭头明显区分 */
+		 * 屋顶折线 + 房身（暖金底 + 描边）+ 门（副色），与 Return 的折返箭头明显区分 */
 		void DrawReturnRoot(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -570,16 +587,16 @@ namespace Helios::Icons
 
 			/* 房身 */
 			dl->AddRectFilled(c.At(0.24f, 0.46f), c.At(0.76f, 0.84f),
-				PaletteColor(color, kViolet, 0.16f), c.Len(0.05f));
+				PaletteColor(color, AccentInkColor(), 0.16f), c.Len(0.05f));
 			dl->AddRect(c.At(0.24f, 0.46f), c.At(0.76f, 0.84f), color, c.Len(0.05f), 0, t);
 
 			/* 屋顶折线（左右屋檐探出房身） */
 			dl->AddLine(c.At(0.13f, 0.51f), c.At(0.50f, 0.16f), color, t);
 			dl->AddLine(c.At(0.50f, 0.16f), c.At(0.87f, 0.51f), color, t);
 
-			/* 门（薄荷） */
+			/* 门（副色） */
 			dl->AddRectFilled(c.At(0.43f, 0.62f), c.At(0.57f, 0.84f),
-				PaletteColor(color, kMint), c.Len(0.02f));
+				PaletteColor(color, AltColor()), c.Len(0.02f));
 		}
 
 		void DrawFilter(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -605,13 +622,13 @@ namespace Helios::Icons
 				const bool active = (layer == 1);
 				if (active)
 					dl->AddRectFilled(c.At(0.14f, top), c.At(0.86f, top + 0.18f),
-						PaletteColor(color, kMint, 0.14f), c.Len(0.045f));
+						PaletteColor(color, AltColor(), 0.14f), c.Len(0.045f));
 				dl->AddRect(c.At(0.14f, top), c.At(0.86f, top + 0.18f),
-					active ? PaletteColor(color, kMint) : color, c.Len(0.045f), 0, t);
+					active ? PaletteColor(color, AltColor()) : color, c.Len(0.045f), 0, t);
 			}
 
 			/* 中间层的勾 */
-			const ImU32 check = PaletteColor(color, kMint);
+			const ImU32 check = PaletteColor(color, AltColor());
 			dl->AddLine(c.At(0.54f, 0.47f), c.At(0.60f, 0.53f), check, t);
 			dl->AddLine(c.At(0.60f, 0.53f), c.At(0.73f, 0.40f), check, t);
 		}
@@ -622,14 +639,14 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
+			const ImU32 mint = PaletteColor(color, AltColor());
 
 			dl->AddRectFilled(c.At(0.188f, 0.125f), c.At(0.781f, 0.875f),
-				PaletteColor(color, kViolet, 0.18f), c.Len(0.0625f));
+				PaletteColor(color, AccentInkColor(), 0.18f), c.Len(0.0625f));
 			dl->AddRect(c.At(0.188f, 0.125f), c.At(0.781f, 0.875f), color, c.Len(0.0625f), 0, t);
-			dl->AddLine(c.At(0.625f, 0.125f), c.At(0.625f, 0.281f), violet, t);
-			dl->AddLine(c.At(0.625f, 0.281f), c.At(0.781f, 0.281f), violet, t);
+			dl->AddLine(c.At(0.625f, 0.125f), c.At(0.625f, 0.281f), accent, t);
+			dl->AddLine(c.At(0.625f, 0.281f), c.At(0.781f, 0.281f), accent, t);
 
 			/* 尖括号 + 斜杠 */
 			dl->AddLine(c.At(0.406f, 0.406f), c.At(0.313f, 0.500f), mint, t);
@@ -674,7 +691,7 @@ namespace Helios::Icons
 			dl->PathBezierCubicCurveTo(c.At(0.70f, 0.84f), c.At(0.30f, 0.84f), c.At(0.08f, 0.50f), 24);
 			dl->PathStroke(color, 0, t);
 
-			dl->AddLine(c.At(0.22f, 0.82f), c.At(0.78f, 0.18f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.22f, 0.82f), c.At(0.78f, 0.18f), PaletteColor(color, AccentInkColor()), t);
 		}
 
 		/* ---- 场景树节点 ----
@@ -685,26 +702,26 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
+			const ImU32 mint = PaletteColor(color, AltColor());
 
 			/* 根节点向下分出三个子对象：用圆节点和连线表达场景层级 */
-			dl->AddLine(c.At(0.50f, 0.30f), c.At(0.50f, 0.50f), violet, t);
-			dl->AddLine(c.At(0.22f, 0.50f), c.At(0.78f, 0.50f), violet, t);
-			dl->AddLine(c.At(0.22f, 0.50f), c.At(0.22f, 0.70f), violet, t);
-			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.70f), violet, t);
-			dl->AddLine(c.At(0.78f, 0.50f), c.At(0.78f, 0.70f), violet, t);
+			dl->AddLine(c.At(0.50f, 0.30f), c.At(0.50f, 0.50f), accent, t);
+			dl->AddLine(c.At(0.22f, 0.50f), c.At(0.78f, 0.50f), accent, t);
+			dl->AddLine(c.At(0.22f, 0.50f), c.At(0.22f, 0.70f), accent, t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.70f), accent, t);
+			dl->AddLine(c.At(0.78f, 0.50f), c.At(0.78f, 0.70f), accent, t);
 
 			const float root_radius = c.Len(0.125f);
 			const float child_radius = c.Len(0.095f);
-			dl->AddCircleFilled(c.At(0.50f, 0.22f), root_radius, PaletteColor(color, kMint, 0.20f));
+			dl->AddCircleFilled(c.At(0.50f, 0.22f), root_radius, PaletteColor(color, AltColor(), 0.20f));
 			dl->AddCircle(c.At(0.50f, 0.22f), root_radius, mint, 0, t);
-			dl->AddCircleFilled(c.At(0.22f, 0.78f), child_radius, PaletteColor(color, kViolet, 0.16f));
-			dl->AddCircle(c.At(0.22f, 0.78f), child_radius, violet, 0, t);
-			dl->AddCircleFilled(c.At(0.50f, 0.78f), child_radius, PaletteColor(color, kViolet, 0.16f));
-			dl->AddCircle(c.At(0.50f, 0.78f), child_radius, violet, 0, t);
-			dl->AddCircleFilled(c.At(0.78f, 0.78f), child_radius, PaletteColor(color, kViolet, 0.16f));
-			dl->AddCircle(c.At(0.78f, 0.78f), child_radius, violet, 0, t);
+			dl->AddCircleFilled(c.At(0.22f, 0.78f), child_radius, PaletteColor(color, AccentInkColor(), 0.16f));
+			dl->AddCircle(c.At(0.22f, 0.78f), child_radius, accent, 0, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.78f), child_radius, PaletteColor(color, AccentInkColor(), 0.16f));
+			dl->AddCircle(c.At(0.50f, 0.78f), child_radius, accent, 0, t);
+			dl->AddCircleFilled(c.At(0.78f, 0.78f), child_radius, PaletteColor(color, AccentInkColor(), 0.16f));
+			dl->AddCircle(c.At(0.78f, 0.78f), child_radius, accent, 0, t);
 			dl->AddCircleFilled(c.At(0.50f, 0.22f), c.Len(0.035f), mint);
 		}
 
@@ -714,13 +731,13 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 			const float lens_radius = c.Len(0.22f);
 
-			/* 相机机身、取景器凸起与镜头；镜头中心用薄荷绿聚焦点强调 */
-			dl->AddRectFilled(c.At(0.08f, 0.28f), c.At(0.92f, 0.82f), PaletteColor(color, kViolet, 0.12f), c.Len(0.12f));
+			/* 相机机身、取景器凸起与镜头；镜头中心用副色聚焦点强调 */
+			dl->AddRectFilled(c.At(0.08f, 0.28f), c.At(0.92f, 0.82f), PaletteColor(color, AccentInkColor(), 0.12f), c.Len(0.12f));
 			dl->AddRect(c.At(0.08f, 0.28f), c.At(0.92f, 0.82f), color, c.Len(0.12f), 0, t);
-			dl->AddRect(c.At(0.23f, 0.16f), c.At(0.50f, 0.29f), PaletteColor(color, kViolet), c.Len(0.045f), 0, t);
-			dl->AddCircleFilled(c.At(0.57f, 0.55f), lens_radius, PaletteColor(color, kViolet, 0.22f));
-			dl->AddCircle(c.At(0.57f, 0.55f), lens_radius, PaletteColor(color, kViolet), 0, t);
-			dl->AddCircleFilled(c.At(0.57f, 0.55f), c.Len(0.075f), PaletteColor(color, kMint));
+			dl->AddRect(c.At(0.23f, 0.16f), c.At(0.50f, 0.29f), PaletteColor(color, AccentInkColor()), c.Len(0.045f), 0, t);
+			dl->AddCircleFilled(c.At(0.57f, 0.55f), lens_radius, PaletteColor(color, AccentInkColor(), 0.22f));
+			dl->AddCircle(c.At(0.57f, 0.55f), lens_radius, PaletteColor(color, AccentInkColor()), 0, t);
+			dl->AddCircleFilled(c.At(0.57f, 0.55f), c.Len(0.075f), PaletteColor(color, AltColor()));
 		}
 
 		void DrawDirectionalLight(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -731,9 +748,9 @@ namespace Helios::Icons
 			/* 太阳 + 三束等长等距的平行光：区分于点光（四向短射线）、聚光（锥形）。
 			 * 三束用同一个方向 + 垂直偏移量算出来，才不会像随手画的三条斜线。 */
 			const ImVec2 sun = c.At(0.30f, 0.28f);
-			dl->AddCircleFilled(sun, c.Len(0.16f), PaletteColor(color, kViolet, 0.18f));
+			dl->AddCircleFilled(sun, c.Len(0.16f), PaletteColor(color, AccentInkColor(), 0.18f));
 			dl->AddCircle(sun, c.Len(0.16f), color, 0, t);
-			dl->AddCircleFilled(sun, c.Len(0.045f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(sun, c.Len(0.045f), PaletteColor(color, AltColor()));
 
 			const float along_x = 0.707f;
 			const float along_y = 0.707f;
@@ -755,13 +772,13 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 
 			/* 发光球 + 四向短射线 */
-			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.22f), PaletteColor(color, kViolet, 0.18f));
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.22f), PaletteColor(color, AccentInkColor(), 0.18f));
 			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.22f), color, 0, t);
-			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.075f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.075f), PaletteColor(color, AltColor()));
 
-			dl->AddLine(c.At(0.50f, 0.04f), c.At(0.50f, 0.18f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.04f), c.At(0.50f, 0.18f), PaletteColor(color, AccentInkColor()), t);
 			dl->AddLine(c.At(0.50f, 0.82f), c.At(0.50f, 0.96f), color, t);
-			dl->AddLine(c.At(0.04f, 0.50f), c.At(0.18f, 0.50f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.04f, 0.50f), c.At(0.18f, 0.50f), PaletteColor(color, AccentInkColor()), t);
 			dl->AddLine(c.At(0.82f, 0.50f), c.At(0.96f, 0.50f), color, t);
 		}
 
@@ -771,9 +788,9 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 
 			/* 灯源 + 向下张开的光锥（不封底，才读得出是"投出去的光"） */
-			dl->AddCircleFilled(c.At(0.50f, 0.16f), c.Len(0.11f), PaletteColor(color, kMint));
-			dl->AddLine(c.At(0.40f, 0.32f), c.At(0.14f, 0.92f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.60f, 0.32f), c.At(0.86f, 0.92f), PaletteColor(color, kViolet), t);
+			dl->AddCircleFilled(c.At(0.50f, 0.16f), c.Len(0.11f), PaletteColor(color, AltColor()));
+			dl->AddLine(c.At(0.40f, 0.32f), c.At(0.14f, 0.92f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.60f, 0.32f), c.At(0.86f, 0.92f), PaletteColor(color, AccentInkColor()), t);
 		}
 
 		void DrawLight(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -782,19 +799,19 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 			const ImVec2 bulb = c.At(0.50f, 0.42f);
 
-			/* 灯泡轮廓 + 灯座；淡紫灯罩与薄荷色发光核心 */
-			dl->AddCircleFilled(bulb, c.Len(0.25f), PaletteColor(color, kViolet, 0.18f));
+			/* 灯泡轮廓 + 灯座；淡金灯罩与副色发光核心 */
+			dl->AddCircleFilled(bulb, c.Len(0.25f), PaletteColor(color, AccentInkColor(), 0.18f));
 			dl->AddCircle(bulb, c.Len(0.25f), color, 0, t);
 			dl->AddLine(c.At(0.37f, 0.57f), c.At(0.42f, 0.69f), color, t);
 			dl->AddLine(c.At(0.63f, 0.57f), c.At(0.58f, 0.69f), color, t);
-			dl->AddLine(c.At(0.42f, 0.69f), c.At(0.58f, 0.69f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.42f, 0.69f), c.At(0.58f, 0.69f), PaletteColor(color, AccentInkColor()), t);
 			dl->AddLine(c.At(0.43f, 0.77f), c.At(0.57f, 0.77f), color, t);
 			dl->AddLine(c.At(0.45f, 0.84f), c.At(0.55f, 0.84f), color, t);
-			dl->AddCircleFilled(bulb, c.Len(0.065f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(bulb, c.Len(0.065f), PaletteColor(color, AltColor()));
 
-			dl->AddLine(c.At(0.50f, 0.04f), c.At(0.50f, 0.11f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.13f, 0.42f), c.At(0.20f, 0.42f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.80f, 0.42f), c.At(0.87f, 0.42f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.04f), c.At(0.50f, 0.11f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.13f, 0.42f), c.At(0.20f, 0.42f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.80f, 0.42f), c.At(0.87f, 0.42f), PaletteColor(color, AccentInkColor()), t);
 		}
 
 		void DrawAudio(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -802,18 +819,18 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
-			/* 扬声器主体填淡紫，声波用主线色，中心用薄荷色作识别点 */
+			/* 扬声器主体填淡金，声波用主线色，中心用副色作识别点 */
 			static constexpr float kSpeaker[6][2] = {
 				{ 0.08f, 0.40f }, { 0.30f, 0.40f }, { 0.60f, 0.18f },
 				{ 0.60f, 0.82f }, { 0.30f, 0.60f }, { 0.08f, 0.60f }
 			};
-			FillPoly(dl, c, kSpeaker, PaletteColor(color, kViolet, 0.18f));
-			StrokePolyline(dl, c, kSpeaker, t, PaletteColor(color, kViolet), true);
+			FillPoly(dl, c, kSpeaker, PaletteColor(color, AccentInkColor(), 0.18f));
+			StrokePolyline(dl, c, kSpeaker, t, PaletteColor(color, AccentInkColor()), true);
 			dl->PathArcTo(c.At(0.57f, 0.50f), c.Len(0.20f), -0.82f, 0.82f, 18);
 			dl->PathStroke(color, 0, t);
 			dl->PathArcTo(c.At(0.57f, 0.50f), c.Len(0.34f), -0.82f, 0.82f, 18);
 			dl->PathStroke(color, 0, t);
-			dl->AddCircleFilled(c.At(0.30f, 0.50f), c.Len(0.055f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.30f, 0.50f), c.Len(0.055f), PaletteColor(color, AltColor()));
 		}
 
 		void DrawParticle(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -826,11 +843,11 @@ namespace Helios::Icons
 				{ 0.50f, 0.08f }, { 0.56f, 0.40f }, { 0.84f, 0.50f }, { 0.56f, 0.58f },
 				{ 0.50f, 0.90f }, { 0.43f, 0.58f }, { 0.16f, 0.50f }, { 0.43f, 0.40f }
 			};
-			StrokePolyline(dl, c, kBurst, t, PaletteColor(color, kViolet), true);
-			dl->AddCircleFilled(c.At(0.17f, 0.20f), c.Len(0.06f), PaletteColor(color, kMint));
-			dl->AddCircleFilled(c.At(0.83f, 0.23f), c.Len(0.045f), PaletteColor(color, kMint));
+			StrokePolyline(dl, c, kBurst, t, PaletteColor(color, AccentInkColor()), true);
+			dl->AddCircleFilled(c.At(0.17f, 0.20f), c.Len(0.06f), PaletteColor(color, AltColor()));
+			dl->AddCircleFilled(c.At(0.83f, 0.23f), c.Len(0.045f), PaletteColor(color, AltColor()));
 			dl->AddCircleFilled(c.At(0.78f, 0.80f), c.Len(0.07f), color);
-			dl->AddCircleFilled(c.At(0.20f, 0.81f), c.Len(0.04f), PaletteColor(color, kViolet));
+			dl->AddCircleFilled(c.At(0.20f, 0.81f), c.Len(0.04f), PaletteColor(color, AccentInkColor()));
 		}
 
 		void DrawTerrain(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -844,12 +861,12 @@ namespace Helios::Icons
 				{ 0.58f, 0.28f }, { 0.91f, 0.76f }, { 0.91f, 0.84f }, { 0.08f, 0.84f }
 			};
 			dl->AddTriangleFilled(c.At(0.27f, 0.76f), c.At(0.58f, 0.28f), c.At(0.91f, 0.76f),
-				PaletteColor(color, kViolet, 0.14f));
+				PaletteColor(color, AccentInkColor(), 0.14f));
 			dl->AddTriangleFilled(c.At(0.08f, 0.76f), c.At(0.27f, 0.43f), c.At(0.41f, 0.60f),
-				PaletteColor(color, kMint, 0.10f));
-			StrokePolyline(dl, c, kHill, t, PaletteColor(color, kViolet), true);
-			dl->AddLine(c.At(0.29f, 0.48f), c.At(0.40f, 0.58f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.60f, 0.34f), c.At(0.73f, 0.49f), PaletteColor(color, kMint), t);
+				PaletteColor(color, AltColor(), 0.10f));
+			StrokePolyline(dl, c, kHill, t, PaletteColor(color, AccentInkColor()), true);
+			dl->AddLine(c.At(0.29f, 0.48f), c.At(0.40f, 0.58f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.60f, 0.34f), c.At(0.73f, 0.49f), PaletteColor(color, AltColor()), t);
 
 			dl->PathLineTo(c.At(0.10f, 0.91f));
 			dl->PathBezierCubicCurveTo(c.At(0.34f, 0.82f), c.At(0.66f, 0.98f), c.At(0.90f, 0.89f), 12);
@@ -862,13 +879,13 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 
 			/* 球体 + 左上高光弧 + 反射亮点 */
-			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.40f), PaletteColor(color, kViolet, 0.12f));
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.40f), PaletteColor(color, AccentInkColor(), 0.12f));
 			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.40f), color, 0, t);
 
 			dl->PathArcTo(c.At(0.50f, 0.50f), c.Len(0.22f), 3.34f, 4.56f, 16);
-			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
 
-			dl->AddCircleFilled(c.At(0.66f, 0.66f), c.Len(0.08f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.66f, 0.66f), c.Len(0.08f), PaletteColor(color, AltColor()));
 		}
 
 		void DrawModel(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -884,13 +901,13 @@ namespace Helios::Icons
 			static constexpr float kTop[4][2] = {
 				{ 0.50f, 0.08f }, { 0.92f, 0.30f }, { 0.50f, 0.52f }, { 0.08f, 0.30f }
 			};
-			FillPoly(dl, c, kTop, PaletteColor(color, kViolet, 0.16f));
+			FillPoly(dl, c, kTop, PaletteColor(color, AccentInkColor(), 0.16f));
 			StrokePolyline(dl, c, kCube, t, color, true);
 
-			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.08f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.50f, 0.08f), PaletteColor(color, AccentInkColor()), t);
 			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.92f, 0.70f), color, t);
 			dl->AddLine(c.At(0.50f, 0.50f), c.At(0.08f, 0.70f), color, t);
-			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.045f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.045f), PaletteColor(color, AltColor()));
 		}
 
 		/* ---- 默认 3D 形状（新建菜单 / 场景树）----
@@ -902,24 +919,24 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
-			/* 左面淡紫、顶面薄荷（右面留白）：两块带色的面给出实心体积感 */
+			/* 左面淡金、顶面副色（右面留白）：两块带色的面给出实心体积感 */
 			static constexpr float kTop[4][2] = {
 				{ 0.50f, 0.08f }, { 0.92f, 0.30f }, { 0.50f, 0.52f }, { 0.08f, 0.30f }
 			};
 			static constexpr float kLeft[4][2] = {
 				{ 0.08f, 0.30f }, { 0.50f, 0.52f }, { 0.50f, 0.92f }, { 0.08f, 0.70f }
 			};
-			FillPoly(dl, c, kLeft, PaletteColor(color, kViolet, 0.20f));
-			FillPoly(dl, c, kTop, PaletteColor(color, kMint, 0.24f));
+			FillPoly(dl, c, kLeft, PaletteColor(color, AccentInkColor(), 0.20f));
+			FillPoly(dl, c, kTop, PaletteColor(color, AltColor(), 0.24f));
 
 			static constexpr float kShell[6][2] = {
 				{ 0.50f, 0.08f }, { 0.92f, 0.30f }, { 0.92f, 0.70f },
 				{ 0.50f, 0.92f }, { 0.08f, 0.70f }, { 0.08f, 0.30f }
 			};
 			StrokePolyline(dl, c, kShell, t, color, true);
-			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.08f, 0.30f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.92f, 0.30f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.50f, 0.92f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.08f, 0.30f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.92f, 0.30f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.50f, 0.52f), c.At(0.50f, 0.92f), PaletteColor(color, AccentInkColor()), t);
 		}
 
 		void DrawSphereShape(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -929,7 +946,7 @@ namespace Helios::Icons
 
 			/* 圆面 + 经线（竖椭圆）+ 纬线（横弦）：一眼是球，不是"光圈 / 灯泡" */
 			const ImVec2 sphere_center = c.At(0.50f, 0.50f);
-			dl->AddCircleFilled(sphere_center, c.Len(0.42f), PaletteColor(color, kViolet, 0.16f));
+			dl->AddCircleFilled(sphere_center, c.Len(0.42f), PaletteColor(color, AccentInkColor(), 0.16f));
 
 			constexpr int kMeridianSegments = 28;
 			for (int i = 0; i <= kMeridianSegments; ++i)
@@ -937,9 +954,9 @@ namespace Helios::Icons
 				const float angle = 2.0f * kPi * static_cast<float>(i) / kMeridianSegments;
 				dl->PathLineTo(c.At(0.50f + std::cos(angle) * 0.16f, 0.50f + std::sin(angle) * 0.42f));
 			}
-			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
 
-			dl->AddLine(c.At(0.08f, 0.50f), c.At(0.92f, 0.50f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.08f, 0.50f), c.At(0.92f, 0.50f), PaletteColor(color, AccentInkColor()), t);
 			dl->AddCircle(sphere_center, c.Len(0.42f), color, 0, t);
 		}
 
@@ -952,10 +969,10 @@ namespace Helios::Icons
 			static constexpr float kQuad[4][2] = {
 				{ 0.50f, 0.16f }, { 0.92f, 0.50f }, { 0.50f, 0.84f }, { 0.08f, 0.50f }
 			};
-			FillPoly(dl, c, kQuad, PaletteColor(color, kMint, 0.18f));
+			FillPoly(dl, c, kQuad, PaletteColor(color, AltColor(), 0.18f));
 			StrokePolyline(dl, c, kQuad, t, color, true);
-			dl->AddLine(c.At(0.29f, 0.33f), c.At(0.71f, 0.67f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.71f, 0.33f), c.At(0.29f, 0.67f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.29f, 0.33f), c.At(0.71f, 0.67f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.71f, 0.33f), c.At(0.29f, 0.67f), PaletteColor(color, AccentInkColor()), t);
 		}
 
 		/* 「3D」分组行（新建菜单）：线框小立方体 + 右下角一颗小球 —— "多种 3D 形状"
@@ -966,8 +983,8 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 
 			/* 小球先画（占右下角，不压几何） */
-			dl->AddCircleFilled(c.At(0.76f, 0.76f), c.Len(0.18f), PaletteColor(color, kViolet, 0.14f));
-			dl->AddCircle(c.At(0.76f, 0.76f), c.Len(0.18f), PaletteColor(color, kViolet), 0, t);
+			dl->AddCircleFilled(c.At(0.76f, 0.76f), c.Len(0.18f), PaletteColor(color, AccentInkColor(), 0.14f));
+			dl->AddCircle(c.At(0.76f, 0.76f), c.Len(0.18f), PaletteColor(color, AccentInkColor()), 0, t);
 
 			/* 线框立方体（左上）：轮廓 + 三条中棱；左面垫一层淡色给出体积 */
 			static constexpr float kShell[6][2] = {
@@ -977,12 +994,12 @@ namespace Helios::Icons
 			static constexpr float kLeft[4][2] = {
 				{ 0.04f, 0.205f }, { 0.37f, 0.37f }, { 0.37f, 0.70f }, { 0.04f, 0.535f }
 			};
-			FillPoly(dl, c, kLeft, PaletteColor(color, kViolet, 0.16f));
+			FillPoly(dl, c, kLeft, PaletteColor(color, AccentInkColor(), 0.16f));
 			StrokePolyline(dl, c, kShell, t, color, true);
 
-			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.37f, 0.70f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.70f, 0.535f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.04f, 0.535f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.37f, 0.70f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.70f, 0.535f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.37f, 0.37f), c.At(0.04f, 0.535f), PaletteColor(color, AccentInkColor()), t);
 		}
 
 		void DrawSprite(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -993,8 +1010,8 @@ namespace Helios::Icons
 			/* 画框 + 山 + 太阳：图片图标的通用语言 */
 			dl->AddRect(c.At(0.08f, 0.16f), c.At(0.92f, 0.84f), color, c.Len(0.08f), 0, t);
 
-			dl->AddTriangleFilled(c.At(0.18f, 0.74f), c.At(0.46f, 0.40f), c.At(0.72f, 0.74f), PaletteColor(color, kViolet, 0.85f));
-			dl->AddCircleFilled(c.At(0.70f, 0.34f), c.Len(0.08f), PaletteColor(color, kMint));
+			dl->AddTriangleFilled(c.At(0.18f, 0.74f), c.At(0.46f, 0.40f), c.At(0.72f, 0.74f), PaletteColor(color, AccentInkColor(), 0.85f));
+			dl->AddCircleFilled(c.At(0.70f, 0.34f), c.Len(0.08f), PaletteColor(color, AltColor()));
 		}
 
 		void DrawEntity(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -1002,12 +1019,12 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 			const ImVec2 origin = c.At(0.48f, 0.56f);
-			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
 
 			/* 空物体：中心锚点伸出平面轴与一条斜向轴，表达可被变换的原点 */
 			dl->AddLine(origin, c.At(0.90f, 0.56f), color, t);
 			dl->AddLine(origin, c.At(0.48f, 0.13f), color, t);
-			dl->AddLine(origin, c.At(0.18f, 0.25f), violet, t);
+			dl->AddLine(origin, c.At(0.18f, 0.25f), accent, t);
 			dl->AddLine(origin, c.At(0.48f, 0.94f), color, t);
 			dl->AddLine(origin, c.At(0.08f, 0.56f), color, t);
 
@@ -1016,8 +1033,8 @@ namespace Helios::Icons
 			static constexpr float kAxisZ[3][2] = { { 0.16f, 0.38f }, { 0.18f, 0.25f }, { 0.31f, 0.28f } };
 			FillPoly(dl, c, kAxisX, color);
 			FillPoly(dl, c, kAxisY, color);
-			FillPoly(dl, c, kAxisZ, violet);
-			dl->AddCircleFilled(origin, c.Len(0.075f), PaletteColor(color, kMint));
+			FillPoly(dl, c, kAxisZ, accent);
+			dl->AddCircleFilled(origin, c.Len(0.075f), PaletteColor(color, AltColor()));
 		}
 
 		/* ---- 组件卡头部 ----
@@ -1068,10 +1085,10 @@ namespace Helios::Icons
 			static constexpr float kTag[5][2] = {
 				{ 0.10f, 0.24f }, { 0.62f, 0.24f }, { 0.92f, 0.50f }, { 0.62f, 0.76f }, { 0.10f, 0.76f }
 			};
-			FillPoly(dl, c, kTag, PaletteColor(color, kViolet, 0.16f));
+			FillPoly(dl, c, kTag, PaletteColor(color, AccentInkColor(), 0.16f));
 			StrokePolyline(dl, c, kTag, StrokeWidth(size), color, true);
 
-			dl->AddCircleFilled(c.At(0.31f, 0.50f), c.Len(0.095f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.31f, 0.50f), c.Len(0.095f), PaletteColor(color, AltColor()));
 		}
 
 		void DrawStats(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -1102,7 +1119,7 @@ namespace Helios::Icons
 			const ImVec2 bottom_min = c.At(0.56f, 0.56f);
 			const ImVec2 bottom_max = c.At(0.95f, 0.86f);
 
-			dl->AddRectFilled(left_min, left_max, PaletteColor(color, kViolet, 0.20f), radius);
+			dl->AddRectFilled(left_min, left_max, PaletteColor(color, AccentInkColor(), 0.20f), radius);
 			dl->AddRect(left_min, left_max, color, radius, 0, t);
 			dl->AddRect(top_min, top_max, color, radius, 0, t);
 			dl->AddRect(bottom_min, bottom_max, color, radius, 0, t);
@@ -1122,46 +1139,46 @@ namespace Helios::Icons
 
 			dl->AddRect(c.At(0.06f, 0.09f), c.At(0.94f, 0.91f), color, radius, 0, t);
 
-			/* 提示符：左端小折线（软紫） */
-			dl->AddLine(c.At(0.19f, 0.30f), c.At(0.28f, 0.41f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.28f, 0.41f), c.At(0.19f, 0.52f), PaletteColor(color, kViolet), t);
+			/* 提示符：左端小折线（暖金） */
+			dl->AddLine(c.At(0.19f, 0.30f), c.At(0.28f, 0.41f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.28f, 0.41f), c.At(0.19f, 0.52f), PaletteColor(color, AccentInkColor()), t);
 
-			/* 日志行：提示行（薄荷）+ 正文行 */
-			dl->AddLine(c.At(0.40f, 0.41f), c.At(0.80f, 0.41f), PaletteColor(color, kMint), t);
+			/* 日志行：提示行（副色）+ 正文行 */
+			dl->AddLine(c.At(0.40f, 0.41f), c.At(0.80f, 0.41f), PaletteColor(color, AltColor()), t);
 			dl->AddLine(c.At(0.19f, 0.70f), c.At(0.80f, 0.70f), color, t);
 		}
 
 		/* 适配视图（Fit）：四角取景框 + 内容块 —— "把整张图收进这方视野"。
 		 * 与 Gizmos 同族（四角框语言），中心从轴点换成内容块
-		 * （软紫圆角块 + 薄荷芯点 = 被收进来的"图"）。 */
+		 * （暖金圆角块 + 副色芯点 = 被收进来的"图"）。 */
 		void DrawFitView(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
+			const ImU32 mint = PaletteColor(color, AltColor());
 
 			/* 四角取景框 */
-			dl->AddLine(c.At(0.125f, 0.344f), c.At(0.125f, 0.125f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.125f, 0.125f), c.At(0.344f, 0.125f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.656f, 0.125f), c.At(0.875f, 0.125f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.875f, 0.125f), c.At(0.875f, 0.344f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.875f, 0.656f), c.At(0.875f, 0.875f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.875f, 0.875f), c.At(0.656f, 0.875f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.344f, 0.875f), c.At(0.125f, 0.875f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.125f, 0.875f), c.At(0.125f, 0.656f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.125f, 0.344f), c.At(0.125f, 0.125f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.125f, 0.125f), c.At(0.344f, 0.125f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.656f, 0.125f), c.At(0.875f, 0.125f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.875f, 0.125f), c.At(0.875f, 0.344f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.875f, 0.656f), c.At(0.875f, 0.875f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.875f, 0.875f), c.At(0.656f, 0.875f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.344f, 0.875f), c.At(0.125f, 0.875f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.125f, 0.875f), c.At(0.125f, 0.656f), accent, t * 1.1f);
 
-			/* 内容块：软底 + 墨色描边收口，中心一枚薄荷芯 */
+			/* 内容块：软底 + 墨色描边收口，中心一枚副色芯 */
 			const ImVec2 block_min = c.At(0.359f, 0.359f);
 			const ImVec2 block_max = c.At(0.641f, 0.641f);
-			dl->AddRectFilled(block_min, block_max, PaletteColor(color, kViolet, 0.30f), c.Len(0.056f));
+			dl->AddRectFilled(block_min, block_max, PaletteColor(color, AccentInkColor(), 0.30f), c.Len(0.056f));
 			dl->AddRect(block_min, block_max, color, c.Len(0.056f), 0, t);
 			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.053f), mint);
 		}
 
 		/* 预览垂直翻转（Frame Graph 工具行的镜像开关）：水平镜像轴（虚线）上下两块
-		 * 互为镜像的三角块 —— 上块紫调（当前朝向）、下块藏青调（翻转后的朝向），
-		 * 轴上中心一枚薄荷轴点。 */
+		 * 互为镜像的三角块 —— 上块金调（当前朝向）、下块藏青调（翻转后的朝向），
+		 * 轴上中心一枚副色轴点。 */
 		void DrawFlipVertical(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -1172,36 +1189,36 @@ namespace Helios::Icons
 			constexpr float dash_on = 3.0f / 32.0f;
 			constexpr float dash_cycle = 3.0f / 32.0f * 2.0f;
 			for (float x = 5.0f / 32.0f; x < 26.0f / 32.0f; x += dash_cycle)
-				dl->AddLine(c.At(x, 0.5f), c.At(x + dash_on, 0.5f), PaletteColor(color, kViolet), t);
+				dl->AddLine(c.At(x, 0.5f), c.At(x + dash_on, 0.5f), PaletteColor(color, AccentInkColor()), t);
 
 			static constexpr float kTop[3][2] = {
 				{ 9.0f / 32.0f, 5.0f / 32.0f }, { 23.0f / 32.0f, 5.0f / 32.0f }, { 9.0f / 32.0f, 14.5f / 32.0f }
 			};
-			FillPoly(dl, c, kTop, PaletteColor(color, kViolet, 0.22f));
-			StrokePolyline(dl, c, kTop, t, PaletteColor(color, kViolet), true);
+			FillPoly(dl, c, kTop, PaletteColor(color, AccentInkColor(), 0.22f));
+			StrokePolyline(dl, c, kTop, t, PaletteColor(color, AccentInkColor()), true);
 
 			static constexpr float kBottom[3][2] = {
 				{ 9.0f / 32.0f, 27.0f / 32.0f }, { 23.0f / 32.0f, 27.0f / 32.0f }, { 9.0f / 32.0f, 17.5f / 32.0f }
 			};
-			FillPoly(dl, c, kBottom, PaletteColor(color, kMint, 0.20f));
+			FillPoly(dl, c, kBottom, PaletteColor(color, AltColor(), 0.20f));
 			StrokePolyline(dl, c, kBottom, t, color, true);
 
-			/* 轴点：镜像中心（薄荷芯，落在留空的半格上） */
-			dl->AddCircleFilled(c.At(0.5f, 0.5f), c.Len(0.05f), PaletteColor(color, kMint));
+			/* 轴点：镜像中心（副色芯，落在留空的半格上） */
+			dl->AddCircleFilled(c.At(0.5f, 0.5f), c.Len(0.05f), PaletteColor(color, AltColor()));
 		}
 
-		/* 弹窗最大化（CPU 图表弹窗的行尾按钮）：窗块（软紫底 + 标题条）+ 右上角向外撑的
+		/* 弹窗最大化（CPU 图表弹窗的行尾按钮）：窗块（暖金底 + 标题条）+ 右上角向外撑的
 		 * 角标箭头 —— 语汇与 Scale 的四角箭头同族，这里只留右上向外、读作"撑到全窗"。 */
 		void DrawMaximize(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 mint = PaletteColor(color, AltColor());
 
 			/* 窗块 */
-			dl->AddRectFilled(c.At(0.156f, 0.312f), c.At(0.688f, 0.750f), PaletteColor(color, kViolet, 0.16f), c.Len(0.056f));
+			dl->AddRectFilled(c.At(0.156f, 0.312f), c.At(0.688f, 0.750f), PaletteColor(color, AccentInkColor(), 0.16f), c.Len(0.056f));
 			dl->AddRect(c.At(0.156f, 0.312f), c.At(0.688f, 0.750f), color, c.Len(0.056f), 0, t);
-			dl->AddLine(c.At(0.156f, 0.453f), c.At(0.688f, 0.453f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.156f, 0.453f), c.At(0.688f, 0.453f), PaletteColor(color, AccentInkColor()), t);
 
 			/* 右上角标箭头：顶点 + 左 / 下两条短边 + 指向窗内的对角线 */
 			dl->AddLine(c.At(0.8125f, 0.1875f), c.At(0.6250f, 0.1875f), mint, t * 1.1f);
@@ -1210,16 +1227,16 @@ namespace Helios::Icons
 		}
 
 		/* 还原为浮动窗：前下后上两个错层窗块（经典"还原"语汇；后块灰调后退、
-		 * 前块软紫底 + 标题条 —— 与 Overdraw 的两块叠放同族但层级感相反）。 */
+		 * 前块暖金底 + 标题条 —— 与 Overdraw 的两块叠放同族但层级感相反）。 */
 		void DrawRestore(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
 			dl->AddRectFilled(c.At(0.359f, 0.219f), c.At(0.828f, 0.594f), PaletteColor(color, kGray), c.Len(0.056f));
-			dl->AddRectFilled(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), PaletteColor(color, kViolet, 0.16f), c.Len(0.056f));
+			dl->AddRectFilled(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), PaletteColor(color, AccentInkColor(), 0.16f), c.Len(0.056f));
 			dl->AddRect(c.At(0.172f, 0.406f), c.At(0.641f, 0.781f), color, c.Len(0.056f), 0, t);
-			dl->AddLine(c.At(0.172f, 0.531f), c.At(0.641f, 0.531f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.172f, 0.531f), c.At(0.641f, 0.531f), PaletteColor(color, AccentInkColor()), t);
 		}
 
 		/* 侧边栏：外框 + 侧栏分隔线 + 指向内容的箭头 */
@@ -1227,7 +1244,7 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 arrow = PaletteColor(color, kMint);
+			const ImU32 arrow = PaletteColor(color, AltColor());
 
 			dl->AddRect(c.At(0.12f, 0.16f), c.At(0.88f, 0.84f), color, c.Len(0.06f), 0, t);
 			dl->AddLine(c.At(0.62f, 0.16f), c.At(0.62f, 0.84f), color, t);
@@ -1243,12 +1260,46 @@ namespace Helios::Icons
 
 			dl->AddRect(c.At(0.12f, 0.16f), c.At(0.88f, 0.84f), color, c.Len(0.06f), 0, t);
 			dl->AddLine(c.At(0.38f, 0.16f), c.At(0.38f, 0.84f), color, t);
-			dl->AddLine(c.At(0.48f, 0.50f), c.At(0.72f, 0.50f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.72f, 0.50f), c.At(0.63f, 0.39f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.72f, 0.50f), c.At(0.63f, 0.61f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.48f, 0.50f), c.At(0.72f, 0.50f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.72f, 0.50f), c.At(0.63f, 0.39f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.72f, 0.50f), c.At(0.63f, 0.61f), PaletteColor(color, AccentInkColor()), t);
 		}
 
-		/* 抓取当前帧（相机）：机身（软紫底 + 描边）+ 顶部取景凸起 + 镜头（紫环 + 薄荷芯） */
+		/* 层级树一键收起 / 展开：两枚同向箭头（收起朝上折、展开朝下铺），
+		 * 上面那枚用主色、下面那枚用副色 —— 跟图标集里其它双色调图标一个路数。 */
+		void DrawCollapseAll(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->PathLineTo(c.At(9.0f / 32.0f, 14.0f / 32.0f));
+			dl->PathLineTo(c.At(16.0f / 32.0f, 7.0f / 32.0f));
+			dl->PathLineTo(c.At(23.0f / 32.0f, 14.0f / 32.0f));
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
+
+			dl->PathLineTo(c.At(9.0f / 32.0f, 23.0f / 32.0f));
+			dl->PathLineTo(c.At(16.0f / 32.0f, 16.0f / 32.0f));
+			dl->PathLineTo(c.At(23.0f / 32.0f, 23.0f / 32.0f));
+			dl->PathStroke(PaletteColor(color, AltColor()), 0, t);
+		}
+
+		void DrawExpandAll(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
+		{
+			const Canvas c{ center, size };
+			const float t = StrokeWidth(size);
+
+			dl->PathLineTo(c.At(9.0f / 32.0f, 9.0f / 32.0f));
+			dl->PathLineTo(c.At(16.0f / 32.0f, 16.0f / 32.0f));
+			dl->PathLineTo(c.At(23.0f / 32.0f, 9.0f / 32.0f));
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
+
+			dl->PathLineTo(c.At(9.0f / 32.0f, 18.0f / 32.0f));
+			dl->PathLineTo(c.At(16.0f / 32.0f, 25.0f / 32.0f));
+			dl->PathLineTo(c.At(23.0f / 32.0f, 18.0f / 32.0f));
+			dl->PathStroke(PaletteColor(color, AltColor()), 0, t);
+		}
+
+		/* 抓取当前帧（相机）：机身（暖金底 + 描边）+ 顶部取景凸起 + 镜头（金环 + 副色芯） */
 		void DrawCapture(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
@@ -1261,13 +1312,13 @@ namespace Helios::Icons
 
 			/* 机身 */
 			dl->AddRectFilled(c.At(0.1563f, 0.2813f), c.At(0.8438f, 0.7500f),
-				PaletteColor(color, kViolet, 0.16f), c.Len(0.069f));
+				PaletteColor(color, AccentInkColor(), 0.16f), c.Len(0.069f));
 			dl->AddRect(c.At(0.1563f, 0.2813f), c.At(0.8438f, 0.7500f), color, c.Len(0.069f), 0, t);
 
-			/* 镜头：紫环 + 薄荷芯 */
-			dl->AddCircleFilled(c.At(0.5f, 0.5156f), c.Len(0.1313f), PaletteColor(color, kViolet, 0.22f));
-			dl->AddCircle(c.At(0.5f, 0.5156f), c.Len(0.1313f), PaletteColor(color, kViolet), t);
-			dl->AddCircleFilled(c.At(0.5f, 0.5156f), c.Len(0.0438f), PaletteColor(color, kMint));
+			/* 镜头：金环 + 副色芯 */
+			dl->AddCircleFilled(c.At(0.5f, 0.5156f), c.Len(0.1313f), PaletteColor(color, AccentInkColor(), 0.22f));
+			dl->AddCircle(c.At(0.5f, 0.5156f), c.Len(0.1313f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddCircleFilled(c.At(0.5f, 0.5156f), c.Len(0.0438f), PaletteColor(color, AltColor()));
 		}
 
 		/* ---- 内容（资源浏览器）----
@@ -1286,8 +1337,8 @@ namespace Helios::Icons
 			static constexpr float kBody[4][2] = {
 				{ 0.08f, 0.35f }, { 0.92f, 0.35f }, { 0.92f, 0.83f }, { 0.08f, 0.83f }
 			};
-			FillPoly(dl, c, kTab, PaletteColor(color, kViolet, 0.16f));
-			FillPoly(dl, c, kBody, PaletteColor(color, kViolet, 0.12f));
+			FillPoly(dl, c, kTab, PaletteColor(color, AccentInkColor(), 0.16f));
+			FillPoly(dl, c, kBody, PaletteColor(color, AccentInkColor(), 0.12f));
 
 			/* 外形（正视图 + 标签页）：与工具栏里打开状态的斜前片区分开 */
 			static constexpr float kFolder[6][2] = {
@@ -1295,7 +1346,7 @@ namespace Helios::Icons
 				{ 0.46f, 0.34f }, { 0.93f, 0.34f }, { 0.93f, 0.83f }
 			};
 			StrokePolyline(dl, c, kFolder, t, color, true);
-			dl->AddLine(c.At(0.16f, 0.57f), c.At(0.82f, 0.57f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.16f, 0.57f), c.At(0.82f, 0.57f), PaletteColor(color, AltColor()), t);
 		}
 
 		void DrawFile(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -1319,9 +1370,9 @@ namespace Helios::Icons
 			/* 图片文件：页里装着一张风景 —— 两座山 + 太阳（形够大，14px 下也认得出） */
 			StrokePage(dl, c, t, color);
 
-			dl->AddTriangleFilled(c.At(0.28f, 0.82f), c.At(0.50f, 0.53f), c.At(0.72f, 0.82f), PaletteColor(color, kViolet, 0.90f));
-			dl->AddTriangleFilled(c.At(0.50f, 0.82f), c.At(0.66f, 0.62f), c.At(0.82f, 0.82f), PaletteColor(color, kMint, 0.72f));
-			dl->AddCircleFilled(c.At(0.68f, 0.44f), c.Len(0.085f), PaletteColor(color, kMint));
+			dl->AddTriangleFilled(c.At(0.28f, 0.82f), c.At(0.50f, 0.53f), c.At(0.72f, 0.82f), PaletteColor(color, AccentInkColor(), 0.90f));
+			dl->AddTriangleFilled(c.At(0.50f, 0.82f), c.At(0.66f, 0.62f), c.At(0.82f, 0.82f), PaletteColor(color, AltColor(), 0.72f));
+			dl->AddCircleFilled(c.At(0.68f, 0.44f), c.Len(0.085f), PaletteColor(color, AltColor()));
 		}
 
 		/* SVG 文件：页里一段贝塞尔曲线 + 两端锚点（矢量绘图的通行记号）——
@@ -1335,10 +1386,10 @@ namespace Helios::Icons
 
 			dl->PathLineTo(c.At(0.359f, 0.703f));
 			dl->PathBezierCubicCurveTo(c.At(0.437f, 0.500f), c.At(0.547f, 0.422f), c.At(0.641f, 0.406f));
-			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
 
-			dl->AddCircleFilled(c.At(0.359f, 0.703f), c.Len(0.044f), PaletteColor(color, kMint));
-			dl->AddCircleFilled(c.At(0.641f, 0.406f), c.Len(0.044f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.359f, 0.703f), c.Len(0.044f), PaletteColor(color, AltColor()));
+			dl->AddCircleFilled(c.At(0.641f, 0.406f), c.Len(0.044f), PaletteColor(color, AltColor()));
 		}
 
 		void DrawFileMtlGraph(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -1350,17 +1401,17 @@ namespace Helios::Icons
 			/* 材质图 = 一个带输入 / 输出端口的节点（用过节点编辑器的都认得）：
 			 * 方框填淡色 + 左右两个实心端口 + 两小段连线。
 			 * 别用"三个点连两条线"——那个造型是"分享"，反而认不出是节点图。 */
-			dl->AddRectFilled(c.At(0.30f, 0.24f), c.At(0.70f, 0.76f), PaletteColor(color, kViolet, 0.18f), rounding);
+			dl->AddRectFilled(c.At(0.30f, 0.24f), c.At(0.70f, 0.76f), PaletteColor(color, AccentInkColor(), 0.18f), rounding);
 			dl->AddRect(c.At(0.30f, 0.24f), c.At(0.70f, 0.76f), color, rounding, 0, t);
 
-			dl->AddLine(c.At(0.14f, 0.50f), c.At(0.30f, 0.50f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.14f, 0.50f), c.At(0.30f, 0.50f), PaletteColor(color, AccentInkColor()), t);
 			dl->AddLine(c.At(0.70f, 0.50f), c.At(0.86f, 0.50f), color, t);
 
-			dl->AddCircleFilled(c.At(0.13f, 0.50f), c.Len(0.095f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.13f, 0.50f), c.Len(0.095f), PaletteColor(color, AltColor()));
 			dl->AddCircleFilled(c.At(0.87f, 0.50f), c.Len(0.095f), color);
 		}
 
-		/* 着色器文件：页里一颗"材质球"（右半浸紫 = 明暗交界，左上一点薄荷 = 高光）。
+		/* 着色器文件：页里一颗"材质球"（右半浸金 = 明暗交界，左上一点副色 = 高光）。
 		 * 球是 DCC 里最通行的着色器 / 材质预览造型，比"写个 fx 字母"或波形更一眼认得出。 */
 		void DrawFileShader(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
@@ -1369,12 +1420,12 @@ namespace Helios::Icons
 
 			StrokePage(dl, c, t, color);
 
-			dl->AddCircleFilled(c.At(0.53f, 0.62f), c.Len(0.17f), PaletteColor(color, kViolet, 0.18f));
+			dl->AddCircleFilled(c.At(0.53f, 0.62f), c.Len(0.17f), PaletteColor(color, AccentInkColor(), 0.18f));
 			dl->AddCircle(c.At(0.53f, 0.62f), c.Len(0.17f), color, 0, t);
 			/* 右半个圆弧（-90° → +90° 经过 +x）：球被照亮的那一半，用强调色压出来 */
 			dl->PathArcTo(c.At(0.53f, 0.62f), c.Len(0.17f), -1.5708f, 1.5708f, 12);
-			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
-			dl->AddCircleFilled(c.At(0.45f, 0.54f), c.Len(0.045f), PaletteColor(color, kMint));
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
+			dl->AddCircleFilled(c.At(0.45f, 0.54f), c.Len(0.045f), PaletteColor(color, AltColor()));
 		}
 
 		/* 模型文件：页里一个立方体 —— 与场景树里的 Model 是同一副造型（同一件东西的两种用法：
@@ -1391,8 +1442,8 @@ namespace Helios::Icons
 				{ 0.53f, 0.34f }, { 0.75f, 0.46f }, { 0.75f, 0.70f },
 				{ 0.53f, 0.82f }, { 0.31f, 0.70f }, { 0.31f, 0.46f }
 			};
-			FillPoly(dl, c, kCube, PaletteColor(color, kViolet, 0.16f));
-			StrokePolyline(dl, c, kCube, t, PaletteColor(color, kViolet), true);
+			FillPoly(dl, c, kCube, PaletteColor(color, AccentInkColor(), 0.16f));
+			StrokePolyline(dl, c, kCube, t, PaletteColor(color, AccentInkColor()), true);
 
 			dl->AddLine(c.At(0.31f, 0.46f), c.At(0.53f, 0.58f), color, t);
 			dl->AddLine(c.At(0.53f, 0.58f), c.At(0.75f, 0.46f), color, t);
@@ -1416,11 +1467,11 @@ namespace Helios::Icons
 				dl->PathBezierCubicCurveTo(c.At(0.366f, 0.538f), c.At(0.412f, 0.469f), c.At(0.50f, 0.35f));
 			};
 			build_drop();
-			dl->PathFillConvex(PaletteColor(color, kViolet, 0.16f));
+			dl->PathFillConvex(PaletteColor(color, AccentInkColor(), 0.16f));
 			build_drop();
-			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
 
-			dl->AddCircleFilled(c.At(0.444f, 0.609f), c.Len(0.034f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.444f, 0.609f), c.Len(0.034f), PaletteColor(color, AltColor()));
 		}
 
 		/* 探针缓存文件：页里一个八面体 + 中心星芒（与场景树里的 ReflectionProbe 同一处标记——
@@ -1437,8 +1488,8 @@ namespace Helios::Icons
 				{ 0.500f, 0.316f }, { 0.713f, 0.431f }, { 0.713f, 0.663f },
 				{ 0.500f, 0.778f }, { 0.287f, 0.663f }, { 0.287f, 0.431f }
 			};
-			FillPoly(dl, c, kBody, PaletteColor(color, kViolet, 0.16f));
-			StrokePolyline(dl, c, kBody, t, PaletteColor(color, kViolet), true);
+			FillPoly(dl, c, kBody, PaletteColor(color, AccentInkColor(), 0.16f));
+			StrokePolyline(dl, c, kBody, t, PaletteColor(color, AccentInkColor()), true);
 
 			/* 腰线 + 竖棱 */
 			dl->AddLine(c.At(0.287f, 0.431f), c.At(0.500f, 0.547f), color, t);
@@ -1450,7 +1501,7 @@ namespace Helios::Icons
 				{ 0.500f, 0.453f }, { 0.534f, 0.522f }, { 0.603f, 0.547f }, { 0.534f, 0.572f },
 				{ 0.500f, 0.641f }, { 0.466f, 0.572f }, { 0.397f, 0.547f }, { 0.466f, 0.522f }
 			};
-			FillPoly(dl, c, kStar, PaletteColor(color, kMint));
+			FillPoly(dl, c, kStar, PaletteColor(color, AltColor()));
 		}
 
 		/* 头文件：页里一对尖括号夹着 H —— "声明"那类文件，与源文件的尖括号斜杠是一对。
@@ -1459,7 +1510,7 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 mint = PaletteColor(color, AltColor());
 
 			StrokePage(dl, c, t, color);
 
@@ -1479,7 +1530,7 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 mint = PaletteColor(color, AltColor());
 
 			StrokePage(dl, c, t, color);
 
@@ -1498,18 +1549,18 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
+			const ImU32 mint = PaletteColor(color, AltColor());
 
 			/* 四角取景框：视口里的辅助显示范围 */
-			dl->AddLine(c.At(0.10f, 0.32f), c.At(0.10f, 0.10f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.10f, 0.10f), c.At(0.32f, 0.10f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.68f, 0.10f), c.At(0.90f, 0.10f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.90f, 0.10f), c.At(0.90f, 0.32f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.90f, 0.68f), c.At(0.90f, 0.90f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.90f, 0.90f), c.At(0.68f, 0.90f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.32f, 0.90f), c.At(0.10f, 0.90f), violet, t * 1.1f);
-			dl->AddLine(c.At(0.10f, 0.90f), c.At(0.10f, 0.68f), violet, t * 1.1f);
+			dl->AddLine(c.At(0.10f, 0.32f), c.At(0.10f, 0.10f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.10f, 0.10f), c.At(0.32f, 0.10f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.68f, 0.10f), c.At(0.90f, 0.10f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.90f, 0.10f), c.At(0.90f, 0.32f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.90f, 0.68f), c.At(0.90f, 0.90f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.90f, 0.90f), c.At(0.68f, 0.90f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.32f, 0.90f), c.At(0.10f, 0.90f), accent, t * 1.1f);
+			dl->AddLine(c.At(0.10f, 0.90f), c.At(0.10f, 0.68f), accent, t * 1.1f);
 
 			/* 中心十字 + 轴点：实体图标的位置标记 */
 			dl->AddLine(c.At(0.50f, 0.34f), c.At(0.50f, 0.66f), mint, t);
@@ -1521,25 +1572,25 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
 
 			/* 3×3 网格：外框 + 两条纵 / 横内线（内线细一档区分主次） */
-			dl->AddRect(c.At(0.12f, 0.12f), c.At(0.88f, 0.88f), violet, c.Len(0.06f), 0, t * 1.1f);
+			dl->AddRect(c.At(0.12f, 0.12f), c.At(0.88f, 0.88f), accent, c.Len(0.06f), 0, t * 1.1f);
 			const float p1 = 0.12f + 0.76f / 3.0f;
 			const float p2 = 0.12f + 0.76f * 2.0f / 3.0f;
-			dl->AddLine(c.At(p1, 0.12f), c.At(p1, 0.88f), violet, t * 0.72f);
-			dl->AddLine(c.At(p2, 0.12f), c.At(p2, 0.88f), violet, t * 0.72f);
-			dl->AddLine(c.At(0.12f, p1), c.At(0.88f, p1), violet, t * 0.72f);
-			dl->AddLine(c.At(0.12f, p2), c.At(0.88f, p2), violet, t * 0.72f);
+			dl->AddLine(c.At(p1, 0.12f), c.At(p1, 0.88f), accent, t * 0.72f);
+			dl->AddLine(c.At(p2, 0.12f), c.At(p2, 0.88f), accent, t * 0.72f);
+			dl->AddLine(c.At(0.12f, p1), c.At(0.88f, p1), accent, t * 0.72f);
+			dl->AddLine(c.At(0.12f, p2), c.At(0.88f, p2), accent, t * 0.72f);
 		}
 
 		void DrawWorldAxis(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 mint = PaletteColor(color, AltColor());
 			const ImU32 red = PaletteColor(color, kRed);
-			const ImU32 violet = PaletteColor(color, kViolet);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
 
 			/* 三轴角标：Y 向上 / X 左下 / Z 右下，轴端各两撇小箭头 */
 			const ImVec2 origin = c.At(0.50f, 0.52f);
@@ -1551,11 +1602,11 @@ namespace Helios::Icons
 			dl->AddLine(c.At(0.15f, 0.85f), c.At(0.18f, 0.66f), red, t);
 			dl->AddLine(c.At(0.15f, 0.85f), c.At(0.34f, 0.82f), red, t);
 
-			dl->AddLine(origin, c.At(0.85f, 0.85f), violet, t);
-			dl->AddLine(c.At(0.85f, 0.85f), c.At(0.82f, 0.66f), violet, t);
-			dl->AddLine(c.At(0.85f, 0.85f), c.At(0.66f, 0.82f), violet, t);
+			dl->AddLine(origin, c.At(0.85f, 0.85f), accent, t);
+			dl->AddLine(c.At(0.85f, 0.85f), c.At(0.82f, 0.66f), accent, t);
+			dl->AddLine(c.At(0.85f, 0.85f), c.At(0.66f, 0.82f), accent, t);
 
-			/* 轴心点：继承墨色外圈 + 薄荷芯 */
+			/* 轴心点：继承墨色外圈 + 副色芯 */
 			dl->AddCircleFilled(origin, c.Len(0.06f), color);
 			dl->AddCircleFilled(origin, c.Len(0.028f), mint);
 		}
@@ -1565,7 +1616,7 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 mint = PaletteColor(color, AltColor());
 			const ImU32 gray = PaletteColor(color, kGray);
 
 			dl->AddRect(c.At(0.17f, 0.17f), c.At(0.83f, 0.83f), gray, 0.0f, 0, t * 0.7f);
@@ -1581,16 +1632,16 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
+			const ImU32 mint = PaletteColor(color, AltColor());
 			const ImU32 gray = PaletteColor(color, kGray);
 			const ImVec2 origin = c.At(0.44f, 0.53f);
 
 			dl->AddLine(c.At(0.06f, 0.88f), c.At(0.94f, 0.88f), gray, t * 0.7f);
 			StrokeDashedCircle(dl, origin, c.Len(0.33f), gray, t * 0.7f, c.Len(0.04f), c.Len(0.07f));
-			dl->AddLine(origin, c.At(0.44f, 0.12f), violet, t);
-			dl->AddLine(origin, c.At(0.88f, 0.53f), violet, t);
-			dl->AddLine(origin, c.At(0.44f, 0.94f), violet, t);
+			dl->AddLine(origin, c.At(0.44f, 0.12f), accent, t);
+			dl->AddLine(origin, c.At(0.88f, 0.53f), accent, t);
+			dl->AddLine(origin, c.At(0.44f, 0.94f), accent, t);
 			dl->AddCircleFilled(origin, c.Len(0.08f), gray);
 			dl->AddCircleFilled(origin, c.Len(0.04f), mint);
 		}
@@ -1606,7 +1657,7 @@ namespace Helios::Icons
 			const ImVec2 panel_max = c.At(0.875f, 0.844f);
 			const ImU32 gray = PaletteColor(color, kGray);
 
-			dl->AddRectFilled(panel_min, panel_max, PaletteColor(color, kViolet, 0.12f), c.Len(0.0625f));
+			dl->AddRectFilled(panel_min, panel_max, PaletteColor(color, AccentInkColor(), 0.12f), c.Len(0.0625f));
 
 			/* 网格：四横三竖，压在折线下面当读数背景 */
 			for (int i = 0; i < 4; ++i)
@@ -1625,17 +1676,17 @@ namespace Helios::Icons
 				c.At(0.219f, 0.688f), c.At(0.375f, 0.469f), c.At(0.500f, 0.594f),
 				c.At(0.625f, 0.344f), c.At(0.781f, 0.531f),
 			};
-			dl->AddPolyline(curve_points, IM_ARRAYSIZE(curve_points), PaletteColor(color, kMint), 0, t * 0.9f);
+			dl->AddPolyline(curve_points, IM_ARRAYSIZE(curve_points), PaletteColor(color, AltColor()), 0, t * 0.9f);
 			dl->AddCircleFilled(c.At(0.625f, 0.344f), c.Len(0.0625f),
-				PaletteColor(color, kMint, 0.22f));
-			dl->AddCircle(c.At(0.625f, 0.344f), c.Len(0.0625f), PaletteColor(color, kViolet), 0, t * 0.7f);
+				PaletteColor(color, AltColor(), 0.22f));
+			dl->AddCircle(c.At(0.625f, 0.344f), c.Len(0.0625f), PaletteColor(color, AccentInkColor()), 0, t * 0.7f);
 
 			/* 标定红杠 */
 			const ImU32 red = PaletteColor(color, kRed);
 			dl->AddLine(c.At(0.750f, 0.250f), c.At(0.813f, 0.250f), red, t * 0.8f);
 			dl->AddLine(c.At(0.750f, 0.406f), c.At(0.813f, 0.406f), red, t * 0.8f);
 
-			dl->AddRect(panel_min, panel_max, PaletteColor(color, kViolet), c.Len(0.0625f), 0, t);
+			dl->AddRect(panel_min, panel_max, PaletteColor(color, AccentInkColor()), c.Len(0.0625f), 0, t);
 		}
 
 		/* ---- 调试档位（弹层图标族）----
@@ -1661,7 +1712,7 @@ namespace Helios::Icons
 
 			const float kUpperLeft[3][2] = { { 0.14f, 0.14f }, { 0.86f, 0.14f }, { 0.14f, 0.86f } };
 			const float kLowerRight[3][2] = { { 0.86f, 0.14f }, { 0.86f, 0.86f }, { 0.14f, 0.86f } };
-			FillPoly(dl, c, kUpperLeft, PaletteColor(color, kViolet));
+			FillPoly(dl, c, kUpperLeft, PaletteColor(color, AccentInkColor()));
 			FillPoly(dl, c, kLowerRight, PaletteColor(color, kGray));
 
 			ChannelTileOutline(dl, c, StrokeWidth(size), color);
@@ -1675,10 +1726,10 @@ namespace Helios::Icons
 
 			ChannelTileBase(dl, c, color);
 
-			const ImU32 violet = PaletteColor(color, kViolet);
-			dl->AddLine(c.At(0.40f, 0.64f), c.At(0.62f, 0.42f), violet, t * 1.15f);
-			dl->AddLine(c.At(0.62f, 0.42f), c.At(0.44f, 0.42f), violet, t * 1.15f);
-			dl->AddLine(c.At(0.62f, 0.42f), c.At(0.62f, 0.60f), violet, t * 1.15f);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
+			dl->AddLine(c.At(0.40f, 0.64f), c.At(0.62f, 0.42f), accent, t * 1.15f);
+			dl->AddLine(c.At(0.62f, 0.42f), c.At(0.44f, 0.42f), accent, t * 1.15f);
+			dl->AddLine(c.At(0.62f, 0.42f), c.At(0.62f, 0.60f), accent, t * 1.15f);
 			dl->AddCircleFilled(c.At(0.34f, 0.70f), c.Len(0.075f), PaletteColor(color, kGray));
 
 			ChannelTileOutline(dl, c, t, color);
@@ -1691,7 +1742,7 @@ namespace Helios::Icons
 
 			ChannelTileBase(dl, c, color);
 
-			dl->AddRectFilled(c.At(0.28f, 0.26f), c.At(0.72f, 0.37f), PaletteColor(color, kViolet), c.Len(0.05f));
+			dl->AddRectFilled(c.At(0.28f, 0.26f), c.At(0.72f, 0.37f), PaletteColor(color, AccentInkColor()), c.Len(0.05f));
 			dl->AddRectFilled(c.At(0.28f, 0.445f), c.At(0.72f, 0.555f), PaletteColor(color, kGray), c.Len(0.05f));
 			dl->AddRectFilled(c.At(0.28f, 0.63f), c.At(0.72f, 0.74f), color, c.Len(0.05f));
 
@@ -1706,7 +1757,7 @@ namespace Helios::Icons
 			ChannelTileBase(dl, c, color);
 
 			dl->AddCircleFilled(c.At(0.56f, 0.50f), c.Len(0.25f), PaletteColor(color, kGray));
-			dl->AddCircleFilled(c.At(0.43f, 0.37f), c.Len(0.085f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.43f, 0.37f), c.Len(0.085f), PaletteColor(color, AltColor()));
 
 			ChannelTileOutline(dl, c, StrokeWidth(size), color);
 		}
@@ -1720,9 +1771,9 @@ namespace Helios::Icons
 
 			const float kDiamondVertical[4][2] = { { 0.50f, 0.22f }, { 0.62f, 0.50f }, { 0.50f, 0.78f }, { 0.38f, 0.50f } };
 			const float kDiamondHorizontal[4][2] = { { 0.22f, 0.50f }, { 0.50f, 0.38f }, { 0.78f, 0.50f }, { 0.50f, 0.62f } };
-			FillPoly(dl, c, kDiamondVertical, PaletteColor(color, kViolet));
-			FillPoly(dl, c, kDiamondHorizontal, PaletteColor(color, kViolet));
-			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.055f), PaletteColor(color, kMint));
+			FillPoly(dl, c, kDiamondVertical, PaletteColor(color, AccentInkColor()));
+			FillPoly(dl, c, kDiamondHorizontal, PaletteColor(color, AccentInkColor()));
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.055f), PaletteColor(color, AltColor()));
 
 			ChannelTileOutline(dl, c, StrokeWidth(size), color);
 		}
@@ -1750,8 +1801,8 @@ namespace Helios::Icons
 
 			ChannelTileBase(dl, c, color);
 
-			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.15f), PaletteColor(color, kMint));
-			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.27f), PaletteColor(color, kViolet), 0, t * 0.9f);
+			dl->AddCircleFilled(c.At(0.50f, 0.50f), c.Len(0.15f), PaletteColor(color, AltColor()));
+			dl->AddCircle(c.At(0.50f, 0.50f), c.Len(0.27f), PaletteColor(color, AccentInkColor()), 0, t * 0.9f);
 
 			ChannelTileOutline(dl, c, t, color);
 		}
@@ -1781,7 +1832,7 @@ namespace Helios::Icons
 			const float radius = c.Len(0.30f);
 			dl->AddCircleFilled(center, radius, PaletteColor(color, kGray));
 			dl->PathArcTo(center, radius, kPi * 0.5f, kPi * 1.5f, 24);	/* 下方 → 左 → 上方 = 左半 */
-			dl->PathFillConvex(PaletteColor(color, kViolet));
+			dl->PathFillConvex(PaletteColor(color, AccentInkColor()));
 			dl->AddCircle(center, radius, color, 0, t);
 		}
 
@@ -1792,7 +1843,7 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 
 			dl->AddCircleFilled(center, c.Len(0.30f), PaletteColor(color, kGray));
-			dl->AddCircleFilled(c.At(0.40f, 0.36f), c.Len(0.085f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.40f, 0.36f), c.Len(0.085f), PaletteColor(color, AltColor()));
 			dl->AddCircle(center, c.Len(0.30f), color, 0, t);
 		}
 
@@ -1823,13 +1874,13 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
-			const ImU32 mint = PaletteColor(color, kMint);
-			const ImU32 pale_mint = PaletteColor(color, kMint, 0.22f);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
+			const ImU32 mint = PaletteColor(color, AltColor());
+			const ImU32 pale_mint = PaletteColor(color, AltColor(), 0.22f);
 
 			/* 环境弧 */
 			dl->PathArcTo(c.At(0.50f, 0.50f), c.Len(0.375f), kPi, kPi * 2.0f, 32);
-			dl->PathStroke(violet, 0, t * 0.85f);
+			dl->PathStroke(accent, 0, t * 0.85f);
 
 			/* 弧上的三颗入射点 */
 			for (int i = 0; i < 3; ++i)
@@ -1850,7 +1901,7 @@ namespace Helios::Icons
 			dl->PathArcTo(c.At(0.50f, 0.781f), c.Len(0.125f), kPi, kPi * 2.0f, 24);
 			dl->PathFillConvex(pale_mint);
 			dl->PathArcTo(c.At(0.50f, 0.781f), c.Len(0.125f), kPi, kPi * 2.0f, 24);
-			dl->PathStroke(violet, 0, t * 0.8f);
+			dl->PathStroke(accent, 0, t * 0.8f);
 		}
 
 		/* Indirect Specular：环境光打到表面后按反射方向弹走（拱弧 + 反弹箭头 + 高光点） */
@@ -1858,13 +1909,13 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 violet = PaletteColor(color, kViolet);
-			const ImU32 mint = PaletteColor(color, kMint);
+			const ImU32 accent = PaletteColor(color, AccentInkColor());
+			const ImU32 mint = PaletteColor(color, AltColor());
 
 			/* 环境弧 + 单颗入射点 */
 			dl->PathArcTo(c.At(0.50f, 0.50f), c.Len(0.375f), kPi, kPi * 2.0f, 32);
-			dl->PathStroke(violet, 0, t * 0.85f);
-			dl->AddCircleFilled(c.At(0.25f, 0.375f), c.Len(0.044f), PaletteColor(color, kMint, 0.22f));
+			dl->PathStroke(accent, 0, t * 0.85f);
+			dl->AddCircleFilled(c.At(0.25f, 0.375f), c.Len(0.044f), PaletteColor(color, AltColor(), 0.22f));
 			dl->AddCircle(c.At(0.25f, 0.375f), c.Len(0.044f), mint, 0, t * 0.6f);
 
 			/* 落到表面再反弹出去 */
@@ -1876,17 +1927,17 @@ namespace Helios::Icons
 			/* 地面 + 反射面 */
 			dl->AddLine(c.At(0.219f, 0.781f), c.At(0.781f, 0.781f), color, t * 0.8f);
 			dl->PathArcTo(c.At(0.50f, 0.781f), c.Len(0.125f), kPi, kPi * 2.0f, 24);
-			dl->PathFillConvex(PaletteColor(color, kViolet, 0.12f));
+			dl->PathFillConvex(PaletteColor(color, AccentInkColor(), 0.12f));
 			dl->PathArcTo(c.At(0.50f, 0.781f), c.Len(0.125f), kPi, kPi * 2.0f, 24);
-			dl->PathStroke(violet, 0, t * 0.8f);
+			dl->PathStroke(accent, 0, t * 0.8f);
 
 			/* 高光星 */
 			const float kSparkle[8][2] = {
 				{ 0.494f, 0.547f }, { 0.528f, 0.612f }, { 0.594f, 0.647f }, { 0.528f, 0.681f },
 				{ 0.494f, 0.747f }, { 0.459f, 0.681f }, { 0.394f, 0.647f }, { 0.459f, 0.612f },
 			};
-			FillConcavePoly(dl, c, kSparkle, PaletteColor(color, kMint, 0.22f));
-			StrokePolyline(dl, c, kSparkle, t * 0.6f, violet, true);
+			FillConcavePoly(dl, c, kSparkle, PaletteColor(color, AltColor(), 0.22f));
+			StrokePolyline(dl, c, kSparkle, t * 0.6f, accent, true);
 		}
 
 		/* Probe：圆盘分三段（灰底 + 红 / 青绿两段弧）：两个探针按权重混合的示意 */
@@ -1900,7 +1951,7 @@ namespace Helios::Icons
 			dl->PathArcTo(center, radius, 0.0f, kPi * 0.5f, 12);	/* 右下 1/4：探针 0 */
 			dl->PathFillConvex(PaletteColor(color, kRed));
 			dl->PathArcTo(center, radius, kPi * 0.5f, kPi, 12);	/* 左下 1/4：探针 1 */
-			dl->PathFillConvex(PaletteColor(color, kMint));
+			dl->PathFillConvex(PaletteColor(color, AltColor()));
 			dl->AddCircle(center, radius, color, 0, t);
 		}
 
@@ -1917,7 +1968,7 @@ namespace Helios::Icons
 			}
 
 			dl->AddCircleFilled(c.At(0.34f, 0.28f), c.Len(0.10f), color);
-			dl->AddCircleFilled(c.At(0.62f, 0.50f), c.Len(0.10f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.62f, 0.50f), c.Len(0.10f), PaletteColor(color, AltColor()));
 			dl->AddCircleFilled(c.At(0.47f, 0.72f), c.Len(0.10f), color);
 		}
 
@@ -1933,7 +1984,7 @@ namespace Helios::Icons
 			const ImVec2 second_max = c.At(0.82f, 0.82f);
 
 			dl->AddRectFilled(first_min, first_max, PaletteColor(color, kGray), c.Len(0.05f));
-			dl->AddRectFilled(second_min, second_max, PaletteColor(color, kViolet), c.Len(0.05f));
+			dl->AddRectFilled(second_min, second_max, PaletteColor(color, AccentInkColor()), c.Len(0.05f));
 			/* 叠加区：半透明墨色 —— 深浅两画布下都是"再覆盖一层"的观感 */
 			dl->AddRectFilled(second_min, first_max, Soften(color, 0.38f), c.Len(0.03f));
 
@@ -1954,14 +2005,16 @@ namespace Helios::Icons
 			ChannelTileOutline(dl, c, t, color);
 		}
 
+		/* SVG 资产里写的十六进制只是颜色槽的标识（#655fd0 = 强调色槽、#27a88a = 副色槽），
+		 * 实际落色由 SvgInkColor 决定：两个彩色槽都跟主题走，其余固定 —— 换主题不用动资产。 */
 		enum class SvgInk : uint8_t
 		{
 			None,
 			Navy,
-			Violet,
-			Mint,
-			PaleMint,
-			PaleViolet,
+			Accent,
+			PaleAccent,
+			Alt,
+			PaleAlt,
 			Red,
 			Gray,
 		};
@@ -1995,17 +2048,19 @@ namespace Helios::Icons
 			std::vector<SvgShape> Shapes;
 		};
 
-		constexpr ImU32 SvgInkColor(SvgInk ink, uint8_t alpha, bool dark_canvas)
+		/* 两个彩色槽都跟主题走：深色画布用 Accent / AccentTint、Alt / AltTint，
+		 * 亮底（强调色按钮上的图标）用 OnLight / Pale 那两对 */
+		inline ImU32 SvgInkColor(SvgInk ink, uint8_t alpha, bool dark_canvas)
 		{
 			if (dark_canvas)
 			{
 				switch (ink)
 				{
 				case SvgInk::Navy:        return IM_COL32(211, 222, 241, alpha);
-				case SvgInk::Violet:      return IM_COL32(166, 158, 255, alpha);
-				case SvgInk::Mint:        return IM_COL32(82, 222, 187, alpha);
-				case SvgInk::PaleMint:    return IM_COL32(27, 67, 60, alpha);
-				case SvgInk::PaleViolet:  return IM_COL32(43, 43, 78, alpha);
+				case SvgInk::Accent:      return InkColor(EditorTheme::Token::Accent, alpha);
+				case SvgInk::PaleAccent:  return InkColor(EditorTheme::Token::AccentTint, alpha);
+				case SvgInk::Alt:         return InkColor(EditorTheme::Token::AccentAlt, alpha);
+				case SvgInk::PaleAlt:     return InkColor(EditorTheme::Token::AccentAltTint, alpha);
 				case SvgInk::Red:         return IM_COL32(255, 132, 126, alpha);
 				case SvgInk::Gray:        return IM_COL32(174, 187, 208, alpha);
 				default:                  return IM_COL32(0, 0, 0, 0);
@@ -2015,10 +2070,10 @@ namespace Helios::Icons
 			switch (ink)
 			{
 			case SvgInk::Navy:        return IM_COL32(41, 53, 80, alpha);   /* #293550 */
-			case SvgInk::Violet:      return IM_COL32(101, 95, 208, alpha); /* #655FD0 */
-			case SvgInk::Mint:        return IM_COL32(39, 168, 138, alpha); /* #27A88A */
-			case SvgInk::PaleMint:    return IM_COL32(225, 245, 238, alpha);/* #E1F5EE */
-			case SvgInk::PaleViolet:  return IM_COL32(238, 240, 255, alpha);/* #EEF0FF */
+			case SvgInk::Accent:      return InkColor(EditorTheme::Token::AccentOnLight, alpha);
+			case SvgInk::PaleAccent:  return InkColor(EditorTheme::Token::AccentPale, alpha);
+			case SvgInk::Alt:         return InkColor(EditorTheme::Token::AccentAltDeep, alpha);
+			case SvgInk::PaleAlt:     return InkColor(EditorTheme::Token::AccentAltPale, alpha);
 			case SvgInk::Red:         return IM_COL32(213, 92, 85, alpha);  /* #D55C55 */
 			case SvgInk::Gray:        return IM_COL32(170, 178, 193, alpha);/* #AAB2C1 */
 			default:                  return IM_COL32(0, 0, 0, 0);
@@ -2034,13 +2089,13 @@ namespace Helios::Icons
 			if (std::strcmp(value, "#293550") == 0)
 				return SvgInk::Navy;
 			if (std::strcmp(value, "#655fd0") == 0)
-				return SvgInk::Violet;
+				return SvgInk::Accent;
 			if (std::strcmp(value, "#27a88a") == 0)
-				return SvgInk::Mint;
+				return SvgInk::Alt;
 			if (std::strcmp(value, "#e1f5ee") == 0)
-				return SvgInk::PaleMint;
+				return SvgInk::PaleAlt;
 			if (std::strcmp(value, "#eef0ff") == 0)
-				return SvgInk::PaleViolet;
+				return SvgInk::PaleAccent;
 			if (std::strcmp(value, "#d55c55") == 0)
 				return SvgInk::Red;
 			if (std::strcmp(value, "#aab2c1") == 0)
@@ -2287,7 +2342,7 @@ namespace Helios::Icons
 				dl->AddLine(c.At(x, 0.16f), c.At(x, 0.28f), color, t);
 				dl->AddLine(c.At(x, 0.72f), c.At(x, 0.84f), color, t);
 			}
-			dl->AddTriangleFilled(c.At(0.43f, 0.40f), c.At(0.43f, 0.60f), c.At(0.61f, 0.50f), PaletteColor(color, kMint));
+			dl->AddTriangleFilled(c.At(0.43f, 0.40f), c.At(0.43f, 0.60f), c.At(0.61f, 0.50f), PaletteColor(color, AltColor()));
 		}
 
 		/* Animation：三条轨道 + 错开的关键帧 + 播放方向 */
@@ -2301,7 +2356,7 @@ namespace Helios::Icons
 			{
 				dl->AddLine(c.At(0.18f, ys[i]), c.At(0.82f, ys[i]), color, t);
 				dl->AddCircleFilled(c.At(i == 1 ? 0.40f : 0.50f, ys[i]), c.Len(0.09f),
-					i == 1 ? color : PaletteColor(color, kMint));
+					i == 1 ? color : PaletteColor(color, AltColor()));
 			}
 			dl->AddTriangleFilled(c.At(0.66f, 0.40f), c.At(0.66f, 0.60f), c.At(0.82f, 0.50f), color);
 		}
@@ -2310,7 +2365,7 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			dl->AddRectFilled(c.At(0.32f, 0.28f), c.At(0.44f, 0.72f), color, c.Len(0.04f));
-			dl->AddRectFilled(c.At(0.56f, 0.28f), c.At(0.68f, 0.72f), PaletteColor(color, kMint), c.Len(0.04f));
+			dl->AddRectFilled(c.At(0.56f, 0.28f), c.At(0.68f, 0.72f), PaletteColor(color, AltColor()), c.Len(0.04f));
 		}
 
 		/* 循环播放：开口圆 + 箭头，中间一个小播放三角（与设计稿的 loop 同形） */
@@ -2318,8 +2373,8 @@ namespace Helios::Icons
 		{
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
-			const ImU32 ring = PaletteColor(color, kViolet);
-			const ImU32 glyph = PaletteColor(color, kMint);
+			const ImU32 ring = PaletteColor(color, AccentInkColor());
+			const ImU32 glyph = PaletteColor(color, AltColor());
 
 			/* 开口在右上：从 -60° 扫到 280°，箭头落在起点上 */
 			dl->PathArcTo(c.At(0.5f, 0.5f), c.Len(0.3125f), -1.0472f, 4.8869f, 40);
@@ -2345,7 +2400,7 @@ namespace Helios::Icons
 			};
 			dl->AddPolyline(points, IM_ARRAYSIZE(points), color, 0, t);
 			for (const ImVec2& point : points)
-				dl->AddCircleFilled(point, c.Len(0.055f), PaletteColor(color, kMint));
+				dl->AddCircleFilled(point, c.Len(0.055f), PaletteColor(color, AltColor()));
 		}
 
 		void DrawPreview(ImDrawList* dl, const ImVec2& center, float size, ImU32 color)
@@ -2357,8 +2412,8 @@ namespace Helios::Icons
 			const ImVec2 points[] = {
 				c.At(0.20f, 0.70f), c.At(0.38f, 0.46f), c.At(0.52f, 0.58f), c.At(0.68f, 0.38f), c.At(0.82f, 0.70f),
 			};
-			dl->AddPolyline(points, IM_ARRAYSIZE(points), PaletteColor(color, kMint), 0, t);
-			dl->AddCircleFilled(c.At(0.70f, 0.32f), c.Len(0.055f), PaletteColor(color, kMint));
+			dl->AddPolyline(points, IM_ARRAYSIZE(points), PaletteColor(color, AltColor()), 0, t);
+			dl->AddCircleFilled(c.At(0.70f, 0.32f), c.Len(0.055f), PaletteColor(color, AltColor()));
 		}
 
 		/* ---- 后处理 ---- */
@@ -2376,13 +2431,13 @@ namespace Helios::Icons
 					{ 0.375f, top }, { 0.625f, top + 0.125f }, { 0.375f, top + 0.25f }, { 0.125f, top + 0.125f }
 				};
 				if (i == 0)
-					FillPoly(dl, c, plate, PaletteColor(color, kViolet, 0.18f));
-				StrokePolyline(dl, c, plate, t, PaletteColor(color, kViolet), true);
+					FillPoly(dl, c, plate, PaletteColor(color, AccentInkColor(), 0.18f));
+				StrokePolyline(dl, c, plate, t, PaletteColor(color, AccentInkColor()), true);
 			}
 
-			dl->AddLine(c.At(0.844f, 0.16f), c.At(0.844f, 0.66f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.75f, 0.57f), c.At(0.844f, 0.66f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.938f, 0.57f), c.At(0.844f, 0.66f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.844f, 0.16f), c.At(0.844f, 0.66f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.75f, 0.57f), c.At(0.844f, 0.66f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.938f, 0.57f), c.At(0.844f, 0.66f), PaletteColor(color, AltColor()), t);
 		}
 
 		/* PostProcess：画面外框 + 取景内容 + 提亮星芒（成片之上再加一层效果） */
@@ -2392,14 +2447,14 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 			const float rounding = c.Len(0.045f);
 
-			dl->AddRectFilled(c.At(0.11f, 0.125f), c.At(0.89f, 0.875f), PaletteColor(color, kViolet, 0.18f), rounding);
-			dl->AddRect(c.At(0.11f, 0.125f), c.At(0.89f, 0.875f), PaletteColor(color, kViolet), rounding, 0, t);
-			dl->AddCircleFilled(c.At(0.312f, 0.312f), c.Len(0.0625f), PaletteColor(color, kMint));
+			dl->AddRectFilled(c.At(0.11f, 0.125f), c.At(0.89f, 0.875f), PaletteColor(color, AccentInkColor(), 0.18f), rounding);
+			dl->AddRect(c.At(0.11f, 0.125f), c.At(0.89f, 0.875f), PaletteColor(color, AccentInkColor()), rounding, 0, t);
+			dl->AddCircleFilled(c.At(0.312f, 0.312f), c.Len(0.0625f), PaletteColor(color, AltColor()));
 
 			const ImVec2 ridge[] = {
 				c.At(0.19f, 0.72f), c.At(0.375f, 0.50f), c.At(0.50f, 0.625f), c.At(0.625f, 0.47f), c.At(0.81f, 0.72f)
 			};
-			dl->AddPolyline(ridge, IM_ARRAYSIZE(ridge), PaletteColor(color, kViolet), 0, t);
+			dl->AddPolyline(ridge, IM_ARRAYSIZE(ridge), PaletteColor(color, AccentInkColor()), 0, t);
 
 			const ImVec2 star_vertical[] = {
 				c.At(0.688f, 0.25f), c.At(0.724f, 0.375f), c.At(0.688f, 0.50f), c.At(0.652f, 0.375f)
@@ -2407,8 +2462,8 @@ namespace Helios::Icons
 			const ImVec2 star_horizontal[] = {
 				c.At(0.563f, 0.375f), c.At(0.688f, 0.34f), c.At(0.813f, 0.375f), c.At(0.688f, 0.41f)
 			};
-			dl->AddConvexPolyFilled(star_vertical, IM_ARRAYSIZE(star_vertical), PaletteColor(color, kMint));
-			dl->AddConvexPolyFilled(star_horizontal, IM_ARRAYSIZE(star_horizontal), PaletteColor(color, kMint));
+			dl->AddConvexPolyFilled(star_vertical, IM_ARRAYSIZE(star_vertical), PaletteColor(color, AltColor()));
+			dl->AddConvexPolyFilled(star_horizontal, IM_ARRAYSIZE(star_horizontal), PaletteColor(color, AltColor()));
 		}
 
 		/* Bloom：中心亮核 + 两圈光晕（外圈虚线）+ 八向发散 */
@@ -2418,18 +2473,18 @@ namespace Helios::Icons
 			const float t = StrokeWidth(size);
 			const ImVec2 middle = c.At(0.50f, 0.50f);
 
-			dl->AddCircleFilled(middle, c.Len(0.094f), PaletteColor(color, kMint));
-			dl->AddCircle(middle, c.Len(0.25f), PaletteColor(color, kViolet), 0, t);
+			dl->AddCircleFilled(middle, c.Len(0.094f), PaletteColor(color, AltColor()));
+			dl->AddCircle(middle, c.Len(0.25f), PaletteColor(color, AccentInkColor()), 0, t);
 			StrokeDashedCircle(dl, middle, c.Len(0.406f), color, t, c.Len(0.047f), c.Len(0.094f));
 
-			dl->AddLine(c.At(0.50f, 0.03f), c.At(0.50f, 0.125f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.50f, 0.875f), c.At(0.50f, 0.97f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.03f, 0.50f), c.At(0.125f, 0.50f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.875f, 0.50f), c.At(0.97f, 0.50f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.172f, 0.172f), c.At(0.238f, 0.238f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.762f, 0.762f), c.At(0.828f, 0.828f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.828f, 0.172f), c.At(0.762f, 0.238f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.238f, 0.762f), c.At(0.172f, 0.828f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.50f, 0.03f), c.At(0.50f, 0.125f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.50f, 0.875f), c.At(0.50f, 0.97f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.03f, 0.50f), c.At(0.125f, 0.50f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.875f, 0.50f), c.At(0.97f, 0.50f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.172f, 0.172f), c.At(0.238f, 0.238f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.762f, 0.762f), c.At(0.828f, 0.828f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.828f, 0.172f), c.At(0.762f, 0.238f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.238f, 0.762f), c.At(0.172f, 0.828f), PaletteColor(color, AccentInkColor()), t);
 		}
 
 		/* ColorGrading：色轮（三块扇区）+ 顶部选取点 */
@@ -2440,26 +2495,26 @@ namespace Helios::Icons
 			const ImVec2 middle = c.At(0.50f, 0.50f);
 			const float radius = c.Len(0.375f);
 
-			dl->AddCircleFilled(middle, radius, PaletteColor(color, kViolet, 0.16f));
+			dl->AddCircleFilled(middle, radius, PaletteColor(color, AccentInkColor(), 0.16f));
 
-			/* 三个扇区填薄荷：从右侧经底部绕到顶部 */
+			/* 三个扇区填副色：从右侧经底部绕到顶部 */
 			dl->PathArcTo(middle, radius, 0.0f, 1.5f * kPi, 24);
 			dl->PathLineTo(middle);
-			dl->PathFillConvex(PaletteColor(color, kMint, 0.16f));
+			dl->PathFillConvex(PaletteColor(color, AltColor(), 0.16f));
 			dl->PathArcTo(middle, radius, 0.0f, 1.5f * kPi, 24);
-			dl->PathStroke(PaletteColor(color, kMint), 0, t);
-			dl->AddLine(middle, c.At(0.875f, 0.50f), PaletteColor(color, kMint), t);
-			dl->AddLine(middle, c.At(0.50f, 0.125f), PaletteColor(color, kMint), t);
+			dl->PathStroke(PaletteColor(color, AltColor()), 0, t);
+			dl->AddLine(middle, c.At(0.875f, 0.50f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(middle, c.At(0.50f, 0.125f), PaletteColor(color, AltColor()), t);
 
-			dl->AddCircle(middle, radius, PaletteColor(color, kViolet), 0, t);
+			dl->AddCircle(middle, radius, PaletteColor(color, AccentInkColor()), 0, t);
 
 			/* 顶部选取点 + 右侧明度弧 + 两个色点 */
-			dl->AddCircleFilled(c.At(0.50f, 0.3125f), c.Len(0.069f), PaletteColor(color, kMint, 0.16f));
-			dl->AddCircle(c.At(0.50f, 0.3125f), c.Len(0.069f), PaletteColor(color, kMint), 0, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.3125f), c.Len(0.069f), PaletteColor(color, AltColor(), 0.16f));
+			dl->AddCircle(c.At(0.50f, 0.3125f), c.Len(0.069f), PaletteColor(color, AltColor()), 0, t);
 			dl->PathArcTo(c.At(0.6625f, 0.506f), c.Len(0.0625f), kPi * 0.5f, kPi * 1.5f, 8);
-			dl->PathStroke(PaletteColor(color, kViolet), 0, t);
-			dl->AddCircleFilled(c.At(0.375f, 0.6875f), c.Len(0.018f), PaletteColor(color, kViolet));
-			dl->AddCircleFilled(c.At(0.50f, 0.75f), c.Len(0.018f), PaletteColor(color, kViolet));
+			dl->PathStroke(PaletteColor(color, AccentInkColor()), 0, t);
+			dl->AddCircleFilled(c.At(0.375f, 0.6875f), c.Len(0.018f), PaletteColor(color, AccentInkColor()));
+			dl->AddCircleFilled(c.At(0.50f, 0.75f), c.Len(0.018f), PaletteColor(color, AccentInkColor()));
 		}
 
 		/* DepthOfField：相机机身 + 镜头 + 下方对焦条（清晰范围） */
@@ -2472,16 +2527,16 @@ namespace Helios::Icons
 				{ 0.094f, 0.5625f }, { 0.094f, 0.281f }, { 0.3125f, 0.281f }, { 0.406f, 0.156f },
 				{ 0.625f, 0.156f }, { 0.719f, 0.281f }, { 0.906f, 0.281f }, { 0.906f, 0.5625f }
 			};
-			FillPoly(dl, c, kBody, PaletteColor(color, kViolet, 0.18f));
-			StrokePolyline(dl, c, kBody, t, PaletteColor(color, kViolet), true);
+			FillPoly(dl, c, kBody, PaletteColor(color, AccentInkColor(), 0.18f));
+			StrokePolyline(dl, c, kBody, t, PaletteColor(color, AccentInkColor()), true);
 
-			dl->AddCircleFilled(c.At(0.50f, 0.422f), c.Len(0.156f), PaletteColor(color, kMint, 0.16f));
-			dl->AddCircle(c.At(0.50f, 0.422f), c.Len(0.156f), PaletteColor(color, kMint), 0, t);
-			dl->AddCircle(c.At(0.50f, 0.422f), c.Len(0.0625f), PaletteColor(color, kViolet), 0, t);
+			dl->AddCircleFilled(c.At(0.50f, 0.422f), c.Len(0.156f), PaletteColor(color, AltColor(), 0.16f));
+			dl->AddCircle(c.At(0.50f, 0.422f), c.Len(0.156f), PaletteColor(color, AltColor()), 0, t);
+			dl->AddCircle(c.At(0.50f, 0.422f), c.Len(0.0625f), PaletteColor(color, AccentInkColor()), 0, t);
 
 			dl->AddLine(c.At(0.125f, 0.781f), c.At(0.3125f, 0.781f), color, t);
 			dl->AddLine(c.At(0.6875f, 0.781f), c.At(0.875f, 0.781f), color, t);
-			dl->AddCircleFilled(c.At(0.50f, 0.781f), c.Len(0.047f), PaletteColor(color, kMint));
+			dl->AddCircleFilled(c.At(0.50f, 0.781f), c.Len(0.047f), PaletteColor(color, AltColor()));
 		}
 
 		/* MotionBlur：左侧速度线 + 右侧拉长的运动体 */
@@ -2490,17 +2545,17 @@ namespace Helios::Icons
 			const Canvas c{ center, size };
 			const float t = StrokeWidth(size);
 
-			dl->AddLine(c.At(0.125f, 0.25f), c.At(0.4375f, 0.25f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.219f, 0.406f), c.At(0.594f, 0.406f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.3125f, 0.5625f), c.At(0.656f, 0.5625f), PaletteColor(color, kViolet), t);
-			dl->AddLine(c.At(0.406f, 0.719f), c.At(0.8125f, 0.719f), PaletteColor(color, kViolet), t);
+			dl->AddLine(c.At(0.125f, 0.25f), c.At(0.4375f, 0.25f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.219f, 0.406f), c.At(0.594f, 0.406f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.3125f, 0.5625f), c.At(0.656f, 0.5625f), PaletteColor(color, AccentInkColor()), t);
+			dl->AddLine(c.At(0.406f, 0.719f), c.At(0.8125f, 0.719f), PaletteColor(color, AccentInkColor()), t);
 
 			static constexpr float kBlob[10][2] = {
 				{ 0.531f, 0.219f }, { 0.688f, 0.25f }, { 0.781f, 0.375f }, { 0.844f, 0.5625f }, { 0.781f, 0.75f },
 				{ 0.656f, 0.844f }, { 0.50f, 0.875f }, { 0.594f, 0.75f }, { 0.625f, 0.5625f }, { 0.594f, 0.375f }
 			};
-			FillConcavePoly(dl, c, kBlob, PaletteColor(color, kMint, 0.18f));
-			StrokePolyline(dl, c, kBlob, t, PaletteColor(color, kMint), true);
+			FillConcavePoly(dl, c, kBlob, PaletteColor(color, AltColor(), 0.18f));
+			StrokePolyline(dl, c, kBlob, t, PaletteColor(color, AltColor()), true);
 		}
 
 		/* AntiAliasing：阶梯边缘 + 虚线对齐参考（锯齿与过渡采样） */
@@ -2514,16 +2569,16 @@ namespace Helios::Icons
 				{ 0.5625f, 0.1875f }, { 0.5625f, 0.094f }, { 0.8125f, 0.094f }, { 0.8125f, 0.656f },
 				{ 0.594f, 0.656f }, { 0.594f, 0.75f }, { 0.375f, 0.75f }, { 0.375f, 0.844f }, { 0.1875f, 0.844f }
 			};
-			FillConcavePoly(dl, c, kStairs, PaletteColor(color, kViolet, 0.18f));
-			StrokePolyline(dl, c, kStairs, t, PaletteColor(color, kViolet), true);
+			FillConcavePoly(dl, c, kStairs, PaletteColor(color, AccentInkColor(), 0.18f));
+			StrokePolyline(dl, c, kStairs, t, PaletteColor(color, AccentInkColor()), true);
 
-			dl->AddLine(c.At(0.094f, 0.8125f), c.At(0.281f, 0.8125f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.4375f, 0.8125f), c.At(0.594f, 0.8125f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.75f, 0.781f), c.At(0.875f, 0.781f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.281f, 0.90f), c.At(0.281f, 0.75f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.4375f, 0.844f), c.At(0.4375f, 0.6875f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.594f, 0.75f), c.At(0.594f, 0.594f), PaletteColor(color, kMint), t);
-			dl->AddLine(c.At(0.656f, 0.125f), c.At(0.75f, 0.125f), PaletteColor(color, kMint), t);
+			dl->AddLine(c.At(0.094f, 0.8125f), c.At(0.281f, 0.8125f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.4375f, 0.8125f), c.At(0.594f, 0.8125f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.75f, 0.781f), c.At(0.875f, 0.781f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.281f, 0.90f), c.At(0.281f, 0.75f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.4375f, 0.844f), c.At(0.4375f, 0.6875f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.594f, 0.75f), c.At(0.594f, 0.594f), PaletteColor(color, AltColor()), t);
+			dl->AddLine(c.At(0.656f, 0.125f), c.At(0.75f, 0.125f), PaletteColor(color, AltColor()), t);
 		}
 
 		/* Vignette：画面外框 + 内框 + 中心亮区 + 虚线衰减环 */
@@ -2534,13 +2589,13 @@ namespace Helios::Icons
 			const ImVec2 middle = c.At(0.50f, 0.50f);
 			const float rounding = c.Len(0.045f);
 
-			dl->AddRectFilled(c.At(0.094f, 0.125f), c.At(0.906f, 0.875f), PaletteColor(color, kViolet, 0.18f), rounding);
-			dl->AddRect(c.At(0.094f, 0.125f), c.At(0.906f, 0.875f), PaletteColor(color, kViolet), rounding, 0, t);
-			dl->AddRect(c.At(0.156f, 0.1875f), c.At(0.844f, 0.8125f), PaletteColor(color, kMint), c.Len(0.02f), 0, t);
+			dl->AddRectFilled(c.At(0.094f, 0.125f), c.At(0.906f, 0.875f), PaletteColor(color, AccentInkColor(), 0.18f), rounding);
+			dl->AddRect(c.At(0.094f, 0.125f), c.At(0.906f, 0.875f), PaletteColor(color, AccentInkColor()), rounding, 0, t);
+			dl->AddRect(c.At(0.156f, 0.1875f), c.At(0.844f, 0.8125f), PaletteColor(color, AltColor()), c.Len(0.02f), 0, t);
 
-			dl->AddCircleFilled(middle, c.Len(0.1875f), PaletteColor(color, kMint, 0.16f));
-			dl->AddCircle(middle, c.Len(0.1875f), PaletteColor(color, kMint), 0, t);
-			StrokeDashedCircle(dl, middle, c.Len(0.281f), PaletteColor(color, kViolet), t, c.Len(0.044f), c.Len(0.075f));
+			dl->AddCircleFilled(middle, c.Len(0.1875f), PaletteColor(color, AltColor(), 0.16f));
+			dl->AddCircle(middle, c.Len(0.1875f), PaletteColor(color, AltColor()), 0, t);
+			StrokeDashedCircle(dl, middle, c.Len(0.281f), PaletteColor(color, AccentInkColor()), t, c.Len(0.044f), c.Len(0.075f));
 
 			dl->AddLine(c.At(0.219f, 0.25f), c.At(0.281f, 0.25f), color, t);
 			dl->AddLine(c.At(0.719f, 0.25f), c.At(0.781f, 0.25f), color, t);
@@ -2612,6 +2667,8 @@ namespace Helios::Icons
 			{ "Restore",           &DrawRestore },
 			{ "ExpandSidebar",     &DrawExpandSidebar },
 			{ "CollapseSidebar",   &DrawCollapseSidebar },
+			{ "ExpandAll",         &DrawExpandAll },
+			{ "CollapseAll",       &DrawCollapseAll },
 			{ "Capture",           &DrawCapture },
 			{ "Directory",         &DrawDirectory },
 			{ "File",              &DrawFile },

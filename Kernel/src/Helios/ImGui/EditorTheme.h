@@ -5,6 +5,8 @@
 
 #include <imgui.h>
 
+#include <algorithm>
+#include <cmath>
 #include <string>
 #include "Helios/Common/Export.h"
 
@@ -25,6 +27,8 @@ namespace Helios::EditorTheme
     namespace Detail
     {
         HELIOS_API float& UiScaleStorage();
+        /* 当前主题序号（定义在 EditorTheme.cpp，同样为了跨模块只有一份） */
+        HELIOS_API int& ThemeIndexStorage();
     }
 
     /* 设计像素 → ImGui 单位的缩放系数（macOS = 1；Windows = 系统 content scale） */
@@ -68,12 +72,24 @@ namespace Helios::EditorTheme
         /* 警告提示：介于正文与错误之间的"需要注意"语义（日志窗口的 WARN 级标色） */
         inline const ImVec4 Warning   = ImVec4(0.851f, 0.702f, 0.420f, 1.00f); /* #D9B36B */
 
-        /* 淡紫强调色：与图标系统同源 —— 取 SvgInk::Violet 的深色画布落地色（EditorIcons.cpp，
-         * #A69EFF），图标里的紫与 UI 状态色是同一个颜色。
+        /* 强调色一族：运行时可变（工具栏切换主题），所以定义收口在 EditorTheme.cpp ——
+         * Windows 上 Kernel.dll 与 Editor.exe 各有一份头文件里的 inline 变量，改一处另一处看不到。
          * 只用于选中 / 激活 / 焦点 / 拖拽，不作为装饰色铺满界面 */
-        inline const ImVec4 Accent      = ImVec4(0.651f, 0.620f, 1.000f, 1.00f); /* #A69EFF */
-        inline const ImVec4 AccentHover = ImVec4(0.776f, 0.757f, 1.000f, 1.00f); /* #C6C1FF */
-        inline const ImVec4 AccentDown  = ImVec4(0.533f, 0.502f, 0.910f, 1.00f); /* #8880E8 */
+        extern HELIOS_API ImVec4 Accent;
+        extern HELIOS_API ImVec4 AccentHover;
+        extern HELIOS_API ImVec4 AccentDown;
+
+        /* 图标侧的派生态（换主题时由 RefreshAccentTokens 从 Accent 折算）：
+         * Ink 主色、Tint 深底淡底、OnLight 亮底深描边、Pale 亮底极淡填充；
+         * 带 Alt 的是副色（色轮转 150° 的对比色），语义相同。 */
+        extern HELIOS_API ImVec4 AccentInk;
+        extern HELIOS_API ImVec4 AccentTint;
+        extern HELIOS_API ImVec4 AccentOnLight;
+        extern HELIOS_API ImVec4 AccentPale;
+        extern HELIOS_API ImVec4 AccentAlt;
+        extern HELIOS_API ImVec4 AccentAltDeep;
+        extern HELIOS_API ImVec4 AccentAltTint;
+        extern HELIOS_API ImVec4 AccentAltPale;
 
         /* 分量色：X/Y/Z 的身份标识（红 / 绿 / 蓝），只出现在「分量重置按钮」和「视图指示器」两处
          * （共用 AxisGlyph.h 的字母笔画）；深色界面用降饱和版本。W 没有约定色，用中性灰。 */
@@ -93,8 +109,9 @@ namespace Helios::EditorTheme
          * 细轨用中性灰；点亮段与圆点一起表示"当前值"——当前值在强调色白名单里，
          * 故用 Accent；悬停 / 拖动时整条再亮一档，状态的差异只在这三个颜色里。 */
         inline const ImVec4 SliderTrack = Neutral6;      /* #465363 细轨（值右侧那一段） */
-        inline const ImVec4 SliderValue = Accent;        /* #A69EFF 点亮段 + 圆点（常态） */
-        inline const ImVec4 SliderHover = AccentHover;   /* #C6C1FF 点亮段 + 圆点（悬停 / 拖动） */
+        /* 点亮段与圆点跟着主题走，值由 RefreshAccentTokens 落定 */
+        extern HELIOS_API ImVec4 SliderValue;
+        extern HELIOS_API ImVec4 SliderHover;
 
         inline const ImVec4 Clear   = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
         inline const ImVec4 White06 = ImVec4(1.0f, 1.0f, 1.0f, 0.06f);
@@ -147,9 +164,34 @@ namespace Helios::EditorTheme
         return ImVec4(color.x, color.y, color.z, alpha);
     }
 
-    /* 已选中行被悬停时的填充色：保住淡紫底、再亮一档。ImGui 对「悬停 + 选中」画的也是
-     * HeaderHovered（会把选中色整个盖掉）；选中行的调用点要显式 PushStyleColor 顶住。 */
-    inline const ImVec4 RowHoverSelected = WithAlpha(Token::Accent, 0.50f);
+    /* 按比例压暗 / 提亮（保持色相）：派生态都从强调色算，不另存色值 */
+    inline ImVec4 ScaleRgb(const ImVec4& color, float factor)
+    {
+        return ImVec4(color.x * factor, color.y * factor, color.z * factor, color.w);
+    }
+
+    inline ImVec4 MixRgb(const ImVec4& from, const ImVec4& to, float t)
+    {
+        return ImVec4(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t,
+            from.z + (to.z - from.z) * t, 1.0f);
+    }
+
+    /* 辅色太深时按比例混白、提到能在深色底上描边（色相不变）：
+     * 主题表里的深紫 / 靛青 / 石墨这类副色直接用会看不见 */
+    inline ImVec4 LiftForDark(const ImVec4& color, float min_level)
+    {
+        const float max_c = std::max(color.x, std::max(color.y, color.z));
+        if (max_c >= min_level)
+            return color;
+
+        const float t = (min_level - max_c) / std::max(1.0f - max_c, 1e-4f);
+        return MixRgb(color, ImVec4(1.0f, 1.0f, 1.0f, 1.0f), t);
+    }
+
+    /* 已选中行被悬停时的填充色：保住强调色底、再亮一档。ImGui 对「悬停 + 选中」画的也是
+     * HeaderHovered（会把选中色整个盖掉）；选中行的调用点要显式 PushStyleColor 顶住。
+     * 值随主题刷新（见 RefreshAccentTokens），不要手写。 */
+    extern HELIOS_API ImVec4 RowHoverSelected;
 
     /* ==================== 形状语言（Style 数值） ==================== */
 
@@ -164,7 +206,7 @@ namespace Helios::EditorTheme
         style.WindowBorderSize     = 0.0f;        /* 边框交给背景明度差，不用描边 */
         style.WindowMinSize        = ImVec2(200.0f, 120.0f);
         style.WindowTitleAlign     = ImVec2(0.0f, 0.5f);
-        style.WindowMenuButtonPosition = ImGuiDir_Right; /* 折叠/停靠按钮放右侧，避免误点 */
+        style.WindowMenuButtonPosition = ImGuiDir_None; /* 不画折叠/停靠按钮，页签栏右端保持干净 */
 
         style.ChildRounding        = 5.0f;
         style.ChildBorderSize      = 1.0f;
@@ -208,17 +250,9 @@ namespace Helios::EditorTheme
 
     /* ==================== Helios Dark 配色 ==================== */
 
-    inline void ApplyDark()
+    /* 中性灰阶与语义色：跟主题无关，只在 ApplyDark 里整表写一次 */
+    inline void ApplyBaseColors(ImGuiStyle& style)
     {
-        ImGuiStyle& style = ImGui::GetStyle();
-        style = ImGuiStyle(); /* 先回到官方默认值，避免残留旧配色 */
-        ApplyMetrics(style);
-        /* 设计像素 → ImGui 单位：一次性缩放全部内置尺寸（padding / rounding / spacing /
-         * 滚动条 / 拖拽最小尺寸等）。macOS 与 Windows 100% 下 UiScale = 1，是 no-op；
-         * Windows 高 DPI 下让系统控件与字体同步放大。必须在任何 Push 样式栈之前调用。
-         * 注意：ImFloor 取整，非整数缩放下个别值少 0~1px（可接受，优于半像素模糊）。 */
-        style.ScaleAllSizes(UiScale());
-
         ImVec4* c = style.Colors;
 
         c[ImGuiCol_Text]                   = Token::Text;
@@ -247,28 +281,18 @@ namespace Helios::EditorTheme
         c[ImGuiCol_ScrollbarGrabHovered]   = WithAlpha(Token::Neutral7, 0.85f);
         c[ImGuiCol_ScrollbarGrabActive]    = Token::Neutral8;
 
-        c[ImGuiCol_CheckMark]              = Token::Accent;
         c[ImGuiCol_SliderGrab]             = Token::Neutral7;
-        c[ImGuiCol_SliderGrabActive]       = Token::Accent;                 /* 拖拽滑块 = 强调 */
 
         c[ImGuiCol_Button]                 = WithAlpha(Token::Neutral5, 0.90f);
         c[ImGuiCol_ButtonHovered]          = Token::Neutral5;
         c[ImGuiCol_ButtonActive]           = Token::Neutral6;
 
-        /* 列表行：选中 = 强调色浸染 40%；悬停 = 中性提亮（White 12%）；按下 = 55%。
+        /* 列表行：悬停 = 中性提亮（White 12%）。选中 / 按下在 ApplyAccentColors。
          * 「悬停 + 选中」被 ImGui 也画成 HeaderHovered —— 那个组合由选中行的调用点
-         * 推 RowHoverSelected 顶住（见它的注释），不在这条色带里。 */
-        c[ImGuiCol_Header]                 = WithAlpha(Token::Accent, 0.40f);
+         * 推 RowHoverSelected 顶住（见它的注释）。 */
         c[ImGuiCol_HeaderHovered]          = Token::White12;
-        c[ImGuiCol_HeaderActive]           = WithAlpha(Token::Accent, 0.55f);
 
         c[ImGuiCol_Separator]              = Token::Separator;
-        c[ImGuiCol_SeparatorHovered]       = WithAlpha(Token::Accent, 0.60f);
-        c[ImGuiCol_SeparatorActive]        = Token::Accent;
-
-        c[ImGuiCol_ResizeGrip]             = WithAlpha(Token::Accent, 0.12f);
-        c[ImGuiCol_ResizeGripHovered]      = WithAlpha(Token::Accent, 0.45f);
-        c[ImGuiCol_ResizeGripActive]       = WithAlpha(Token::Accent, 0.80f);
 
         /* Tab：亮度单调递增 —— 条(Neutral1) < 未激活(Neutral2) < 激活(Neutral3)。
          * 激活项永远最亮，避免"亮的条 + 暗的 Tab"反向对比产生的下凹感。 */
@@ -278,13 +302,9 @@ namespace Helios::EditorTheme
         c[ImGuiCol_TabUnfocused]           = Token::Neutral1;               /* 未聚焦节点：条为 N0，Tab 亮一档 */
         c[ImGuiCol_TabUnfocusedActive]     = WithAlpha(Token::Neutral3, 0.80f);
 
-        c[ImGuiCol_DockingPreview]         = WithAlpha(Token::Accent, 0.55f);
         c[ImGuiCol_DockingEmptyBg]         = Token::Neutral0;               /* 停靠空区 = 最深底 */
 
         c[ImGuiCol_PlotLines]              = Token::Neutral7;
-        c[ImGuiCol_PlotLinesHovered]       = Token::AccentHover;
-        c[ImGuiCol_PlotHistogram]          = WithAlpha(Token::Accent, 0.90f);
-        c[ImGuiCol_PlotHistogramHovered]   = Token::AccentHover;
 
         c[ImGuiCol_TableHeaderBg]          = Token::Neutral3;
         c[ImGuiCol_TableBorderStrong]      = ImVec4(0.227f, 0.251f, 0.282f, 1.00f);
@@ -292,12 +312,134 @@ namespace Helios::EditorTheme
         c[ImGuiCol_TableRowBg]             = Token::Clear;
         c[ImGuiCol_TableRowBgAlt]          = ImVec4(1.0f, 1.0f, 1.0f, 0.03f);
 
-        c[ImGuiCol_TextSelectedBg]         = WithAlpha(Token::Accent, 0.38f);
-        c[ImGuiCol_DragDropTarget]         = WithAlpha(Token::Accent, 0.92f);
-        c[ImGuiCol_NavHighlight]           = Token::Accent;
         c[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.0f, 1.0f, 1.0f, 0.70f);
         c[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.0f, 0.0f, 0.0f, 0.35f);
         c[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.03f, 0.03f, 0.04f, 0.55f);
+    }
+
+    /* 强调色一族：切主题时只重刷这些（见 SetTheme），其余颜色与尺寸原样留着 */
+    inline void ApplyAccentColors(ImGuiStyle& style)
+    {
+        ImVec4* c = style.Colors;
+
+        c[ImGuiCol_CheckMark]              = Token::Accent;
+        c[ImGuiCol_SliderGrabActive]       = Token::Accent;                 /* 拖拽滑块 = 强调 */
+
+        /* 列表行：选中 = 强调色浸染 40%，按下 = 55% */
+        c[ImGuiCol_Header]                 = WithAlpha(Token::Accent, 0.40f);
+        c[ImGuiCol_HeaderActive]           = WithAlpha(Token::Accent, 0.55f);
+
+        c[ImGuiCol_SeparatorHovered]       = WithAlpha(Token::Accent, 0.60f);
+        c[ImGuiCol_SeparatorActive]        = Token::Accent;
+
+        c[ImGuiCol_ResizeGrip]             = WithAlpha(Token::Accent, 0.12f);
+        c[ImGuiCol_ResizeGripHovered]      = WithAlpha(Token::Accent, 0.45f);
+        c[ImGuiCol_ResizeGripActive]       = WithAlpha(Token::Accent, 0.80f);
+
+        c[ImGuiCol_DockingPreview]         = WithAlpha(Token::Accent, 0.55f);
+
+        c[ImGuiCol_PlotLinesHovered]       = Token::AccentHover;
+        c[ImGuiCol_PlotHistogram]          = WithAlpha(Token::Accent, 0.90f);
+        c[ImGuiCol_PlotHistogramHovered]   = Token::AccentHover;
+
+        c[ImGuiCol_TextSelectedBg]         = WithAlpha(Token::Accent, 0.38f);
+        c[ImGuiCol_DragDropTarget]         = WithAlpha(Token::Accent, 0.92f);
+        c[ImGuiCol_NavHighlight]           = Token::Accent;
+    }
+
+    inline void ApplyDark()
+    {
+        ImGuiStyle& style = ImGui::GetStyle();
+        style = ImGuiStyle(); /* 先回到官方默认值，避免残留旧配色 */
+        ApplyMetrics(style);
+        /* 设计像素 → ImGui 单位：一次性缩放内置尺寸（padding / rounding / spacing 等）。
+         * macOS 与 Windows 100% 下 UiScale = 1 是 no-op，高 DPI 时控件与字体同步放大；
+         * 必须在任何 Push 样式栈之前调用。ImFloor 取整，非整数缩放下个别值少 0~1px。 */
+        style.ScaleAllSizes(UiScale());
+
+        ApplyBaseColors(style);
+        ApplyAccentColors(style);
+    }
+
+    /* ==================== 主题预设（菜单栏切换） ==================== */
+
+    /* 一套主题两个色：亮的那档当强调色（深色面板上才看得见），另一档当辅色给图标 / 装饰。
+     * 悬停 / 按下 / 各种淡色全由 RefreshAccentTokens 折算 —— 加主题只动这张表 */
+    struct ThemePreset
+    {
+        const char* Name;
+        ImVec4 Accent;
+        ImVec4 Alt;
+    };
+
+    inline const ThemePreset kThemePresets[] =
+    {
+        /* 皇家金 #F2C14E + 香槟金 #F7E7CE */ { "Royal Gold",    ImVec4(0.949f, 0.757f, 0.306f, 1.0f),
+                                        ImVec4(0.969f, 0.906f, 0.808f, 1.0f) },
+        /* 梦幻紫 #A69EFF + #302A63 */ { "Dream Violet",  ImVec4(0.651f, 0.620f, 1.000f, 1.0f),
+                                        ImVec4(0.188f, 0.165f, 0.388f, 1.0f) },
+        /* 深海薄荷 #0F4C81 + #2EC4B6 */ { "Deep Sea Mint", ImVec4(0.180f, 0.769f, 0.714f, 1.0f),
+                                        ImVec4(0.059f, 0.298f, 0.506f, 1.0f) },
+        /* 松柏米白 #1F6F50 + #F4EBDD */ { "Pine Cream",    ImVec4(0.957f, 0.922f, 0.867f, 1.0f),
+                                        ImVec4(0.122f, 0.435f, 0.314f, 1.0f) },
+        /* 靛青珊瑚 #2E3A8C + #F26B5B */ { "Indigo Coral",  ImVec4(0.949f, 0.420f, 0.357f, 1.0f),
+                                        ImVec4(0.180f, 0.227f, 0.549f, 1.0f) },
+        /* 石墨雾蓝 #3A3A3A + #A8C7E8 */ { "Graphite Blue", ImVec4(0.659f, 0.780f, 0.910f, 1.0f),
+                                        ImVec4(0.227f, 0.227f, 0.227f, 1.0f) },
+    };
+
+    inline int ThemeCount()
+    {
+        return static_cast<int>(sizeof(kThemePresets) / sizeof(kThemePresets[0]));
+    }
+
+    inline const ThemePreset& GetTheme(int index)
+    {
+        return kThemePresets[(index >= 0 && index < ThemeCount()) ? index : 0];
+    }
+
+    /* 当前主题序号（越界一律落到 0） */
+    inline int ActiveTheme()
+    {
+        return Detail::ThemeIndexStorage();
+    }
+
+    /* 由当前主题的一对色折算全部派生态：切主题与启动初始化共用一套算术 */
+    inline void RefreshAccentTokens()
+    {
+        const ThemePreset& preset = GetTheme(Detail::ThemeIndexStorage());
+
+        Token::Accent      = preset.Accent;
+        Token::AccentHover = MixRgb(preset.Accent, ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 0.22f);
+        Token::AccentDown  = ScaleRgb(preset.Accent, 0.84f);
+
+        Token::AccentInk     = ScaleRgb(Token::Accent, 0.82f);  /* 图标主色，深一档 */
+        Token::AccentTint    = ScaleRgb(Token::Accent, 0.28f);  /* 深色画布上的淡底 */
+        Token::AccentOnLight = ScaleRgb(Token::Accent, 0.68f);  /* 亮底上的深描边 */
+        Token::AccentPale    = MixRgb(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), Token::Accent, 0.18f);
+
+        /* 辅色：深色档先提到能在暗底上描边，再由它折出淡色变体 */
+        Token::AccentAlt     = LiftForDark(preset.Alt, 0.55f);
+        Token::AccentAltDeep = ScaleRgb(Token::AccentAlt, 0.72f);
+        Token::AccentAltTint = ScaleRgb(Token::AccentAlt, 0.30f);
+        Token::AccentAltPale = MixRgb(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), Token::AccentAlt, 0.12f);
+
+        Token::SliderValue = Token::Accent;
+        Token::SliderHover = Token::AccentHover;
+        RowHoverSelected   = WithAlpha(Token::Accent, 0.50f);
+    }
+
+    /* 切主题：写 Token 并只重刷强调色那几项 —— 不重置整张样式表，切换时不会闪 */
+    inline void SetTheme(int index)
+    {
+        if (index < 0 || index >= ThemeCount())
+            index = 0;
+
+        Detail::ThemeIndexStorage() = index;
+        RefreshAccentTokens();
+
+        if (ImGui::GetCurrentContext() != nullptr)
+            ApplyAccentColors(ImGui::GetStyle());
     }
 
     /* ==================== 字体系统 ==================== */
@@ -309,6 +451,7 @@ namespace Helios::EditorTheme
     {
         ImFont* Regular = nullptr; /* 正文（逻辑 14px） */
         ImFont* Title   = nullptr; /* 面板标题（逻辑 16px） */
+        ImFont* Display = nullptr; /* 启动页大字（逻辑 28px，只有拉丁字形） */
     };
 
     /* 全局字体存取：各面板用 GetFonts().Title 切换标题字体 */
@@ -379,6 +522,9 @@ namespace Helios::EditorTheme
 
         fonts.Regular = AddMergedFont(io, latin_regular, cjk, 14.0f, dpi_scale);
         fonts.Title   = AddMergedFont(io, latin_semibold, cjk, 16.0f, dpi_scale);
+
+        /* 启动页的字样只用拉丁：28px 再合并两千多个中文字形，字体图集会翻好几倍 */
+        fonts.Display = AddMergedFont(io, latin_semibold, std::string(), 28.0f, dpi_scale);
 
         if (fonts.Regular == nullptr) /* 拉丁字体缺失时退化为纯中文单字体 */
             fonts.Regular = AddMergedFont(io, cjk, std::string(), 14.0f, dpi_scale);

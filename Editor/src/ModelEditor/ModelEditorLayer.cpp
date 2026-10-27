@@ -1,4 +1,5 @@
 ﻿#include "Pch.h"
+#include "FileDialog.h"
 #include "ModelEditorLayer.h"
 #include "MaterialSlotEditing.h"
 #include <glm/gtx/quaternion.hpp>
@@ -96,7 +97,7 @@ namespace Helios
 			return target;
 		}
 
-		/* 导入工作区（Assets/Cache）里的引用只对这次编辑有效，导出时不能跟着写进清单 */
+		/* 导入工作区（项目 Cache）里的引用只对这次编辑有效，导出时不能跟着写进清单 */
 		bool IsScratchAssetPath(const std::string& asset_path)
 		{
 			if (asset_path.empty())
@@ -104,7 +105,7 @@ namespace Helios
 
 			std::error_code error;
 			const std::filesystem::path relative =
-				std::filesystem::relative(PathFromUtf8(asset_path), g_AssetsPath / "Cache", error);
+				std::filesystem::relative(PathFromUtf8(asset_path), g_ProjectPath / "Cache", error);
 			return !error && !relative.empty()
 				&& relative.native().rfind(std::filesystem::path("..").native(), 0) != 0;
 		}
@@ -369,7 +370,7 @@ namespace Helios
 					std::filesystem::path relative_path;
 					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
 						payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
-						OnDragItemToScene(g_AssetsPath / relative_path);
+						OnDragItemToScene(ResolveAssetPath(relative_path));
 				}
 				ImGui::EndDragDropTarget();
 			}
@@ -916,7 +917,7 @@ namespace Helios
 				{
 					const std::string extension = ToLowercase(PathToUtf8(relative_path.extension()).c_str());
 					if (extension == ".mtl")
-						AssignSubModelMaterial(static_cast<size_t>(index), PathToUtf8(g_AssetsPath / relative_path));
+						AssignSubModelMaterial(static_cast<size_t>(index), PathToUtf8(ResolveAssetPath(relative_path)));
 				}
 			}
 			ImGui::EndDragDropTarget();
@@ -1066,7 +1067,7 @@ namespace Helios
 		EDITOR_LOG_DEBUG("Import model file: {}.", path);
 
 		const std::filesystem::path workbench =
-			g_AssetsPath / "Cache" / "ModelEditor" / PathFromUtf8(path).stem();
+			g_ProjectPath / "Cache" / "ModelEditor" / PathFromUtf8(path).stem();
 		const std::string mesh_path = Helios::ImportModel(path, PathToUtf8(workbench));
 		if (mesh_path.empty())
 			return false;

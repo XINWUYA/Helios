@@ -26,6 +26,7 @@ namespace Helios
 		/* 设置垂直同步 */
 		[[nodiscard]] bool IsVSync() const override { return m_WindowInfo.Descriptor.IsVSync; }
 		void SetVSync(bool enable) override;
+		void SetWindowTitle(const std::string& title) override;
 
 		/* 获取GLFWwindow* */
 		[[nodiscard]] void* GetNativeWindow() const override { return m_pGLFWWindow; }

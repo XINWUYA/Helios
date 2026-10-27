@@ -3,7 +3,7 @@
 
 namespace Helios
 {
-TestApp::TestApp() : Application("Sample_SkyBox")
+TestApp::TestApp() : Application("Sample_SkyBox", 1920, 1080, false, {}, "Sample_SkyBox")
 {
 	PushLayer(CreateSharedPtr<SampleSkyBox>());
 }

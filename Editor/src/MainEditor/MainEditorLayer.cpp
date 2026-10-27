@@ -5,8 +5,10 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
-#include "Helios/Application/FileDialog.h"
+#include "FileDialog.h"
 #include "Helios/Common/PathUtils.h"
+#include "Helios/Common/AssetPath.h"
+#include "Helios/Core/AssetManager.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Renderer/Renderer.h"
 #include <cctype>
@@ -41,6 +43,12 @@ namespace Helios
 		EditorResourceBrowser::AnimationClipOpenSink clip_open;
 		clip_open.Open = [this](const std::string& path) { m_Context.OpenAnimationClip(path); };
 		m_ResourceBrowser.SetAnimationClipOpenSink(std::move(clip_open));
+
+		/* 项目本地设置先读：脚本开关要赶在首次编译 / 加载之前生效 */
+		m_Settings = EditorSettings::Load();
+		EditorSettings::Apply(m_Settings);
+		m_ScriptModule.SetAutoReloadEnabled(m_Settings.AutoReloadScripts);
+		m_ScriptModule.SetAutoCompileEnabled(m_Settings.AutoCompileScripts);
 
 		/* 启动时把已编译好的脚本模块挂上：类注册进 ScriptRegistry，属性面板与场景加载才有类可用 */
 		m_ScriptModule.LoadLatest();
@@ -268,11 +276,11 @@ namespace Helios
 		if (path.empty())
 			return;
 
-		/* 脚本必须放在 Assets/Scripts 下：CMake 只从那里收集源文件 */
+		/* 脚本必须放在当前项目的 Scripts 下：CMake 只从那里收集源文件 */
 		std::error_code error;
 		const std::filesystem::path target = std::filesystem::weakly_canonical(PathFromUtf8(path), error);
 		const std::filesystem::path script_root =
-			std::filesystem::weakly_canonical(std::filesystem::path(ASSETS_PATH) / "Scripts", error);
+			std::filesystem::weakly_canonical(g_ProjectPath / "Scripts", error);
 		if (target.parent_path() != script_root)
 		{
 			CORE_LOG_ERROR("[Script] Scripts must be saved under {}.", PathToUtf8(script_root));
@@ -366,6 +374,10 @@ namespace Helios
 		EditorTheme::PushDockHostBackground();
 		if (!opt_padding)
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+		/* 菜单栏高度 = 字体高 + 2×FramePadding.y，压厚一档，左端的徽标才放得下看得清的尺寸 */
+		const ImVec2 host_frame_padding = ImGui::GetStyle().FramePadding;
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+			ImVec2(host_frame_padding.x, ImMax(host_frame_padding.y, Scaled(5.0f))));
 		/* ### 之后为窗口 ID：保持不变，旧的 imgui.ini 停靠布局继续有效 */
 		ImGui::Begin("Helios###DockSpace Demo", &p_open, window_flags);
 		{
@@ -378,6 +390,41 @@ namespace Helios
 			/* 菜单栏 */
 			if (ImGui::BeginMenuBar())
 			{
+				/* 菜单栏底色：强调色自左向右淡出。画在这里是因为宿主窗口的绘制裁剪区不含菜单栏，
+				 * 只有 BeginMenuBar 把裁剪框开到菜单栏内；MenuBarBg 仍是底，菜单项后画压在上面 */
+				const ImRect bar = ImGui::GetCurrentWindow()->MenuBarRect();
+				const ImVec2 fade_end(ImMin(bar.Max.x, bar.Min.x + Scaled(560.0f)), bar.Max.y);
+				const ImVec4& accent = EditorTheme::Token::Accent;
+				const ImU32 tint = ImGui::GetColorU32(ImVec4(accent.x, accent.y, accent.z, 0.22f));
+				const ImU32 fade = ImGui::GetColorU32(ImVec4(accent.x, accent.y, accent.z, 0.0f));
+				ImGui::GetWindowDrawList()->AddRectFilledMultiColor(bar.Min, fade_end, tint, fade, fade, tint);
+
+				/* 品牌记号：太阳徽标，与启动页同一张贴图、按强调色着色。没渲染设备时（离屏预览）
+				 * 不碰资产缓存，菜单栏就空着不占位 */
+				if (!m_EmblemRequested)
+				{
+					m_EmblemRequested = true;
+					if (Renderer::GetRenderAPI() != nullptr)
+						m_pEmblem = AssetManager::Instance().GetOrLoad<DeviceTexture>(
+							PathToUtf8(g_EngineResPath / "EditorRes" / "branding" / "sun-emblem.png"));
+				}
+				if (m_pEmblem != nullptr && m_pEmblem->IsLoaded())
+				{
+					/* 与菜单项同中线：项框高 = FrameHeight，文字在框内居中，不是贴着文字行 */
+					const float row = ImGui::GetFrameHeight();
+					const float mark = row - Scaled(3.0f);
+					/* 缩到 20pt 后线稿大半像素落在抗锯齿边缘，直接吃 Accent 会比色板暗一截，
+					 * 往白里提一档才和菜单文字的亮度站平 */
+					const ImVec4 mark_color = EditorTheme::MixRgb(EditorTheme::Token::Accent,
+						ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 0.40f);
+					const ImVec2 cursor = ImGui::GetCursorScreenPos();
+					const ImVec2 mark_min(cursor.x, cursor.y + (row - mark) * 0.5f);
+					ImGui::GetWindowDrawList()->AddImage((ImTextureID)m_pEmblem.get(),
+						mark_min, ImVec2(mark_min.x + mark, mark_min.y + mark),
+						ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), ImGui::GetColorU32(mark_color));
+					ImGui::Dummy(ImVec2(mark, row));
+				}
+
 				if (ImGui::BeginMenu("File"))
 				{
 					if (ImGui::MenuItem("New Scene", "Ctrl+N"))
@@ -500,10 +547,33 @@ namespace Helios
 						m_Context.ReloadScripts([this]() { return m_ScriptModule.Recompile(); });
 					}
 					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Compile Assets/Scripts and hot-reload the module");
+						ImGui::SetTooltip("Compile the project scripts and hot-reload the module");
 
 					if (ImGui::MenuItem("Reload Module"))
 						m_Context.ReloadScripts([this]() { return m_ScriptModule.LoadLatest(); });
+
+					/* 自动化的两个开关：调试时把自动重载关掉，免得编一次就换一个 image */
+					ImGui::Separator();
+
+					bool auto_reload = m_Settings.AutoReloadScripts;
+					if (ImGui::MenuItem("Auto Reload", nullptr, &auto_reload))
+					{
+						m_Settings.AutoReloadScripts = auto_reload;
+						m_ScriptModule.SetAutoReloadEnabled(auto_reload);
+						EditorSettings::Save(m_Settings);
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Reload the module as soon as a new build shows up");
+
+					bool auto_compile = m_Settings.AutoCompileScripts;
+					if (ImGui::MenuItem("Auto Compile On Open", nullptr, &auto_compile))
+					{
+						m_Settings.AutoCompileScripts = auto_compile;
+						m_ScriptModule.SetAutoCompileEnabled(auto_compile);
+						EditorSettings::Save(m_Settings);
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Build the project scripts on open when no module exists yet");
 
 					/* 脚本执行顺序：全场景一张表，Order 小的先跑 */
 					ImGui::Separator();
@@ -522,19 +592,97 @@ namespace Helios
 				/* Settings：全局开关（对所有视口生效） */
 				if (ImGui::BeginMenu("Settings"))
 				{
-					bool msaa = Renderer::IsMSAAEnabled();
+					bool msaa = m_Settings.MSAA;
 					if (ImGui::MenuItem("MSAA", nullptr, &msaa))
-						Renderer::SetMSAAEnabled(msaa);
+					{
+						m_Settings.MSAA = msaa;
+						EditorSettings::Apply(m_Settings);
+						EditorSettings::Save(m_Settings);
+					}
 					if (ImGui::IsItemHovered())
 						ImGui::SetTooltip("开：场景通道 4x 多重采样，物体边缘更平滑；关：退回单采样");
 
 					ImGui::Separator();
 
-					bool gpu_skinning = SkeletonModel::IsGlobalGpuSkinningEnabled();
+					bool gpu_skinning = m_Settings.GPUSkinning;
 					if (ImGui::MenuItem("GPU Skinning", nullptr, &gpu_skinning))
-						SkeletonModel::SetGlobalGpuSkinningEnabled(gpu_skinning);
+					{
+						m_Settings.GPUSkinning = gpu_skinning;
+						EditorSettings::Apply(m_Settings);
+						EditorSettings::Save(m_Settings);
+					}
 					if (ImGui::IsItemHovered())
 						ImGui::SetTooltip("开：顶点由计算着色器算；关：退回 CPU 蒙皮");
+
+					ImGui::EndMenu();
+				}
+
+				/* Theme：六套强调色 —— 一行一个色块 + 名字，当前档右端打勾 */
+				if (ImGui::BeginMenu("Theme"))
+				{
+					const ImGuiStyle& style = ImGui::GetStyle();
+					const float box = ImGui::GetTextLineHeight() * 0.78f;
+					const float gap = style.ItemInnerSpacing.x;
+					const float tick = ImGui::GetFontSize() * 0.8f;
+					const float row_height = ImGui::GetFrameHeight();
+
+					/* 行宽按最长的名字定死：各行的色卡、文字、勾才会纵向对齐 */
+					const float block_gap = Scaled(3.0f);
+					const float pair_width = box + block_gap + box * 0.62f;
+					float name_width = 0.0f;
+					for (int i = 0; i < EditorTheme::ThemeCount(); ++i)
+						name_width = std::max(name_width, ImGui::CalcTextSize(EditorTheme::GetTheme(i).Name).x);
+
+					const float row_width = style.FramePadding.x * 2.0f + pair_width + gap + name_width + gap + tick;
+
+					for (int i = 0; i < EditorTheme::ThemeCount(); ++i)
+					{
+						const EditorTheme::ThemePreset& preset = EditorTheme::GetTheme(i);
+						const bool active = (i == EditorTheme::ActiveTheme());
+
+						ImGui::PushID(i);
+						if (ImGui::Selectable("##theme", false, ImGuiSelectableFlags_None,
+							ImVec2(row_width, row_height)))
+						{
+							m_Settings.Theme = i;
+							EditorTheme::SetTheme(i);
+							EditorSettings::Save(m_Settings);
+						}
+						ImGui::PopID();
+
+						const ImVec2 row_min = ImGui::GetItemRectMin();
+						const ImVec2 row_max = ImGui::GetItemRectMax();
+						const float center_y = (row_min.y + row_max.y) * 0.5f;
+						ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+						/* 色卡：主色一块、副色缩一号底对齐 —— 一眼看出这套主题配的是哪两个色 */
+						const ImVec2 swatch_min(row_min.x + style.FramePadding.x, center_y - box * 0.5f);
+						draw_list->AddRectFilled(swatch_min, ImVec2(swatch_min.x + box, swatch_min.y + box),
+							ImGui::GetColorU32(preset.Accent), box * 0.3f);
+
+						const float alt_box = box * 0.62f;
+						const ImVec2 alt_min(swatch_min.x + box + block_gap, swatch_min.y + box - alt_box);
+						draw_list->AddRectFilled(alt_min, ImVec2(alt_min.x + alt_box, alt_min.y + alt_box),
+							ImGui::GetColorU32(preset.Alt), alt_box * 0.3f);
+						/* 辅色有深有浅，描一圈细边才不会在深色底上糊掉 */
+						draw_list->AddRect(alt_min, ImVec2(alt_min.x + alt_box, alt_min.y + alt_box),
+							ImGui::GetColorU32(EditorTheme::Token::Border), alt_box * 0.3f, 0, 1.0f);
+
+						draw_list->AddText(ImVec2(swatch_min.x + pair_width + gap,
+											 row_min.y + (row_height - ImGui::GetTextLineHeight()) * 0.5f),
+							ImGui::GetColorU32(ImGuiCol_Text), preset.Name);
+
+						if (active)
+						{
+							const float x = row_max.x - style.FramePadding.x - tick;
+							const ImU32 tick_color = ImGui::GetColorU32(EditorTheme::Token::Accent);
+							const float thickness = Scaled(1.6f);
+							draw_list->AddLine(ImVec2(x, center_y),
+								ImVec2(x + tick * 0.38f, center_y + tick * 0.36f), tick_color, thickness);
+							draw_list->AddLine(ImVec2(x + tick * 0.38f, center_y + tick * 0.36f),
+								ImVec2(x + tick, center_y - tick * 0.34f), tick_color, thickness);
+						}
+					}
 
 					ImGui::EndMenu();
 				}
@@ -585,6 +733,7 @@ namespace Helios
 			}
 		}
 		ImGui::End();
+		ImGui::PopStyleVar();
 		EditorTheme::PopDockHostBackground();
 
 		/* Style Editor：实时调参，Export 后固化回 EditorTheme.h */
@@ -789,5 +938,8 @@ namespace Helios
 	void MainEditorLayer::OnUpdate(float delta_time)
 	{
 		PROFILE_FUNCTION();
+
+		/* IDE 那边编好的脚本产物自动跟上：轮询产物时间戳，编译成功才重载 */
+		m_ScriptModule.TickAutoReload(delta_time);
 	}
 }

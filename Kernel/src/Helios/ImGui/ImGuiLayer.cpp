@@ -34,20 +34,21 @@ namespace Helios
 		return result.empty() ? std::string("App") : result;
 	}
 
-	/* 布局 ini 路径：<工程根>/imgui/<应用名>.ini
-	 * ASSETS_PATH 对所有 target 相同，若各应用共用同一个 ini 会互相覆盖布局，故按应用名分文件。
-	 * 建目录失败时退回工程根，保证布局仍可持久化。 */
+	/* 布局 ini：<项目>/.helios/imgui.ini，每个项目一份，换项目就换布局。
+	 * .helios 是点开头的本地状态目录，资源浏览器不列；并行开多个应用时按名字分文件。
+	 * 建目录失败退回项目根。 */
 	static std::string BuildLayoutIniPath()
 	{
 		const Application* app = Application::Instance();
-		const std::filesystem::path file_name = SanitizeFileName(app != nullptr ? app->GetName() : std::string()) + ".ini";
+		const std::string config = app != nullptr ? app->GetConfigName() : std::string();
+		const std::filesystem::path file_name = config.empty()
+			? "imgui.ini" : (SanitizeFileName(config) + ".ini");
 
-		const std::filesystem::path root = std::filesystem::path(ASSETS_PATH).parent_path();
-		const std::filesystem::path dir = root / "imgui";
+		const std::filesystem::path dir = g_ProjectPath / ".helios";
 
 		std::error_code error;
 		std::filesystem::create_directories(dir, error);
-		return (error ? root / file_name : dir / file_name).string();
+		return (error ? g_ProjectPath / file_name : dir / file_name).string();
 	}
 
 	ImGuiLayer::ImGuiLayer()
@@ -78,6 +79,7 @@ namespace Helios
 		/* 每个应用各用一份布局文件，避免编辑器与各 Sample 互相覆盖（见 BuildLayoutIniPath） */
 		m_IniPath = BuildLayoutIniPath();
 		SetLayoutSavingEnabled(true);
+		CORE_LOG_INFO("Layout ini: {}", m_IniPath);
 
 		/* 窗口需在字体构建前取得：字形按屏幕 content scale 光栅化，Retina 下文字才锐利 */
 		auto* window = static_cast<GLFWwindow*>(Application::Instance()->GetWindow().GetNativeWindow());
@@ -119,6 +121,18 @@ namespace Helios
 	void ImGuiLayer::SetLayoutSavingEnabled(bool enabled)
 	{
 		ImGui::GetIO().IniFilename = enabled ? m_IniPath.c_str() : nullptr;
+	}
+
+	void ImGuiLayer::RebindLayoutToProject()
+	{
+		/* 沿用当前"是否允许写盘"的状态：最小化期间换项目不该顺手把保存打开 */
+		const bool saving = ImGui::GetIO().IniFilename != nullptr;
+
+		m_IniPath = BuildLayoutIniPath();
+		ImGui::GetIO().IniFilename = saving ? m_IniPath.c_str() : nullptr;
+		ImGui::LoadIniSettingsFromDisk(m_IniPath.c_str());
+
+		CORE_LOG_INFO("Layout ini: {}", m_IniPath);
 	}
 
 	void ImGuiLayer::OnEvent(IEvent* event)

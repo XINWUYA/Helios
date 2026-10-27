@@ -33,18 +33,18 @@ endif()
 target_include_directories(Editor
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/Kernel/src
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/spdlog/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/debugbreak
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glfw/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glad/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/imgui
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/glm
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/stb
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/entt/single_include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/tinyxml2
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/magic_enum/include
-        ${CMAKE_SOURCE_DIR}/Libraries/ThirdParty/assimp/include
+        ${HELIOS_ENGINE_ROOT}/Kernel/src
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/spdlog/include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/debugbreak
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/glfw/include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/glad/include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/imgui
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/glm
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/stb
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/entt/single_include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/tinyxml2
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/magic_enum/include
+        ${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/assimp/include
 )
 
 # Link libraries
@@ -82,20 +82,34 @@ set_target_properties(Editor PROPERTIES
 # Platform-specific settings
 if(WIN32)
     target_compile_definitions(Editor PRIVATE PLATFORM_WINDOWS)
+    # 文件对话框：GetOpenFileName / ShellExecute 来自这两个系统库；
+    # 选目录的 SHBrowseForFolder 要 CoInitializeEx，配对 ole32
+    target_link_libraries(Editor PRIVATE comdlg32 shell32 ole32)
 elseif(APPLE)
     set_target_properties(Editor PROPERTIES
         MACOSX_BUNDLE ON
     )
 
+    # 文件对话框直接用 Cocoa 的 NSOpenPanel / NSSavePanel
+    find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
+    target_link_libraries(Editor PRIVATE ${COCOA_FRAMEWORK})
+
+    # 文件对话框走 Cocoa 的 NSOpenPanel，要按 Objective-C++ 编
+    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/FileDialog.cpp"
+        PROPERTIES
+            COMPILE_FLAGS "-x objective-c++"
+            SKIP_PRECOMPILE_HEADERS ON
+    )
+
     helios_sign_macos_bundle(Editor)
 endif()
 
-# Copy assets to output directory (optional)
+# 输出目录自带一份引擎资源：脱离源码树运行时把它放到可执行文件旁边即可
 if(WIN32)
     add_custom_command(TARGET Editor POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/Assets"
-        "$<TARGET_FILE_DIR:Editor>/Assets"
-        COMMENT "Copying Assets to output directory"
+        "${ENGINE_RES_PATH}"
+        "$<TARGET_FILE_DIR:Editor>/EngineRes"
+        COMMENT "Copying engine resources to output directory"
     )
 endif()

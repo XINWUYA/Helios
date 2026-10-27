@@ -224,59 +224,70 @@ namespace Helios::MaterialParamUI
 
 	/* 可选 Shader：只收 MaterialShaders 目录下含 stage 声明的 .glsl（相对路径，字典序）——
 	 * 管线内 shader 与库文件都不进清单；跳过 Cache（编译产物目录），整树扫。
+	 * 引擎内置的与项目自己加的都要列，同名以项目里的为准。
 	 * 调用方缓存清单，在选中变化 / 菜单打开时重扫。 */
 	inline std::vector<std::string> CollectShaderOptions()
 	{
 		std::vector<std::string> options;
 
-		std::error_code error;
-		for (std::filesystem::recursive_directory_iterator iter(g_AssetsPath,
-				std::filesystem::directory_options::skip_permission_denied, error), end;
-			iter != end; iter.increment(error))
+		const auto scan_root = [&options](const std::filesystem::path& root)
 		{
-			if (error)
-				break;
-
-			const std::filesystem::directory_entry& item = *iter;
-			if (item.is_directory())
+			std::error_code error;
+			for (std::filesystem::recursive_directory_iterator iter(root,
+					std::filesystem::directory_options::skip_permission_denied, error), end;
+				iter != end; iter.increment(error))
 			{
-				if (item.path().filename() == "Cache")
-					iter.disable_recursion_pending();
-				continue;
-			}
-
-			if (!item.is_regular_file())
-				continue;
-
-			std::string extension = PathToUtf8(item.path().extension());
-			for (char& character : extension)
-			{
-				if (character >= 'A' && character <= 'Z')
-					character = static_cast<char>(character - 'A' + 'a');
-			}
-			if (extension != ".glsl")
-				continue;
-
-			const std::string relative = RELATIVE_PATH(PathToUtf8(item.path()));
-			if (relative.rfind(kShaderMenuDir, 0) != 0)
-				continue;
-
-			/* 目录里也得含 stage 声明（与编译器的切分判据一致），防库文件混进来 */
-			bool has_stage = false;
-			std::ifstream source(item.path(), std::ios::binary);
-			for (std::string line; std::getline(source, line); )
-			{
-				if (line.find("#type") != std::string::npos)
-				{
-					has_stage = true;
+				if (error)
 					break;
-				}
-			}
-			if (!has_stage)
-				continue;
 
-			options.emplace_back(relative);
-		}
+				const std::filesystem::directory_entry& item = *iter;
+				if (item.is_directory())
+				{
+					if (item.path().filename() == "Cache")
+						iter.disable_recursion_pending();
+					continue;
+				}
+
+				if (!item.is_regular_file())
+					continue;
+
+				std::string extension = PathToUtf8(item.path().extension());
+				for (char& character : extension)
+				{
+					if (character >= 'A' && character <= 'Z')
+						character = static_cast<char>(character - 'A' + 'a');
+				}
+				if (extension != ".glsl")
+					continue;
+
+				const std::string relative = RELATIVE_PATH(PathToUtf8(item.path()));
+				if (relative.rfind(kShaderMenuDir, 0) != 0)
+					continue;
+
+				/* 目录里也得含 stage 声明（与编译器的切分判据一致），防库文件混进来 */
+				bool has_stage = false;
+				std::ifstream source(item.path(), std::ios::binary);
+				for (std::string line; std::getline(source, line); )
+				{
+					if (line.find("#type") != std::string::npos)
+					{
+						has_stage = true;
+						break;
+					}
+				}
+				if (!has_stage)
+					continue;
+
+				/* 项目根先扫，同名的内置 shader 不再重复列一遍 */
+				if (std::find(options.begin(), options.end(), relative) != options.end())
+					continue;
+
+				options.emplace_back(relative);
+			}
+		};
+
+		scan_root(g_ProjectPath);
+		scan_root(g_EngineResPath);
 
 		std::sort(options.begin(), options.end());
 		return options;
@@ -436,7 +447,7 @@ namespace Helios::MaterialParamUI
 							payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
 						{
 							const auto new_texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(
-								PathToUtf8(g_AssetsPath / relative_path));
+								PathToUtf8(ResolveAssetPath(relative_path)));
 							if (new_texture->IsLoaded())
 							{
 								texture = new_texture;
@@ -451,7 +462,7 @@ namespace Helios::MaterialParamUI
 				{
 					ImGui::BeginTooltip();
 					ImGui::Image((ImTextureID)show_texture.get(), ImVec2(200, 200), ImVec2(0, 1), ImVec2(1, 0));
-					ImGui::TextDisabled("Click to reveal in Assets");
+					ImGui::TextDisabled("Click to reveal in the resource browser");
 					ImGui::EndTooltip();
 				}
 

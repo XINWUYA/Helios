@@ -234,6 +234,58 @@ namespace Helios::PanelChrome
 		return clicked;
 	}
 
+	/* 浮动菜单（右键 / 下拉）的统一版式：圆角 6、上下内边距 10、行距 4。
+	 * ⚠️ 必须压在 Begin* 之前 —— 窗口的圆角与内边距在本帧第一次 Begin 时就锁定了，
+	 * 压在窗口内部完全不生效（看起来像没改）。 */
+	inline void PushMenuStyle()
+	{
+		ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, EditorTheme::Scaled(6.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+			ImVec2(EditorTheme::Scaled(8.0f), EditorTheme::Scaled(10.0f)));
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+			ImVec2(ImGui::GetStyle().ItemSpacing.x, EditorTheme::Scaled(4.0f)));
+	}
+
+	inline void PopMenuStyle()
+	{
+		ImGui::PopStyleVar(3);
+	}
+
+	/* 纯文字菜单行：版式和 MenuItemWithIcon 同一套（Selectable + 手绘文字），只是不画图标。
+	 * 不用 ImGui::MenuItem —— 它会给勾选列和箭头列留位置，弹层右侧被白白撑宽。 */
+	inline bool MenuItemText(const char* label, const char* shortcut = nullptr)
+	{
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
+		const ImVec2 shortcut_size = (shortcut != nullptr) ? ImGui::CalcTextSize(shortcut, nullptr, true) : ImVec2(0.0f, 0.0f);
+		const float width = style.FramePadding.x * 2.0f + label_size.x
+			+ ((shortcut != nullptr) ? shortcut_size.x + style.ItemInnerSpacing.x * 3.0f : 0.0f);
+
+		ImGui::PushID(label);
+		const bool clicked = ImGui::Selectable("##row", false,
+			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover
+				| ImGuiSelectableFlags_SpanAvailWidth,
+			ImVec2(width, 0.0f));
+		ImGui::PopID();
+
+		const ImVec2 min = ImGui::GetItemRectMin();
+		const ImVec2 max = ImGui::GetItemRectMax();
+		const float center_y = (min.y + max.y) * 0.5f;
+		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+
+		draw_list->AddText(ImVec2(min.x + style.FramePadding.x, center_y - ImGui::GetFontSize() * 0.5f),
+			ImGui::GetColorU32(EditorTheme::Token::Text), label);
+
+		if (shortcut != nullptr)
+		{
+			draw_list->AddText(ImVec2(max.x - style.FramePadding.x - shortcut_size.x,
+				center_y - shortcut_size.y * 0.5f),
+				ImGui::GetColorU32(EditorTheme::Token::TextDim), shortcut);
+		}
+
+		return clicked;
+	}
+
 	/* 行尾勾选标记：行右缘固定列里的一枚矢量对勾（两笔画，Accent 色）——
 	 * 切换行（MenuItemToggleWithIcon）与单选行（MenuItemSelectWithIcon）共用，
 	 * 两处的"勾选列"逐像素一致；未勾选的行也保留同一列，位置不随状态跳。 */

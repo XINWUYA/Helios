@@ -80,7 +80,7 @@ namespace Helios
 				return;
 			}
 
-			const std::filesystem::path absolute_path = g_AssetsPath / relative_path;
+			const std::filesystem::path absolute_path = ResolveAssetPath(relative_path);
 
 			std::error_code error;
 			const uintmax_t size = std::filesystem::file_size(absolute_path, error);

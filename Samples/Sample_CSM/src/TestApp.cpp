@@ -3,7 +3,7 @@
 
 namespace Helios
 {
-TestApp::TestApp() : Application("Sample_CSM")
+TestApp::TestApp() : Application("Sample_CSM", 1920, 1080, false, {}, "Sample_CSM")
 {
 	PushLayer(CreateSharedPtr<SampleCSM>());
 }

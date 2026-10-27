@@ -9,6 +9,7 @@
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/Math.h"
 #include "Helios/Common/Utils.h"
+#include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/Camera.h"
 #include "Helios/Scene/Material.h"
 #include "Helios/Scene/Scene.h"
@@ -1149,12 +1150,20 @@ namespace Helios
 				material = CreateSharedPtr<Material>();
 				material->SetShader(AssetManager::Instance().GetOrLoad<DeviceShader>(
 					ABSOLUTE_PATH("Shaders/Overlay/Wireframe.glsl")));
-				/* 与编辑器 UI 的强调色同值（#A69EFF 紫）：悬停子模型卡一眼看出对应哪段 */
-				material->SetParameters(ParamType::Vec4, "u_WireframeColor",
-					glm::vec4(0.651f, 0.620f, 1.0f, 1.0f));
 
 				auto& raster_state = material->GetRasterState();
 				raster_state.CullMode = CullMode::Cull_None;
+			}
+
+			/* 颜色跟编辑器强调色一致（悬停子模型卡一眼看出对应哪段）：切过主题才重设，
+			 * SetParameters 要走参数表，别每帧刷 */
+			static int applied_theme = -1;
+			if (applied_theme != EditorTheme::ActiveTheme())
+			{
+				applied_theme = EditorTheme::ActiveTheme();
+				const ImVec4& accent = EditorTheme::Token::Accent;
+				material->SetParameters(ParamType::Vec4, "u_WireframeColor",
+					glm::vec4(accent.x, accent.y, accent.z, 1.0f));
 			}
 			return material;
 		}

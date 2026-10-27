@@ -1,6 +1,6 @@
 ﻿#include "Pch.h"
 #include "FileDialog.h"
-#include "Application.h"
+#include "Helios/Application/Application.h"
 
 #ifdef PLATFORM_WINDOWS
 /* windows.h 必须排在 glfw3.h 前面，否则两者对 APIENTRY 的定义会互相覆盖 */
@@ -14,6 +14,9 @@
 /* commdlg.h / shellapi.h 依赖 windows.h 里的基础类型与调用约定 */
 #include "commdlg.h"
 #include "shellapi.h"
+/* 选目录走 SHBrowseForFolder：BROWSEINFOW / ILFree 在 shlobj.h，CoInitializeEx 在 objbase.h */
+#include "shlobj.h"
+#include <objbase.h>
 #include "Helios/Common/PathUtils.h"
 #endif
 
@@ -172,6 +175,69 @@ namespace Helios
 			
 			if ([savePanel runModal] == NSModalResponseOK) {
 				NSURL* url = [savePanel URL];
+				NSString* path = [url path];
+				return std::string([path UTF8String]);
+			}
+		}
+		return std::string();
+#else
+		return std::string();
+#endif
+	}
+
+	/* 选目录：工程目录 / 新工程放哪 */
+	std::string FileDialog::OpenFolder(const char* title)
+	{
+#ifdef PLATFORM_WINDOWS
+		std::wstring wide_title;
+		if (title != nullptr && *title != '\0')
+		{
+			const int length = MultiByteToWideChar(CP_UTF8, 0, title, -1, nullptr, 0);
+			if (length > 0)
+			{
+				wide_title.resize(static_cast<size_t>(length));
+				MultiByteToWideChar(CP_UTF8, 0, title, -1, wide_title.data(), length);
+			}
+		}
+
+		/* 新式浏览框（BIF_NEWDIALOGSTYLE）要求 COM 就绪：先初始化一次，退出前配对清理 */
+		const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+		BROWSEINFOW browse{};
+		browse.hwndOwner = glfwGetWin32Window(
+			static_cast<GLFWwindow*>(Application::Instance()->GetWindow().GetNativeWindow()));
+		browse.lpszTitle = wide_title.empty() ? L"Select a project folder" : wide_title.c_str();
+		browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+
+		std::string result;
+		if (PIDLIST_ABSOLUTE id_list = SHBrowseForFolderW(&browse); id_list != nullptr)
+		{
+			wchar_t path_buffer[MAX_PATH]{};
+			if (SHGetPathFromIDListW(id_list, path_buffer) == TRUE)
+				result = PathToUtf8(std::filesystem::path(path_buffer));
+			ILFree(id_list);
+		}
+
+		if (SUCCEEDED(com_result))
+			CoUninitialize();
+
+		return result;
+#elif defined(PLATFORM_MACOS)
+		@autoreleasepool {
+			NSOpenPanel* openPanel = [NSOpenPanel openPanel];
+			[openPanel setAllowsMultipleSelection:NO];
+			[openPanel setCanChooseDirectories:YES];
+			[openPanel setCanChooseFiles:NO];
+			[openPanel setCanCreateDirectories:YES];
+			if (title != nullptr && *title != '\0')
+				[openPanel setMessage:[NSString stringWithUTF8String:title]];
+
+			// Set parent window
+			NSWindow* nsWindow = glfwGetCocoaWindow((GLFWwindow*)Application::Instance()->GetWindow().GetNativeWindow());
+			[openPanel beginSheetModalForWindow:nsWindow completionHandler:nil];
+
+			if ([openPanel runModal] == NSModalResponseOK) {
+				NSURL* url = [[openPanel URLs] objectAtIndex:0];
 				NSString* path = [url path];
 				return std::string([path UTF8String]);
 			}

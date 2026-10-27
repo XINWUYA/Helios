@@ -252,6 +252,34 @@ namespace Helios
 			return args;
 		}
 
+		/* 行内 uniform 声明的参数名：`uniform sampler2D u_X;` / `layout(...) uniform vec4 u_Y = ...;`。
+		 * uniform 块头（`uniform Xxx {`）没有分号，返回空。 */
+		std::string UniformNameInLine(const std::string& line)
+		{
+			const size_t uniform_pos = line.find("uniform");
+			if (uniform_pos == std::string::npos)
+				return {};
+
+			const size_t semicolon = line.find(';', uniform_pos);
+			if (semicolon == std::string::npos)
+				return {};
+
+			std::string decl = line.substr(uniform_pos + 7, semicolon - uniform_pos - 7);
+			if (const size_t assign = decl.find('='); assign != std::string::npos)
+				decl.erase(assign);
+			if (const size_t bracket = decl.find('['); bracket != std::string::npos)
+				decl.erase(bracket);
+
+			/* 类型之后最后一个标识符就是参数名 */
+			const size_t name_end = decl.find_last_not_of(" \t\r\n");
+			if (name_end == std::string::npos)
+				return {};
+			const size_t name_start = decl.find_last_of(" \t\r\n", name_end);
+			return (name_start == std::string::npos)
+				? decl.substr(0, name_end + 1)
+				: decl.substr(name_start + 1, name_end - name_start);
+		}
+
 		/* 把声明行尾注释解析成面板规范（认不出的指令就当普通注释，不影响参数本身） */
 		MaterialPropertySpec ParsePropertySpec(const std::string& comment)
 		{
@@ -298,6 +326,70 @@ namespace Helios
 
 			return spec;
 		}
+
+		/* 第二项是不是 external（不区分大小写） */
+		bool IsExternalKeyword(const std::string& text)
+		{
+			static constexpr const char* kExternal = "external";
+			if (text.size() != std::strlen(kExternal))
+				return false;
+			for (size_t i = 0; i < text.size(); ++i)
+			{
+				if (std::tolower(static_cast<unsigned char>(text[i])) != kExternal[i])
+					return false;
+			}
+			return true;
+		}
+	}
+
+	/* 变体维度：逐行找 @variant(NAME) / @variant(NAME, external)。行尾标注绑到该行声明的参数，
+	 * 单独一行或写了 external 的就是外部维度 —— 值不在材质里取。 */
+	std::vector<ShaderVariantSpec> DeviceShader::ParseVariantSpecs(const std::string& source)
+	{
+		std::vector<ShaderVariantSpec> specs;
+		if (source.empty())
+			return specs;
+
+		const auto add = [&specs](ShaderVariantSpec spec)
+		{
+			for (const ShaderVariantSpec& existing : specs)
+			{
+				if (existing.Name == spec.Name)
+					return; /* 同名先到者定 */
+			}
+			specs.push_back(std::move(spec));
+		};
+
+		size_t line_begin = 0;
+		while (line_begin <= source.size())
+		{
+			const size_t line_end = source.find('\n', line_begin);
+			const std::string line = source.substr(line_begin,
+				line_end == std::string::npos ? std::string::npos : line_end - line_begin);
+
+			if (line.find("@variant") != std::string::npos)
+			{
+				const std::vector<std::string> args = SplitArgs(DirectiveArg(line, "@variant"));
+				if (!args.empty() && !args[0].empty())
+				{
+					ShaderVariantSpec spec;
+					spec.Name = args[0];
+					const bool external = args.size() > 1 && IsExternalKeyword(args[1]);
+					if (!external)
+						spec.ParamName = UniformNameInLine(line);
+					/* 绑不到参数的（单独一行写的）自然按外部维度处理 */
+					spec.Source = (external || spec.ParamName.empty())
+						? ShaderVariantSource::External
+						: ShaderVariantSource::Param;
+					add(std::move(spec));
+				}
+			}
+
+			if (line_end == std::string::npos)
+				break;
+			line_begin = line_end + 1;
+		}
+		return specs;
 	}
 
 	void DeviceShader::ReflectFromSPIRV(const std::vector<uint32_t>& spirv)
@@ -447,6 +539,13 @@ namespace Helios
 			std::smatch binding_match;
 			if (std::regex_search(qualifiers, binding_match, block_binding_regex))
 				m_Reflection.UniformBlockBindings.insert(static_cast<uint32_t>(std::stoul(binding_match[1].str())));
+		}
+
+		/* 变体维度：顶点 / 片元各调一次，同名只留一份 */
+		for (const ShaderVariantSpec& spec : ParseVariantSpecs(source))
+		{
+			if (m_Reflection.FindVariantSpec(spec.Name) == nullptr)
+				m_Reflection.VariantSpecs.push_back(spec);
 		}
 	}
 
