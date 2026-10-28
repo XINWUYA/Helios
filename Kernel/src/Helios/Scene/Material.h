@@ -66,6 +66,10 @@ namespace Helios
 		 * 见 Builtin/DirectLight.glsl）。前向渲染通道据此决定一个对象是否走
 		 * "逐光源一笔"循环（天空盒 / Unlit 类材质单笔原样提交）。 */
 		[[nodiscard]] bool SupportsDirectLighting() const;
+		/* 能否装进延迟 G-Buffer：着色器声明了标准材质契约的主采样器（u_AlbedoTexture，
+		 * 见 Builtin/MaterialLit.glsl）。声明不了的自定义着色器（纯色 / Unlit）
+		 * 在延迟管线下用自身着色器前向直画，否则参数会被转换丢弃、外观退化。 */
+		[[nodiscard]] bool SupportsGBuffer() const;
 		/* 渲染队列：小于 2500 不透明（先画、写深度），大于等于 2500 透明
 		 * （后画、从远到近、只测不写深度）。见 RenderCommon 的队列常量。 */
 		void SetRenderQueue(int32_t render_queue) { m_RenderQueue = render_queue; }

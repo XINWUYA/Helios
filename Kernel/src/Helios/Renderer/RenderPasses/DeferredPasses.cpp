@@ -451,6 +451,69 @@ namespace Helios
 				return lighting_pass->GetData().LightingResult;
 			}
 
+			/* 前向直画 Pass：G-Buffer 只装得下标准材质契约的着色器，自定义着色器（纯色 / Unlit）
+			 * 的裸 uniform 转不过去 —— 这类不透明物体在这里用自身着色器直画，覆盖掉光照结果对应像素。
+			 * 放在天空之后：背景先铺好，深度沿用 G-Buffer 的场景深度（反向 Z，GreaterEqual 比较）。 */
+			void AddForwardOpaquePass(RenderView& render_view)
+			{
+				PROFILE_FUNCTION();
+
+				auto& frame_graph = render_view.GetFrameGraph();
+				const auto& viewport_region = render_view.GetViewportRegion();
+
+				struct ForwardOpaquePassData
+				{
+					FrameGraphResourceHandleTyped<FrameGraphTexture> Output;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> ObjectId;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> Depth;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle;
+				};
+
+				frame_graph->AddPass<ForwardOpaquePassData>("ForwardOpaquePass",
+					[&](FrameGraphBuilder& builder, ForwardOpaquePassData& data)
+					{
+						data.Output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("LightingPassOutput");
+						data.ObjectId = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferObjectId");
+						data.Depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
+						data.ShadowMapHandle = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ShadowMapHandle");
+
+						builder.BindInputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment);
+						builder.BindInputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment);
+						builder.BindInputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
+						builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
+
+						FrameGraphPassInfo::Descriptor pass_desc;
+						pass_desc.Attachments.ColorAttachments(0) = data.Output;
+						pass_desc.Attachments.ColorAttachments(1) = data.ObjectId;
+						pass_desc.Attachments.DepthAttachment() = data.Depth;
+						/* 颜色、ObjectId 与场景深度都保留：这个 Pass 只往已有结果上落笔 */
+						pass_desc.PreserveContent = true;
+						pass_desc.ViewportRegion = viewport_region;
+						builder.CreateRenderPass("ForwardOpaqueRenderTarget", pass_desc);
+
+						/* 产物是"写进已有资源"，不声明为目标会被图裁剪剔除 */
+						builder.AsSideEffect();
+					},
+					[&render_view](const FrameGraphResources& resources, const ForwardOpaquePassData& data)
+					{
+						auto scene = render_view.GetOwnerScene();
+						if (scene == nullptr)
+							return;
+
+						const auto render_pass_info = resources.GetPassRenderTarget();
+						render_view.EmplacePassFrameBuffer("ForwardOpaquePass", render_pass_info);
+
+						render_pass_info->Bind();
+						{
+							ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
+							Forward::SubmitSceneObjects(render_view, *scene, false,
+								Forward::SubmitBatch::UnsupportedGBuffer);
+						}
+						render_pass_info->Unbind();
+					}
+					);
+			}
+
 			/* 前向透明 Pass：G-Buffer 只存得住单层表面，透明物体在这里用自身着色器直画 ——
 			 * 颜色叠在光照结果（已含天空）上，深度取 G-Buffer 的场景深度（只测不写），
 			 * ObjectId 一并写入，像素拾取跟前向管线一致。 */
@@ -598,12 +661,15 @@ namespace Helios
 			if (render_view->GetDebugViewMode() != DebugViewMode::Wireframe)
 				AddSkyPass(*render_view);
 
-			/* 透明物体最后画（天空之后）：调试档位下由调试 Pass 统一重绘，这里跳过，
-			 * 免得半透明层盖住调试读数；场景里没有透明物体时整趟都不挂 */
-			if (render_view->GetDebugViewMode() == DebugViewMode::None
-				&& RenderSorting::HasTransparentObjects(render_view->GetVisibleMeshObjects()))
+			/* 自定义着色器的物体走前向直画，透明物体最后画（天空之后）：调试档位下由调试 Pass
+			 * 统一重绘，这两趟都跳过，免得盖住调试读数；场景里没有对应物体时整趟都不挂 */
+			if (render_view->GetDebugViewMode() == DebugViewMode::None)
 			{
-				AddForwardTransparentPass(*render_view);
+				const auto& visible_objects = render_view->GetVisibleMeshObjects();
+				if (RenderSorting::HasForwardOnlyOpaqueObjects(visible_objects))
+					AddForwardOpaquePass(*render_view);
+				if (RenderSorting::HasTransparentObjects(visible_objects))
+					AddForwardTransparentPass(*render_view);
 			}
 
 			/* 后处理链（效果注册表驱动）：天空之后、输出之前；无效果 / 未启用 = 恒直通 */

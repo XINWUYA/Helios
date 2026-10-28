@@ -43,7 +43,8 @@ namespace Helios
 			 * 第 0 笔完整着色（直接光 + 环境 / 自发光，用材质自身的光栅状态），其余笔加法混合 +
 			 * Equal 比较，只输出该光源的直接光。天空盒和 Unlit 单笔原样提交；
 			 * 调用方自己负责绑目标、视口和阴影纹理。 */
-			void SubmitForwardObjects(RenderView& render_view, Scene& scene, bool transparent)
+			void SubmitForwardObjects(RenderView& render_view, Scene& scene, bool transparent,
+				SubmitBatch batch = SubmitBatch::All)
 			{
 				const auto probe_manager = scene.GetReflectionProbeManager();
 				const auto& lights = render_view.GetValidLights();
@@ -51,8 +52,11 @@ namespace Helios
 				const glm::vec3 view_position = (render_view.GetCullingCamera() != nullptr)
 					? render_view.GetCullingCamera()->GetPosition() : glm::vec3(0.0f);
 
-				const auto draw_list = RenderSorting::CollectDrawList(
-					render_view.GetVisibleMeshObjects(), transparent, view_position);
+				const auto& visible_objects = render_view.GetVisibleMeshObjects();
+				const auto draw_list = (batch == SubmitBatch::All)
+					? RenderSorting::CollectDrawList(visible_objects, transparent, view_position)
+					: RenderSorting::CollectDrawList(visible_objects, transparent, view_position,
+						[](const VisibleMeshObject& object) { return RenderSorting::IsForwardOnlyOpaque(object); });
 
 				/* 环境项放在主阴影光源那一笔里合成：只有那笔的阴影因子非 0，
 				 * 环境项才吃得到阴影（见 AmbientShadowVisibility） */
@@ -143,9 +147,9 @@ namespace Helios
 			FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle; /* 阴影贴图 */
 		};
 
-		void SubmitSceneObjects(RenderView& render_view, Scene& scene, bool transparent)
+		void SubmitSceneObjects(RenderView& render_view, Scene& scene, bool transparent, SubmitBatch batch)
 		{
-			SubmitForwardObjects(render_view, scene, transparent);
+			SubmitForwardObjects(render_view, scene, transparent, batch);
 		}
 
 		struct ScenePassTextureData

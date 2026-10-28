@@ -84,12 +84,30 @@ namespace Helios::RenderSorting
 		return key;
 	}
 
+	/* 延迟管线下装不进 G-Buffer 的不透明对象：自定义着色器（纯色 / Unlit）的裸 uniform
+	 * 转不过去，改在光照之后用自身着色器前向直画。天空有专属 Pass、透明走前向透明批；
+	 * 没有着色器的材质仍按 G-Buffer 兜底画（转换时补默认贴图），不在这里。 */
+	inline bool IsForwardOnlyOpaque(const VisibleMeshObject& object)
+	{
+		if (object.Material == nullptr || object.Material->IsSkyBox() || object.Material->IsTransparent())
+			return false;
+		return object.Material->GetShader() != nullptr && !object.Material->SupportsGBuffer();
+	}
+
+	/* 有没有这类对象：延迟管线据此决定挂不挂前向直画那一趟 */
+	inline bool HasForwardOnlyOpaqueObjects(const std::vector<VisibleMeshObject>& objects)
+	{
+		return std::any_of(objects.begin(), objects.end(), IsForwardOnlyOpaque);
+	}
+
 	/* 收集一批要绘制的对象并排序：
 	 * 不透明 -> 队列升序，同队列按状态键分组（同材质同布局连着画），组内保持收集顺序；
 	 * 透明   -> 队列升序，同队列按到相机的距离从远到近（近的后画，叠得对）。
 	 * 透明批不能按状态重排，否则混合顺序就乱了。材质为空的对象两个批次都不收。 */
+	template <typename Filter>
 	inline std::vector<const VisibleMeshObject*> CollectDrawList(
-		const std::vector<VisibleMeshObject>& objects, bool transparent, const glm::vec3& view_position)
+		const std::vector<VisibleMeshObject>& objects, bool transparent, const glm::vec3& view_position,
+		Filter filter)
 	{
 		struct DrawEntry
 		{
@@ -107,6 +125,8 @@ namespace Helios::RenderSorting
 			if (object.Material == nullptr)
 				continue;
 			if (IsTransparentObject(object) != transparent)
+				continue;
+			if (!filter(object))
 				continue;
 
 			DrawEntry entry;
@@ -146,9 +166,17 @@ namespace Helios::RenderSorting
 		return draw_list;
 	}
 
+	inline std::vector<const VisibleMeshObject*> CollectDrawList(
+		const std::vector<VisibleMeshObject>& objects, bool transparent, const glm::vec3& view_position)
+	{
+		return CollectDrawList(objects, transparent, view_position,
+			[](const VisibleMeshObject&) { return true; });
+	}
+
 	/* G-Buffer 批：按材质 + 网格分组。
 	 * 天空盒不进 G-Buffer —— 它输出最终颜色、顶点着色器把网格折成全屏天空，转成 G-Buffer
-	 * 材质只会得到一颗实心球；透明物体也不进 —— G-Buffer 只存单层表面，叠不出半透明。
+	 * 材质只会得到一颗实心球；透明物体也不进 —— G-Buffer 只存单层表面，叠不出半透明；
+	 * 声明不了标准材质契约的自定义着色器同样进不去（参数转不过去），改走前向直画。
 	 * 这些材质最后都会转成同一套 G-Buffer 着色器、光栅状态也统一，所以只按材质和网格排。 */
 	inline std::vector<const VisibleMeshObject*> CollectGBufferList(
 		const std::vector<VisibleMeshObject>& objects)
@@ -161,6 +189,8 @@ namespace Helios::RenderSorting
 			if (object.Material == nullptr || object.MeshSegment == nullptr)
 				continue;
 			if (object.Material->IsSkyBox() || object.Material->IsTransparent())
+				continue;
+			if (IsForwardOnlyOpaque(object))
 				continue;
 
 			uint64_t key = 0xCBF29CE484222325ULL;

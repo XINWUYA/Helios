@@ -80,6 +80,15 @@ namespace Helios
 		return SupportsIBL();
 	}
 
+	bool Material::SupportsGBuffer() const
+	{
+		PROFILE_FUNCTION();
+
+		/* 判据 = 声明了标准材质契约的主采样器：G-Buffer 只能承载 MaterialLit 那套参数
+		 * （贴图 + 顶点色），自定义着色器的裸 uniform 转不过去。 */
+		return m_pShader != nullptr && m_pShader->GetUniformBinding("u_AlbedoTexture") >= 0;
+	}
+
 	void Material::SetParameters(ParamType type, const std::string& name, const std::any& param)
 	{
 		PROFILE_FUNCTION();
