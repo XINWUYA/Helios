@@ -89,14 +89,7 @@ namespace Helios
     {
         /* 逆序收束：先结束未闭合的 Pass，再注销运行时上下文（此后不再有对象
          * 通过 MetalRuntime 取用设备），最后释放自身持有的设备资源。 */
-        if (m_CurrentRenderEncoder)
-        {
-            m_CurrentRenderEncoder->endEncoding();
-            m_CurrentRenderEncoder = nullptr;
-        }
-        m_ActiveRenderPassDescriptor = nullptr;
-        m_ActivePipelineState = nullptr;
-        m_RasterStateEncoder = nullptr;
+        CloseRenderEncoder();
 
         ReleaseDefaultMultisampleAttachments();
 
@@ -190,7 +183,7 @@ namespace Helios
      * 渲染到 drawable（屏幕）时不翻转：屏幕行序由系统窗口决定，且只被写入不被采样。 */
     void MetalRenderAPI::ApplyViewport(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
     {
-        if (!m_CurrentRenderEncoder)
+        if (!m_CurrentRenderEncoder || m_EncoderSuspended)
             return;
 
         /* 当前编码器上已经是这个视口就不再发（Pass 开始时刚按附件尺寸设过一次） */
@@ -223,7 +216,7 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
-        if (m_CurrentRenderEncoder)
+        if (m_CurrentRenderEncoder && !m_EncoderSuspended)
         {
             /* 视口高度取自基类记下的 applied 视口，与 y 同属 framebuffer 像素坐标系；
              * 还没设过视口或数值异常时退化为不翻转，避免下溢成巨大值。 */
@@ -309,7 +302,7 @@ namespace Helios
 
     void MetalRenderAPI::ApplyEncoderRasterState()
     {
-        if (!m_CurrentRenderEncoder)
+        if (!m_CurrentRenderEncoder || m_EncoderSuspended)
             return;
 
         /* 同一编码器内状态未变化时无需重复下发 */
@@ -406,7 +399,7 @@ namespace Helios
 
     bool MetalRenderAPI::ApplyPipelineState(uint64_t vertex_layout_hash)
     {
-        if (!m_CurrentRenderEncoder || !m_BoundShader)
+        if (!m_CurrentRenderEncoder || m_EncoderSuspended || !m_BoundShader)
             return false;
 
         const MetalPipelineDesc desc = BuildPipelineDesc(vertex_layout_hash);
@@ -475,7 +468,7 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
-        if (!m_CurrentRenderEncoder)
+        if (!m_CurrentRenderEncoder || m_EncoderSuspended)
         {
             CORE_LOG_ERROR("No active render encoder!");
             return;
@@ -536,7 +529,7 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
-        if (!m_CurrentRenderEncoder)
+        if (!m_CurrentRenderEncoder || m_EncoderSuspended)
         {
             CORE_LOG_ERROR("No active render encoder!");
             return;
@@ -587,16 +580,7 @@ namespace Helios
         /* Metal 同一时刻只允许一个编码器：先收束当前渲染通道、再插入 blit 编码器。注意：不能另起
          * 命令缓冲区提交（DeviceTexture::GenerateMipmap 就是那么干的）—— 调用方通常在帧录制中，
          * 独立提交会先执行、结果是空纹理。 */
-        if (m_CurrentRenderEncoder)
-        {
-            m_CurrentRenderEncoder->endEncoding();
-            RenderQueryProfiler::Instance().OnRenderPassEnd();
-            m_CurrentRenderEncoder = nullptr;
-            MetalRuntime::SetEncoder(nullptr);
-            m_ActiveRenderPassDescriptor = nullptr;
-            m_ActivePipelineState = nullptr;
-            m_RasterStateEncoder = nullptr;
-        }
+        CloseRenderEncoder();
 
         if (!m_CurrentCommandBuffer)
         {
@@ -656,16 +640,7 @@ namespace Helios
 
         /* 与 CopyTexture 同一模式：先收束可能还在开启的渲染通道，再在当前帧的
          * 命令缓冲区上插入 blit —— 拷到的是"本 Pass 刚画完"的当刻内容 */
-        if (m_CurrentRenderEncoder)
-        {
-            m_CurrentRenderEncoder->endEncoding();
-            RenderQueryProfiler::Instance().OnRenderPassEnd();
-            m_CurrentRenderEncoder = nullptr;
-            MetalRuntime::SetEncoder(nullptr);
-            m_ActiveRenderPassDescriptor = nullptr;
-            m_ActivePipelineState = nullptr;
-            m_RasterStateEncoder = nullptr;
-        }
+        CloseRenderEncoder();
 
         if (!m_CurrentCommandBuffer)
         {
@@ -696,15 +671,7 @@ namespace Helios
             return false;
 
         /* 计算 / 拷贝可能还挂在当前命令缓冲上：提交它，等执行完，CPU 才能安全读回 */
-        if (m_CurrentRenderEncoder)
-        {
-            m_CurrentRenderEncoder->endEncoding();
-            m_CurrentRenderEncoder = nullptr;
-            MetalRuntime::SetEncoder(nullptr);
-            m_ActiveRenderPassDescriptor = nullptr;
-            m_ActivePipelineState = nullptr;
-            m_RasterStateEncoder = nullptr;
-        }
+        CloseRenderEncoder();
 
         m_CurrentCommandBuffer->commit();
         m_CurrentCommandBuffer->waitUntilCompleted();
@@ -746,16 +713,7 @@ namespace Helios
         /* 与 GenerateMipmap 同一模式：Metal 同一时刻只允许一个命令编码器，
          * 先收束可能还在开启的渲染通道，再在当前帧的命令缓冲区上插入 blit ——
          * 拷贝与前后 Pass 保持录制顺序，读到的正是"当刻"内容。 */
-        if (m_CurrentRenderEncoder)
-        {
-            m_CurrentRenderEncoder->endEncoding();
-            RenderQueryProfiler::Instance().OnRenderPassEnd();
-            m_CurrentRenderEncoder = nullptr;
-            MetalRuntime::SetEncoder(nullptr);
-            m_ActiveRenderPassDescriptor = nullptr;
-            m_ActivePipelineState = nullptr;
-            m_RasterStateEncoder = nullptr;
-        }
+        CloseRenderEncoder();
 
         if (!m_CurrentCommandBuffer)
         {
@@ -782,9 +740,8 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
-        /* 仍有未结束的 Pass 时先收束，避免命令缓冲区漏记整个 Pass */
-        if (m_CurrentRenderEncoder)
-            EndRenderPass();
+        /* 仍有未结束（或挂起等合并）的 Pass 时先收束，避免命令缓冲区漏记整个 Pass */
+        CloseRenderEncoder();
 
         if (!m_CurrentCommandBuffer)
             return;
@@ -1100,9 +1057,10 @@ namespace Helios
         /* 组名留一份：随后创建的编码器拿它当标签 */
         m_DebugGroupStack.emplace_back(name ? name : "");
 
-        if (m_CurrentRenderEncoder && name)
+        if (m_CurrentRenderEncoder && !m_EncoderSuspended && name)
         {
             m_CurrentRenderEncoder->pushDebugGroup(NS::String::string(name, NS::UTF8StringEncoding));
+            ++m_EncoderDebugGroupDepth;
         }
     }
 
@@ -1113,9 +1071,10 @@ namespace Helios
         if (!m_DebugGroupStack.empty())
             m_DebugGroupStack.pop_back();
 
-        if (m_CurrentRenderEncoder)
+        if (m_CurrentRenderEncoder && !m_EncoderSuspended && m_EncoderDebugGroupDepth > 0)
         {
             m_CurrentRenderEncoder->popDebugGroup();
+            --m_EncoderDebugGroupDepth;
         }
     }
 
@@ -1139,16 +1098,7 @@ namespace Helios
             return false;
 
         /* 计算编码器不能和渲染编码器并存：先把当前的收掉（与 AcquireDefaultTargetSnapshot 同套路） */
-        if (m_CurrentRenderEncoder)
-        {
-            m_CurrentRenderEncoder->endEncoding();
-            RenderQueryProfiler::Instance().OnRenderPassEnd();
-            m_CurrentRenderEncoder = nullptr;
-            MetalRuntime::SetEncoder(nullptr);
-            m_ActiveRenderPassDescriptor = nullptr;
-            m_ActivePipelineState = nullptr;
-            m_RasterStateEncoder = nullptr;
-        }
+        CloseRenderEncoder();
 
         /* 着色器 binding → MSL buffer 下标：uniform 块在引擎预留的高位区间
          * （见 MetalBinding::ToBufferIndex），storage 缓冲直接用 binding */
@@ -1220,18 +1170,37 @@ namespace Helios
             return;
         }
 
-        /* Metal 同一时刻只允许一个活动的命令编码器。若上一个 Pass 未显式结束
-         * （例如 FrameGraph 先开启默认 Pass 再执行携带有离屏附件的 Pass），
-         * 先将其收束，使 Pass 交替时命令缓冲区结构始终有效。 */
-        if (m_CurrentRenderEncoder)
+        /* 上一趟挂起着、附件又完全相同：接着在同一个编码器上画，附件不用写回再读入 */
+        if (m_EncoderSuspended && CanResumeRenderPass(renderPassDescriptor))
         {
-            m_CurrentRenderEncoder->endEncoding();
-            RenderQueryProfiler::Instance().OnRenderPassEnd();
-            m_CurrentRenderEncoder = nullptr;
-            m_ActiveRenderPassDescriptor = nullptr;
-            m_ActivePipelineState = nullptr;
-            m_RasterStateEncoder = nullptr;
+            m_EncoderSuspended = false;
+            m_ActiveRenderPassDescriptor = renderPassDescriptor;
+            MetalRuntime::SetEncoder(m_CurrentRenderEncoder);
+            ++m_MergedRenderPassCount;
+
+            /* 抓帧里按 Pass 分组：续画的这一趟单独压一层调试组 */
+            if (!m_DebugGroupStack.empty() && !m_DebugGroupStack.back().empty())
+            {
+                m_CurrentRenderEncoder->pushDebugGroup(
+                    NS::String::string(m_DebugGroupStack.back().c_str(), NS::UTF8StringEncoding));
+                m_ResumeDebugGroupOpen = true;
+            }
+
+            /* 同一个编码器上的状态都还在；视口和裁剪按新开一趟的样子复位 */
+            uint32_t width = 0;
+            uint32_t height = 0;
+            GetRenderPassAttachmentSize(renderPassDescriptor, width, height);
+            ResetAppliedViewport();
+            if (width > 0 && height > 0)
+            {
+                ApplyViewport(0, 0, width, height);
+                m_CurrentRenderEncoder->setScissorRect(MTL::ScissorRect{ 0, 0, width, height });
+            }
+            return;
         }
+
+        /* Metal 同一时刻只允许一个活动的命令编码器：上一个没收的先收掉 */
+        CloseRenderEncoder();
 
         /* 如果没有命令缓冲区，创建一个新的（整帧共用一个，最后由 Present 提交） */
         if (!m_CurrentCommandBuffer)
@@ -1264,6 +1233,8 @@ namespace Helios
         }
 
         MetalRuntime::SetEncoder(m_CurrentRenderEncoder);
+        SnapshotAttachments(renderPassDescriptor);
+        m_EncoderDebugGroupDepth = 0;
 
         /* 编码器标签取当前打开的调试组链（最内层就是本趟 Pass 的名字） */
         SetMetalEncoderLabel(m_CurrentRenderEncoder, BuildEncoderLabel(m_DebugGroupStack, "RenderPass"));
@@ -1290,21 +1261,95 @@ namespace Helios
         ApplyEncoderRasterState();
     }
 
-    void MetalRenderAPI::EndRenderPass()
+    void MetalRenderAPI::EndRenderPass(bool allow_merge)
     {
         PROFILE_FUNCTION();
 
+        if (m_CurrentRenderEncoder == nullptr || m_EncoderSuspended)
+            return;
+
+        /* 续画时补的那层调试组在这一趟结束时弹掉 */
+        if (m_ResumeDebugGroupOpen)
+        {
+            m_CurrentRenderEncoder->popDebugGroup();
+            m_ResumeDebugGroupOpen = false;
+        }
+
+        /* 可以合并就先挂着，等下一趟来接；接不上的话由下一次换编码器时统一收掉。
+         * 计时开着时每趟都要独立的通道采样，不挂起 */
+        if (allow_merge && m_EncoderDebugGroupDepth == 0 && !RenderQueryProfiler::Instance().IsEnabled())
+        {
+            m_EncoderSuspended = true;
+            MetalRuntime::SetEncoder(nullptr);
+            return;
+        }
+
+        CloseRenderEncoder();
+    }
+
+    void MetalRenderAPI::CloseRenderEncoder()
+    {
         if (m_CurrentRenderEncoder)
         {
+            if (m_ResumeDebugGroupOpen)
+                m_CurrentRenderEncoder->popDebugGroup();
             m_CurrentRenderEncoder->endEncoding();
             RenderQueryProfiler::Instance().OnRenderPassEnd();
             m_CurrentRenderEncoder = nullptr;
             MetalRuntime::SetEncoder(nullptr);
         }
 
+        m_EncoderSuspended = false;
+        m_ResumeDebugGroupOpen = false;
+        m_EncoderDebugGroupDepth = 0;
         m_ActiveRenderPassDescriptor = nullptr;
         m_ActivePipelineState = nullptr;
         m_RasterStateEncoder = nullptr;
+    }
+
+    void MetalRenderAPI::SnapshotAttachments(MTL::RenderPassDescriptor* descriptor)
+    {
+        const auto snapshot = [](MTL::RenderPassAttachmentDescriptor* attachment, AttachmentIdentity& identity)
+        {
+            identity = AttachmentIdentity{};
+            if (attachment == nullptr)
+                return;
+            identity.Texture = attachment->texture();
+            identity.Resolve = attachment->resolveTexture();
+            identity.Level = attachment->level();
+            identity.Slice = attachment->slice();
+        };
+
+        for (uint32_t i = 0; i < MAX_COLOR_ATTACHMENT_NUM; ++i)
+            snapshot(descriptor->colorAttachments()->object(i), m_ActiveAttachments[i]);
+        snapshot(descriptor->depthAttachment(), m_ActiveAttachments[MAX_COLOR_ATTACHMENT_NUM]);
+        snapshot(descriptor->stencilAttachment(), m_ActiveAttachments[MAX_COLOR_ATTACHMENT_NUM + 1]);
+    }
+
+    /* 能接着画的条件：附件逐个相同（纹理、解析目标、层级），新一趟全是 Load，也就是它只想在
+     * 上一趟的结果上继续叠加。写回方式沿用第一趟的（多写回一次不影响结果） */
+    bool MetalRenderAPI::CanResumeRenderPass(MTL::RenderPassDescriptor* descriptor) const
+    {
+        if (descriptor == nullptr || descriptor == m_RenderPassDescriptor || !m_CurrentPassIsOffscreen)
+            return false;
+        const auto same = [](MTL::RenderPassAttachmentDescriptor* attachment, const AttachmentIdentity& identity)
+        {
+            if (attachment == nullptr || attachment->texture() == nullptr)
+                return identity.Texture == nullptr;
+            return attachment->texture() == identity.Texture
+                && attachment->resolveTexture() == identity.Resolve
+                && attachment->level() == identity.Level
+                && attachment->slice() == identity.Slice
+                && attachment->loadAction() == MTL::LoadActionLoad;
+        };
+
+        for (uint32_t i = 0; i < MAX_COLOR_ATTACHMENT_NUM; ++i)
+        {
+            if (!same(descriptor->colorAttachments()->object(i), m_ActiveAttachments[i]))
+                return false;
+        }
+        return same(descriptor->depthAttachment(), m_ActiveAttachments[MAX_COLOR_ATTACHMENT_NUM])
+            && same(descriptor->stencilAttachment(), m_ActiveAttachments[MAX_COLOR_ATTACHMENT_NUM + 1]);
     }
 }
 

@@ -67,7 +67,7 @@ namespace Helios
         MTL::Device* GetDevice() const { return m_Device; }
         MTL::CommandQueue* GetCommandQueue() const { return m_CommandQueue; }
         MTL::CommandBuffer* GetCurrentCommandBuffer() const { return m_CurrentCommandBuffer; }
-        MTL::RenderCommandEncoder* GetCurrentRenderEncoder() const { return m_CurrentRenderEncoder; }
+        MTL::RenderCommandEncoder* GetCurrentRenderEncoder() const { return m_EncoderSuspended ? nullptr : m_CurrentRenderEncoder; }
         CA::MetalDrawable* GetCurrentDrawable() const { return m_CurrentDrawable; }
 
         void SetMetalLayer(CA::MetalLayer* layer) { m_MetalLayer = layer; }
@@ -85,9 +85,13 @@ namespace Helios
             uint32_t param_binding, const void* param_data, uint32_t param_size,
             uint32_t group_count) override;
 
-        /* 渲染通道管理 */
+        /* 渲染通道管理。allow_merge：先不结束编码器，下一趟附件完全相同且全是 Load 时
+         * 直接接着画，省掉一次附件写回再读入 */
         void BeginRenderPass(MTL::RenderPassDescriptor* renderPassDescriptor);
-        void EndRenderPass();
+        void EndRenderPass(bool allow_merge = false);
+
+        /* 统计：被合并进上一个编码器的通道数（检查用） */
+        [[nodiscard]] uint32_t GetMergedRenderPassCount() const { return m_MergedRenderPassCount; }
 
         void BeginDefaultRenderPass(bool preserve_content) override;
         void EndDefaultRenderPass() override;
@@ -109,6 +113,13 @@ namespace Helios
         [[nodiscard]] MetalPipelineDesc BuildPipelineDesc(uint64_t vertex_layout_hash) const;
 
     private:
+        /* 收掉当前渲染编码器（含挂起的），所有要换编码器的地方都走这里 */
+        void CloseRenderEncoder();
+        /* 新通道能否接在挂起的编码器上继续画 */
+        [[nodiscard]] bool CanResumeRenderPass(MTL::RenderPassDescriptor* descriptor) const;
+        /* 记下当前编码器的附件身份，合并时拿来比对 */
+        void SnapshotAttachments(MTL::RenderPassDescriptor* descriptor);
+
         /* 默认目标的多重采样附件：按全局 MSAA 设置创建，绘制落在它们上面，
          * 通道结束解析回 drawable 与窗口深度纹理；关闭时整体释放、回到单采样直画。 */
         void SyncDefaultMultisampleAttachments(MTL::RenderPassDescriptor* descriptor,
@@ -210,6 +221,21 @@ namespace Helios
         };
 
         CachedVertexBuffer m_AppliedVertexBuffers[MetalBinding::MaxVertexBuffers]{};
+
+        /* 通道合并：编码器挂起时等下一趟来接；附件快照用来判断是不是同一组目标 */
+        struct AttachmentIdentity
+        {
+            MTL::Texture* Texture{ nullptr };
+            MTL::Texture* Resolve{ nullptr };
+            NS::UInteger Level{ 0 };
+            NS::UInteger Slice{ 0 };
+        };
+        AttachmentIdentity m_ActiveAttachments[MAX_COLOR_ATTACHMENT_NUM + 2]{};
+        bool m_EncoderSuspended{ false };
+        /* 编码器上自己压入的调试组层数（合并续画时补的那一层单独记） */
+        uint32_t m_EncoderDebugGroupDepth{ 0 };
+        bool m_ResumeDebugGroupOpen{ false };
+        uint32_t m_MergedRenderPassCount{ 0 };
     };
 }
 

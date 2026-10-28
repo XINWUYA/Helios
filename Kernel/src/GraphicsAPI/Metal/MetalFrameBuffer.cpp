@@ -109,11 +109,10 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
+        /* 叠加 Pass 结束时先不收编码器：紧跟着的同附件叠加 Pass 可以接着画 */
         auto* render_api = dynamic_cast<MetalRenderAPI*>(Renderer::GetRenderAPI().get());
         if (render_api)
-        {
-            render_api->EndRenderPass();
-        }
+            render_api->EndRenderPass(/*allow_merge=*/true);
     }
 
     void MetalFrameBuffer::Resize(uint32_t width, uint32_t height)
