@@ -127,6 +127,7 @@ namespace Helios
 		{
 			std::string FileName;							/* 文件名 */
 			std::string FilePath;							/* 记录当前文件路径 */
+			std::filesystem::path AbsolutePath;				/* 建树时记下的绝对路径：逐帧取缩略图 / 图标不再查磁盘 */
 			FileType	Type;								/* 文件类型 */
 			float		FileSize{ 0 };						/* 文件大小 */
 			int			Depth{ -1 };						/* 文件夹距离目标目录的层数 */

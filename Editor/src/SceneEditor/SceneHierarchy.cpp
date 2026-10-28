@@ -1266,7 +1266,7 @@ namespace Helios
 		if (is_opened)
 		{
 			for (const Entity& root : roots)
-				ShowEntityNode(root, children, pending_delete, filter, kTreeRootKey);
+				ShowEntityNode(root, children, pending_delete, filter, kTreeRootKey, false);
 
 			ImGui::TreePop();
 		}
@@ -1309,7 +1309,8 @@ namespace Helios
 
 	/* 显示一个节点及其子树 */
 	void SceneHierarchy::ShowEntityNode(const Entity& entity, const EntityChildren& children,
-	                                    Entity& pending_delete, const FilterSet* filter, uint64_t parent_key)
+	                                    Entity& pending_delete, const FilterSet* filter, uint64_t parent_key,
+	                                    bool parent_hidden)
 	{
 		PROFILE_FUNCTION();
 
@@ -1320,10 +1321,10 @@ namespace Helios
 		const auto& name = entity.GetComponent<NameComponent>().m_Name;
 
 		/* 可见性两种口径：眼睛画的是自身状态（点它只写自己那一行），
-		 * 行的压暗看的是有效状态（自身或祖先被隐藏，含父链传染）。 */
-		const bool self_hidden = entity.HasComponent<VisibilityComponent>()
-			&& !entity.GetComponent<VisibilityComponent>().m_Visible;
-		const bool effectively_hidden = (m_pOwnerScene == nullptr) ? false : !m_pOwnerScene->IsEntityVisible(entity);
+		 * 行的压暗看的是有效状态（自身或祖先被隐藏）。祖先的结果由上一层传下来，不逐行上溯父链。 */
+		const auto* visibility = m_pOwnerScene->GetRegistry().try_get<VisibilityComponent>(entity);
+		const bool self_hidden = (visibility != nullptr) && !visibility->m_Visible;
+		const bool effectively_hidden = parent_hidden || self_hidden;
 
 		const auto child_entry = children.find(entity);
 		const std::vector<Entity>* sub_entities = (child_entry != children.end()) ? &child_entry->second : nullptr;
@@ -1482,7 +1483,7 @@ namespace Helios
 		if (has_children && is_opened)
 		{
 			for (const Entity& child : *sub_entities)
-				ShowEntityNode(child, children, pending_delete, filter, tree_key);
+				ShowEntityNode(child, children, pending_delete, filter, tree_key, effectively_hidden);
 
 			ImGui::TreePop();
 		}

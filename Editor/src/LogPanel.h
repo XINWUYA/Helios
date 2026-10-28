@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -48,8 +49,8 @@ namespace Helios
 	private:
 		/* 从 LogBuffer 增量取新（环形覆盖 / 清空时整体重建缓存） */
 		void SyncEntries();
-		/* 按搜索词 + 级别显隐重建过滤结果（行索引表），并统计级别条数 */
-		void RebuildVisibleEntries();
+		/* 过滤新到的条目并统计级别条数；搜索词或级别显隐变了才整表重算 */
+		void UpdateVisibleEntries();
 		/* 工具行：级别过滤（带条数）+ 搜索 + 跟随 + 计数 */
 		void ShowToolbar();
 		/* 条目列表（ListClipper 虚拟化；悬停提示 + 双击复制 + 跟随滚动） */
@@ -62,21 +63,31 @@ namespace Helios
 		bool DrawEntryRow(const LogBuffer::Record& record, float row_height);
 
 		bool PassesSearchFilter(const LogBuffer::Record& record) const;
+		/* 按绝对序位取条目（序位见 m_EntryBase） */
+		[[nodiscard]] const LogBuffer::Record& EntryAt(uint64_t position) const { return m_Entries[position - m_EntryBase]; }
 
-		/* 显示缓存（按序号增量追加；随环形容量截断） */
-		std::vector<LogBuffer::Record> m_Entries;
+		/* 显示缓存（按序号增量追加；随环形容量从头部截断） */
+		std::deque<LogBuffer::Record> m_Entries;
+		std::vector<LogBuffer::Record> m_Fetched;
 		uint64_t m_LastSeq{ 0 };
+		/* m_Entries 首条的绝对序位（只增不减）：过滤结果存绝对序位，头部丢条目时不用整表平移 */
+		uint64_t m_EntryBase{ 0 };
 		/* 级别显隐（索引 = spdlog::level::level_enum） */
 		bool m_LevelVisible[6] = { true, true, true, true, true, true };
-		/* 级别条数（槽 0..4 = trace..err；critical 并进 err；每帧随过滤重建） */
+		/* 级别条数（槽 0..4 = trace..err；critical 并进 err；随过滤增量维护） */
 		uint32_t m_LevelCounts[5] = { 0, 0, 0, 0, 0 };
 		/* 搜索：驻留缓冲（输入框直接编辑）+ 小写化过滤词 */
 		char m_SearchBuffer[128] = {};
 		std::string m_SearchFilter;
 		/* 跟随尾部（新条目到来时钉在底部） */
 		bool m_Follow{ true };
-		/* 过滤结果：m_Entries 的行索引（每帧重建） */
-		std::vector<uint32_t> m_VisibleEntries;
+		/* 过滤结果：可见条目的绝对序位（升序），m_FilteredEnd 之前的条目都已过滤过 */
+		std::deque<uint64_t> m_VisibleEntries;
+		uint64_t m_FilteredEnd{ 0 };
+		/* 上次过滤用的搜索词与级别显隐：变了就整表重算 */
+		std::string m_AppliedSearch;
+		bool m_AppliedLevelVisible[6] = { true, true, true, true, true, true };
+		bool m_FilterDirty{ true };
 		/* 选中集合（按 Seq 记：行索引随过滤 / 环形滚动不稳）；入口 = 行点击（单选 / 加选 /
 		 * 范围）与全选 */
 		std::unordered_set<uint64_t> m_SelectedSeqs;

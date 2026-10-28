@@ -444,8 +444,7 @@ namespace Helios
 		if (!node.ThumbnailResolved)
 		{
 			node.ThumbnailResolved = true;
-			node.Thumbnail = AssetManager::Instance().GetOrLoad<DeviceTexture>(
-				PathToUtf8(ResolveAssetPath(PathFromUtf8(node.FilePath))));
+			node.Thumbnail = AssetManager::Instance().GetOrLoad<DeviceTexture>(PathToUtf8(node.AbsolutePath));
 
 			if (node.Thumbnail != nullptr && !node.Thumbnail->IsLoaded())
 				node.Thumbnail = nullptr;
@@ -461,7 +460,7 @@ namespace Helios
 		if (node.Type != FileType::Svg)
 			return nullptr;
 
-		return Svg::GetImage(AbsoluteAssetPath(node.FilePath));
+		return Svg::GetImage(node.AbsolutePath);
 	}
 
 	/* GIF：帧表与图集纹理都在 Gif 模块里（按写入时间缓存）——
@@ -471,7 +470,7 @@ namespace Helios
 		if (node.Type != FileType::Image)
 			return nullptr;
 
-		return Gif::GetClip(AbsoluteAssetPath(node.FilePath));
+		return Gif::GetClip(node.AbsolutePath);
 	}
 
 	std::string EditorResourceBrowser::DisplayNodeName(const FileNode& node)
@@ -578,6 +577,7 @@ namespace Helios
 			const std::string current_path = (m_CurrentFileNode != nullptr) ? m_CurrentFileNode->FilePath : std::string();
 
 			m_RootFileNodeTree = CreateSharedPtr<FileNode>(PathToUtf8(g_ProjectPath), "", FileType::Folder, 0, -1);
+			m_RootFileNodeTree->AbsolutePath = g_ProjectPath;
 			BuildFileNodeTree(m_RootFileNodeTree);
 			UpdateDirectoryStamp();
 			m_FilterDirty = true;
@@ -2646,6 +2646,7 @@ namespace Helios
 			file_node->ParentNode = parent_node;
 			file_node->FileName = file_name;
 			file_node->FilePath = PathToUtf8(relative_path);
+			file_node->AbsolutePath = g_ProjectPath / relative_path;	/* 与 ResolveAssetPath 同形，资源缓存键一致 */
 			file_node->Depth = parent_node->Depth + 1;
 
 			if (directory_entry.is_directory()) /* 文件夹，递归目录 */
@@ -2662,7 +2663,8 @@ namespace Helios
 				file_node->Type = FileTypeOfKind(AssetFileKindOf(PathToUtf8(filename.extension())));
 
 				/* 图标不在这里取：非图片是矢量图标，图片缩略图按需加载（见 ThumbnailOf） */
-				file_node->FileSize = static_cast<float>(std::filesystem::file_size(path)) / 1024.0f;
+				std::error_code size_error;
+				file_node->FileSize = static_cast<float>(directory_entry.file_size(size_error)) / 1024.0f;
 				parent_node->ChildNodes.emplace_back(file_node);
 			}
 		}

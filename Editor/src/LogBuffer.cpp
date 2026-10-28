@@ -67,11 +67,12 @@ namespace Helios
 		/* 整体重建的两种情形：since 落点已被环形覆盖；或 since 早于最近一次
 		 * Clear（旧游标对应的条目已被清空，继续增量会让清空前的缓存残留） */
 		const bool rebuild = (since + 1 < m_Records.front().Seq) || (since < m_ClearedBelow);
-		for (const Record& record : m_Records)
-		{
-			if (record.Seq > since)
-				out.push_back(record);
-		}
+
+		/* 序号在缓冲里是连续的：直接算出第一条新条目的位置，不用从头扫 */
+		const uint64_t first_seq = m_Records.front().Seq;
+		const size_t start = (since + 1 > first_seq) ? static_cast<size_t>(since + 1 - first_seq) : 0;
+		for (size_t index = start; index < m_Records.size(); ++index)
+			out.push_back(m_Records[index]);
 
 		if (!out.empty())
 			since = out.back().Seq;

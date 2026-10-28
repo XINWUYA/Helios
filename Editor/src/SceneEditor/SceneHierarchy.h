@@ -182,9 +182,10 @@ namespace Helios
 		/* 收集根节点与 父->子 列表（按句柄升序，顺序稳定） */
 		void BuildHierarchy(EntityChildren& children, std::vector<Entity>& roots) const;
 		/* 显示实体节点及其子树；pending_delete 累积删除请求，由调用方在遍历后执行。
-		 * parent_key 是父节点在展开状态表里的键（树根用 kTreeRootKey）。 */
+		 * parent_key 是父节点在展开状态表里的键（树根用 kTreeRootKey）；parent_hidden = 祖先里有被隐藏的。 */
 		void ShowEntityNode(const Entity& entity, const EntityChildren& children,
-		                    Entity& pending_delete, const FilterSet* filter, uint64_t parent_key);
+		                    Entity& pending_delete, const FilterSet* filter, uint64_t parent_key,
+		                    bool parent_hidden);
 		/* 底栏「收起 / 展开全部」：把本帧画过的、有子节点的行统一置成 open */
 		void SetAllNodesOpen(bool open);
 		/* 本帧有没有能收起的行（全是没有子节点的实体时，底栏那枚按钮置灰） */

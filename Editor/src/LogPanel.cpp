@@ -2,6 +2,7 @@
 #include "LogPanel.h"
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include "EditorCommon.h"
 #include "EditorIcons.h"
@@ -197,7 +198,7 @@ namespace Helios
 		}
 
 		SyncEntries();
-		RebuildVisibleEntries();
+		UpdateVisibleEntries();
 
 		/* 面板标题由页签承担（"Log"）；面板内不重复标题行，清空动作在工具行右端（见 ShowToolbar） */
 		ShowToolbar();
@@ -233,13 +234,13 @@ namespace Helios
 	void LogPanel::SelectAllVisible()
 	{
 		m_SelectedSeqs.clear();
-		for (uint32_t index : m_VisibleEntries)
-			m_SelectedSeqs.insert(m_Entries[index].Seq);
+		for (uint64_t position : m_VisibleEntries)
+			m_SelectedSeqs.insert(EntryAt(position).Seq);
 
 		/* 锚点落到首个可见行：接着 Shift 点选从它算 */
 		m_HasSelectionAnchor = !m_VisibleEntries.empty();
 		if (m_HasSelectionAnchor)
-			m_SelectionAnchor = m_Entries[m_VisibleEntries.front()].Seq;
+			m_SelectionAnchor = EntryAt(m_VisibleEntries.front()).Seq;
 	}
 
 	void LogPanel::SelectSingle(uint64_t seq)
@@ -268,7 +269,7 @@ namespace Helios
 		{
 			for (size_t i = 0; i < m_VisibleEntries.size(); ++i)
 			{
-				if (m_Entries[m_VisibleEntries[i]].Seq == target)
+				if (EntryAt(m_VisibleEntries[i]).Seq == target)
 					return static_cast<int>(i);
 			}
 			return -1;
@@ -286,7 +287,7 @@ namespace Helios
 
 		m_SelectedSeqs.clear();
 		for (int i = ImMin(from, to); i <= ImMax(from, to); ++i)
-			m_SelectedSeqs.insert(m_Entries[m_VisibleEntries[static_cast<size_t>(i)]].Seq);
+			m_SelectedSeqs.insert(EntryAt(m_VisibleEntries[static_cast<size_t>(i)]).Seq);
 
 		/* 锚点不动：连续 Shift 点选时范围始终从同一个锚点算起 */
 	}
@@ -300,9 +301,9 @@ namespace Helios
 	uint32_t LogPanel::GetSelectedCount() const
 	{
 		uint32_t count = 0;
-		for (uint32_t index : m_VisibleEntries)
+		for (uint64_t position : m_VisibleEntries)
 		{
-			if (m_SelectedSeqs.count(m_Entries[index].Seq) != 0)
+			if (m_SelectedSeqs.count(EntryAt(position).Seq) != 0)
 				++count;
 		}
 		return count;
@@ -311,9 +312,9 @@ namespace Helios
 	std::string LogPanel::BuildSelectedText() const
 	{
 		std::string text;
-		for (uint32_t index : m_VisibleEntries)
+		for (uint64_t position : m_VisibleEntries)
 		{
-			const LogBuffer::Record& record = m_Entries[index];
+			const LogBuffer::Record& record = EntryAt(position);
 			if (m_SelectedSeqs.count(record.Seq) == 0)
 				continue;
 			if (!text.empty())
@@ -325,41 +326,67 @@ namespace Helios
 
 	void LogPanel::SyncEntries()
 	{
-		std::vector<LogBuffer::Record> fetched;
-		const bool rebuild = LogBuffer::Instance().FetchSince(m_LastSeq, fetched);
+		const bool rebuild = LogBuffer::Instance().FetchSince(m_LastSeq, m_Fetched);
 
 		if (rebuild)
 		{
+			m_EntryBase += m_Entries.size();
 			m_Entries.clear();
 			m_SelectedSeqs.clear(); /* 数据源换代，选择快照作废 */
+			m_FilterDirty = true;
 		}
 
-		for (LogBuffer::Record& record : fetched)
+		for (LogBuffer::Record& record : m_Fetched)
 			m_Entries.push_back(std::move(record));
 
-		/* 缓存与环形缓冲同容量截断（显示缓存不需要比数据源留得更旧） */
-		if (m_Entries.size() > LogBuffer::kCapacity)
-			m_Entries.erase(m_Entries.begin(), m_Entries.begin() + (m_Entries.size() - LogBuffer::kCapacity));
+		/* 缓存与环形缓冲同容量，从头部丢旧条目；已过滤过的要从级别条数里扣掉
+		 * （搜索词刚改过就不用扣，下面会整表重算） */
+		const bool counts_current = !m_FilterDirty && m_SearchFilter == m_AppliedSearch;
+		while (m_Entries.size() > LogBuffer::kCapacity)
+		{
+			const LogBuffer::Record& front = m_Entries.front();
+			if (counts_current && m_EntryBase < m_FilteredEnd && PassesSearchFilter(front))
+				--m_LevelCounts[LevelCountSlot(front.Level)];
+
+			m_Entries.pop_front();
+			++m_EntryBase;
+		}
+
+		while (!m_VisibleEntries.empty() && m_VisibleEntries.front() < m_EntryBase)
+			m_VisibleEntries.pop_front();
+		m_FilteredEnd = std::max(m_FilteredEnd, m_EntryBase);
 	}
 
-	void LogPanel::RebuildVisibleEntries()
+	void LogPanel::UpdateVisibleEntries()
 	{
-		m_VisibleEntries.clear();
-		m_VisibleEntries.reserve(m_Entries.size());
-		for (uint32_t& count : m_LevelCounts)
-			count = 0;
-
-		for (uint32_t index = 0; index < m_Entries.size(); ++index)
+		const bool filter_changed = m_FilterDirty || m_SearchFilter != m_AppliedSearch
+			|| std::memcmp(m_LevelVisible, m_AppliedLevelVisible, sizeof(m_LevelVisible)) != 0;
+		if (filter_changed)
 		{
-			const LogBuffer::Record& record = m_Entries[index];
+			m_VisibleEntries.clear();
+			for (uint32_t& count : m_LevelCounts)
+				count = 0;
+
+			m_FilteredEnd = m_EntryBase;
+			m_AppliedSearch = m_SearchFilter;
+			std::memcpy(m_AppliedLevelVisible, m_LevelVisible, sizeof(m_LevelVisible));
+			m_FilterDirty = false;
+		}
+
+		/* 只过滤还没过滤过的新条目 */
+		const uint64_t entry_end = m_EntryBase + m_Entries.size();
+		for (uint64_t position = m_FilteredEnd; position < entry_end; ++position)
+		{
+			const LogBuffer::Record& record = EntryAt(position);
 			if (!PassesSearchFilter(record))
 				continue;
 
 			/* 条数只跟搜索词走、不受级别显隐影响：数字 = 该级别当前的全部条数（含被藏起来的） */
 			++m_LevelCounts[LevelCountSlot(record.Level)];
 			if (IsLevelVisible(static_cast<spdlog::level::level_enum>(record.Level)))
-				m_VisibleEntries.push_back(index);
+				m_VisibleEntries.push_back(position);
 		}
+		m_FilteredEnd = entry_end;
 	}
 
 	bool LogPanel::PassesSearchFilter(const LogBuffer::Record& record) const
@@ -436,9 +463,11 @@ namespace Helios
 		if (Icons::IconButton(Icons::Id::Remove, ImVec2(clear_width, clear_width), false, "Clear Log"))
 		{
 			LogBuffer::Instance().Clear();
+			m_EntryBase += m_Entries.size();
 			m_Entries.clear();
 			m_VisibleEntries.clear();
 			m_SelectedSeqs.clear();
+			m_FilterDirty = true;
 		}
 
 		ImGui::Dummy(ImVec2(0.0f, 2.0f));
@@ -460,7 +489,7 @@ namespace Helios
 			while (clipper.Step())
 			{
 				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
-					clicked_any_row |= DrawEntryRow(m_Entries[m_VisibleEntries[static_cast<size_t>(row)]], row_height);
+					clicked_any_row |= DrawEntryRow(EntryAt(m_VisibleEntries[static_cast<size_t>(row)]), row_height);
 			}
 			clipper.End();
 

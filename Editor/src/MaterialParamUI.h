@@ -9,6 +9,7 @@
 #include <fstream>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <imgui.h>
@@ -63,26 +64,82 @@ namespace Helios::MaterialParamUI
 		MaterialPropertySpec Spec;
 	};
 
+	/* 一条 @property 声明的预处理结果：名字的 ID、缺省行、@showif 依赖都提前算好 */
+	struct PropertyLayoutEntry
+	{
+		const ReflectedMaterialParam* Reflected{ nullptr };
+		uint32_t ParamId{ 0 };
+		MaterialParamInfo DefaultRow;
+		uint32_t ShowIfId{ 0 };
+		const ReflectedMaterialParam* ShowIfDeclared{ nullptr };
+	};
+
+	/* Shader 的属性清单（只含 @property，按名字排好）：按 Shader 实例 + 热重载版本缓存，
+	 * 面板每帧取行时不再过滤反射、算 ID、排序。只在 UI 线程用。 */
+	inline const std::vector<PropertyLayoutEntry>& PropertyLayoutOf(const SharedPtr<DeviceShader>& shader)
+	{
+		struct CacheEntry
+		{
+			WeakPtr<DeviceShader> Shader;
+			uint32_t Generation{ 0 };
+			std::vector<PropertyLayoutEntry> Entries;
+		};
+		static std::unordered_map<const DeviceShader*, CacheEntry> s_Cache;
+
+		CacheEntry& cached = s_Cache[shader.get()];
+		if (cached.Shader.lock() == shader && cached.Generation == shader->GetGeneration())
+			return cached.Entries;
+
+		cached.Shader = shader;
+		cached.Generation = shader->GetGeneration();
+		cached.Entries.clear();
+
+		const ShaderReflectionData& reflection = shader->GetReflectionData();
+		for (const ReflectedMaterialParam& reflected : reflection.MaterialParams)
+		{
+			/* 引擎自己绑的参数（如 u_ShadowMap / u_BRDFLut）没标 @property，不列：
+			 * 贴图由渲染通道逐绘制给，面板改了也会被覆盖 */
+			if (!reflected.Property)
+				continue;
+
+			PropertyLayoutEntry entry;
+			entry.Reflected = &reflected;
+			entry.ParamId = ToID(reflected.Name);
+			entry.DefaultRow = MakeDefaultMaterialParamRow(reflected);
+			if (!reflected.PropertySpec.ShowIfParam.empty())
+			{
+				entry.ShowIfId = ToID(reflected.PropertySpec.ShowIfParam);
+				entry.ShowIfDeclared = reflection.FindMaterialParam(reflected.PropertySpec.ShowIfParam);
+			}
+			cached.Entries.push_back(std::move(entry));
+		}
+
+		std::sort(cached.Entries.begin(), cached.Entries.end(),
+			[](const PropertyLayoutEntry& lhs, const PropertyLayoutEntry& rhs) { return lhs.Reflected->Name < rhs.Reflected->Name; });
+		return cached.Entries;
+	}
+
 	/* @showif 求值：拿材质里的当前值比（没有就用反射默认值）。开关不是 int / float、
 	 * 或者那个参数压根没声明时按可见处理 —— 别把行藏没了。 */
-	inline bool IsPropertyVisible(const Material& material, const ShaderReflectionData& reflection,
-		const MaterialPropertySpec& spec)
+	inline bool IsLayoutEntryVisible(const Material& material, const PropertyLayoutEntry& entry)
 	{
+		const MaterialPropertySpec& spec = entry.Reflected->PropertySpec;
 		if (spec.ShowIfParam.empty())
 			return true;
 
-		std::any value;
 		const auto& parameters = material.GetAllParameters();
-		const auto iter = parameters.find(ToID(spec.ShowIfParam));
-		if (iter != parameters.end())
-			value = iter->second.Value;
-		else if (const ReflectedMaterialParam* declared = reflection.FindMaterialParam(spec.ShowIfParam))
-			value = declared->Default;
+		const std::any* value = nullptr;
+		if (const auto iter = parameters.find(entry.ShowIfId); iter != parameters.end())
+			value = &iter->second.Value;
+		else if (entry.ShowIfDeclared != nullptr)
+			value = &entry.ShowIfDeclared->Default;
 
-		if (value.type() == typeid(int))
-			return static_cast<float>(std::any_cast<int>(value)) == spec.ShowIfValue;
-		if (value.type() == typeid(float))
-			return std::any_cast<float>(value) == spec.ShowIfValue;
+		if (value == nullptr)
+			return true;
+		if (value->type() == typeid(int))
+			return static_cast<float>(std::any_cast<int>(*value)) == spec.ShowIfValue;
+		if (value->type() == typeid(float))
+			return std::any_cast<float>(*value) == spec.ShowIfValue;
 		return true;
 	}
 
@@ -97,25 +154,17 @@ namespace Helios::MaterialParamUI
 		if (shader == nullptr)
 			return rows;
 
-		const ShaderReflectionData& reflection = shader->GetReflectionData();
+		const std::vector<PropertyLayoutEntry>& layout = PropertyLayoutOf(shader);
 		const auto& parameters = material.GetAllParameters();
-		rows.reserve(reflection.MaterialParams.size());
-		for (const ReflectedMaterialParam& reflected : reflection.MaterialParams)
+		rows.reserve(layout.size());
+		for (const PropertyLayoutEntry& entry : layout)
 		{
-			/* 引擎自己绑的参数（如 u_ShadowMap / u_BRDFLut）没标 @property，不列：
-			 * 贴图由渲染通道逐绘制给，面板改了也会被覆盖 */
-			if (!reflected.Property)
-				continue;
-			if (!IsPropertyVisible(material, reflection, reflected.PropertySpec))
+			if (!IsLayoutEntryVisible(material, entry))
 				continue;
 
-			const auto iter = parameters.find(ToID(reflected.Name));
-			rows.push_back({ iter != parameters.end() ? iter->second : MakeDefaultMaterialParamRow(reflected),
-				reflected.PropertySpec });
+			const auto iter = parameters.find(entry.ParamId);
+			rows.push_back({ iter != parameters.end() ? iter->second : entry.DefaultRow, entry.Reflected->PropertySpec });
 		}
-
-		std::sort(rows.begin(), rows.end(),
-			[](const MaterialParamRow& lhs, const MaterialParamRow& rhs) { return lhs.Param.Name < rhs.Param.Name; });
 		return rows;
 	}
 
