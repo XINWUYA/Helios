@@ -28,13 +28,7 @@ namespace Helios
 			RenderRasterState MakeAdditiveRasterState(const RenderRasterState& base)
 			{
 				RenderRasterState state = base;
-				state.EnableBlend = true;
-				state.BlendEquationRGB = BlendEquation::Add;
-				state.BlendEquationA = BlendEquation::Add;
-				state.BlendFuncSrcRGB = BlendFunc::One;
-				state.BlendFuncSrcA = BlendFunc::One;
-				state.BlendFuncDstRGB = BlendFunc::One;
-				state.BlendFuncDstA = BlendFunc::One;
+				state.SetAdditiveBlend();
 				state.DepthCompareFunc = CompareFunc::Equal;
 				return state;
 			}
@@ -63,6 +57,13 @@ namespace Helios
 				const size_t ambient_light_index = (shadow_maps != nullptr)
 					? shadow_maps->FindPrimaryShadowLightIndex(lights) : 0;
 
+				/* 前向直画用材质自身 shader：没写的贴图槽补默认贴图（缺绑定 Metal 会断言），
+				 * 没写的值参数补默认值（裸 uniform 是 per-program 状态，不补会沿用上一个材质的值）。
+				 * per_draw 跨对象复用，覆盖表只清不释放 */
+				DrawParams per_draw;
+				per_draw.FillMissing = MaterialFill::Values | MaterialFill::Textures;
+				per_draw.Overrides.reserve(8);
+
 				for (const VisibleMeshObject* mesh_object : draw_list)
 				{
 					Renderer::FillObjectUniformBuffer(*mesh_object);
@@ -72,20 +73,11 @@ namespace Helios
 						: material->GetRasterState();
 
 					/* IBL 是"每次绘制都不一样"的绑定（按对象选最近探针）—— 走 per-draw 覆盖、不写进材质对象；
-					 * 只对支持 IBL 的 Shader 发；没有探针时靠覆盖里的中性兜底，保证四个采样槽始终有绑定。
-					 * 覆盖随每个光照笔重发（声明过的采样器每次绘制都要有绑定）。 */
-					DrawParams per_draw;
+					 * 只对支持 IBL 的 Shader 发；没有探针时靠覆盖里的中性兜底，保证四个采样槽始终有绑定。 */
+					per_draw.Overrides.clear();
+					per_draw.RasterStateOverride.reset();
 					if (transparent)
 						per_draw.RasterStateOverride = base_state;
-
-					/* 前向直画用材质自身 shader，不经过 G-Buffer 的采样器兜底：材质没写的贴图槽
-					 * 要用默认贴图补上，缺一个声明过的采样器 Metal 就会直接断言。 */
-					per_draw.Overrides = material->CollectMissingTextureParamDefaults();
-
-					/* 值参数也要补齐：裸 uniform 是 per-program 状态，材质没写就会沿用
-					 * 上一个材质留下的值（场景里别处的 tiling 会把 UV 带歪）。 */
-					const auto value_fills = material->CollectMissingValueParamDefaults();
-					per_draw.Overrides.insert(per_draw.Overrides.end(), value_fills.begin(), value_fills.end());
 
 					if (material->SupportsIBL())
 					{
@@ -107,20 +99,20 @@ namespace Helios
 					/* 天空盒与不参与光照合成的材质：单笔原样提交 */
 					if (material->IsSkyBox() || !material->SupportsDirectLighting())
 					{
-						Renderer::Submit(material, mesh_primitive,
-							per_draw.Overrides.empty() && !per_draw.RasterStateOverride.has_value()
-								? nullptr : &per_draw);
+						Renderer::Submit(material, mesh_primitive, &per_draw);
 						continue;
 					}
+
+					/* 合成开关放在覆盖表最后，逐笔只改它的值 */
+					per_draw.Overrides.emplace_back(ParamType::Int, "u_ComposeAmbientEmission", 1);
+					std::any& compose_value = per_draw.Overrides.back().Value;
 
 					/* 本视图没有光源（都落在看不到的层）：仍画一笔环境光 + IBL，
 					 * 否则物体整片消失 */
 					if (lights.empty())
 					{
 						Renderer::FillEmptyLightUniformBuffer();
-						per_draw.Overrides.emplace_back(ParamType::Int, "u_ComposeAmbientEmission", 1);
 						Renderer::Submit(material, mesh_primitive, &per_draw);
-						per_draw.Overrides.pop_back();
 						continue;
 					}
 
@@ -128,15 +120,12 @@ namespace Helios
 					{
 						Renderer::FillLightUniformBuffer(lights[light_index], shadow_maps);
 
-						/* 合成开关只在环境项那一笔打开；其余笔加覆盖、用后即还（下笔重设） */
-						per_draw.Overrides.emplace_back(ParamType::Int, "u_ComposeAmbientEmission",
-							light_index == ambient_light_index ? 1 : 0);
+						/* 合成开关只在环境项那一笔打开，其余笔加法叠加 */
+						compose_value = light_index == ambient_light_index ? 1 : 0;
 						if (light_index > 0)
 							per_draw.RasterStateOverride = MakeAdditiveRasterState(base_state);
 
 						Renderer::Submit(material, mesh_primitive, &per_draw);
-
-						per_draw.Overrides.pop_back();
 					}
 				}
 			}

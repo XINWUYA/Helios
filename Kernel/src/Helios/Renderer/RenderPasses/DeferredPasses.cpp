@@ -60,22 +60,43 @@ namespace Helios
 			return 0;
 		}
 
-		SharedPtr<Material> CreateGBufferMaterial(
-			const SharedPtr<Material>& source, const SharedPtr<DeviceShader>& gbuffer_shader)
+		/* 普通材质转成 GBuffer.glsl 能画的材质；已经是完整 GBuffer 材质的返回空（直接画自己）。
+		 * 结果缓存在源材质上（见 Material::GetDerived），源材质或 GBuffer shader 变了才重建 */
+		SharedPtr<Material> CreateGBufferMaterial(const Material& source, const SharedPtr<DeviceShader>& gbuffer_shader)
 		{
+			if (gbuffer_shader == nullptr)
+				return nullptr;
+
+			/* 声称用 GBuffer shader 但采样点没配全的老材质（head.mtl 这类待迁移
+			 * 资产）也要走转换：直画会带着未绑定的采样点，画面是垃圾输入 */
+			if (source.GetShader() == gbuffer_shader)
+			{
+				const auto& parameters = source.GetAllParameters();
+				const bool complete = std::all_of(
+					gbuffer_shader->GetReflectionData().SamplerBindings.begin(),
+					gbuffer_shader->GetReflectionData().SamplerBindings.end(),
+					[&parameters](const auto& sampler_entry)
+					{
+						const auto iter = parameters.find(ToID(sampler_entry.first));
+						return iter != parameters.end() && iter->second.Type == ParamType::Texture;
+					});
+				if (complete)
+					return nullptr;
+			}
+
 			auto material = Material::Create(gbuffer_shader);
 			const auto& gbuffer_reflection = gbuffer_shader->GetReflectionData();
-			for (const auto& [_, parameter] : source->GetAllParameters())
+			for (const auto& [_, parameter] : source.GetAllParameters())
 			{
 				if (parameter.Type == ParamType::Texture)
 				{
 					if (gbuffer_shader->GetUniformBinding(parameter.Name) < 0)
 						continue;
-					const auto texture = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(parameter.Value);
-					/* 没加载成功的贴图不复制，留给下面的默认贴图兜底 */
-					if (texture.first == nullptr || !texture.first->IsLoaded())
+					/* 没加载成功的贴图也照抄：绘制时会换成默认贴图，等它重载成功又能直接用上 */
+					const auto* texture = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(&parameter.Value);
+					if (texture == nullptr || texture->first == nullptr)
 						continue;
-					material->SetTexture(parameter.Name, texture.first);
+					material->SetTexture(parameter.Name, texture->first);
 				}
 				else
 				{
@@ -98,7 +119,7 @@ namespace Helios
 				material->SetTexture(sampler_name, Material::DefaultTextureForSampler(sampler_name));
 			}
 
-			material->SetRasterState(source->GetRasterState());
+			material->SetRasterState(source.GetRasterState());
 			return material;
 		}
 	}
@@ -140,8 +161,8 @@ namespace Helios
 				object_id_desc.TextureFormat = TextureFormat::R32F;
 
 				/* GBuffer Pass 使用 GBuffer.glsl；普通材质在提交前转换为该 shader 对应的临时材质。 */
-				const auto gbuffer_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/DeferredShaders/GBuffer.glsl"));
+				static BuiltinAsset<DeviceShader> s_gbuffer_shader("Shaders/DeferredShaders/GBuffer.glsl");
+				const auto gbuffer_shader = s_gbuffer_shader.Get();
 
 				struct GBufferPassData
 				{
@@ -195,10 +216,6 @@ namespace Helios
 					},
 					[&render_view, gbuffer_shader](const FrameGraphResources& resources, const GBufferPassData& data)
 					{
-						std::unordered_map<const Material*, SharedPtr<Material>> gbuffer_materials;
-						/* 目标 shader 已声明、材质没写的值参数 → 用默认值补齐。块式 uniform 是 per-program 状态：
-						 * 不写会残留上一个对象的取值。 */
-						std::unordered_map<const Material*, std::vector<MaterialParamInfo>> gbuffer_param_fills;
 						const auto render_pass_info = resources.GetPassRenderTarget();
 						render_view.EmplacePassFrameBuffer("GBufferPass", render_pass_info);
 
@@ -206,52 +223,29 @@ namespace Helios
 						{
 							Renderer::GetRenderAPI()->Clear();
 
+							/* 目标 shader 已声明、材质没写的值参数用默认值补齐：块式 uniform 是 per-program 状态，
+							 * 不写会残留上一个对象的取值 */
+							DrawParams per_draw;
+							per_draw.FillMissing = MaterialFill::Values;
+
 							const auto gbuffer_list = RenderSorting::CollectGBufferList(render_view.GetVisibleMeshObjects());
 							for (const VisibleMeshObject* gbuffer_object : gbuffer_list)
 							{
 								const VisibleMeshObject& mesh_object = *gbuffer_object;
-
-								/* Fill object uniform buffer */
-								Renderer::FillObjectUniformBuffer(mesh_object);
-
 								const auto& material = mesh_object.Material;
 								if (material == nullptr)
 									continue;
 
-								auto gbuffer_material = material;
-								/* 声称用 GBuffer shader 但采样点没配全的老材质（head.mtl 这类待迁移
-								 * 资产）也要走转换：直画会带着未绑定的采样点，画面是垃圾输入 */
-								bool needs_conversion = (material->GetShader() != gbuffer_shader);
-								if (!needs_conversion)
-								{
-									const auto& parameters = material->GetAllParameters();
-									for (const auto& sampler_entry : gbuffer_shader->GetReflectionData().SamplerBindings)
-									{
-										const auto iter = parameters.find(ToID(sampler_entry.first));
-										if (iter == parameters.end() || iter->second.Type != ParamType::Texture)
-										{
-											needs_conversion = true;
-											break;
-										}
-									}
-								}
-								if (needs_conversion)
-								{
-									auto [cached, inserted] = gbuffer_materials.try_emplace(material.get());
-									if (inserted)
-										cached->second = CreateGBufferMaterial(material, gbuffer_shader);
-									gbuffer_material = cached->second;
-								}
+								Renderer::FillObjectUniformBuffer(mesh_object);
 
-								/* 按材质对象缓存补齐结果（转换材质是源材质的复制，参数同源） */
-								auto fills = gbuffer_param_fills.try_emplace(material.get());
-								if (fills.second)
-									fills.first->second = gbuffer_material->CollectMissingValueParamDefaults();
+								/* 光栅状态能被面板直接改、不走材质版本号，每次照源材质同步 */
+								SharedPtr<Material> gbuffer_material = material->GetDerived(gbuffer_shader, &CreateGBufferMaterial);
+								if (gbuffer_material != nullptr)
+									gbuffer_material->SetRasterState(material->GetRasterState());
+								else
+									gbuffer_material = material;
 
-								DrawParams per_draw;
-								per_draw.Overrides = fills.first->second;
-								Renderer::Submit(gbuffer_material, mesh_object.MeshSegment->GetMeshPrimitive(),
-									per_draw.Overrides.empty() ? nullptr : &per_draw);
+								Renderer::Submit(gbuffer_material, mesh_object.MeshSegment->GetMeshPrimitive(), &per_draw);
 							}
 						}
 						render_pass_info->Unbind();
@@ -368,6 +362,46 @@ namespace Helios
 
 							const int debug_view_value = LightingDebugViewValue(render_view.GetDebugViewMode());
 
+							/* 光照材质每趟只建一份：G-Buffer、探针这些逐笔不变，逐笔只改环境项开关 */
+							static BuiltinAsset<DeviceShader> s_lighting_shader("Shaders/DeferredShaders/Lighting.glsl");
+							const auto material = Renderer::CreateFullScreenMaterial(s_lighting_shader.Get(), true);
+							material->SetTexture("u_GBufferTexture0", resources.Get(data.GBufferTexture0).Texture);
+							material->SetTexture("u_GBufferTexture1", resources.Get(data.GBufferTexture1).Texture);
+							material->SetTexture("u_GBufferTexture2", resources.Get(data.GBufferTexture2).Texture);
+							material->SetTexture("u_GBufferTexture3", resources.Get(data.GBufferTexture3).Texture);
+							material->SetTexture("u_GBufferTexture4", resources.Get(data.GBufferTexture4).Texture);
+							material->SetTexture("u_GBufferTexture5", resources.Get(data.GBufferTexture5).Texture);
+							/* 调试视图：光照分量档位（Diffuse / Specular / 环境项 / Probe） */
+							material->SetParameters(ParamType::Int, "u_DebugView", debug_view_value);
+
+							/* 探针 IBL：采样槽位不管有没有效都必须有绑定（缺绑定会被 Metal 校验断言），无效槽位用中性兜底 */
+							material->SetParameters(ParamType::Int, "u_ProbeCount", static_cast<int>(ibl_probes.size()));
+							/* 混合开关：没有探针配过渡时，着色器走旧的"距离最近"路径 */
+							material->SetParameters(ParamType::Int, "u_ProbeBlendEnabled", ibl_blend_enabled ? 1 : 0);
+							static constexpr const char* kProbePositionNames[] = { "u_ProbePosition0", "u_ProbePosition1", "u_ProbePosition2" };
+							static constexpr const char* kProbeExtentNames[] = { "u_ProbeExtent0", "u_ProbeExtent1", "u_ProbeExtent2" };
+							static constexpr const char* kIrradianceNames[] = { "u_IrradianceMap0", "u_IrradianceMap1", "u_IrradianceMap2" };
+							static constexpr const char* kPrefilterNames[] = { "u_PrefilterMap0", "u_PrefilterMap1", "u_PrefilterMap2" };
+							static_assert(std::size(kProbePositionNames) == kMaxDeferredIBLProbes);
+							for (size_t probe_index = 0; probe_index < kMaxDeferredIBLProbes; ++probe_index)
+							{
+								const bool valid = probe_index < ibl_probes.size();
+								material->SetParameters(ParamType::Vec3, kProbePositionNames[probe_index],
+									valid ? ibl_probes[probe_index]->GetPosition() : glm::vec3(0.0f));
+								/* 盒体参数：xyz = 半尺寸、w = 混合距离（关闭混合时不读） */
+								material->SetParameters(ParamType::Vec4, kProbeExtentNames[probe_index],
+									valid ? glm::vec4(ibl_probes[probe_index]->GetBoxSize() * 0.5f,
+										ibl_probes[probe_index]->GetBlendDistance())
+									: glm::vec4(0.0f));
+
+								material->SetTexture(kIrradianceNames[probe_index],
+									valid ? ibl_probes[probe_index]->GetIrradianceMap() : DeviceTexture::BlackCube());
+								material->SetTexture(kPrefilterNames[probe_index],
+									valid ? ibl_probes[probe_index]->GetPrefilterMap() : DeviceTexture::BlackCube());
+							}
+							material->SetTexture("u_BRDFLut",
+								ibl_brdf_lut != nullptr ? ibl_brdf_lut : DeviceTexture::Black());
+
 							/* 单笔光照：light 为空时按"无光源"填 UBO（只合成环境光 + IBL） */
 							const auto draw_light = [&](const SharedPtr<Light>& light, size_t light_index)
 							{
@@ -381,59 +415,9 @@ namespace Helios
 									Renderer::FillEmptyLightUniformBuffer();
 								}
 
-								SharedPtr<Material> material = CreateSharedPtr<Material>();
-								auto& raster_state = material->GetRasterState();
-								raster_state.EnableDepthTest = false;
-								raster_state.EnableDepthWrite = false;
-								raster_state.EnableBlend = true;
-								raster_state.BlendEquationRGB = BlendEquation::Add;
-								raster_state.BlendEquationA = BlendEquation::Add;
-								raster_state.BlendFuncSrcRGB = BlendFunc::One;
-								raster_state.BlendFuncSrcA = BlendFunc::One;
-								raster_state.BlendFuncDstRGB = BlendFunc::One;
-								raster_state.BlendFuncDstA = BlendFunc::One;
-								const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-									ABSOLUTE_PATH("Shaders/DeferredShaders/Lighting.glsl"));
-								material->SetShader(shader);
-								material->SetTexture("u_GBufferTexture0", resources.Get(data.GBufferTexture0).Texture);
-								material->SetTexture("u_GBufferTexture1", resources.Get(data.GBufferTexture1).Texture);
-								material->SetTexture("u_GBufferTexture2", resources.Get(data.GBufferTexture2).Texture);
-								material->SetTexture("u_GBufferTexture3", resources.Get(data.GBufferTexture3).Texture);
-								material->SetTexture("u_GBufferTexture4", resources.Get(data.GBufferTexture4).Texture);
-								material->SetTexture("u_GBufferTexture5", resources.Get(data.GBufferTexture5).Texture);
 								/* 环境光 / 自发光与光源无关，只在主阴影光源那一笔合成（多光源逐笔加法叠加） */
 								material->SetParameters(ParamType::Int, "u_ComposeAmbientEmission",
 									light_index == primary_shadow_light ? 1 : 0);
-								/* 调试视图：光照分量档位（Diffuse / Specular / 环境项 / Probe） */
-								material->SetParameters(ParamType::Int, "u_DebugView", debug_view_value);
-
-								/* 探针 IBL 的参数和贴图每笔光照都完整设一遍（裸 uniform 是 per-program 状态，漏设就残留
-								 * 上一笔）；采样槽位不管有没有效都必须有绑定（缺绑定会被 Metal 校验断言），无效槽位用中性兜底。 */
-								material->SetParameters(ParamType::Int, "u_ProbeCount",
-									static_cast<int>(ibl_probes.size()));
-								/* 混合开关：没有探针配过渡时，着色器走旧的"距离最近"路径 */
-								material->SetParameters(ParamType::Int, "u_ProbeBlendEnabled",
-									ibl_blend_enabled ? 1 : 0);
-								for (size_t probe_index = 0; probe_index < kMaxDeferredIBLProbes; ++probe_index)
-								{
-									const std::string suffix = std::to_string(probe_index);
-									const bool valid = probe_index < ibl_probes.size();
-									material->SetParameters(ParamType::Vec3, "u_ProbePosition" + suffix,
-										valid ? ibl_probes[probe_index]->GetPosition() : glm::vec3(0.0f));
-									/* 盒体参数：xyz = 半尺寸、w = 混合距离（关闭混合时不读） */
-									material->SetParameters(ParamType::Vec4, "u_ProbeExtent" + suffix,
-										valid ? glm::vec4(ibl_probes[probe_index]->GetBoxSize() * 0.5f,
-											ibl_probes[probe_index]->GetBlendDistance())
-										: glm::vec4(0.0f));
-
-									material->SetTexture("u_IrradianceMap" + suffix,
-										valid ? ibl_probes[probe_index]->GetIrradianceMap() : DeviceTexture::BlackCube());
-									material->SetTexture("u_PrefilterMap" + suffix,
-										valid ? ibl_probes[probe_index]->GetPrefilterMap() : DeviceTexture::BlackCube());
-								}
-								material->SetTexture("u_BRDFLut",
-									ibl_brdf_lut != nullptr ? ibl_brdf_lut : DeviceTexture::Black());
-
 								Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
 							};
 

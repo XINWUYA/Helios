@@ -49,6 +49,8 @@ namespace Helios
         void SetFloat3(const std::string& name, const glm::vec3& value) override;
         void SetFloat4(const std::string& name, const glm::vec4& value) override;
         void SetMat4(const std::string& name, const glm::mat4& value) override;
+        int ResolveParamHandle(const std::string& name) override;
+        void SetParam(int handle, ParamType type, const void* data) override;
 
         const std::string& GetDebugName() const override { return m_DebugName; }
 
@@ -108,8 +110,8 @@ namespace Helios
             /* 成员名 → MSL 类型：重载迁移时按它判断类型变没变，大小也由它算 */
             std::unordered_map<std::string, std::string> Types;
             std::vector<uint8_t> Shadow;                      /* CPU 端影子数据 */
-            /* 上次提交的内容指纹：材质参数每帧按名重写一遍，值没变就不必再传 */
-            uint64_t CommittedHash{ 0 };
+            /* 影子数据改过没提交：值没变的写入不置位，同一编码器里就不必再传 */
+            bool Dirty{ true };
             uint32_t CommittedGeneration{ 0 };                /* 上次提交的编码器世代号 */
         };
 
@@ -132,6 +134,8 @@ namespace Helios
         /* 在全部材质块中查找成员，命中时输出所在块与偏移 */
         MaterialBlock* FindMaterialMember(const std::string& name, uint32_t& out_offset);
         void WriteMaterialData(const std::string& name, const void* data, uint32_t size);
+        /* 写进一块的影子数据，越界返回 false；值有变化才标脏 */
+        bool WriteBlockBytes(MaterialBlock& block, uint32_t offset, const void* data, uint32_t size);
 
         std::string m_DebugName{ "Unnamed Shader" };
         std::string m_VertexMSL;
@@ -146,6 +150,16 @@ namespace Helios
 
         /* 材质参数块：顶点阶段与片元阶段各可能有一块 */
         std::vector<MaterialBlock> m_MaterialBlocks;
+
+        /* 参数句柄 → 落在哪几块的哪个偏移（顶点与片元各一份）；名字 → 句柄，没有的记 -1 */
+        struct ParamTarget
+        {
+            uint32_t Block[2]{};
+            uint32_t Offset[2]{};
+            uint32_t Count{ 0 };
+        };
+        std::vector<ParamTarget> m_ParamTargets;
+        std::unordered_map<std::string, int> m_ParamHandles;
 
         /* 纹理槽位 → 使用阶段掩码（首次查询时算好） */
         std::unordered_map<uint32_t, uint8_t> m_TextureStageMasks;

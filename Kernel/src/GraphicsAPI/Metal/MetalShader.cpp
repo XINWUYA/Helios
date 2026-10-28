@@ -41,17 +41,14 @@ namespace Helios
             return 16;
         }
 
-        /* 材质参数块的内容指纹（FNV-1a）：只用来判断同样的数据是否已经提交过 */
-        [[nodiscard]] uint64_t HashMaterialBytes(const uint8_t* data, uint32_t size)
+        /* 编码器上每个材质块槽位最后是哪一块写的（按阶段分开） */
+        constexpr uint32_t kMaxBlockSlots = 32;
+        struct BlockSlotOwner
         {
-            uint64_t hash = 0xCBF29CE484222325ULL;
-            for (uint32_t i = 0; i < size; ++i)
-            {
-                hash ^= data[i];
-                hash *= 0x100000001B3ULL;
-            }
-            return hash;
-        }
+            const void* Block{ nullptr };
+            uint32_t Generation{ 0 };
+        };
+        BlockSlotOwner g_BlockSlotOwners[2][kMaxBlockSlots];
 
         /* MSL 形参上的 [[texture(N)]] / [[sampler(N)]] 是资源槽位的权威来源 */
         const std::regex& GetTextureRegex()
@@ -487,6 +484,8 @@ namespace Helios
         std::swap(m_PipelineStates, other.m_PipelineStates);
         std::swap(m_FailedPipelines, other.m_FailedPipelines);
         std::swap(m_MaterialBlocks, other.m_MaterialBlocks);
+        std::swap(m_ParamTargets, other.m_ParamTargets);
+        std::swap(m_ParamHandles, other.m_ParamHandles);
         std::swap(m_TextureStageMasks, other.m_TextureStageMasks);
         std::swap(m_DefaultUniformValues, other.m_DefaultUniformValues);
         std::swap(m_WarnedMissingUniforms, other.m_WarnedMissingUniforms);
@@ -555,7 +554,7 @@ namespace Helios
             }
 
             /* 内容变了，下一帧无条件重传 */
-            block.CommittedHash = 0;
+            block.Dirty = true;
             block.CommittedGeneration = 0;
         }
     }
@@ -966,15 +965,12 @@ namespace Helios
             if (it == block.Offsets.end())
                 continue;
 
-            const uint32_t offset = it->second;
-            if (offset + size > block.Size)
+            if (!WriteBlockBytes(block, it->second, data, size))
             {
                 CORE_LOG_ERROR("Material uniform '{}' write out of range: {} + {} > {}",
-                    name, offset, size, block.Size);
+                    name, it->second, size, block.Size);
                 continue;
             }
-
-            memcpy(block.Shadow.data() + offset, data, size);
             found = true;
         }
 
@@ -987,6 +983,83 @@ namespace Helios
             CORE_LOG_WARN("Uniform '{}' not found in shader '{}': the value is ignored "
                 "(no matching uniform declaration in the default uniform block).",
                 name, m_DebugName);
+        }
+    }
+
+    bool MetalShader::WriteBlockBytes(MaterialBlock& block, uint32_t offset, const void* data, uint32_t size)
+    {
+        if (offset + size > block.Size || offset + size > block.Shadow.size())
+            return false;
+
+        uint8_t* target = block.Shadow.data() + offset;
+        if (std::memcmp(target, data, size) != 0)
+        {
+            std::memcpy(target, data, size);
+            block.Dirty = true;
+        }
+        return true;
+    }
+
+    int MetalShader::ResolveParamHandle(const std::string& name)
+    {
+        if (const auto cached = m_ParamHandles.find(name); cached != m_ParamHandles.end())
+            return cached->second;
+
+        /* 同名成员顶点与片元各一份，两块都要写 */
+        ParamTarget target;
+        for (uint32_t index = 0; index < m_MaterialBlocks.size() && target.Count < 2; ++index)
+        {
+            const auto it = m_MaterialBlocks[index].Offsets.find(name);
+            if (it == m_MaterialBlocks[index].Offsets.end())
+                continue;
+            target.Block[target.Count] = index;
+            target.Offset[target.Count] = it->second;
+            ++target.Count;
+        }
+
+        int handle = -1;
+        if (target.Count > 0)
+        {
+            handle = static_cast<int>(m_ParamTargets.size());
+            m_ParamTargets.push_back(target);
+        }
+        else if (m_Reflection.SamplerBindings.find(name) == m_Reflection.SamplerBindings.end()
+            && m_WarnedMissingUniforms.insert(name).second)
+        {
+            /* 与按名字写的告警同口径：采样器不是块成员，不算缺失 */
+            CORE_LOG_WARN("Uniform '{}' not found in shader '{}': the value is ignored "
+                "(no matching uniform declaration in the default uniform block).",
+                name, m_DebugName);
+        }
+
+        m_ParamHandles.emplace(name, handle);
+        return handle;
+    }
+
+    void MetalShader::SetParam(int handle, ParamType type, const void* data)
+    {
+        if (handle < 0 || data == nullptr || static_cast<size_t>(handle) >= m_ParamTargets.size())
+            return;
+
+        uint32_t size = 0;
+        switch (type)
+        {
+        case ParamType::Int: size = sizeof(int); break;
+        case ParamType::Float: size = sizeof(float); break;
+        case ParamType::Vec2: size = sizeof(glm::vec2); break;
+        case ParamType::Vec3: size = sizeof(glm::vec3); break;
+        case ParamType::Vec4: size = sizeof(glm::vec4); break;
+        case ParamType::Mat4: size = sizeof(glm::mat4); break;
+        case ParamType::Texture: return;
+        }
+
+        const ParamTarget& target = m_ParamTargets[handle];
+        for (uint32_t index = 0; index < target.Count; ++index)
+        {
+            MaterialBlock& block = m_MaterialBlocks[target.Block[index]];
+            if (!WriteBlockBytes(block, target.Offset[index], data, size))
+                CORE_LOG_ERROR("Material uniform write out of range in shader '{}': {} + {} > {}",
+                    m_DebugName, target.Offset[index], size, block.Size);
         }
     }
 
@@ -1042,9 +1115,12 @@ namespace Helios
             if (block.Size == 0 || block.Shadow.empty())
                 continue;
 
-            /* 材质每帧按名重写全部参数，值没变的块不必再传（同一编码器里那份还在） */
-            const uint64_t hash = HashMaterialBytes(block.Shadow.data(), block.Size);
-            if (block.CommittedGeneration == generation && block.CommittedHash == hash)
+            /* 值没变、同一编码器里这个槽位最后也是自己写的，就不必再传；
+             * 别的着色器在同一槽位传过自己的块，得重新传一遍 */
+            BlockSlotOwner& owner = g_BlockSlotOwners[block.IsVertexStage ? 0 : 1]
+                [std::min<uint32_t>(block.BufferIndex, kMaxBlockSlots - 1)];
+            if (!block.Dirty && block.CommittedGeneration == generation
+                && owner.Block == &block && owner.Generation == generation)
                 continue;
 
             /* 优先写进环形缓冲：不占命令缓冲带宽，绑定只带偏移 */
@@ -1079,8 +1155,10 @@ namespace Helios
                     encoder->setFragmentBuffer(block.Buffer, 0, block.BufferIndex);
             }
 
-            block.CommittedHash = hash;
+            block.Dirty = false;
             block.CommittedGeneration = generation;
+            owner.Block = &block;
+            owner.Generation = generation;
         }
     }
 

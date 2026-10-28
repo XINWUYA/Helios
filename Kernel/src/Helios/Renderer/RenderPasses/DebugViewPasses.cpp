@@ -103,8 +103,8 @@ namespace Helios
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
 
-				const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/DebugShaders/DebugOverdraw.glsl"));
+				static BuiltinAsset<DeviceShader> s_overdraw_shader("Shaders/DebugShaders/DebugOverdraw.glsl");
+				const auto shader = s_overdraw_shader.Get();
 
 				struct OverdrawPassData
 				{
@@ -136,13 +136,7 @@ namespace Helios
 						{
 							auto material = CreateSharedPtr<Material>();
 							auto& raster_state = material->GetRasterState();
-							raster_state.EnableBlend = true;
-							raster_state.BlendEquationRGB = BlendEquation::Add;
-							raster_state.BlendEquationA = BlendEquation::Add;
-							raster_state.BlendFuncSrcRGB = BlendFunc::One;
-							raster_state.BlendFuncSrcA = BlendFunc::One;
-							raster_state.BlendFuncDstRGB = BlendFunc::One;
-							raster_state.BlendFuncDstA = BlendFunc::One;
+							raster_state.SetAdditiveBlend();
 							material->SetShader(shader);
 
 							for (const auto& mesh_object : render_view.GetVisibleMeshObjects())
@@ -245,8 +239,8 @@ namespace Helios
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
 
-				const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/DebugShaders/DebugShadow.glsl"));
+				static BuiltinAsset<DeviceShader> s_shadow_shader("Shaders/DebugShaders/DebugShadow.glsl");
+				const auto shader = s_shadow_shader.Get();
 
 				struct AccumulatePassData
 				{
@@ -310,13 +304,7 @@ namespace Helios
 							auto& raster_state = material->GetRasterState();
 							raster_state.EnableDepthTest = false;
 							raster_state.EnableDepthWrite = false;
-							raster_state.EnableBlend = true;
-							raster_state.BlendEquationRGB = BlendEquation::Add;
-							raster_state.BlendEquationA = BlendEquation::Add;
-							raster_state.BlendFuncSrcRGB = BlendFunc::One;
-							raster_state.BlendFuncSrcA = BlendFunc::One;
-							raster_state.BlendFuncDstRGB = BlendFunc::One;
-							raster_state.BlendFuncDstA = BlendFunc::One;
+							raster_state.SetAdditiveBlend();
 							material->SetShader(shader);
 							material->SetTexture("u_GBufferTexture0", resources.Get(data.GBufferTexture0).Texture);
 							material->SetTexture("u_GBufferTexture1", resources.Get(data.GBufferTexture1).Texture);
@@ -352,8 +340,8 @@ namespace Helios
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
 
-				const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/DebugShaders/DebugView.glsl"));
+				static BuiltinAsset<DeviceShader> s_composite_shader("Shaders/DebugShaders/DebugView.glsl");
+				const auto shader = s_composite_shader.Get();
 
 				struct CompositePassData
 				{
@@ -443,8 +431,8 @@ namespace Helios
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
 
-				const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/DebugShaders/DebugMaterial.glsl"));
+				static BuiltinAsset<DeviceShader> s_material_shader("Shaders/DebugShaders/DebugMaterial.glsl");
+				const auto shader = s_material_shader.Get();
 
 				struct DebugMaterialPassData
 				{

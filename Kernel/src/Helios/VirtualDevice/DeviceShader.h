@@ -211,6 +211,12 @@ namespace Helios
 		virtual void SetFloat4(const std::string& name, const glm::vec4& value) = 0;
 		virtual void SetMat4(const std::string& name, const glm::mat4& value) = 0;
 
+		/* 参数句柄：名字解析一次，绘制时按句柄写值，不再逐次按字符串查表。
+		 * -1 = 着色器里没有这个参数；重载换代后句柄作废，按 GetGeneration 重取 */
+		virtual int ResolveParamHandle(const std::string& name) = 0;
+		/* data 按 type 解释（int / float / vec2-4 / mat4），handle 为 -1 时什么也不做 */
+		virtual void SetParam(int handle, ParamType type, const void* data) = 0;
+
 		/* 获取Shader名 */
 		virtual const std::string& GetDebugName() const = 0;
 

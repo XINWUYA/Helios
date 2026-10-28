@@ -38,6 +38,8 @@ namespace Helios
 			return;
 
 		m_pShader = shader;
+		++m_Revision;
+		++m_LayoutRevision;
 		/* Shader更换，binding布局也随之改变，刷新Shader的反射结果 */
 		RefreshTextureBindings();
 		m_ShaderGeneration = shader != nullptr ? shader->GetGeneration() : 0;
@@ -50,9 +52,8 @@ namespace Helios
 		/* 天空盒的识别以着色器为单一来源（样例场景的约定同源）：资产里的天空
 		 * 就是"网格 + SkyBox.glsl 材质"，由顶点着色器折叠成全屏天空。
 		 * AssetManager 按路径缓存，指针比较即可。 */
-		static const SharedPtr<DeviceShader> s_skybox_shader =
-			AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Sky/SkyBox.glsl"));
-		return m_pShader != nullptr && m_pShader == s_skybox_shader;
+		static BuiltinAsset<DeviceShader> s_skybox_shader("Shaders/Sky/SkyBox.glsl");
+		return m_pShader != nullptr && m_pShader == s_skybox_shader.Get();
 	}
 
 	bool Material::SupportsIBL() const
@@ -99,11 +100,11 @@ namespace Helios
 			const auto texture = std::any_cast<const SharedPtr<DeviceTexture>>(param);
 			if (!texture)
 				return;
-			m_Parameters[ToID(name)] = { ParamType::Texture, name, std::make_pair(texture, ResolveTextureBinding(name)) };
+			StoreParam({ ParamType::Texture, name, std::make_pair(texture, ResolveTextureBinding(name)) });
 			return;
 		}
 
-		m_Parameters[ToID(name)] = { type, name, param };
+		StoreParam({ type, name, param });
 	}
 
 	void Material::SetTexture(const std::string& name, const SharedPtr<DeviceTexture>& texture)
@@ -113,62 +114,153 @@ namespace Helios
 		if (!texture)
 			return;
 
-		m_Parameters[ToID(name)] = { ParamType::Texture, name, std::make_pair(texture, ResolveTextureBinding(name)) };
+		StoreParam({ ParamType::Texture, name, std::make_pair(texture, ResolveTextureBinding(name)) });
 	}
 
-	/* 应用单个参数（Bind 与 per-draw 覆盖共用）。
+	/* 只改值不动绑定表：表里存的是参数节点的地址，值在绘制时现读 */
+	void Material::StoreParam(MaterialParamInfo info)
+	{
+		const auto [iter, inserted] = m_Parameters.try_emplace(ToID(info.Name));
+		if (inserted || iter->second.Type != info.Type)
+			++m_LayoutRevision;
+		iter->second = std::move(info);
+		++m_Revision;
+	}
+
+	namespace
+	{
+		/* 数值参数的原始字节；值的类型和声明对不上时返回空（跳过不写） */
+		const void* ParamValueData(const MaterialParamInfo& info)
+		{
+			switch (info.Type)
+			{
+			case ParamType::Int: return std::any_cast<int>(&info.Value);
+			case ParamType::Float: return std::any_cast<float>(&info.Value);
+			case ParamType::Vec2: return std::any_cast<glm::vec2>(&info.Value);
+			case ParamType::Vec3: return std::any_cast<glm::vec3>(&info.Value);
+			case ParamType::Vec4: return std::any_cast<glm::vec4>(&info.Value);
+			case ParamType::Mat4: return std::any_cast<glm::mat4>(&info.Value);
+			case ParamType::Texture: break;
+			}
+			return nullptr;
+		}
+
+		const std::pair<SharedPtr<DeviceTexture>, uint32_t>* TextureValue(const MaterialParamInfo& info)
+		{
+			return std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(&info.Value);
+		}
+
+		/* 贴图缺失或加载失败时改绑默认贴图：空槽位 Metal 校验层会直接断言 */
+		bool BindTextureParam(const MaterialParamInfo& info, uint32_t slot)
+		{
+			const auto* texture_info = TextureValue(info);
+			DeviceTexture* texture = texture_info != nullptr ? texture_info->first.get() : nullptr;
+			SharedPtr<DeviceTexture> fallback;
+			if (texture == nullptr || !texture->IsLoaded())
+			{
+				fallback = Material::DefaultTextureForSampler(info.Name);
+				texture = fallback.get();
+			}
+			if (texture == nullptr)
+				return false;
+
+			texture->Bind(slot);
+			return true;
+		}
+	}
+
+	/* 应用单个参数（per-draw 覆盖走这里，按名字写）。
 	 * Texture 的绑定点：值里带着的 slot 无效时按 Shader 反射重新解析 ——
 	 * per-draw 参数（见 MakeTextureParam）正是靠这条在应用时解析出正确的 binding。 */
 	void Material::ApplyParam(const MaterialParamInfo& param_info)
 	{
-		const auto& value = param_info.Value;
+		if (param_info.Type == ParamType::Texture)
+		{
+			/* 反射不到绑定点时回退到槽位 0，绝不静默跳过绑定：
+			 * 若管线要求采样器/纹理而未被绑定，Metal 校验层会直接断言终止。 */
+			const auto* texture_info = TextureValue(param_info);
+			uint32_t slot = texture_info != nullptr ? texture_info->second : InvalidTextureSlot;
+			if (slot == InvalidTextureSlot)
+				slot = ResolveTextureBinding(param_info.Name);
+			if (slot == InvalidTextureSlot)
+				slot = 0u;
+			if (BindTextureParam(param_info, slot))
+				m_pShader->SetInt(param_info.Name, static_cast<int>(slot));
+			return;
+		}
+
+		const void* data = ParamValueData(param_info);
+		if (data == nullptr)
+			return;
+
 		switch (param_info.Type)
 		{
-		case ParamType::Texture:
-			{
-				const auto texture_info = std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(value);
-
-				/* 贴图缺失或加载失败时改绑默认贴图：空槽位 Metal 校验层会直接断言 */
-				SharedPtr<DeviceTexture> texture = texture_info.first;
-				if (texture == nullptr || !texture->IsLoaded())
-					texture = DefaultTextureForSampler(param_info.Name);
-				if (texture == nullptr)
-					break;
-
-				/* 反射不到绑定点时回退到槽位 0，绝不静默跳过绑定：
-				 * 若管线要求采样器/纹理而未被绑定，Metal 校验层会直接断言终止。 */
-				uint32_t slot = texture_info.second;
-				if (slot == InvalidTextureSlot)
-					slot = ResolveTextureBinding(param_info.Name);
-				if (slot == InvalidTextureSlot)
-					slot = 0u;
-				texture->Bind(slot);
-				m_pShader->SetInt(param_info.Name, static_cast<int>(slot));
-			}
-			break;
-		case ParamType::Int:
-			m_pShader->SetInt(param_info.Name, std::any_cast<int>(value));
-			break;
-		case ParamType::Float:
-			m_pShader->SetFloat(param_info.Name, std::any_cast<float>(value));
-			break;
-		case ParamType::Vec2:
-			m_pShader->SetFloat2(param_info.Name, std::any_cast<glm::vec2>(value));
-			break;
-		case ParamType::Vec3:
-			m_pShader->SetFloat3(param_info.Name, std::any_cast<glm::vec3>(value));
-			break;
-		case ParamType::Vec4:
-			m_pShader->SetFloat4(param_info.Name, std::any_cast<glm::vec4>(value));
-			break;
-		case ParamType::Mat4:
-			m_pShader->SetMat4(param_info.Name, std::any_cast<glm::mat4>(value));
-			break;
+		case ParamType::Int: m_pShader->SetInt(param_info.Name, *static_cast<const int*>(data)); break;
+		case ParamType::Float: m_pShader->SetFloat(param_info.Name, *static_cast<const float*>(data)); break;
+		case ParamType::Vec2: m_pShader->SetFloat2(param_info.Name, *static_cast<const glm::vec2*>(data)); break;
+		case ParamType::Vec3: m_pShader->SetFloat3(param_info.Name, *static_cast<const glm::vec3*>(data)); break;
+		case ParamType::Vec4: m_pShader->SetFloat4(param_info.Name, *static_cast<const glm::vec4*>(data)); break;
+		case ParamType::Mat4: m_pShader->SetMat4(param_info.Name, *static_cast<const glm::mat4*>(data)); break;
+		case ParamType::Texture: break;
 		}
 	}
 
+	Material::BoundParam Material::BindParam(const MaterialParamInfo& info) const
+	{
+		BoundParam bound;
+		bound.Info = &info;
+		bound.Handle = m_pShader->ResolveParamHandle(info.Name);
+		if (info.Type == ParamType::Texture)
+		{
+			const auto* texture_info = TextureValue(info);
+			uint32_t slot = texture_info != nullptr ? texture_info->second : InvalidTextureSlot;
+			if (slot == InvalidTextureSlot)
+				slot = ResolveTextureBinding(info.Name);
+			bound.Slot = slot == InvalidTextureSlot ? 0u : slot;
+		}
+		return bound;
+	}
+
+	void Material::ApplyBound(const BoundParam& bound)
+	{
+		const MaterialParamInfo& info = *bound.Info;
+		if (info.Type == ParamType::Texture)
+		{
+			if (BindTextureParam(info, bound.Slot) && bound.Handle >= 0)
+			{
+				const int slot = static_cast<int>(bound.Slot);
+				m_pShader->SetParam(bound.Handle, ParamType::Int, &slot);
+			}
+			return;
+		}
+
+		if (bound.Handle < 0)
+			return;
+		if (const void* data = ParamValueData(info))
+			m_pShader->SetParam(bound.Handle, info.Type, data);
+	}
+
+	void Material::RebuildBindTable()
+	{
+		BindCache& cache = m_BindCache;
+		cache.Revision = m_LayoutRevision;
+		cache.Shader = m_pShader.get();
+		cache.Generation = m_pShader->GetGeneration();
+
+		cache.Params.clear();
+		cache.Params.reserve(m_Parameters.size());
+		for (const auto& [id, info] : m_Parameters)
+			cache.Params.push_back(BindParam(info));
+
+		cache.FillsBuilt = MaterialFill::None;
+		cache.ValueFills.clear();
+		cache.TextureFills.clear();
+		cache.BoundValueFills.clear();
+		cache.BoundTextureFills.clear();
+	}
+
 	/* 绑定材质中的各参数 */
-	void Material::Bind()
+	void Material::Bind(uint8_t fill_missing)
 	{
 		PROFILE_FUNCTION();
 
@@ -180,12 +272,54 @@ namespace Helios
 			RefreshTextureBindings();
 		}
 
-		/* 先绑定Shader */
+		/* 先绑定Shader：GL 第一次绑定才 link，句柄要在这之后解析 */
 		m_pShader->Bind();
 
-		/* 绑定参数 */
-		for (auto& param : m_Parameters)
-			ApplyParam(param.second);
+		BindCache& cache = m_BindCache;
+		if (cache.Revision != m_LayoutRevision || cache.Shader != m_pShader.get()
+			|| cache.Generation != m_pShader->GetGeneration())
+			RebuildBindTable();
+
+		for (const BoundParam& bound : cache.Params)
+			ApplyBound(bound);
+
+		/* 补齐项第一次用到时才收集，之后跟着绑定表一起作废 */
+		const auto apply_fills = [this, &cache](uint8_t kind, std::vector<MaterialParamInfo>& fills,
+			std::vector<BoundParam>& bound_fills)
+		{
+			if ((cache.FillsBuilt & kind) == 0)
+			{
+				fills = kind == MaterialFill::Values
+					? CollectMissingValueParamDefaults() : CollectMissingTextureParamDefaults();
+				bound_fills.clear();
+				bound_fills.reserve(fills.size());
+				for (const MaterialParamInfo& fill : fills)
+					bound_fills.push_back(BindParam(fill));
+				cache.FillsBuilt |= kind;
+			}
+			for (const BoundParam& bound : bound_fills)
+				ApplyBound(bound);
+		};
+		if ((fill_missing & MaterialFill::Textures) != 0)
+			apply_fills(MaterialFill::Textures, cache.TextureFills, cache.BoundTextureFills);
+		if ((fill_missing & MaterialFill::Values) != 0)
+			apply_fills(MaterialFill::Values, cache.ValueFills, cache.BoundValueFills);
+	}
+
+	SharedPtr<Material> Material::GetDerived(const SharedPtr<DeviceShader>& target, DeriveFunc build)
+	{
+		BindCache& cache = m_BindCache;
+		const uint32_t generation = target != nullptr ? target->GetGeneration() : 0;
+		const bool same_target = !cache.DerivedTarget.owner_before(target) && !target.owner_before(cache.DerivedTarget);
+		if (!same_target || cache.DerivedTarget.expired() || cache.DerivedRevision != m_Revision
+			|| cache.DerivedGeneration != generation)
+		{
+			cache.Derived = build(*this, target);
+			cache.DerivedTarget = target;
+			cache.DerivedRevision = m_Revision;
+			cache.DerivedGeneration = generation;
+		}
+		return cache.Derived;
 	}
 
 	/* 解绑材质 */
@@ -309,6 +443,8 @@ namespace Helios
 		m_Parameters = source.m_Parameters; /* 参数表逐条拷贝；纹理的 SharedPtr 共享 */
 		m_RasterState = source.m_RasterState;
 		m_RenderQueue = source.m_RenderQueue;
+		++m_Revision;
+		++m_LayoutRevision;
 
 		/* Shader 与参数都可能换了：纹理参数的绑定点统一按新 Shader 重解析 */
 		RefreshTextureBindings();
@@ -337,6 +473,8 @@ namespace Helios
 			/* 没标 @property 的也不留：引擎逐绘制给的值存进材质只会过期 */
 			iter = m_Parameters.erase(iter);
 		}
+		++m_Revision;
+		++m_LayoutRevision;
 	}
 
 	namespace
@@ -455,13 +593,16 @@ namespace Helios
 
 		/* 注意：Ambient 不能用黑 —— 缺贴图的材质走 "albedo × 0.3" 回退环境项，
 		 * 黑贴图会让延迟端在没有探针时把这个环境项丢掉。 */
+		static BuiltinAsset<DeviceTexture> s_normal("Textures/normal.png");
+		static BuiltinAsset<DeviceTexture> s_white("Textures/White.png");
+		static BuiltinAsset<DeviceTexture> s_black("Textures/Black.png");
 		if (sampler_name.find("Normal") != std::string::npos)
-			return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/normal.png"));
+			return s_normal.Get();
 		if (sampler_name.find("Albedo") != std::string::npos
 			|| sampler_name.find("Roughness") != std::string::npos
 			|| sampler_name.find("Ambient") != std::string::npos)
-			return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/White.png"));
-		return AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Black.png"));
+			return s_white.Get();
+		return s_black.Get();
 	}
 
 	uint32_t Material::ResolveTextureBinding(const std::string& name) const
@@ -487,6 +628,8 @@ namespace Helios
 			texture_info.second = ResolveTextureBinding(param_info.Name);
 			m_Parameters[id] = { param_info.Type, param_info.Name, texture_info };
 		}
+		++m_Revision;
+		++m_LayoutRevision;
 	}
 
 	/* ---- 材质体读写：.mtl 条目、独立材质资产、实例覆盖共用 ---- */

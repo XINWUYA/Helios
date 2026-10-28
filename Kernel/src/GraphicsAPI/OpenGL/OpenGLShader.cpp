@@ -342,6 +342,32 @@ namespace Helios
 		glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(value));
 	}
 
+	int OpenGLShader::ResolveParamHandle(const std::string& name)
+	{
+		/* 没 link 的 program 查不到 location，先补上（与 Bind 的处理一致） */
+		if (!m_IsLinked)
+			LazyLink();
+		return FindUniformLocation(name);
+	}
+
+	void OpenGLShader::SetParam(int handle, ParamType type, const void* data)
+	{
+		if (handle < 0 || data == nullptr)
+			return;
+
+		const auto* values = static_cast<const float*>(data);
+		switch (type)
+		{
+		case ParamType::Int: glUniform1i(handle, *static_cast<const int*>(data)); break;
+		case ParamType::Float: glUniform1f(handle, values[0]); break;
+		case ParamType::Vec2: glUniform2fv(handle, 1, values); break;
+		case ParamType::Vec3: glUniform3fv(handle, 1, values); break;
+		case ParamType::Vec4: glUniform4fv(handle, 1, values); break;
+		case ParamType::Mat4: glUniformMatrix4fv(handle, 1, GL_FALSE, values); break;
+		case ParamType::Texture: break;
+		}
+	}
+
 #ifdef __APPLE__
 	/* macOS only supports OpenGL 4.1 (GLSL 4.10), need to convert GLSL version and features */
 	static std::string ConvertGLSLToMacOSCompatible(const std::string& source)

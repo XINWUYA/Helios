@@ -26,6 +26,14 @@ namespace Helios
 		}
 	};
 
+	/* 绘制时补齐材质没写的参数：结果缓存在材质上，参数或 shader 变了才重算 */
+	namespace MaterialFill
+	{
+		constexpr uint8_t None = 0;
+		constexpr uint8_t Values = 1u << 0;   /* 数值参数补默认值（裸 uniform 是 per-program 状态，不补会串值） */
+		constexpr uint8_t Textures = 1u << 1; /* @property 采样器补默认贴图（缺绑定 Metal 会断言） */
+	}
+
 	/* 单次绘制的覆盖参数（per-draw）。
 	 * 由渲染通道随提交通道应用：只写当前绑定的 Shader 与光栅状态、不落材质对象 ——
 	 * 用于 IBL 探针选择、逐光源加法笔这类"每次绘制不同"的绑定，避免污染共享材质。 */
@@ -35,6 +43,8 @@ namespace Helios
 		/* 光栅状态覆盖（如逐光源加法笔的"加法混合 + Equal 深度比较"）。
 		 * 设置时整份替代材质自身的光栅状态（不是逐字段合并）；未设置用材质自身的。 */
 		std::optional<RenderRasterState> RasterStateOverride{};
+		/* 先于 Overrides 应用的补齐项，取值见 MaterialFill */
+		uint8_t FillMissing{ MaterialFill::None };
 	};
 
 	/*
@@ -86,8 +96,8 @@ namespace Helios
 		[[nodiscard]] const RenderRasterState& GetRasterState() const { return m_RasterState; }
 		RenderRasterState& GetRasterState() { return m_RasterState; }
 
-		/* 绑定材质中的各参数 */
-		void Bind();
+		/* 绑定材质中的各参数；fill_missing 见 MaterialFill */
+		void Bind(uint8_t fill_missing = MaterialFill::None);
 		/* 解绑材质 */
 		void Unbind();
 
@@ -137,6 +147,11 @@ namespace Helios
 		 * 用白，其余用黑。GBuffer 材质转换与材质参数补齐共用这一份判据。 */
 		static SharedPtr<DeviceTexture> DefaultTextureForSampler(const std::string& sampler_name);
 
+		/* 换成另一个 shader 画时的转换材质（延迟 G-Buffer 用），本材质和目标 shader 都没变就复用上次的。
+		 * build 返回空 = 不用转换，直接画自己。 */
+		using DeriveFunc = SharedPtr<Material> (*)(const Material& source, const SharedPtr<DeviceShader>& target);
+		SharedPtr<Material> GetDerived(const SharedPtr<DeviceShader>& target, DeriveFunc build);
+
 		/* 默认材质 */
 		static SharedPtr<Material>& Default();
 		/* 错误材质 */
@@ -154,6 +169,51 @@ namespace Helios
 		[[nodiscard]] uint32_t ResolveTextureBinding(const std::string& name) const;
 		/* Shader变更后，重新解析所有纹理参数的绑定点 */
 		void RefreshTextureBindings();
+
+		/* 按当前 shader 解析好句柄的一条参数：绘制时按句柄写，不再按名字查 */
+		struct BoundParam
+		{
+			const MaterialParamInfo* Info{ nullptr };
+			int Handle{ -1 };
+			uint32_t Slot{ 0 }; /* 贴图的绑定点 */
+		};
+
+		/* 绑定表与转换材质缓存：参数改动计数或 shader 换代后重建。
+		 * 拷贝材质时不跟着拷（表里的指针指向原对象的参数表） */
+		struct BindCache
+		{
+			BindCache() = default;
+			BindCache(const BindCache&) {}
+			BindCache& operator=(const BindCache&) { *this = BindCache(); return *this; }
+			BindCache(BindCache&&) = default;
+			BindCache& operator=(BindCache&&) = default;
+
+			uint32_t Revision{ UINT32_MAX };
+			uint32_t Generation{ 0 };
+			const DeviceShader* Shader{ nullptr };
+			std::vector<BoundParam> Params;
+			std::vector<MaterialParamInfo> ValueFills;
+			std::vector<MaterialParamInfo> TextureFills;
+			std::vector<BoundParam> BoundValueFills;
+			std::vector<BoundParam> BoundTextureFills;
+			uint8_t FillsBuilt{ MaterialFill::None };
+
+			WeakPtr<DeviceShader> DerivedTarget;
+			uint32_t DerivedRevision{ UINT32_MAX };
+			uint32_t DerivedGeneration{ 0 };
+			SharedPtr<Material> Derived;
+		};
+
+		void StoreParam(MaterialParamInfo info);
+		void RebuildBindTable();
+		BoundParam BindParam(const MaterialParamInfo& info) const;
+		void ApplyBound(const BoundParam& bound);
+
+		/* 参数表或 shader 每改一次加一（转换材质据此作废） */
+		uint32_t m_Revision{ 0 };
+		/* 只在增删参数、换类型、换 shader 时加一（绑定表据此重建，改值不用重建） */
+		uint32_t m_LayoutRevision{ 0 };
+		BindCache m_BindCache;
 
 		/* 资产路径（可空） */
 		std::string m_Path{};

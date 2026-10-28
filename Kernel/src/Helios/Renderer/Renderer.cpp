@@ -230,7 +230,7 @@ namespace Helios
 			? per_draw->RasterStateOverride.value()
 			: material->GetRasterState());
 
-		material->Bind();
+		material->Bind(per_draw != nullptr ? per_draw->FillMissing : MaterialFill::None);
 
 		/* per-draw 覆盖：只写当前绑定的 Shader / 纹理，不落材质对象（共享材质保持只读） */
 		if (per_draw != nullptr)
@@ -239,12 +239,23 @@ namespace Helios
 				material->ApplyParam(param);
 		}
 
-		/* 按 Shader 声明绑定当前 Pass 的阴影纹理。 */
+		/* 按 Shader 声明绑定当前 Pass 的阴影纹理。绘制按 shader 分组，记住上一个的查表结果就够了 */
 		if (m_pCurrentShadowMap != nullptr)
 		{
-			const int shadow_binding = material->GetShader()->GetUniformBinding("u_ShadowMap");
-			if (shadow_binding >= 0)
-				m_pCurrentShadowMap->Bind(static_cast<uint32_t>(shadow_binding));
+			/* 弱引用拿住控制块，比较控制块就不会撞上被释放后复用的地址 */
+			static WeakPtr<DeviceShader> s_last_shader;
+			static uint32_t s_last_generation = 0;
+			static int s_shadow_binding = -1;
+			const SharedPtr<DeviceShader>& shader = material->GetShader();
+			const bool same_shader = !s_last_shader.owner_before(shader) && !shader.owner_before(s_last_shader);
+			if (!same_shader || shader->GetGeneration() != s_last_generation)
+			{
+				s_last_shader = shader;
+				s_last_generation = shader->GetGeneration();
+				s_shadow_binding = shader->GetUniformBinding("u_ShadowMap");
+			}
+			if (s_shadow_binding >= 0)
+				m_pCurrentShadowMap->Bind(static_cast<uint32_t>(s_shadow_binding));
 		}
 
 		mesh_primitive.VertexArray->Bind();
@@ -295,14 +306,22 @@ namespace Helios
 		return s_FullScreenVertexArray;
 	}
 
+	SharedPtr<Material> Renderer::CreateFullScreenMaterial(const SharedPtr<DeviceShader>& shader, bool additive)
+	{
+		auto material = CreateSharedPtr<Material>();
+		auto& raster_state = material->GetRasterState();
+		raster_state.EnableDepthTest = false;
+		raster_state.EnableDepthWrite = false;
+		if (additive)
+			raster_state.SetAdditiveBlend();
+		material->SetShader(shader);
+		return material;
+	}
+
 	namespace
 	{
 		/* 蒙皮计算着色器：第一次用到时加载，之后复用 */
-		SharedPtr<DeviceShader>& SkinComputeShader()
-		{
-			static SharedPtr<DeviceShader> shader;
-			return shader;
-		}
+		BuiltinAsset<DeviceShader> s_SkinComputeShader("Shaders/Compute/GPUSkin.glsl");
 	}
 
 	bool Renderer::DispatchSkin(const SharedPtr<DeviceStorageBuffer>& palette,
@@ -314,10 +333,7 @@ namespace Helios
 		if (m_pRenderAPI == nullptr || vertex_count == 0 || !m_pRenderAPI->SupportsCompute())
 			return false;
 
-		if (SkinComputeShader() == nullptr)
-			SkinComputeShader() = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Compute/GPUSkin.glsl"));
-
-		const SharedPtr<DeviceShader>& shader = SkinComputeShader();
+		const SharedPtr<DeviceShader> shader = s_SkinComputeShader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
 

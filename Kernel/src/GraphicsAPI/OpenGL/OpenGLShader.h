@@ -25,6 +25,9 @@ namespace Helios
 		void SetFloat3(const std::string& name, const glm::vec3& value) override;
 		void SetFloat4(const std::string& name, const glm::vec4& value) override;
 		void SetMat4(const std::string& name, const glm::mat4& value) override;
+		/* GL 的句柄就是 uniform location */
+		int ResolveParamHandle(const std::string& name) override;
+		void SetParam(int handle, ParamType type, const void* data) override;
 		[[nodiscard]] const std::string& GetDebugName() const override { return m_DebugName; }
 
 		/* 计算着色器（#type compute）：桌面 GL 4.3+ 才有，线程组尺寸读 local_size_x */

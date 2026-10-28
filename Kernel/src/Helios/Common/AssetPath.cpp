@@ -9,6 +9,8 @@ namespace Helios
 
 	namespace
 	{
+		uint32_t s_ProjectPathGeneration = 1;
+
 		/* 相对路径里出现 .. 就说明跑到根外面去了，这一份不能当资产相对路径用 */
 		bool IsInsideRoot(const std::filesystem::path& relative)
 		{
@@ -76,8 +78,14 @@ namespace Helios
 		}
 
 		g_ProjectPath = absolute;
+		++s_ProjectPathGeneration;
 		CORE_LOG_INFO("Project root: {}", PathToUtf8(g_ProjectPath));
 		return true;
+	}
+
+	uint32_t GetProjectPathGeneration()
+	{
+		return s_ProjectPathGeneration;
 	}
 
 	bool ParseProjectArgument(int argc, const char* const* argv)

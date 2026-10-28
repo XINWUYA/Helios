@@ -27,6 +27,9 @@ namespace Helios
 	/* 启动期换项目，目录不存在返回 false */
 	HELIOS_API bool SetProjectPath(const std::filesystem::path& path);
 
+	/* 项目根每换一次加一：按相对路径缓存的句柄据此判断要不要重新解析 */
+	HELIOS_API uint32_t GetProjectPathGeneration();
+
 	/* 命令行解析：--project <dir> 或 --project=<dir>，后出现的覆盖前面的。
 	 * 返回值表示命令行是否指定了项目（编辑器据此决定直接进工程还是先出启动页）。 */
 	HELIOS_API bool ParseProjectArgument(int argc, const char* const* argv);

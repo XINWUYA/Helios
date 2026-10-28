@@ -7,6 +7,7 @@ namespace Helios
 {
 	class RenderView;
 	class Material;
+	class DeviceShader;
 	class DeviceTexture;
 	class DeviceUniformBuffer;
 	class ScopedShadowMapBinding;
@@ -52,6 +53,9 @@ namespace Helios
 		static const ResultGPUTimerNode& GetGPUTimerRoot() { return m_GPUTimerRoot; }
 
 		static SharedPtr<DeviceVertexArray> GetFullScreenVertexArray();
+
+		/* 全屏 Pass 的材质：不测深度也不写；additive 打开 One/One 加法混合 */
+		static SharedPtr<Material> CreateFullScreenMaterial(const SharedPtr<DeviceShader>& shader, bool additive = false);
 
 		static void FillObjectUniformBuffer(const VisibleMeshObject& mesh_object);
 

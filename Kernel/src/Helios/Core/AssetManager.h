@@ -5,6 +5,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include "Helios/Common/AssetPath.h"
 #include "Helios/Common/Common.h"
 #include "Helios/Common/Export.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
@@ -216,5 +217,33 @@ namespace Helios
 
 	private:
 		AssetManager() = default;
+	};
+
+	/* 引擎内置资源的常驻句柄：放在函数里当 static 用，每帧取不再解析路径、不碰文件系统。
+	 * 只存弱引用（资源由 AssetManager 持有），换项目根后自动重新解析。主线程用。 */
+	template<typename AssetType>
+	class BuiltinAsset
+	{
+	public:
+		explicit BuiltinAsset(const char* relative_path) : m_RelativePath(relative_path) {}
+
+		SharedPtr<AssetType> Get()
+		{
+			SharedPtr<AssetType> asset = m_Asset.lock();
+			const uint32_t generation = GetProjectPathGeneration();
+			if (asset == nullptr || generation != m_Generation)
+			{
+				asset = AssetManager::Instance().GetOrLoad<AssetType>(
+					PathToUtf8(ResolveAssetPath(PathFromUtf8(m_RelativePath))));
+				m_Asset = asset;
+				m_Generation = generation;
+			}
+			return asset;
+		}
+
+	private:
+		const char* m_RelativePath;
+		WeakPtr<AssetType> m_Asset;
+		uint32_t m_Generation{ 0 };
 	};
 }

@@ -45,27 +45,6 @@ namespace Helios
 				return ViewportRegion{ 0, 0, desc.Width, desc.Height };
 			}
 
-			/* 全屏效果材质：不测深度也不写；additive = One/One 加法混合（升采样回叠用） */
-			SharedPtr<Material> MakeFullScreenMaterial(const SharedPtr<DeviceShader>& shader, bool additive)
-			{
-				auto material = CreateSharedPtr<Material>();
-				auto& raster_state = material->GetRasterState();
-				raster_state.EnableDepthTest = false;
-				raster_state.EnableDepthWrite = false;
-				if (additive)
-				{
-					raster_state.EnableBlend = true;
-					raster_state.BlendEquationRGB = BlendEquation::Add;
-					raster_state.BlendEquationA = BlendEquation::Add;
-					raster_state.BlendFuncSrcRGB = BlendFunc::One;
-					raster_state.BlendFuncSrcA = BlendFunc::One;
-					raster_state.BlendFuncDstRGB = BlendFunc::One;
-					raster_state.BlendFuncDstA = BlendFunc::One;
-				}
-				material->SetShader(shader);
-				return material;
-			}
-
 			/* 链的一步：半分辨率金字塔（Prefilter → 降采样链 → tent 升采样回叠 → 合成）。
 			 * 未启用 / 视口过小 → 原样返回 input（不建任何 Pass）。 */
 			TextureHandle BuildBloom(RenderView& render_view, TextureHandle input)
@@ -97,14 +76,14 @@ namespace Helios
 
 				auto& frame_graph = render_view.GetFrameGraph();
 
-				const auto prefilter_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/PostProcessShaders/BloomPrefilter.glsl"));
-				const auto downsample_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/PostProcessShaders/BloomDownsample.glsl"));
-				const auto upsample_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/PostProcessShaders/BloomUpsample.glsl"));
-				const auto composite_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-					ABSOLUTE_PATH("Shaders/PostProcessShaders/BloomComposite.glsl"));
+				static BuiltinAsset<DeviceShader> s_prefilter_shader("Shaders/PostProcessShaders/BloomPrefilter.glsl");
+				static BuiltinAsset<DeviceShader> s_downsample_shader("Shaders/PostProcessShaders/BloomDownsample.glsl");
+				static BuiltinAsset<DeviceShader> s_upsample_shader("Shaders/PostProcessShaders/BloomUpsample.glsl");
+				static BuiltinAsset<DeviceShader> s_composite_shader("Shaders/PostProcessShaders/BloomComposite.glsl");
+				const auto prefilter_shader = s_prefilter_shader.Get();
+				const auto downsample_shader = s_downsample_shader.Get();
+				const auto upsample_shader = s_upsample_shader.Get();
+				const auto composite_shader = s_composite_shader.Get();
 
 				const auto mip_desc = [&viewport_region](uint32_t level)
 				{
@@ -155,7 +134,7 @@ namespace Helios
 
 							render_pass_info->Bind();
 							{
-								auto material = MakeFullScreenMaterial(prefilter_shader, false);
+								auto material = Renderer::CreateFullScreenMaterial(prefilter_shader);
 								material->SetTexture("u_SceneColor", resources.Get(data.Input).Texture);
 								material->SetParameters(ParamType::Float, "u_Threshold", bloom.Threshold);
 								Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
@@ -205,7 +184,7 @@ namespace Helios
 
 							render_pass_info->Bind();
 							{
-								auto material = MakeFullScreenMaterial(downsample_shader, false);
+								auto material = Renderer::CreateFullScreenMaterial(downsample_shader);
 								material->SetTexture("u_Source", resources.Get(data.Input).Texture);
 								material->SetParameters(ParamType::Vec2, "u_TexelSize", texel_size);
 								Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
@@ -260,7 +239,7 @@ namespace Helios
 
 							render_pass_info->Bind();
 							{
-								auto material = MakeFullScreenMaterial(upsample_shader, true);
+								auto material = Renderer::CreateFullScreenMaterial(upsample_shader, true);
 								material->SetTexture("u_Source", resources.Get(data.Source).Texture);
 								material->SetParameters(ParamType::Vec2, "u_TexelSize", texel_size);
 								material->SetParameters(ParamType::Float, "u_Scatter", scatter);
@@ -313,7 +292,7 @@ namespace Helios
 
 						render_pass_info->Bind();
 						{
-							auto material = MakeFullScreenMaterial(composite_shader, false);
+							auto material = Renderer::CreateFullScreenMaterial(composite_shader);
 							material->SetTexture("u_SceneColor", resources.Get(data.SceneColor).Texture);
 							material->SetTexture("u_BloomTexture", resources.Get(data.BloomTexture).Texture);
 							material->SetParameters(ParamType::Float, "u_Intensity", intensity);

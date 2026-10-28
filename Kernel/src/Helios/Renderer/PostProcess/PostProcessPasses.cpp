@@ -77,14 +77,9 @@ namespace Helios
 					render_api->SetViewport(0, 0, viewport_region.Width, viewport_region.Height);
 					render_api->SetScissor(0, 0, viewport_region.Width, viewport_region.Height);
 
-					const auto present_shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-						ABSOLUTE_PATH("Shaders/PostProcessShaders/PostProcessPresent.glsl"));
-
 					/* 全屏直出：不测深度、不写，不混合 */
-					auto material = CreateSharedPtr<Material>();
-					material->SetShader(present_shader);
-					material->GetRasterState().EnableDepthTest = false;
-					material->GetRasterState().EnableDepthWrite = false;
+					static BuiltinAsset<DeviceShader> s_present_shader("Shaders/PostProcessShaders/PostProcessPresent.glsl");
+					auto material = Renderer::CreateFullScreenMaterial(s_present_shader.Get());
 					material->SetTexture("u_Source", resources.Get(data.Source).Texture);
 					Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
 					render_api->Flush();

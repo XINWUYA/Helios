@@ -462,6 +462,19 @@ namespace Helios
 			, EnableColorWrite(true), Wireframe(false)
 		{
 		}
+
+		/* 切成 One/One 加法混合：逐光源叠加、计数、回叠这几类 Pass 共用 */
+		RenderRasterState& SetAdditiveBlend()
+		{
+			EnableBlend = true;
+			BlendEquationRGB = BlendEquation::Add;
+			BlendEquationA = BlendEquation::Add;
+			BlendFuncSrcRGB = BlendFunc::One;
+			BlendFuncSrcA = BlendFunc::One;
+			BlendFuncDstRGB = BlendFunc::One;
+			BlendFuncDstA = BlendFunc::One;
+			return *this;
+		}
 	};
 
 }
