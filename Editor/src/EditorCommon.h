@@ -3,11 +3,11 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <glm/glm.hpp>
 #include <imgui.h>
 #include <string>
 
+#include "Common/TextMatch.h"
 #include "ImGui/EditorTheme.h"
 
 namespace Helios
@@ -73,35 +73,5 @@ namespace Helios
 
 		return { clamp_axis(imgui_width * to_physical_scale),
 		         clamp_axis(imgui_height * to_physical_scale) };
-	}
-
-	/* ---- 面板过滤词的文本匹配 ----
-	 * 层级面板的实体搜索与资源浏览器的过滤共用这一处，语义保持一致。 */
-
-	inline std::string ToLowercase(const char* text)
-	{
-		if (text == nullptr)
-			return {};
-
-		std::string result(text);
-		std::transform(result.begin(), result.end(), result.begin(),
-			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-		return result;
-	}
-
-	/* needle 必须是已经小写化的（用 ToLowercase 过一次）；
-	 * needle 为空视为"全部命中"。 */
-	inline bool ContainsCaseInsensitive(const char* haystack, const std::string& lowercase_needle)
-	{
-		if (haystack == nullptr)
-			return false;
-
-		if (lowercase_needle.empty())
-			return true;
-
-		/* 边比边转小写，不复制原串：搜索框每帧对大量条目调用 */
-		const char* end = haystack + std::strlen(haystack);
-		return std::search(haystack, end, lowercase_needle.begin(), lowercase_needle.end(),
-			[](char lhs, char rhs) { return static_cast<char>(std::tolower(static_cast<unsigned char>(lhs))) == rhs; }) != end;
 	}
 }

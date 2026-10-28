@@ -77,38 +77,6 @@ namespace Helios
 			return clicked;
 		}
 
-		std::string LowercaseAscii(const char* text)
-		{
-			std::string lowered(text != nullptr ? text : "");
-			for (char& character : lowered)
-				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-			return lowered;
-		}
-
-		/* 不区分大小写的子串查找（needle 需已小写化；逐字节比较对 UTF-8 中文同样有效——
-		 * 高位字节经 tolower 原样保留，两侧编码一致即可命中） */
-		bool ContainsCaseInsensitive(const std::string& haystack, const std::string& needle_lower)
-		{
-			if (needle_lower.empty())
-				return true;
-			if (haystack.size() < needle_lower.size())
-				return false;
-
-			for (size_t start = 0; start + needle_lower.size() <= haystack.size(); ++start)
-			{
-				size_t matched = 0;
-				while (matched < needle_lower.size()
-					&& static_cast<char>(std::tolower(static_cast<unsigned char>(haystack[start + matched])))
-						== needle_lower[matched])
-				{
-					++matched;
-				}
-				if (matched == needle_lower.size())
-					return true;
-			}
-			return false;
-		}
-
 		void FormatTime(std::time_t seconds, uint32_t millis, char (&out)[32])
 		{
 			std::tm local_time{};
@@ -209,7 +177,7 @@ namespace Helios
 
 	void LogPanel::SetSearchFilter(const std::string& filter)
 	{
-		m_SearchFilter = LowercaseAscii(filter.c_str());
+		m_SearchFilter = ToLowercase(filter);
 		std::snprintf(m_SearchBuffer, sizeof(m_SearchBuffer), "%s", filter.c_str());
 	}
 
@@ -447,7 +415,7 @@ namespace Helios
 		Icons::BeginSearchInput();
 		ImGui::SetNextItemWidth(search_width);
 		if (ImGui::InputTextWithHint("##LogFind", "Search...", m_SearchBuffer, IM_ARRAYSIZE(m_SearchBuffer)))
-			m_SearchFilter = LowercaseAscii(m_SearchBuffer);
+			m_SearchFilter = ToLowercase(m_SearchBuffer);
 		Icons::EndSearchInput();
 
 		ImGui::SameLine();

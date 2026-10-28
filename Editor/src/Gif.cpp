@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "Gif.h"
+#include "Common/TextMatch.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Renderer/Renderer.h"
 #include <cctype>
@@ -22,10 +23,7 @@ namespace Helios::Gif
 
 		bool IsGifPath(const std::filesystem::path& path)
 		{
-			std::string extension = PathToUtf8(path.extension());
-			for (char& character : extension)
-				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-			return extension == ".gif";
+			return LowercaseExtension(path) == ".gif";
 		}
 
 		/* 整个文件读进内存（stb 的动图接口只吃内存缓冲）；失败返回 false */

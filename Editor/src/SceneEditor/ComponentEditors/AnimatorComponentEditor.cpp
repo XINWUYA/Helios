@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "ComponentEditors.h"
+#include "Common/TextMatch.h"
 #include "Helios/Core/AssetManager.h"
 #include "ImGui/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
@@ -45,9 +46,7 @@ namespace Helios
 					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
 						payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
 					{
-						std::string extension = PathToUtf8(relative_path.extension());
-						std::transform(extension.begin(), extension.end(), extension.begin(),
-							[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+						const std::string extension = LowercaseExtension(relative_path);
 
 						if (extension == ".anim")
 						{

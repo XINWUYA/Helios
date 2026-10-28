@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "FrameGraphPanel.h"
+#include "Common/TextMatch.h"
 #include "EditorIcons.h"
 #include "ImGui/EditorTheme.h"
 #include "PanelRegistry.h"
@@ -1466,15 +1467,10 @@ namespace Helios
 		bool highlight_active = false;
 		{
 			/* 大小写不敏感的子串匹配（搜索） */
+			const std::string needle = ToLowercase(m_SearchFilter);
 			const auto matches_filter = [&](const std::string& candidate)
 			{
-				std::string lowered_candidate = candidate;
-				std::string lowered_filter = m_SearchFilter;
-				std::transform(lowered_candidate.begin(), lowered_candidate.end(), lowered_candidate.begin(),
-					[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-				std::transform(lowered_filter.begin(), lowered_filter.end(), lowered_filter.begin(),
-					[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-				return lowered_candidate.find(lowered_filter) != std::string::npos;
+				return ContainsCaseInsensitive(candidate, needle);
 			};
 
 			/* 有向遍历：upstream = res→产出 pass / pass→输入 res；downstream 反向 */

@@ -6,6 +6,7 @@
 #include "EditorIcons.h"
 #include "Gif.h"
 #include "MaterialParamUI.h"
+#include "Command/AssetFileOps.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "Svg.h"
@@ -135,11 +136,7 @@ namespace Helios
 		/* 只有 .glsl 源码谈得上 include 依赖；.metal 是编译产物，里面引用的 <metal_stdlib> 不是我们的 */
 		bool IsGlslSource(const std::filesystem::path& path)
 		{
-			std::string extension = PathToUtf8(path.extension());
-			for (char& character : extension)
-				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-
-			return extension == ".glsl";
+			return LowercaseExtension(path) == ".glsl";
 		}
 
 		class ComponentCustomDrawCommand final : public ICommand
@@ -1428,9 +1425,7 @@ namespace Helios
 				if (payload->DataSize > 1 && TryPathFromUtf8Payload(
 					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
 				{
-					std::string extension = PathToUtf8(relative_path.extension());
-					std::transform(extension.begin(), extension.end(), extension.begin(),
-						[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+					const std::string extension = LowercaseExtension(relative_path);
 
 					if (extension == ".mesh" || extension == ".model")
 						ApplyDroppedMeshToEntity(entity, PathToUtf8(ResolveAssetPath(relative_path)));
@@ -2078,11 +2073,7 @@ namespace Helios
 		/* 图片的采样与格式：GIF 走自己的图集，不在这里配 */
 		if (!entry.IsFolder && entry.Kind == AssetFileKind::Image)
 		{
-			std::string extension = PathToUtf8(absolute_path.extension());
-			for (char& character : extension)
-				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-
-			if (extension != ".gif")
+			if (LowercaseExtension(absolute_path) != ".gif")
 				DrawTextureSettingsSection(PathToUtf8(absolute_path));
 		}
 

@@ -445,7 +445,7 @@ namespace Helios
 		if (m_pMainScene == nullptr || path.empty())
 			return false;
 
-		const std::string extension = ToLowercase(PathToUtf8(path.extension()).c_str());
+		const std::string extension = LowercaseExtension(path);
 		const bool exchange_format = extension == ".obj" || extension == ".fbx" || extension == ".gltf"
 			|| extension == ".glb" || extension == ".dae" || extension == ".stl";
 		if (extension != ".mesh" && extension != ".model" && !exchange_format)

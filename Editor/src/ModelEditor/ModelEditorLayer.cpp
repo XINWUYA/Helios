@@ -14,6 +14,10 @@
 #include "EditorCommon.h"
 #include "EditorIcons.h"
 #include "MaterialParamUI.h"
+#include "Command/AssetFileOps.h"
+#include "ImGui/ImGuiExtensions.h"
+#include "Helios/Core/AssetManager.h"
+#include <glm/gtc/type_ptr.hpp>
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 
@@ -77,7 +81,7 @@ namespace Helios
 			{
 				if (!entry.is_regular_file(error))
 					continue;
-				if (ToLowercase(PathToUtf8(entry.path().extension()).c_str()) != ".anim")
+				if (LowercaseExtension(entry.path()) != ".anim")
 					continue;
 				if (!prefix.empty() && PathToUtf8(entry.path().stem()).rfind(prefix, 0) != 0)
 					continue;
@@ -92,7 +96,7 @@ namespace Helios
 		std::filesystem::path ResolveExportPath(const std::string& file_path, const char* extension)
 		{
 			std::filesystem::path target = PathFromUtf8(file_path);
-			if (ToLowercase(PathToUtf8(target.extension()).c_str()) != extension)
+			if (LowercaseExtension(target) != extension)
 				target.replace_extension(extension);
 			return target;
 		}
@@ -924,7 +928,7 @@ namespace Helios
 				if (payload->DataSize > 1 && TryPathFromUtf8Payload(
 					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
 				{
-					const std::string extension = ToLowercase(PathToUtf8(relative_path.extension()).c_str());
+					const std::string extension = LowercaseExtension(relative_path);
 					if (extension == ".mtl")
 						AssignSubModelMaterial(static_cast<size_t>(index), PathToUtf8(ResolveAssetPath(relative_path)));
 				}
@@ -1061,7 +1065,7 @@ namespace Helios
 		if (path.empty())
 			return false;
 
-		const std::string extension = ToLowercase(PathToUtf8(PathFromUtf8(path).extension()).c_str());
+		const std::string extension = LowercaseExtension(PathFromUtf8(path));
 		if (extension == ".model" || extension == ".mesh")
 			return LoadMeshModel(path);
 

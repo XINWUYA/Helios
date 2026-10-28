@@ -35,21 +35,6 @@ namespace Helios
 			return ImGui::GetColorU32(color);
 		}
 
-		bool ContainsIgnoreCase(const std::string& text, const std::string& needle)
-		{
-			if (needle.empty())
-				return true;
-
-			const auto lower = [](char ch) { return static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); };
-			std::string haystack = text;
-			std::string pattern = needle;
-			for (char& ch : haystack)
-				ch = lower(ch);
-			for (char& ch : pattern)
-				ch = lower(ch);
-			return haystack.find(pattern) != std::string::npos;
-		}
-
 		std::string EntityName(Scene& scene, entt::entity entity)
 		{
 			if (const auto* name = scene.GetRegistry().try_get<NameComponent>(entity))
@@ -497,10 +482,11 @@ namespace Helios
 		const std::string animator_name = (m_pScene != nullptr && m_AnimatorEntity != entt::null)
 			? EntityName(*m_pScene, m_AnimatorEntity) : std::string("Root");
 
+		const std::string needle = ToLowercase(m_TrackFilter);
 		for (int index = 0; index < GetTrackCount(); ++index)
 		{
 			const std::string label = TimelineModel::MakeTrackLabel(m_Clip->GetTracks()[index], animator_name);
-			if (ContainsIgnoreCase(label, m_TrackFilter))
+			if (ContainsCaseInsensitive(label, needle))
 				m_VisibleTracks.push_back(index);
 		}
 	}
@@ -1350,11 +1336,12 @@ namespace Helios
 			? EntityName(*m_pScene, m_AnimatorEntity) : std::string("Root");
 
 		bool any = false;
+		const std::string needle = ToLowercase(m_AddTrackFilter);
 		for (const TimelineModel::PropertyEntry& entry : m_AddTrackEntries)
 		{
 			const std::string owner = entry.Path.empty() ? animator_name : entry.Path;
 			const std::string label = owner + " · " + entry.Component + "." + entry.Property;
-			if (!ContainsIgnoreCase(label, m_AddTrackFilter))
+			if (!ContainsCaseInsensitive(label, needle))
 				continue;
 
 			any = true;

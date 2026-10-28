@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "ModelImporter.h"
+#include "Common/TextMatch.h"
 #include "Helios/Scene/SkeletonModel.h"
 #include "Helios/Scene/AnimationClip.h"
 
@@ -1306,10 +1307,7 @@ namespace Helios
 			return {};
 		}
 
-		std::string extension = ExtractFileSuffix(filepath);
-		std::transform(extension.begin(), extension.end(), extension.begin(),
-			[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-		extension.insert(extension.begin(), '.');
+		std::string extension = "." + ToLowercase(ExtractFileSuffix(filepath));
 
 		if (extension == ".obj")
 			return ImportObj(filepath, dest_dir);
@@ -1335,10 +1333,7 @@ namespace Helios
 				if (!entry.is_regular_file(error))
 					continue;
 
-				std::string sibling_extension = PathToUtf8(entry.path().extension());
-				std::transform(sibling_extension.begin(), sibling_extension.end(), sibling_extension.begin(),
-					[](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-				if (sibling_extension != ".bin")
+				if (LowercaseExtension(entry.path()) != ".bin")
 					continue;
 
 				ImportedTexture companion;
