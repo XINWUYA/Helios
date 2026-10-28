@@ -26,6 +26,9 @@ uniform int u_SelectedId;
 uniform vec4 u_OutlineColor;
 /* 描边宽度（像素），配合固定的采样半径 4 使用 */
 uniform float u_Thickness;
+/* 粗筛掩码（见 SelectionMask.glsl）：一块覆盖 u_MaskTile 见方，非零表示这块里有选中像素 */
+uniform sampler2D u_SelectionMask;
+uniform int u_MaskTile;
 
 const int kKernelRadius = 4;
 
@@ -36,6 +39,28 @@ void main()
 
 	/* 选中像素自己不落笔：轮廓是它外侧的一圈 */
 	if (int(floor(texelFetch(u_ObjectId, pixel, 0).r + 0.5f)) == u_SelectedId)
+	{
+		OutFragColor = vec4(0.0f);
+		return;
+	}
+
+	/* 粗筛：附近没有选中像素就没什么可算的。这块占了绝大多数像素，
+	 * 用它挡掉 9x9 邻域，比逐像素扫一圈便宜一个数量级 */
+	const ivec2 mask_size = textureSize(u_SelectionMask, 0);
+	const ivec2 mask_pixel = clamp(pixel / max(u_MaskTile, 1), ivec2(0), mask_size - ivec2(1));
+	bool nearby = false;
+	for (int y = -1; y <= 1 && !nearby; ++y)
+	{
+		for (int x = -1; x <= 1 && !nearby; ++x)
+		{
+			const ivec2 sample_mask = mask_pixel + ivec2(x, y);
+			if (sample_mask.x < 0 || sample_mask.y < 0
+				|| sample_mask.x >= mask_size.x || sample_mask.y >= mask_size.y)
+				continue;
+			nearby = texelFetch(u_SelectionMask, sample_mask, 0).r > 0.5f;
+		}
+	}
+	if (!nearby)
 	{
 		OutFragColor = vec4(0.0f);
 		return;
