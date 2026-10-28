@@ -79,19 +79,7 @@ namespace Helios
 			COUNT
 		};
 
-		/* 矢量绘制：在以 center 为中心、边长 size 的正方形内作图 */
-		using IconDrawFunc = void (*)(ImDrawList* draw_list, const ImVec2& center, float size, ImU32 color);
-
-		struct IconDesc
-		{
-			const char*  Name;      /* 语义名：用于调试与阅读 */
-			IconDrawFunc Draw;
-		};
-
-		/* 图标元数据表：与 Id 枚举一一对应，Draw 是加载失败时的回退画法 */
-		const IconDesc& Get(Id id);
-
-		/* 这张图标的 SVG 是否真的从 EditorRes/icons 加载到了（自检用：文件名写错会静默走回退） */
+		/* 这张图标的 SVG 是否真的从 EditorRes/icons 加载到了（自检用：缺图时只画方框占位） */
 		[[nodiscard]] bool HasSvg(Id id);
 
 		/* 绘制图标本体（不进入交互；按钮请用 IconButton）。
