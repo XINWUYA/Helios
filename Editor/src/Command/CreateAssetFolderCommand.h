@@ -1,7 +1,7 @@
 #pragma once
 #include <filesystem>
 #include <string>
-#include "Helios/Command/Command.h"
+#include "Command/Command.h"
 #include "Command/AssetFileOps.h"
 
 namespace Helios

@@ -9,7 +9,7 @@
 #include "Gif.h"
 #include "Svg.h"
 #include "Command/AssetFileOps.h"
-#include "Helios/Command/Command.h"
+#include "Command/Command.h"
 #include "Helios/Common/Common.h"
 
 namespace Helios

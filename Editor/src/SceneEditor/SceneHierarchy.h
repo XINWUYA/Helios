@@ -12,7 +12,7 @@
 #include "CameraPreview.h"
 #include "Command/AssetFileOps.h"
 #include "EditorIcons.h"
-#include "Helios/Command/CommandStack.h"
+#include "Command/CommandStack.h"
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Entity.h"

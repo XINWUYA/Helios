@@ -1,6 +1,6 @@
 #include "Pch.h"
 #include "ComponentEditors.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Components.h"
 

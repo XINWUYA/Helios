@@ -1,20 +1,20 @@
 ﻿#include "Pch.h"
 #include "ModelImporter.h"
-#include "SkeletonModel.h"
-#include "AnimationClip.h"
+#include "Helios/Scene/SkeletonModel.h"
+#include "Helios/Scene/AnimationClip.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 #include <assimp/material.h>
 
-#include "ModelManifest.h"
+#include "Helios/Scene/ModelManifest.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/Scene/Material.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
-#include "SceneCommon.h"
+#include "Helios/Scene/SceneCommon.h"
 
 /* 贴图通道拆分要写 PNG（打包金属粗糙度的拆分 / 未压缩内嵌贴图的落盘）：
  * stb_image 的实现已在 OpenGLTexture.cpp，这里只补 image_write 的实现（全工程唯一一份）。 */

@@ -7,7 +7,7 @@
 #include "EditorIcons.h"
 #include "PanelRegistry.h"
 #include "Helios/Core/Logger.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 
 namespace Helios
 {

@@ -16,7 +16,7 @@ namespace Helios
 
 	/* Shader 热重载：盯住已加载着色器的依赖文件，改了就地重载，由编辑器每帧驱动。
 	 * 改公共库会波及一批 shader，整批在后台编完后同一帧一起换上，画面不会新旧混用。 */
-	class HELIOS_API ShaderReloader
+	class ShaderReloader
 	{
 	public:
 		/* 每帧调用。自动开关关掉时什么都不做 */

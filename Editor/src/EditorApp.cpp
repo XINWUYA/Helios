@@ -6,8 +6,8 @@
 #include "ModelEditor/ModelEditorLayer.h"
 #include "ProjectLauncher/RecentProjects.h"
 #include "Helios/Common/PathUtils.h"
-#include "Helios/Common/ProjectConfig.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "Common/ProjectConfig.h"
+#include "ImGui/EditorTheme.h"
 
 namespace Helios
 {

@@ -8,10 +8,10 @@
 
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/PathUtils.h"
-#include "Helios/Common/ProjectConfig.h"
+#include "Common/ProjectConfig.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Renderer/Renderer.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 #include <cstdio>
 
 namespace Helios

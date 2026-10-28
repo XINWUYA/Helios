@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "Helios/Command/Command.h"
+#include "Command/Command.h"
 #include "Helios/Scene/Entity.h"
 #include "Helios/Scene/Scene.h"
 

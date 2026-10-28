@@ -11,8 +11,8 @@
 #include "Command/RenameAssetCommand.h"
 #include "FileDialog.h"
 #include "Helios/Core/TextureSettings.h"
-#include "Helios/ImGui/EditorTheme.h"
-#include "Helios/ImGui/ImGuiExtensions.h"
+#include "ImGui/EditorTheme.h"
+#include "ImGui/ImGuiExtensions.h"
 #include <utility>
 #include <vector>
 

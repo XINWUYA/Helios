@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
-#include "Helios/Common/Export.h"
 
 namespace Helios::EditorTheme
 {
@@ -26,9 +25,9 @@ namespace Helios::EditorTheme
      * 所有换算一律"从设计值重算"（design × UiScale），不做累乘 —— 因此可重复调用。 */
     namespace Detail
     {
-        HELIOS_API float& UiScaleStorage();
+        float& UiScaleStorage();
         /* 当前主题序号（定义在 EditorTheme.cpp，同样为了跨模块只有一份） */
-        HELIOS_API int& ThemeIndexStorage();
+        int& ThemeIndexStorage();
     }
 
     /* 设计像素 → ImGui 单位的缩放系数（macOS = 1；Windows = 系统 content scale） */
@@ -75,21 +74,21 @@ namespace Helios::EditorTheme
         /* 强调色一族：运行时可变（工具栏切换主题），所以定义收口在 EditorTheme.cpp ——
          * Windows 上 Kernel.dll 与 Editor.exe 各有一份头文件里的 inline 变量，改一处另一处看不到。
          * 只用于选中 / 激活 / 焦点 / 拖拽，不作为装饰色铺满界面 */
-        extern HELIOS_API ImVec4 Accent;
-        extern HELIOS_API ImVec4 AccentHover;
-        extern HELIOS_API ImVec4 AccentDown;
+        extern ImVec4 Accent;
+        extern ImVec4 AccentHover;
+        extern ImVec4 AccentDown;
 
         /* 图标侧的派生态（换主题时由 RefreshAccentTokens 从 Accent 折算）：
          * Ink 主色、Tint 深底淡底、OnLight 亮底深描边、Pale 亮底极淡填充；
          * 带 Alt 的是副色（色轮转 150° 的对比色），语义相同。 */
-        extern HELIOS_API ImVec4 AccentInk;
-        extern HELIOS_API ImVec4 AccentTint;
-        extern HELIOS_API ImVec4 AccentOnLight;
-        extern HELIOS_API ImVec4 AccentPale;
-        extern HELIOS_API ImVec4 AccentAlt;
-        extern HELIOS_API ImVec4 AccentAltDeep;
-        extern HELIOS_API ImVec4 AccentAltTint;
-        extern HELIOS_API ImVec4 AccentAltPale;
+        extern ImVec4 AccentInk;
+        extern ImVec4 AccentTint;
+        extern ImVec4 AccentOnLight;
+        extern ImVec4 AccentPale;
+        extern ImVec4 AccentAlt;
+        extern ImVec4 AccentAltDeep;
+        extern ImVec4 AccentAltTint;
+        extern ImVec4 AccentAltPale;
 
         /* 分量色：X/Y/Z 的身份标识（红 / 绿 / 蓝），只出现在「分量重置按钮」和「视图指示器」两处
          * （共用 AxisGlyph.h 的字母笔画）；深色界面用降饱和版本。W 没有约定色，用中性灰。 */
@@ -110,8 +109,8 @@ namespace Helios::EditorTheme
          * 故用 Accent；悬停 / 拖动时整条再亮一档，状态的差异只在这三个颜色里。 */
         inline const ImVec4 SliderTrack = Neutral6;      /* #465363 细轨（值右侧那一段） */
         /* 点亮段与圆点跟着主题走，值由 RefreshAccentTokens 落定 */
-        extern HELIOS_API ImVec4 SliderValue;
-        extern HELIOS_API ImVec4 SliderHover;
+        extern ImVec4 SliderValue;
+        extern ImVec4 SliderHover;
 
         inline const ImVec4 Clear   = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
         inline const ImVec4 White06 = ImVec4(1.0f, 1.0f, 1.0f, 0.06f);
@@ -141,11 +140,11 @@ namespace Helios::EditorTheme
         inline constexpr float SliderDotRadiusDesign      = 5.0f;
 
         /* 运行时值 = 设计值 × UiScale（ApplyUiScaleToTokens 落定，使用方只读） */
-        extern HELIOS_API float PropertyLabelWidth;
-        extern HELIOS_API float PropertyRowPadY;
-        extern HELIOS_API float CardPad;
-        extern HELIOS_API float SliderTrackThickness;
-        extern HELIOS_API float SliderDotRadius;
+        extern float PropertyLabelWidth;
+        extern float PropertyRowPadY;
+        extern float CardPad;
+        extern float SliderTrackThickness;
+        extern float SliderDotRadius;
     }
 
     /* 按 UiScale 落定 Token 尺寸（SetupFonts / 跨屏重建时调用；从设计值重算而非累乘，
@@ -191,7 +190,7 @@ namespace Helios::EditorTheme
     /* 已选中行被悬停时的填充色：保住强调色底、再亮一档。ImGui 对「悬停 + 选中」画的也是
      * HeaderHovered（会把选中色整个盖掉）；选中行的调用点要显式 PushStyleColor 顶住。
      * 值随主题刷新（见 RefreshAccentTokens），不要手写。 */
-    extern HELIOS_API ImVec4 RowHoverSelected;
+    extern ImVec4 RowHoverSelected;
 
     /* ==================== 形状语言（Style 数值） ==================== */
 
@@ -457,7 +456,7 @@ namespace Helios::EditorTheme
     /* 全局字体存取：各面板用 GetFonts().Title 切换标题字体 */
     namespace Detail
     {
-        HELIOS_API EditorFonts& FontsStorage();
+        EditorFonts& FontsStorage();
     }
 
     inline const EditorFonts& GetFonts()

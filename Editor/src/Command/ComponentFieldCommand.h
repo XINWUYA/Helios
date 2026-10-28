@@ -3,7 +3,7 @@
 #include <string>
 #include <typeindex>
 #include <vector>
-#include "Helios/Command/Command.h"
+#include "Command/Command.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Entity.h"
 

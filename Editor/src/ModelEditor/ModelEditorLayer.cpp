@@ -7,8 +7,8 @@
 #include <cfloat>
 #include <limits>
 #include "Helios/Application/Application.h"
-#include "Helios/ImGui/EditorTheme.h"
-#include "Helios/Scene/ModelImporter.h"
+#include "ImGui/EditorTheme.h"
+#include "Scene/ModelImporter.h"
 #include "Helios/Scene/ModelManifest.h"
 #include "DebugViewMenu.h"
 #include "EditorCommon.h"

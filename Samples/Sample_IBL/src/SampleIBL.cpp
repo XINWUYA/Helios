@@ -1,5 +1,6 @@
 ﻿#include "SampleIBL.h"
 #include "SampleCameraController.h"
+#include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
 #include <Helios/Scene/SceneCommon.h>
 #include <Helios/Scene/ReflectionProbe.h>
@@ -156,9 +157,8 @@ void SampleIBLLayer::OnImGuiRender()
 	}
 
 	ImGui::Separator();
-	ImGui::Text("Light Dir");
 	auto light_dir = m_pDirectionLight->GetDirection();
-	if (ImGuiExt::DrawDirectionIndicator("Light Dir", light_dir, 0))
+	if (ImGui::DragFloat3("Light Dir", glm::value_ptr(light_dir), 0.01f, -1.0f, 1.0f))
 		m_pDirectionLight->SetDirection(light_dir);
 	ImGui::End();
 }

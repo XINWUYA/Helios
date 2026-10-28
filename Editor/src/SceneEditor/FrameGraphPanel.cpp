@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "FrameGraphPanel.h"
 #include "EditorIcons.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 #include "PanelRegistry.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"

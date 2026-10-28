@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "EditorIcons.h"
 #include "Svg.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 #include "Helios/Scene/SceneCommon.h"
 #include <magic_enum.hpp>
 #include <tinyxml2.h>

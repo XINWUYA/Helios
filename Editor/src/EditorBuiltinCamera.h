@@ -35,6 +35,10 @@ namespace Helios
 		[[nodiscard]] const glm::vec3& GetPreviewGridCenter() const { return m_PreviewGridCenter; }
 		[[nodiscard]] float GetPreviewGridScale() const { return m_PreviewGridScale; }
 
+		/* 选中实体 id：>= 0 时视口沿轮廓描边（见 Renderer/RenderPasses/SelectionOutlinePass） */
+		void SetSelectionId(int32_t id) { m_SelectionId = id; }
+		[[nodiscard]] int32_t GetSelectionId() const { return m_SelectionId; }
+
 		/* 子网格高亮（模型预览：悬停子模型卡时用）：>= 0 时把场景里模型的该网格段用强调色
 		 * 平铺再画一遍（见 SceneGizmos::SubmitModelSegmentHighlight）。缺省 -1 = 不画。 */
 		void SetHighlightSegment(int segment_index) { m_HighlightSegment = segment_index; }
@@ -144,6 +148,8 @@ namespace Helios
 		float m_PreviewGridScale{ 1.0f };
 		/* 子网格高亮（见 SetHighlightSegment）：-1 = 不画 */
 		int m_HighlightSegment{ -1 };
+		/* 选中实体 id（描边用）：负数 = 没有选中 */
+		int32_t m_SelectionId{ -1 };
 		/* 上一帧按键状态：起手要求“按下沿”，避免按住按键从其他窗口拖进视口时误起手 */
 		bool m_WasAltPressed{ false };
 		bool m_WasLmbPressed{ false };

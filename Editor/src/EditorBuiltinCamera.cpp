@@ -7,7 +7,7 @@
 #include "Helios/Common/Math.h"
 #include "Helios/Renderer/RenderPasses/DeferredPasses.h"
 #include "Helios/Renderer/RenderPasses/ScenePass.h"
-#include "Helios/Renderer/RenderPasses/SelectionOutlinePass.h"
+#include "Renderer/RenderPasses/SelectionOutlinePass.h"
 
 namespace Helios
 {
@@ -227,7 +227,7 @@ namespace Helios
 
 		/* 选中实体描边：读场景的实体 id 附件（与拾取同一张），在输出上勾一圈强调色。
 		 * 挂在 gizmo 之前 —— 操作手柄与图标压在线条上面。 */
-		SelectionOutline::AddPass(render_view, overlay_output,
+		SelectionOutline::AddPass(render_view, m_SelectionId, overlay_output,
 			frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>(
 				render_view.GetRenderPipeline() == RenderPipeline::Deferred
 					? "GBufferObjectId" : "ScenePassObjectId"));

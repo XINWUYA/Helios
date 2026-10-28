@@ -17,7 +17,7 @@
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/Scene/ReflectionProbe.h"	/* .probe 详情的烘焙结果预览（BuildPreviewTexture） */
 #include "Helios/Scene/AnimationClip.h"
-#include "Helios/ImGui/ImGuiExtensions.h"
+#include "ImGui/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "EntityTemplateRegistry.h"
@@ -29,7 +29,7 @@
 #include "Command/ReparentEntityCommand.h"
 #include "Command/SetEntityVisibilityCommand.h"
 #include "Command/SetComponentOrderCommand.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Renderer/PostProcess/Effects/Bloom.h"
 #include "Helios/Renderer/ShaderCompiler.h"

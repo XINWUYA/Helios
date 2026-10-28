@@ -1,6 +1,6 @@
 ﻿#include "Pch.h"
 #include "ProjectConfig.h"
-#include "AssetPath.h"
+#include "Helios/Common/AssetPath.h"
 #include <tinyxml2.h>
 
 namespace Helios

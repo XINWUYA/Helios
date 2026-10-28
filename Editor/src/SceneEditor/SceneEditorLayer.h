@@ -8,7 +8,7 @@
 #include "EditorBuiltinCamera.h"
 #include "EditorCommon.h"
 #include "TransformGizmo.h"
-#include "Helios/Command/CommandStack.h"
+#include "Command/CommandStack.h"
 
 namespace Helios
 {

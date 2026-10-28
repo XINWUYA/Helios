@@ -17,9 +17,9 @@
 #include "Helios/Core/CPUTimerProfiler.h"
 #include "Helios/Core/FrameTimeProfiler.h"
 #include "Helios/Core/Logger.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 #include "EditorCommon.h"
-#include "Helios/ImGui/ImGuiExtensions.h"
+#include "ImGui/ImGuiExtensions.h"
 #include "Helios/Renderer/RenderQuery.h"
 #include "Helios/Renderer/Renderer.h"
 

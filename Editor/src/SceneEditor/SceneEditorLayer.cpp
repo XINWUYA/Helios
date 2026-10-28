@@ -14,10 +14,10 @@
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include "Helios/Scene/Components.h"
-#include "Helios/Scene/ModelImporter.h"
+#include "Scene/ModelImporter.h"
 #include "FileDialog.h"
 #include "Helios/Common/PathUtils.h"
-#include "Helios/Common/ProjectConfig.h"
+#include "Common/ProjectConfig.h"
 #include "Helios/Script/ScriptRuntime.h"
 
 namespace Helios
@@ -1458,7 +1458,7 @@ namespace Helios
 			/* 选中项 → 视口描边：id 取自实体句柄，与拾取缓冲同源。
 			 * 句柄已失效（实体被删 / 换了场景）就不画。 */
 			const Entity selected_entity = m_SceneHierarchy.GetSelectedEntity();
-			m_pEditorCamera->GetRenderView()->SetSelectionId(
+			m_pEditorCamera->SetSelectionId(
 				(selected_entity && m_pMainScene->IsEntityValid(selected_entity))
 					? static_cast<int32_t>(static_cast<uint32_t>(selected_entity)) : -1);
 

@@ -4,7 +4,7 @@
  * 逐像素跳；矢量笔画是亚像素落点、跟盘一起平滑移动。 */
 #include <imgui.h>
 
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 
 namespace Helios::AxisGlyph
 {

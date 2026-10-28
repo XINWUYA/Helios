@@ -9,8 +9,8 @@
 
 #include <algorithm>
 
-#include "Helios/ImGui/EditorTheme.h"
-#include "Helios/ImGui/AxisGlyph.h"
+#include "ImGui/EditorTheme.h"
+#include "ImGui/AxisGlyph.h"
 
 namespace Helios::ViewGizmo
 {

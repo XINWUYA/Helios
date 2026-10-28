@@ -48,14 +48,13 @@ namespace Helios
 			}
 		}
 
-		void AddPass(RenderView& render_view,
+		void AddPass(RenderView& render_view, int32_t selection_id,
 			FrameGraphResourceHandleTyped<FrameGraphTexture> output,
 			FrameGraphResourceHandleTyped<FrameGraphTexture> object_id)
 		{
 			PROFILE_FUNCTION();
 
-			const int32_t selected_id = render_view.GetSelectionId();
-			if (selected_id < 0 || !output || !object_id)
+			if (selection_id < 0 || !output || !object_id)
 				return;
 
 			auto& frame_graph = render_view.GetFrameGraph();
@@ -85,14 +84,14 @@ namespace Helios
 					/* 写进已有资源，不声明为目标会被图裁剪剔除（同 AxisPass） */
 					builder.AsSideEffect();
 				},
-				[&render_view, selected_id](const FrameGraphResources& resources, const OutlinePassData& data)
+				[&render_view, selection_id](const FrameGraphResources& resources, const OutlinePassData& data)
 				{
 					const auto render_pass_info = resources.GetPassRenderTarget();
 					render_view.EmplacePassFrameBuffer("SelectionOutlinePass", render_pass_info);
 
 					const SharedPtr<Material> material = GetOutlineMaterial();
 					material->SetTexture("u_ObjectId", resources.Get(data.ObjectId).Texture);
-					material->SetParameters(ParamType::Int, "u_SelectedId", selected_id);
+					material->SetParameters(ParamType::Int, "u_SelectedId", selection_id);
 
 					render_pass_info->Bind();
 					{

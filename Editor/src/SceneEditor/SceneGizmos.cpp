@@ -9,7 +9,7 @@
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/Math.h"
 #include "Helios/Common/Utils.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 #include "Helios/Scene/Camera.h"
 #include "Helios/Scene/Material.h"
 #include "Helios/Scene/Scene.h"

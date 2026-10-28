@@ -10,7 +10,7 @@
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Core/AssetManager.h"
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 #include "Helios/Renderer/Renderer.h"
 #include <fstream>
 

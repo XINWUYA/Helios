@@ -1,4 +1,5 @@
 #include "SampleCSM.h"
+#include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
 #include <Helios/Scene/Material.h>
 #include "SampleCameraController.h"
@@ -129,7 +130,7 @@ void SampleCSM::OnImGuiRender()
 	ImGui::Text("- Alt + Mouse Left: Rotate.");
 
 	auto light_dir = m_pDirectionLight->GetDirection();
-	if (ImGuiExt::DrawDirectionIndicator("Light Dir", light_dir, 0))
+	if (ImGui::DragFloat3("Light Dir", glm::value_ptr(light_dir), 0.01f, -1.0f, 1.0f))
 		m_pDirectionLight->SetDirection(light_dir);
 	ImGui::End();
 }

@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "ComponentEditors.h"
 #include "Helios/Core/AssetManager.h"
-#include "Helios/ImGui/ImGuiExtensions.h"
+#include "ImGui/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/AnimationClip.h"
 #include "Helios/Scene/Components.h"

@@ -9,7 +9,7 @@
 #include "PanelLayoutRestore.h"
 #include "ScriptModule.h"
 
-#include "Helios/Renderer/ShaderReloader.h"
+#include "Renderer/ShaderReloader.h"
 
 namespace Helios
 {

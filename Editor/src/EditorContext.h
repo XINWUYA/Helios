@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include "EditorCommon.h"
-#include "Helios/Command/Command.h"
+#include "Command/Command.h"
 #include "Helios/Common/Common.h"
 #include "Helios/Scene/Camera.h"
 

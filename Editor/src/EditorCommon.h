@@ -7,7 +7,7 @@
 #include <imgui.h>
 #include <string>
 
-#include "Helios/ImGui/EditorTheme.h"
+#include "ImGui/EditorTheme.h"
 
 namespace Helios
 {
