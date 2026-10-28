@@ -203,6 +203,48 @@ namespace Helios
 		return world;
 	}
 
+	const glm::mat4& Scene::FrameWorldTransform(entt::entity entity)
+	{
+		/* 往上找到第一个本帧算过的祖先（或根），再自顶向下逐个补齐并记下 */
+		entt::entity chain[kMaxHierarchyDepth];
+		size_t depth = 0;
+		glm::mat4 world{ 1.0f };
+
+		entt::entity current = entity;
+		while (current != entt::null && depth < kMaxHierarchyDepth && m_Registry.valid(current))
+		{
+			const size_t index = static_cast<size_t>(entt::to_entity(current));
+			if (index < m_FrameWorldStamp.size() && m_FrameWorldStamp[index] == m_FrameWorldStampNow)
+			{
+				world = m_FrameWorld[index];
+				break;
+			}
+			chain[depth++] = current;
+			current = GetParent(current);
+		}
+
+		while (depth > 0)
+		{
+			const entt::entity node = chain[--depth];
+			if (const auto* transform_component = m_Registry.try_get<TransformComponent>(node))
+				world *= transform_component->GetTransform();
+
+			const size_t index = static_cast<size_t>(entt::to_entity(node));
+			if (index >= m_FrameWorld.size())
+			{
+				m_FrameWorld.resize(index + 1);
+				m_FrameWorldStamp.resize(index + 1, 0);
+			}
+			m_FrameWorld[index] = world;
+			m_FrameWorldStamp[index] = m_FrameWorldStampNow;
+		}
+
+		const size_t index = static_cast<size_t>(entt::to_entity(entity));
+		static const glm::mat4 s_Identity{ 1.0f };
+		return (index < m_FrameWorldStamp.size() && m_FrameWorldStamp[index] == m_FrameWorldStampNow)
+			? m_FrameWorld[index] : s_Identity;
+	}
+
 	bool Scene::SetParent(entt::entity child, entt::entity parent)
 	{
 		if (!m_Registry.valid(child))
@@ -307,10 +349,17 @@ namespace Helios
 		/* 统一将 TransformComponent 同步给所有 SceneObject（Model / Light / Camera）。
 		 * 传下去的是世界变换（沿父链累积），SceneObject 只认识世界空间。
 		 * 具体变换如何写入由各 SceneObject 重写的 SetTransform 决定（多态）。 */
+		/* 新的一帧换个帧戳：上一帧记下的世界变换全部作废（戳回绕到 0 时整表清掉） */
+		if (++m_FrameWorldStampNow == 0)
+		{
+			std::fill(m_FrameWorldStamp.begin(), m_FrameWorldStamp.end(), 0u);
+			m_FrameWorldStampNow = 1;
+		}
+
 		const auto transform_view = m_Registry.view<TransformComponent>();
 		for (auto entity : transform_view)
 		{
-			const glm::mat4 world_transform = GetWorldTransform(entity);
+			const glm::mat4& world_transform = FrameWorldTransform(entity);
 
 			if (auto* model_component = m_Registry.try_get<ModelComponent>(entity); model_component && model_component->m_Model)
 				model_component->m_Model->SetTransform(world_transform);

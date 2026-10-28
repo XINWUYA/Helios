@@ -11,6 +11,8 @@
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 #include <fstream>
+#include <functional>
+#include <string_view>
 #include <unordered_map>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
@@ -441,14 +443,50 @@ namespace Helios
 	std::vector<glm::mat4> SkeletonModel::CollectJointTransforms(const Scene& scene,
 		const std::vector<entt::entity>& joints, entt::entity root)
 	{
+		const entt::registry& registry = scene.GetRegistry();
 		const glm::mat4 root_inverse = scene.IsEntityValid(root)
 			? glm::inverse(scene.GetWorldTransform(root)) : glm::mat4(1.0f);
 
-		std::vector<glm::mat4> matrices(joints.size(), glm::mat4(1.0f));
+		std::unordered_map<entt::entity, size_t> joint_slots;
+		joint_slots.reserve(joints.size());
 		for (size_t index = 0; index < joints.size(); ++index)
 		{
 			if (scene.IsEntityValid(joints[index]))
-				matrices[index] = root_inverse * scene.GetWorldTransform(joints[index]);
+				joint_slots.emplace(joints[index], index);
+		}
+
+		/* 相对模型根的矩阵：父节点就是根或另一个关节时接着父关节的结果乘，
+		 * 中间夹着别的节点才回退到整条父链（避免每个关节都从场景根重算一遍） */
+		std::vector<glm::mat4> matrices(joints.size(), glm::mat4(1.0f));
+		std::vector<uint8_t> state(joints.size(), 0); /* 0 未算 / 1 在算 / 2 已算 */
+		const std::function<void(size_t)> resolve = [&](size_t index)
+		{
+			if (state[index] != 0)
+				return;
+			state[index] = 1;
+
+			const entt::entity joint = joints[index];
+			const auto* transform = registry.try_get<TransformComponent>(joint);
+			const glm::mat4 local = (transform != nullptr) ? transform->GetTransform() : glm::mat4(1.0f);
+			const entt::entity parent = scene.GetParent(joint);
+
+			if (parent == root && root != entt::null)
+				matrices[index] = local;
+			else if (const auto slot = joint_slots.find(parent); slot != joint_slots.end() && state[slot->second] != 1)
+			{
+				resolve(slot->second);
+				matrices[index] = matrices[slot->second] * local;
+			}
+			else
+				matrices[index] = root_inverse * scene.GetWorldTransform(joint);
+
+			state[index] = 2;
+		};
+
+		for (size_t index = 0; index < joints.size(); ++index)
+		{
+			if (scene.IsEntityValid(joints[index]))
+				resolve(index);
 		}
 		return matrices;
 	}
@@ -456,23 +494,29 @@ namespace Helios
 	std::vector<entt::entity> SkeletonModel::ResolveJoints(Scene& scene, entt::entity owner) const
 	{
 		const SkeletonData& data = GetSkin();
+		entt::registry& registry = scene.GetRegistry();
 
-		/* 关节是嵌套的（根 → 椎 → 四肢），要从模型实体往下整棵子树找 */
-		std::unordered_map<std::string, entt::entity> children;
-		auto parent_view = scene.GetRegistry().view<ParentComponent>();
+		/* 关节是嵌套的（根 → 椎 → 四肢），要从模型实体往下整棵子树找：
+		 * 先一趟建好父 → 子表，再按表往下走（逐层扫全部带父节点的实体会退化成平方） */
+		std::unordered_map<entt::entity, std::vector<entt::entity>> child_lists;
+		const auto parent_view = registry.view<ParentComponent>();
+		for (auto child : parent_view)
+			child_lists[parent_view.get<ParentComponent>(child).m_Parent].push_back(child);
 
+		std::unordered_map<std::string_view, entt::entity> children;
 		std::vector<entt::entity> pending{ owner };
 		while (!pending.empty())
 		{
 			const entt::entity current = pending.back();
 			pending.pop_back();
 
-			for (auto child : parent_view)
-			{
-				if (parent_view.get<ParentComponent>(child).m_Parent != current)
-					continue;
+			const auto found = child_lists.find(current);
+			if (found == child_lists.end())
+				continue;
 
-				if (const auto* name = scene.GetRegistry().try_get<NameComponent>(child))
+			for (const entt::entity child : found->second)
+			{
+				if (const auto* name = registry.try_get<NameComponent>(child))
 					children[name->m_Name] = child;
 				pending.push_back(child);
 			}

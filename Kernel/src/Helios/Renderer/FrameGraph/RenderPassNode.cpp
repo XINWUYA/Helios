@@ -21,13 +21,14 @@ namespace Helios
 	{
 		auto resource = m_OwnerFrameGraph.GetResource(handle);
 		resource->NeedByPass(shared_from_this());
-		m_RegisteredHandleIndices.insert(handle.GetIndex());
+		m_RegisteredHandleIndices.push_back(handle.GetIndex());
 	}
 
 	/* 判断资源Handle是否被注册 */
 	bool RenderPassNode::IsResourceHandleRegistered(FrameGraphResourceHandle handle) const
 	{
-		return m_RegisteredHandleIndices.find(handle.GetIndex()) != m_RegisteredHandleIndices.cend();
+		return std::find(m_RegisteredHandleIndices.begin(), m_RegisteredHandleIndices.end(), handle.GetIndex())
+			!= m_RegisteredHandleIndices.end();
 	}
 
 	/* 根据描述创建RenderPassData */
@@ -39,7 +40,7 @@ namespace Helios
 		auto& attachments = render_pass_data->Descriptor.Attachments;
 
 		const auto& dependency_graph = m_OwnerFrameGraph.GetDependencyGraph();
-		const auto incoming_connections = dependency_graph.GetIncomingConnectionsOfNode(shared_from_this());
+		const auto& incoming_connections = dependency_graph.GetIncomingConnectionsOfNode(shared_from_this());
 
 		for (uint32_t i = 0; i < FrameGraphPassInfo::MAX_ATTACHMENT_NUM; ++i)
 		{
@@ -49,11 +50,11 @@ namespace Helios
 
 				const auto target_resource_handle = desc.Attachments.AttachmentArray[i];
 
-				/* 判断资源节点是否为输入节点 */
+				/* 判断资源节点是否为输入节点（Pass 的入射连线只会来自资源节点） */
 				for (const auto& conn : incoming_connections)
 				{
-					auto resource_node = DynamicPtrCast<RenderResourceNode>(dependency_graph.GetNode(conn->FromNodeIdx));
-					if (resource_node && (resource_node->GetResourceHandle() == target_resource_handle))
+					auto resource_node = StaticPtrCast<RenderResourceNode>(dependency_graph.GetNode(conn->FromNodeIdx));
+					if (resource_node->GetResourceHandle() == target_resource_handle)
 					{
 						render_pass_data->IncomingResourceNodes[i] = resource_node;
 						break;
@@ -120,7 +121,7 @@ namespace Helios
 			{
 				if (render_pass_data->ValidAttachments[i])
 				{
-					const auto& fg_texture = DynamicPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[i]));
+					const auto fg_texture = StaticPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[i]));
 					desc.ColorRenderBuffers.push_back({ fg_texture->GetResource().Texture, fg_texture->GetSubDescriptor().Level, fg_texture->GetSubDescriptor().Layer });
 				}
 			}
@@ -128,7 +129,7 @@ namespace Helios
 			/* 准备Depth Attachment */
 			if (render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM])
 			{
-				const auto& fg_texture = DynamicPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM]));
+				const auto fg_texture = StaticPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM]));
 				desc.DepthRenderBuffer.RenderTarget = fg_texture->GetResource().Texture;
 				desc.DepthRenderBuffer.Level = fg_texture->GetSubDescriptor().Level;
 				desc.DepthRenderBuffer.Layer = fg_texture->GetSubDescriptor().Layer;
@@ -137,40 +138,39 @@ namespace Helios
 			/* 准备Stencil Attachment */
 			if (render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM + 1])
 			{
-				const auto& fg_texture = DynamicPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM + 1]));
+				const auto fg_texture = StaticPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM + 1]));
 				desc.StencilRenderBuffer.RenderTarget = fg_texture->GetResource().Texture;
 				desc.StencilRenderBuffer.Level = fg_texture->GetSubDescriptor().Level;
 				desc.StencilRenderBuffer.Layer = fg_texture->GetSubDescriptor().Layer;
 			}
 
-		/* 没有附件的 Pass（如 SideEffect Pass）直接渲染到默认 RT，不需要创建 FrameBuffer */
-		if (render_pass_data->RenderBufferUsage == RenderBufferUsage::None)
-		{
-			render_pass_data->FrameBuffer.reset();
-			continue;
+			/* 没有附件的 Pass（如 SideEffect Pass）直接渲染到默认 RT，不需要创建 FrameBuffer */
+			if (render_pass_data->RenderBufferUsage == RenderBufferUsage::None)
+			{
+				render_pass_data->FrameBuffer.reset();
+				continue;
+			}
+
+			/* 创建FrameBuffer（名称 + 描述不变时由 FrameGraph 跨帧缓存复用，不再每帧重建） */
+			render_pass_data->FrameBuffer = m_OwnerFrameGraph.AcquirePassFrameBuffer(render_pass_data->DebugName, desc);
 		}
 
-		/* 创建FrameBuffer（名称 + 描述不变时由 FrameGraph 跨帧缓存复用，不再每帧重建） */
-		render_pass_data->FrameBuffer = m_OwnerFrameGraph.AcquirePassFrameBuffer(render_pass_data->DebugName, desc);
+		/* 对于没有附件的Pass，需要由后端绑定默认RenderTarget（如Metal的drawable），
+		 * 否则Metal等显式RenderPass后端会因没有active render encoder而无法绘制。
+		 * 计算 Pass 例外：它不画附件，由 Pass 自己开计算编码器。 */
+		const bool need_default_render_pass = !IsComputePass && (m_RenderPassDatas.empty() ||
+			std::any_of(m_RenderPassDatas.begin(), m_RenderPassDatas.end(),
+			[](const SharedPtr<RenderPassData>& data) { return data->RenderBufferUsage == RenderBufferUsage::None; }));
+
+		if (need_default_render_pass)
+			Renderer::GetRenderAPI()->BeginDefaultRenderPass();
+
+		/* 执行当前Pass */
+		m_OwnerFrameGraphPass->Execute(resources);
+
+		if (need_default_render_pass)
+			Renderer::GetRenderAPI()->EndDefaultRenderPass();
 	}
-
-	/* 对于没有附件的Pass，需要由后端绑定默认RenderTarget（如Metal的drawable），
-	 * 否则Metal等显式RenderPass后端会因没有active render encoder而无法绘制。
-	 * 计算 Pass 例外：它不画附件，由 Pass 自己开计算编码器。 */
-	const bool need_default_render_pass = !IsComputePass && (m_RenderPassDatas.empty() ||
-		std::any_of(m_RenderPassDatas.begin(), m_RenderPassDatas.end(),
-		[](const SharedPtr<RenderPassData>& data) { return data->RenderBufferUsage == RenderBufferUsage::None; }));
-
-	if (need_default_render_pass)
-		Renderer::GetRenderAPI()->BeginDefaultRenderPass();
-
-	/* 执行当前Pass */
-	m_OwnerFrameGraphPass->Execute(resources);
-
-	if (need_default_render_pass)
-		Renderer::GetRenderAPI()->EndDefaultRenderPass();
-}
-
 
 	/* 销毁 */
 	void RenderPassNode::Destroy()

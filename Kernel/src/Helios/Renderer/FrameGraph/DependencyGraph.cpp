@@ -6,7 +6,6 @@ namespace Helios
 	DependencyGraph::Node::Node(std::string name, DependencyGraph& graph)
 		: DebugName(std::move(name)), Index(graph.GenerateNodeIndex()), m_OwnerGraph(graph)
 	{
-		PROFILE_FUNCTION();
 	}
 
 	/* 输出可视化文本 */
@@ -37,15 +36,14 @@ namespace Helios
 	DependencyGraph::Connection::Connection(const SharedPtr<Node>& from, const SharedPtr<Node>& to)
 		: FromNodeIdx(from->Index), ToNodeIdx(to->Index)
 	{
-		PROFILE_FUNCTION();
 	}
 
 	DependencyGraph::DependencyGraph()
 	{
-		PROFILE_FUNCTION();
-
-		m_Nodes.reserve(8);
-		m_Connections.reserve(16);
+		m_Nodes.reserve(64);
+		m_Connections.reserve(128);
+		m_IncomingConnections.reserve(64);
+		m_OutgoingConnections.reserve(64);
 	}
 
 	/* 清楚所有节点和连线 */
@@ -55,6 +53,8 @@ namespace Helios
 
 		m_Nodes.clear();
 		m_Connections.clear();
+		m_IncomingConnections.clear();
+		m_OutgoingConnections.clear();
 	}
 
 	/* 更新节点的引用计数 */
@@ -65,31 +65,31 @@ namespace Helios
 		/* 更新节点的引用计数 */
 		for (const auto& connection : m_Connections)
 		{
-			GetNode(connection->FromNodeIdx)->RefCount++;
+			m_Nodes[connection->FromNodeIdx]->RefCount++;
 		}
 
 		/* 筛选出无效的节点 */
-		std::vector<SharedPtr<Node>> invalid_nodes;
-		std::copy_if(m_Nodes.begin(), m_Nodes.end(), std::back_inserter(invalid_nodes),
-			[](const auto& node)->bool
-			{
-				return !node->IsValid();
-			});
+		std::vector<Node*> invalid_nodes;
+		invalid_nodes.reserve(m_Nodes.size());
+		for (const auto& node : m_Nodes)
+		{
+			if (!node->IsValid())
+				invalid_nodes.push_back(node.get());
+		}
 
 		/* 对于无效的节点，减少其入射节点的引用计数 */
 		while (!invalid_nodes.empty())
 		{
-			auto& node = invalid_nodes.back();
+			Node* node = invalid_nodes.back();
 			invalid_nodes.pop_back();
 
-			const auto incoming_connections = GetIncomingConnectionsOfNode(node);
-			for (const auto& connection : incoming_connections)
+			for (const auto& connection : m_IncomingConnections[node->Index])
 			{
-				auto from_node = GetNode(connection->FromNodeIdx);
+				Node* from_node = m_Nodes[connection->FromNodeIdx].get();
 				from_node->RefCount--;
 
 				if (!from_node->IsValid())
-					invalid_nodes.emplace_back(from_node);
+					invalid_nodes.push_back(from_node);
 			}
 		}
 	}
@@ -97,8 +97,6 @@ namespace Helios
 	/* 获取指定节点 */
 	SharedPtr<DependencyGraph::Node> DependencyGraph::GetNode(uint32_t node_idx) const
 	{
-		PROFILE_FUNCTION();
-
 		if (node_idx >= m_Nodes.size())
 			return nullptr;
 
@@ -106,47 +104,23 @@ namespace Helios
 	}
 
 	/* 获取指定节点的所有入射连线 */
-	std::vector<SharedPtr<DependencyGraph::Connection>> DependencyGraph::GetIncomingConnectionsOfNode(const SharedPtr<Node>& node) const
+	const std::vector<SharedPtr<DependencyGraph::Connection>>& DependencyGraph::GetIncomingConnectionsOfNode(const SharedPtr<Node>& node) const
 	{
-		PROFILE_FUNCTION();
-
-		std::vector<SharedPtr<Connection>> result;
-
-		const uint32_t target_idx = node->Index;
-		std::copy_if(m_Connections.begin(), m_Connections.end(), std::back_inserter(result),
-			[target_idx](const auto& connection)->bool
-			{
-				return connection->ToNodeIdx == target_idx;
-			});
-
-		return result;
+		static const std::vector<SharedPtr<Connection>> empty;
+		return node->Index < m_IncomingConnections.size() ? m_IncomingConnections[node->Index] : empty;
 	}
 
 	/* 获取指定节点的所有出射连线 */
-	std::vector<SharedPtr<DependencyGraph::Connection>> DependencyGraph::GetOutgoingConnectionsOfNode(const SharedPtr<Node>& node) const
+	const std::vector<SharedPtr<DependencyGraph::Connection>>& DependencyGraph::GetOutgoingConnectionsOfNode(const SharedPtr<Node>& node) const
 	{
-		PROFILE_FUNCTION();
-
-		std::vector<SharedPtr<Connection>> result;
-
-		const uint32_t target_idx = node->Index;
-		std::copy_if(m_Connections.begin(), m_Connections.end(), std::back_inserter(result),
-			[target_idx](const auto& connection)->bool
-			{
-				return connection->FromNodeIdx == target_idx;
-			});
-
-		return result;
+		static const std::vector<SharedPtr<Connection>> empty;
+		return node->Index < m_OutgoingConnections.size() ? m_OutgoingConnections[node->Index] : empty;
 	}
 
 	/* 判断连线是否有效 */
 	bool DependencyGraph::IsConnectionValid(const SharedPtr<Connection>& connection) const
 	{
-		PROFILE_FUNCTION();
-
-		const auto from_node = GetNode(connection->FromNodeIdx);
-		const auto to_node = GetNode(connection->ToNodeIdx);
-		return from_node->IsValid() && to_node->IsValid();
+		return m_Nodes[connection->FromNodeIdx]->IsValid() && m_Nodes[connection->ToNodeIdx]->IsValid();
 	}
 
 	/* 输出可视化文本：便于调试（将输出字符复制到：http://www.webgraphviz.com/） */
@@ -223,24 +197,22 @@ namespace Helios
 	/* 注册一个节点到依赖图 */
 	void DependencyGraph::RegisterNode(const SharedPtr<Node>& node)
 	{
-		PROFILE_FUNCTION();
-
 		m_Nodes.emplace_back(node);
+		m_IncomingConnections.resize(m_Nodes.size());
+		m_OutgoingConnections.resize(m_Nodes.size());
 	}
 
 	/* 注册一个连线到依赖图 */
 	void DependencyGraph::RegisterConnection(const SharedPtr<Connection>& connection)
 	{
-		PROFILE_FUNCTION();
-
 		m_Connections.emplace_back(connection);
+		m_OutgoingConnections[connection->FromNodeIdx].push_back(connection);
+		m_IncomingConnections[connection->ToNodeIdx].push_back(connection);
 	}
 
 	/* 生成节点索引 */
 	uint32_t DependencyGraph::GenerateNodeIndex() const
 	{
-		PROFILE_FUNCTION();
-
 		return static_cast<uint32_t>(m_Nodes.size());
 	}
 }

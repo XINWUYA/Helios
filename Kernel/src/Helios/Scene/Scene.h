@@ -135,6 +135,13 @@ namespace Helios
 		/* 处理 QueueDestroy 攒下的请求（OnUpdate 末尾调一次） */
 		void FlushPendingDestroy();
 
+		/* OnUpdate 推变换用的世界变换：父节点本帧算过就接着乘，不用每个实体都从根重算。
+		 * 结果与 GetWorldTransform 逐位一致，按实体下标存，靠帧戳区分新旧 */
+		const glm::mat4& FrameWorldTransform(entt::entity entity);
+		std::vector<glm::mat4> m_FrameWorld;
+		std::vector<uint32_t> m_FrameWorldStamp;
+		uint32_t m_FrameWorldStampNow{ 0 };
+
 		/* 场景中的所有实体都将注册到这里 */
 		entt::registry m_Registry;
 

@@ -282,6 +282,9 @@ namespace Helios
 		if (m_IsBakeReflectionProbes && scene)
 			PrepareReflectionProbeBaking(*this, scene);
 
+		/* 视图输出在帧后被界面读取，标成导出 */
+		m_pFrameGraph->ExportResource(m_RenderTargetHandle);
+
 		/* 生成当前FrameGraph */
 		m_pFrameGraph->Build();
 

@@ -3,44 +3,85 @@
 
 namespace Helios
 {
+	FrameGraphResourceCache::TextureKey::TextureKey(const TextureDesc& desc)
+		: Width(desc.Width), Height(desc.Height), Depth(desc.Depth), MipLevels(desc.MipLevels),
+		Samples(desc.Samples), Format(desc.Format), Sampler(desc.SamplerType), Usage(desc.Usage)
+	{
+	}
+
+	bool FrameGraphResourceCache::TextureKey::operator==(const TextureKey& other) const
+	{
+		return Width == other.Width && Height == other.Height && Depth == other.Depth
+			&& MipLevels == other.MipLevels && Samples == other.Samples && Format == other.Format
+			&& Sampler == other.Sampler && Usage == other.Usage;
+	}
+
+	size_t FrameGraphResourceCache::TextureKeyHash::operator()(const TextureKey& key) const
+	{
+		uint64_t h = 0xCBF29CE484222325ULL;
+		const auto mix = [&h](uint64_t value)
+		{
+			h ^= value + 0x9E3779B97F4A7C15ULL + (h << 6) + (h >> 2);
+		};
+		mix(key.Width);
+		mix(key.Height);
+		mix(key.Depth);
+		mix((static_cast<uint64_t>(key.MipLevels) << 8) | key.Samples);
+		mix(static_cast<uint64_t>(key.Format));
+		mix(static_cast<uint64_t>(key.Sampler));
+		mix(static_cast<uint64_t>(key.Usage));
+		return static_cast<size_t>(h);
+	}
+
 	/* 帧入口：推进帧号（槽位随之轮转），淘汰错过槽位的条目，复位占用标记 */
 	void FrameGraphResourceCache::BeginFrame()
 	{
 		++m_FrameCounter;
 
-		/* 淘汰：连续 kFrameCopyCount + 1 帧没用过就清掉。轮转下"隔帧才用"是常态（稳态副本的
-		 * LastUsedFrame 恒为 当前帧号 - 2），两帧的阈值会把本该轮到的那份提前清掉；超过一个完整
-		 * 轮转周期才算过期。 */
-		auto sweep = [this](auto& cache)
+		/* 连续 kFrameCopyCount + 1 帧没用过才清掉：轮转下"隔帧才用"是常态，
+		 * 稳态副本的 LastUsedFrame 恒为当前帧号 - 2，不能提前清 */
+		const auto expired = [this](uint64_t last_used_frame)
 		{
-			for (auto iter = cache.begin(); iter != cache.end();)
-			{
-				if (iter->second.LastUsedFrame + kFrameCopyCount + 1 <= m_FrameCounter)
-					iter = cache.erase(iter);
-				else
-				{
-					iter->second.InUse = false;
-					++iter;
-				}
-			}
+			return last_used_frame + kFrameCopyCount + 1 <= m_FrameCounter;
 		};
-		sweep(m_TextureCache);
-		sweep(m_FrameBufferCache);
+
+		for (auto& pools : m_TexturePools)
+		{
+			for (auto pool_iter = pools.begin(); pool_iter != pools.end();)
+			{
+				auto& entries = pool_iter->second;
+				entries.erase(std::remove_if(entries.begin(), entries.end(),
+					[&expired](const TextureEntry& entry) { return expired(entry.LastUsedFrame); }), entries.end());
+				for (auto& entry : entries)
+					entry.InUse = false;
+
+				pool_iter = entries.empty() ? pools.erase(pool_iter) : std::next(pool_iter);
+			}
+		}
+
+		for (auto& frame_buffers : m_FrameBuffers)
+		{
+			for (auto iter = frame_buffers.begin(); iter != frame_buffers.end();)
+			{
+				if (expired(iter->second.LastUsedFrame))
+				{
+					iter = frame_buffers.erase(iter);
+					continue;
+				}
+				iter->second.InUse = false;
+				++iter;
+			}
+		}
 	}
 
-	/* 获取（或创建）一张纹理（当前槽位的副本） */
+	/* 取当前槽位池里第一张空闲纹理（按插入顺序，同一张图每帧拿到的分配结果稳定） */
 	SharedPtr<DeviceTexture> FrameGraphResourceCache::AcquireTexture(const std::string& name, const TextureDesc& desc)
 	{
-		const std::string key = MakeTextureKey(name, desc, CurrentSlot());
-
-		const auto iter = m_TextureCache.find(key);
-		if (iter != m_TextureCache.end())
+		auto& entries = m_TexturePools[CurrentSlot()][TextureKey(desc)];
+		for (auto& entry : entries)
 		{
-			auto& entry = iter->second;
-			/* 同帧内已用过的条目（占用中，或释放后又请求）不允许再次复用：
-			 * 同一帧里两张同名纹理若共用一份物理存储，后者会覆写前者尚未消费的内容 */
-			if (entry.InUse || entry.LastUsedFrame == m_FrameCounter)
-				return nullptr;
+			if (entry.InUse)
+				continue;
 
 			entry.InUse = true;
 			entry.LastUsedFrame = m_FrameCounter;
@@ -51,36 +92,43 @@ namespace Helios
 		auto texture = DeviceTexture::Create(name, desc);
 		if (texture)
 		{
-			m_TextureCache.insert({ key, TextureEntry{ texture, m_FrameCounter, true } });
+			entries.push_back(TextureEntry{ texture, m_FrameCounter, true });
 			++m_Stats.TextureCreations;
 		}
 		return texture;
 	}
 
-	/* 归还纹理：仅当归还对象就是当前槽位条目时生效（同帧临时分配的对象不牵动缓存）。
-	 * 注：归还要么发生在同一帧内（帧号未变），要么发生在下一帧 Reset 时（BeginFrame
-	 * 尚未推进帧号）—— 两种情况算出的槽位都与 Acquire 时一致。 */
-	void FrameGraphResourceCache::ReleaseTexture(const std::string& name, const TextureDesc& desc,
-		const SharedPtr<DeviceTexture>& texture)
+	/* 归还纹理。归还要么在同一帧内，要么在下一帧 Reset 时（BeginFrame 还没推进帧号），
+	 * 两种情况算出的槽位都和取用时一致 */
+	void FrameGraphResourceCache::ReleaseTexture(const TextureDesc& desc, const SharedPtr<DeviceTexture>& texture)
 	{
 		if (!texture)
 			return;
 
-		const auto iter = m_TextureCache.find(MakeTextureKey(name, desc, CurrentSlot()));
-		if (iter != m_TextureCache.end() && iter->second.Texture == texture)
-			iter->second.InUse = false;
+		auto& pools = m_TexturePools[CurrentSlot()];
+		const auto pool_iter = pools.find(TextureKey(desc));
+		if (pool_iter == pools.end())
+			return;
+
+		for (auto& entry : pool_iter->second)
+		{
+			if (entry.Texture == texture)
+			{
+				entry.InUse = false;
+				return;
+			}
+		}
 	}
 
 	/* 获取（或创建）一个 FrameBuffer（当前槽位的副本） */
 	SharedPtr<DeviceFrameBuffer> FrameGraphResourceCache::AcquireFrameBuffer(const std::string& name, const FrameBufferDesc& desc)
 	{
-		const std::string key = MakeFrameBufferKey(name, CurrentSlot());
-
-		const auto iter = m_FrameBufferCache.find(key);
-		if (iter != m_FrameBufferCache.end())
+		auto& frame_buffers = m_FrameBuffers[CurrentSlot()];
+		const auto iter = frame_buffers.find(name);
+		if (iter != frame_buffers.end())
 		{
 			auto& entry = iter->second;
-			/* 同槽位内名称相同且描述一致 → 复用；描述变化 → 换新（覆盖旧条目）； */
+			/* 同槽位内名称相同且描述一致 → 复用；描述变化 → 换新（覆盖旧条目） */
 			if (!entry.InUse && IsFrameBufferDescCompatible(entry.Desc, desc))
 			{
 				entry.InUse = true;
@@ -91,7 +139,7 @@ namespace Helios
 
 			if (entry.InUse)
 			{
-				/* 同帧重名：临时分配（与优化前行为一致），不进缓存 */
+				/* 同帧重名：临时分配，不进缓存 */
 				auto transient = DeviceFrameBuffer::Create(name, desc);
 				if (transient)
 					++m_Stats.FrameBufferCreations;
@@ -102,40 +150,10 @@ namespace Helios
 		auto frame_buffer = DeviceFrameBuffer::Create(name, desc);
 		if (frame_buffer)
 		{
-			m_FrameBufferCache.insert_or_assign(key, FrameBufferEntry{ desc, frame_buffer, m_FrameCounter, true });
+			frame_buffers.insert_or_assign(name, FrameBufferEntry{ desc, frame_buffer, m_FrameCounter, true });
 			++m_Stats.FrameBufferCreations;
 		}
 		return frame_buffer;
-	}
-
-	/* 纹理键：名称 + 全量描述字段 + 槽位 */
-	std::string FrameGraphResourceCache::MakeTextureKey(const std::string& name, const TextureDesc& desc, uint32_t slot)
-	{
-		std::string key;
-		key.reserve(name.size() + 72);
-		key.append(name);
-		key.push_back('|');
-		key.append(std::to_string(desc.Width)).push_back('x');
-		key.append(std::to_string(desc.Height)).push_back('x');
-		key.append(std::to_string(desc.Depth)).push_back('x');
-		key.append(std::to_string(desc.MipLevels)).push_back('x');
-		key.append(std::to_string(desc.Samples)).push_back('|');
-		key.append(std::to_string(static_cast<uint32_t>(desc.Format))).push_back('|');
-		key.append(std::to_string(static_cast<uint32_t>(desc.SamplerType))).push_back('|');
-		key.append(std::to_string(static_cast<uint32_t>(desc.Usage))).push_back('|');
-		key.append(std::to_string(slot));
-		return key;
-	}
-
-	/* FrameBuffer 键：名称 + 槽位 */
-	std::string FrameGraphResourceCache::MakeFrameBufferKey(const std::string& name, uint32_t slot)
-	{
-		std::string key;
-		key.reserve(name.size() + 4);
-		key.append(name);
-		key.push_back('|');
-		key.append(std::to_string(slot));
-		return key;
 	}
 
 	/* FrameBuffer 描述逐字段比对：附件（纹理对象 + level/layer）、采样数、视口、

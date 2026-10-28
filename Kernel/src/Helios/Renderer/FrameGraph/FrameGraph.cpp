@@ -49,6 +49,8 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 		m_RenderPassNodes.reserve(100);
+		m_Resources.reserve(128);
+		m_ResourceNodes.reserve(128);
 	}
 
 	FrameGraph::~FrameGraph()
@@ -59,36 +61,32 @@ namespace Helios
 	/* 获取资源 */
 	SharedPtr<IResource> FrameGraph::GetResource(FrameGraphResourceHandle handle)
 	{
-		PROFILE_FUNCTION();
-
-		if (!handle.IsInitialized())
+		if (!IsHandleValid(handle))
 			return nullptr;
 
-		const auto iter = m_ResourcesMap.find(handle.GetIndex());
-		if (iter != m_ResourcesMap.end())
-			return iter->second;
-
-		return nullptr;
+		return m_Resources[handle.GetIndex()];
 	}
 
 	/* 获取资源节点 */
 	SharedPtr<RenderResourceNode> FrameGraph::GetRenderResourceNode(FrameGraphResourceHandle handle)
 	{
-		const auto iter = m_ResourceToResourceNodeMap.find(handle.GetIndex());
-		if (iter != m_ResourceToResourceNodeMap.end())
-			return iter->second;
+		if (!IsHandleValid(handle))
+			return nullptr;
 
-		return nullptr;
+		return m_ResourceNodes[handle.GetIndex()];
 	}
 
-	/* 检查一个资源节点是否有效 */
+	/* 检查一个资源句柄是否指向本帧的资源 */
 	bool FrameGraph::IsHandleValid(FrameGraphResourceHandle handle) const
 	{
-		if (!handle.IsInitialized())
-			return false;
+		return handle.IsInitialized() && handle.GetIndex() < m_Resources.size();
+	}
 
-		// todo: 考虑资源的版本
-		return true;
+	/* 标记导出 */
+	void FrameGraph::ExportResource(FrameGraphResourceHandle handle)
+	{
+		if (IsHandleValid(handle))
+			m_Resources[handle.GetIndex()]->SetExported(true);
 	}
 
 	/* 判断一个资源连线是否有效 */
@@ -110,6 +108,10 @@ namespace Helios
 
 		CullRenderPassNodes();
 
+		/* 黑板里的句柄会在图外被读，统一按导出处理 */
+		for (const auto& [name, handle] : m_Blackboard.GetEntries())
+			ExportResource(handle);
+
 		/* 仅对有效的RenderPassNode执行构建 */
 		auto iter_current = m_RenderPassNodes.begin();
 		while (iter_current != m_LastValidRenderPassNodeIter)
@@ -117,18 +119,16 @@ namespace Helios
 			auto current_node = *iter_current;
 
 			/* 输入涉及资源 */
-			auto incoming_connections = m_DependencyGraph.GetIncomingConnectionsOfNode(current_node);
-			for (const auto& connection : incoming_connections)
+			for (const auto& connection : m_DependencyGraph.GetIncomingConnectionsOfNode(current_node))
 			{
-				const auto from_node = DynamicPtrCast<const RenderResourceNode>(m_DependencyGraph.GetNode(connection->FromNodeIdx));
+				const auto from_node = StaticPtrCast<RenderResourceNode>(m_DependencyGraph.GetNode(connection->FromNodeIdx));
 				current_node->RegisterResourceHandle(from_node->GetResourceHandle());
 			}
 
 			/* 输出涉及资源 */
-			auto outgoing_connections = m_DependencyGraph.GetOutgoingConnectionsOfNode(current_node);
-			for (const auto& connection : outgoing_connections)
+			for (const auto& connection : m_DependencyGraph.GetOutgoingConnectionsOfNode(current_node))
 			{
-				const auto to_node = DynamicPtrCast<const RenderResourceNode>(m_DependencyGraph.GetNode(connection->ToNodeIdx));
+				const auto to_node = StaticPtrCast<RenderResourceNode>(m_DependencyGraph.GetNode(connection->ToNodeIdx));
 				current_node->RegisterResourceHandle(to_node->GetResourceHandle());
 			}
 			/* 构建当前节点 */
@@ -139,9 +139,8 @@ namespace Helios
 		}
 
 		/* 确定资源的构建和销毁时机 */
-		for (const auto& resource_item : m_ResourcesMap)
+		for (const auto& resource : m_Resources)
 		{
-			auto& resource = resource_item.second;
 			if (resource->GetRefCount() > 0)
 			{
 				auto first_pass_node = resource->GetFirstPassNode();
@@ -159,11 +158,8 @@ namespace Helios
 		}
 
 		/* 在Cull之后再更新资源的Usage */
-		for (auto& iter : m_ResourceToResourceNodeMap)
-		{
-			auto& resource_node = iter.second;
+		for (auto& resource_node : m_ResourceNodes)
 			resource_node->UpdateResourceUsage();
-		}
 	}
 
 	/* 执行FrameGraph */
@@ -201,10 +197,11 @@ namespace Helios
 			 * 不会回溯影响这里留的快照（见 FrameGraphCapture） */
 			CapturePassOutputs(*current_node);
 
-			/* 及时销毁不再使用的资源, 最后Target Pass的资源暂不释放，因为ImGui需要用到，todo:只有输出不用释放，输入应正常释放 */
-			if (!current_node->IsTarget)
+			/* 最后一次用完就还回资源池，同帧后面的 Pass 可以接着用这块显存；
+			 * 导出的资源帧后还要读，留到下一帧 Reset 再还 */
+			for (auto& resource : current_node->GetResourcesNeedDestroy())
 			{
-				for (auto& resource : current_node->GetResourcesNeedDestroy())
+				if (!resource->IsExported())
 					resource->Destroy();
 			}
 			/* 下一个 */
@@ -220,10 +217,11 @@ namespace Helios
 		return m_ResourceCache.AcquireFrameBuffer(pass_name + "_FrameBuffer", desc);
 	}
 
-	/* 重置 */
+	/* 重置：黑板跟着清空，上一帧的句柄不能留到这一帧 */
 	void FrameGraph::Reset() noexcept
 	{
 		Destroy();
+		m_Blackboard.Clear();
 	}
 
 	/* 导出依赖图 */
@@ -258,7 +256,7 @@ namespace Helios
 				if (!handle.IsInitialized())
 					continue;
 
-				const auto resource = DynamicPtrCast<Resource<FrameGraphTexture>>(GetResource(handle));
+				const auto resource = StaticPtrCast<Resource<FrameGraphTexture>>(GetResource(handle));
 				if (resource == nullptr || resource->GetResource().Texture == nullptr)
 					continue;
 
@@ -269,7 +267,7 @@ namespace Helios
 				render_pass_data->ValidAttachments[FrameGraphPassInfo::DEPTH_ATTACHMENT_IDX];
 			if (depth_handle.IsInitialized())
 			{
-				const auto resource = DynamicPtrCast<Resource<FrameGraphTexture>>(GetResource(depth_handle));
+				const auto resource = StaticPtrCast<Resource<FrameGraphTexture>>(GetResource(depth_handle));
 				if (resource != nullptr && resource->GetResource().Texture != nullptr)
 					outputs.emplace_back(resource->GetName(), resource->GetResource().Texture);
 			}
@@ -313,63 +311,18 @@ namespace Helios
 			});
 	}
 
-	/* 添加资源到m_ResourcesMap */
+	/* 添加资源到资源表 */
 	FrameGraphResourceHandle FrameGraph::AddResourceInternal(const SharedPtr<IResource>& resource)
 	{
-		const FrameGraphResourceHandle resource_handle(m_ResourcesMap.size());
-		m_ResourcesMap.insert({ resource_handle.GetIndex(), resource });
+		const FrameGraphResourceHandle resource_handle(static_cast<uint16_t>(m_Resources.size()));
+		m_Resources.push_back(resource);
 
-		/* 新增一个RenderResourceNode */
+		/* 新增一个RenderResourceNode，并添加到依赖图 */
 		auto resource_node = CreateSharedPtr<RenderResourceNode>(resource->GetName(), *this, resource_handle);
-		/* 将资源节点添加到依赖图 */
 		m_DependencyGraph.RegisterNode(resource_node);
-		m_ResourceToResourceNodeMap.insert({ resource_handle.GetIndex(), resource_node });
+		m_ResourceNodes.push_back(resource_node);
 
 		return resource_handle;
-	}
-
-	/* 为RenderPass绑定输入资源 */
-	void FrameGraph::BindInputResourceInternal(const SharedPtr<RenderPassNode>& render_pass_node, FrameGraphResourceHandle handle,
-		const std::function<bool(const SharedPtr<IResource>&, const SharedPtr<RenderResourceNode>&)>& callback)
-	{
-		if (!IsHandleValid(handle))
-			return;
-
-		const SharedPtr<IResource>& resource = GetResource(handle);
-		auto resource_node = GetRenderResourceNode(handle);
-
-		if (!resource_node->HasOutgoingConnection())
-		{
-			//if (resource_node->)
-		}
-
-		/* 连接节点 */
-		if (callback(resource, resource_node))
-		{
-
-		}
-	}
-
-	/* 为RenderPass绑定输出资源 */
-	void FrameGraph::BindOutputResourceInternal(const SharedPtr<RenderPassNode>& render_pass_node, FrameGraphResourceHandle handle,
-		const std::function<bool(const SharedPtr<IResource>&, const SharedPtr<RenderResourceNode>&)>& callback)
-	{
-		if (!IsHandleValid(handle))
-			return;
-
-		const SharedPtr<IResource>& resource = GetResource(handle);
-		auto resource_node = GetRenderResourceNode(handle);
-
-		if (!resource_node->HasIncomingConnection())
-		{
-			//if (resource_node->)
-		}
-
-		/* 连接节点 */
-		if (callback(resource, resource_node))
-		{
-			
-		}
 	}
 
 	/* 释放FrameGraph */
@@ -380,13 +333,13 @@ namespace Helios
 		m_RenderPassNodes.clear();
 
 		/* 必须先销毁ResourceNode，才能销毁Resource */
-		for (const auto& resource_node_itr : m_ResourceToResourceNodeMap)
-			resource_node_itr.second->Destroy();
-		m_ResourceToResourceNodeMap.clear();
+		for (const auto& resource_node : m_ResourceNodes)
+			resource_node->Destroy();
+		m_ResourceNodes.clear();
 
-		for (const auto& resource_node: m_ResourcesMap)
-			resource_node.second->Destroy();
-		m_ResourcesMap.clear();
+		for (const auto& resource : m_Resources)
+			resource->Destroy();
+		m_Resources.clear();
 
 		m_DependencyGraph.Clear();
 	}

@@ -17,6 +17,10 @@ namespace Helios
 		FrameGraphResourceHandle& operator[](const std::string& name) noexcept;
 		/* 存放到映射中 */
 		void Add(const std::string& name, FrameGraphResourceHandle handle) noexcept;
+		/* 清空：句柄只在当帧渲染图里有效 */
+		void Clear() noexcept { m_NameToResourceHandleMap.clear(); }
+		/* 全部条目（渲染图据此把黑板里的资源标成导出） */
+		[[nodiscard]] const std::unordered_map<std::string, FrameGraphResourceHandle>& GetEntries() const noexcept { return m_NameToResourceHandleMap; }
 
 		/* 根据名称获取资源 */
 		template <typename ResourceType>

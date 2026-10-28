@@ -1,5 +1,4 @@
 ﻿#pragma once
-#include <unordered_set>
 #include <glm/glm.hpp>
 #include "FrameGraph.h"
 #include "FrameGraphResourceHandle.h"
@@ -69,8 +68,8 @@ namespace Helios
 		FrameGraph& m_OwnerFrameGraph;
 		/* 所属的FrameGraphPass */
 		SharedPtr<IFrameGraphPass> m_OwnerFrameGraphPass{ nullptr };
-		/* 已注册的资源Handles */
-		std::unordered_set<uint16_t> m_RegisteredHandleIndices{};
+		/* 已注册的资源Handles（每个 Pass 只有几个，线性查找就够） */
+		std::vector<uint16_t> m_RegisteredHandleIndices{};
 		/* 需要准备的资源，仅持有指针，内存由FrameGraph统一管理 */
 		std::vector<SharedPtr<IResource>> m_ResourcesNeedPrepared{};
 		/* 需要释放的资源，仅持有指针，内存由FrameGraph统一管理 */

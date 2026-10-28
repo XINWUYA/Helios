@@ -1,16 +1,18 @@
 ﻿#pragma once
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include "Helios/Common/Common.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/VirtualDevice/DeviceFrameBuffer.h"
 
 namespace Helios
 {
-	/* FrameGraph 的跨帧资源缓存（双缓存）：transient 资源（纹理 / FrameBuffer）帧间复用、不再
-	 * 每帧分配；同一逻辑资源保留 kFrameCopyCount 份、按帧号轮转，避免相邻帧争用被 Metal 串行化。
-	 * 规则：命中当前槽位且没被占用 → 复用；描述变了 → 换新；同帧重名 → nullptr；错过一整次轮转就淘汰。 */
+	/* FrameGraph 的 transient 资源池（双缓存）：纹理按描述分池，资源用完就还回池里，
+	 * 同帧后面的 Pass 能直接接着用；每份物理资源按帧号轮转两份，相邻帧不争用同一对象。
+	 * 规则：池里有空闲的就复用、没有就新建；FrameBuffer 按名字复用；错过一整次轮转就淘汰。 */
 	class FrameGraphResourceCache
 	{
 	public:
@@ -20,10 +22,10 @@ namespace Helios
 		/* 帧入口：推进帧号、淘汰长期未使用的条目、复位占用标记 */
 		void BeginFrame();
 
-		/* 获取（或创建）一张纹理：命中当前槽位的副本返回；同帧重名占用时返回 nullptr */
+		/* 从当前槽位的池里取一张描述相同的空闲纹理，没有就新建（name 只用作新建时的标签） */
 		[[nodiscard]] SharedPtr<DeviceTexture> AcquireTexture(const std::string& name, const TextureDesc& desc);
-		/* 归还纹理（仅当归还对象就是当前槽位条目时标记空闲；未缓存对象忽略） */
-		void ReleaseTexture(const std::string& name, const TextureDesc& desc, const SharedPtr<DeviceTexture>& texture);
+		/* 归还纹理：标记空闲，同帧后续 Pass 可以复用（未缓存的对象忽略） */
+		void ReleaseTexture(const TextureDesc& desc, const SharedPtr<DeviceTexture>& texture);
 
 		/* 获取（或创建）一个 FrameBuffer：同一槽位内名称相同且描述一致才复用。
 		 * 注意描述包含附件纹理对象本身 —— 槽位对齐后，FrameBuffer 总是绑定
@@ -41,6 +43,23 @@ namespace Helios
 		[[nodiscard]] const Stats& GetStats() const { return m_Stats; }
 
 	private:
+		/* 纹理池的键：描述的全部字段 */
+		struct TextureKey
+		{
+			uint32_t Width, Height, Depth;
+			uint8_t MipLevels, Samples;
+			TextureFormat Format;
+			SamplerType Sampler;
+			TextureUsage Usage;
+
+			explicit TextureKey(const TextureDesc& desc);
+			bool operator==(const TextureKey& other) const;
+		};
+		struct TextureKeyHash
+		{
+			size_t operator()(const TextureKey& key) const;
+		};
+
 		struct TextureEntry
 		{
 			SharedPtr<DeviceTexture> Texture;
@@ -62,15 +81,12 @@ namespace Helios
 			return static_cast<uint32_t>(m_FrameCounter % kFrameCopyCount);
 		}
 
-		/* 纹理键：名称 + 全量描述字段 + 槽位（任一变化都换新纹理） */
-		[[nodiscard]] static std::string MakeTextureKey(const std::string& name, const TextureDesc& desc, uint32_t slot);
-		/* FrameBuffer 键：名称 + 槽位 */
-		[[nodiscard]] static std::string MakeFrameBufferKey(const std::string& name, uint32_t slot);
 		/* FrameBuffer 描述逐字段比对（含附件纹理对象身份、清除值、保留标志） */
 		[[nodiscard]] static bool IsFrameBufferDescCompatible(const FrameBufferDesc& lhs, const FrameBufferDesc& rhs);
 
-		std::unordered_map<std::string, TextureEntry> m_TextureCache;
-		std::unordered_map<std::string, FrameBufferEntry> m_FrameBufferCache;
+		/* 每个槽位一套：纹理按描述分池，FrameBuffer 按名字存 */
+		std::array<std::unordered_map<TextureKey, std::vector<TextureEntry>, TextureKeyHash>, kFrameCopyCount> m_TexturePools;
+		std::array<std::unordered_map<std::string, FrameBufferEntry>, kFrameCopyCount> m_FrameBuffers;
 		uint64_t m_FrameCounter{ 0 };
 		Stats m_Stats;
 	};

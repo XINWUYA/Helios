@@ -37,7 +37,7 @@ namespace Helios
 		FrameGraphResourceHandleTyped<ResourceType> CreateResource(const std::string& name, const typename ResourceType::Descriptor& desc = {})
 		{
 			auto resource = CreateSharedPtr<Resource<ResourceType>>(name, desc);
-			/* 注入跨帧资源缓存：Create / Destroy 时按 (名称, 描述) 复用 transient 资源 */
+			/* 注入资源池：Create 时取同描述的空闲纹理，Destroy 时还回去 */
 			resource->SetResourceCache(&m_ResourceCache);
 			return FrameGraphResourceHandleTyped<ResourceType>(AddResourceInternal(resource));
 		}
@@ -46,26 +46,24 @@ namespace Helios
 		template<typename ResourceType>
 		void BindInputResource(const SharedPtr<RenderPassNode>& render_pass_node, FrameGraphResourceHandleTyped<ResourceType> handle, typename ResourceType::Usage usage = ResourceType::DefaultReadUsage)
 		{
-			BindInputResourceInternal(render_pass_node, handle,
-				[this, render_pass_node, usage](const SharedPtr<IResource>& resource, const SharedPtr<RenderResourceNode>& resource_node)
-				{
-					/* 将资源节点连接到依赖图中 */
-					auto res = DynamicPtrCast<Resource<ResourceType>>(resource);
-					return res->ConnectAsInput(m_DependencyGraph, render_pass_node, resource_node, usage);
-				});
+			if (!IsHandleValid(handle))
+				return;
+
+			/* 将资源节点作为输入连接到依赖图中 */
+			auto resource = StaticPtrCast<Resource<ResourceType>>(m_Resources[handle.GetIndex()]);
+			resource->ConnectAsInput(m_DependencyGraph, render_pass_node, m_ResourceNodes[handle.GetIndex()], usage);
 		}
 
 		/* 为RenderPass绑定输出资源 */
 		template<typename ResourceType>
 		void BindOutputResource(const SharedPtr<RenderPassNode>& render_pass_node, FrameGraphResourceHandleTyped<ResourceType> handle, typename ResourceType::Usage usage = ResourceType::DefaultWriteUsage)
 		{
-			BindOutputResourceInternal(render_pass_node, handle,
-				[this, render_pass_node, usage](const SharedPtr<IResource>& resource, const SharedPtr<RenderResourceNode>& resource_node)
-				{
-					/* 将资源节点连接到依赖图中 */
-					auto res = DynamicPtrCast<Resource<ResourceType>>(resource);
-					return res->ConnectAsOutput(m_DependencyGraph, render_pass_node, resource_node, usage);
-				});
+			if (!IsHandleValid(handle))
+				return;
+
+			/* 将资源节点作为输出连接到依赖图中 */
+			auto resource = StaticPtrCast<Resource<ResourceType>>(m_Resources[handle.GetIndex()]);
+			resource->ConnectAsOutput(m_DependencyGraph, render_pass_node, m_ResourceNodes[handle.GetIndex()], usage);
 		}
 
 		/* 获取资源 */
@@ -81,6 +79,8 @@ namespace Helios
 
 		/* 检查一个资源节点是否有效 */
 		[[nodiscard]] bool IsHandleValid(FrameGraphResourceHandle handle) const;
+		/* 标记导出：帧结束后还要读的资源（黑板里的句柄会自动导出） */
+		void ExportResource(FrameGraphResourceHandle handle);
 		/* 判断一个资源连线是否有效 */
 		[[nodiscard]] bool IsConnectionValid(const SharedPtr<DependencyGraph::Connection>& connection) const;
 		/* 检查一个FrameGraphPass节点是否被优化掉 */
@@ -113,16 +113,8 @@ namespace Helios
 		/* 抓取一个 Pass 的颜色附件（在其执行完、资源销毁之前调用；见 FrameGraphCapture） */
 		void CapturePassOutputs(RenderPassNode& pass_node);
 
-		/* 添加资源到m_ResourcesMap */
+		/* 添加资源到资源表 */
 		FrameGraphResourceHandle AddResourceInternal(const SharedPtr<IResource>& resource);
-
-		/* 为RenderPass绑定输入资源 */
-		void BindInputResourceInternal(const SharedPtr<RenderPassNode>& render_pass_node, FrameGraphResourceHandle handle, 
-			const std::function<bool(const SharedPtr<IResource>&, const SharedPtr<RenderResourceNode>&)>& callback = [](const SharedPtr<IResource>&, const SharedPtr<RenderResourceNode>&)->bool { return true; });
-
-		/* 为RenderPass绑定输出资源 */
-		void BindOutputResourceInternal(const SharedPtr<RenderPassNode>& render_pass_node, FrameGraphResourceHandle handle, 
-			const std::function<bool(const SharedPtr<IResource>&, const SharedPtr<RenderResourceNode>&)>& callback = [](const SharedPtr<IResource>&, const SharedPtr<RenderResourceNode>&)->bool { return true; });
 
 		/* 释放FrameGraph */
 		void Destroy();
@@ -131,18 +123,16 @@ namespace Helios
 		std::string m_DebugName{ "Unnamed FrameGraph" };
 		/* RenderPassNode列表，包含当前FrameGraph所有Pass节点，再Cull阶段才会剔除其中无效的节点 */
 		std::vector<SharedPtr<RenderPassNode>> m_RenderPassNodes{};
-		/* 资源列表<IFrameGraphResourceHandle.m_Index, IResource> */
-		std::unordered_map<uint16_t, SharedPtr<IResource>> m_ResourcesMap{};
-		/* 资源索引与资源节点索引的映射: first->IResource, second->RenderResourceNode */
-		std::unordered_map<uint16_t, SharedPtr<RenderResourceNode>> m_ResourceToResourceNodeMap{};
+		/* 资源表与资源节点表，下标就是资源句柄的 Index */
+		std::vector<SharedPtr<IResource>> m_Resources{};
+		std::vector<SharedPtr<RenderResourceNode>> m_ResourceNodes{};
 		/* Blackboard: 资源名到资源的映射 */
 		Blackboard m_Blackboard{};
 		/* Pass依赖关系图 */
 		DependencyGraph m_DependencyGraph;
 		/* 最后一个有效的RenderPassNode */
 		std::vector<SharedPtr<RenderPassNode>>::iterator m_LastValidRenderPassNodeIter;
-		/* 跨帧资源缓存：Reset 只清渲染图结构，缓存里的 GPU 资源按 (名称, 描述) 跨帧复用
-		 * （双缓存轮转：相邻帧各用一份副本，见 FrameGraphResourceCache） */
+		/* transient 资源池：Reset 只清渲染图结构，池里的 GPU 资源按描述跨 Pass、跨帧复用 */
 		FrameGraphResourceCache m_ResourceCache;
 		/* 逐 Pass 抓取设施（中间渲染结果快照）：启用时在每个 Pass 执行后拷贝其颜色附件 */
 		FrameGraphCapture m_Capture;

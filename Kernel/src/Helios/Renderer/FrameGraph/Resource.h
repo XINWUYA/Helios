@@ -28,6 +28,11 @@ namespace Helios
 		[[nodiscard]] SharedPtr<RenderPassNode> GetFirstPassNode() const { return m_FirstPassNode.lock(); }
 		[[nodiscard]] SharedPtr<RenderPassNode> GetLastPassNode() const { return m_LastPassNode.lock(); }
 
+		/* 对外导出：帧结束后还会被读（视图输出、拾取、黑板里的句柄），
+		 * 不在最后一个 Pass 后还回资源池，留到下一帧 Reset 再还 */
+		void SetExported(bool exported) { m_IsExported = exported; }
+		[[nodiscard]] bool IsExported() const { return m_IsExported; }
+
 		/* 创建资源 */
 		virtual void Create() = 0;
 		/* 销毁资源 */
@@ -46,6 +51,8 @@ namespace Helios
 		SharedPtr<IResource> m_Parent{ nullptr };
 		/* 资源引用计数 */
 		uint32_t m_RefCount{ 0 };
+		/* 是否对外导出 */
+		bool m_IsExported{ false };
 		/* FrameGraph中第一次使用该资源的Pass */
 		WeakPtr<RenderPassNode> m_FirstPassNode;
 		/* FrameGraph中最后一次使用该资源的Pass */

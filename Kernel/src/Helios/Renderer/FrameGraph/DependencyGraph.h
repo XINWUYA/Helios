@@ -68,10 +68,9 @@ namespace Helios
 		[[nodiscard]] const std::vector<SharedPtr<Node>>& GetNodes() const { return m_Nodes; }
 		/* 获取所有连线 */
 		[[nodiscard]] const std::vector<SharedPtr<Connection>>& GetConnections() const { return m_Connections; }
-		/* 获取指定节点的所有入射连线 */
-		[[nodiscard]] std::vector<SharedPtr<Connection>> GetIncomingConnectionsOfNode(const SharedPtr<Node>& node) const;
-		/* 获取指定节点的所有出射连线 */
-		[[nodiscard]] std::vector<SharedPtr<Connection>> GetOutgoingConnectionsOfNode(const SharedPtr<Node>& node) const;
+		/* 获取指定节点的所有入射 / 出射连线（按节点存好的邻接表，不再每次扫全部连线） */
+		[[nodiscard]] const std::vector<SharedPtr<Connection>>& GetIncomingConnectionsOfNode(const SharedPtr<Node>& node) const;
+		[[nodiscard]] const std::vector<SharedPtr<Connection>>& GetOutgoingConnectionsOfNode(const SharedPtr<Node>& node) const;
 		/* 判断连线是否有效 */
 		[[nodiscard]] bool IsConnectionValid(const SharedPtr<Connection>& connection) const;
 
@@ -86,5 +85,8 @@ namespace Helios
 		std::vector<SharedPtr<Node>> m_Nodes;
 		/* 图中的连线集合 */
 		std::vector<SharedPtr<Connection>> m_Connections;
+		/* 按节点下标分好的入射 / 出射连线 */
+		std::vector<std::vector<SharedPtr<Connection>>> m_IncomingConnections;
+		std::vector<std::vector<SharedPtr<Connection>>> m_OutgoingConnections;
 	};
 }

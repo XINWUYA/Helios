@@ -34,8 +34,6 @@ namespace Helios
 	/* 从FrameGraph中获取资源 */
 	SharedPtr<IResource> FrameGraphResources::GetResource(FrameGraphResourceHandle handle) const
 	{
-		PROFILE_FUNCTION();
-
 		ASSERT(handle.IsInitialized(), "Handle is invalid.");
 		auto resource = m_FrameGraph.GetResource(handle);
 
@@ -56,8 +54,8 @@ namespace Helios
 		const TextureDesc texture_desc{ desc.Width, desc.Height, desc.Depth, desc.MipLevels, desc.Samples,
 			desc.TextureFormat, desc.SamplerType, usage };
 
-		/* 跨帧复用：同 (名称, 描述) 的纹理命中缓存时不再分配。
-		 * 缓存返回空（同帧重名占用 / 分配失败）时退回直接分配，不进缓存。 */
+		/* 从资源池里取同描述的空闲纹理（前面 Pass 用完的、或上上帧留下的），
+		 * 池子分配失败时退回直接分配 */
 		if (cache)
 		{
 			Texture = cache->AcquireTexture(name, texture_desc);
@@ -69,7 +67,7 @@ namespace Helios
 	}
 
 	/* 销毁 */
-	void FrameGraphTexture::Destroy(const std::string& name, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache)
+	void FrameGraphTexture::Destroy(const std::string& /*name*/, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache)
 	{
 		PROFILE_FUNCTION();
 
@@ -77,7 +75,7 @@ namespace Helios
 		{
 			const TextureDesc texture_desc{ desc.Width, desc.Height, desc.Depth, desc.MipLevels, desc.Samples,
 				desc.TextureFormat, desc.SamplerType, usage };
-			cache->ReleaseTexture(name, texture_desc, Texture);
+			cache->ReleaseTexture(texture_desc, Texture);
 		}
 
 		Texture = nullptr;

@@ -89,9 +89,9 @@ namespace Helios
 		static constexpr Usage DefaultReadUsage = TextureUsage::Sampleable;
 		static constexpr Usage DefaultWriteUsage = TextureUsage::ColorAttachment;
 
-		/* 创建（cache 非空时先查跨帧缓存：(名称, 描述) 不变的纹理直接复用） */
+		/* 创建（cache 非空时先从资源池取同描述的空闲纹理） */
 		void Create(const std::string& name, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache);
-		/* 销毁（归还跨帧缓存；未缓存的对象直接释放） */
+		/* 销毁（还回资源池，同帧后续 Pass 可接着用） */
 		void Destroy(const std::string& name, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache);
 	};
 }
