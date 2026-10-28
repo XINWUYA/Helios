@@ -141,7 +141,8 @@ namespace Helios
 		EnumNamesFunc GetEnumNames{ nullptr };
 	};
 
-	/* 含嵌套对象/资源引用的字段无法用「偏移 + 类型」表达，改用回调整块自定义绘制；返回 true 表示组件数据被改动 */
+	/* 含嵌套对象/资源引用的字段无法用「偏移 + 类型」表达，改用回调整块自定义绘制；返回 true 表示组件数据被改动。
+	 * 绘制实现归编辑器，由 ComponentRegistry::SetCustomDraw 装配，引擎注册文件不填。 */
 	using ComponentDrawFunc = bool (*)(void* component);
 
 	/* 组件级可见性条件：返回 false 时整个组件块不显示（如组件持有的嵌套对象为空） */
@@ -179,6 +180,8 @@ namespace Helios
 		/* 可添加形态。未显式声明时，Register() 以默认构造补上一条。 */
 		std::vector<ComponentVariant> Variants;
 
+		/* 自定义编辑入口：由编辑器启动时装配（见 ComponentRegistry::SetCustomDraw）。
+		 * 为空表示这张卡只按字段表画。 */
 		ComponentDrawFunc CustomDraw{ nullptr };
 
 		/* 组件级可见性条件：为空则始终显示 */
@@ -242,6 +245,9 @@ namespace Helios
 
 		void Add(ComponentDesc desc) { m_Components.emplace_back(std::move(desc)); }
 
+		/* 装配某个组件的自定义绘制（编辑器启动时回填）：类型没注册过时记一条警告 */
+		void SetCustomDraw(std::type_index type, ComponentDrawFunc draw);
+
 	private:
 		ComponentRegistry() = default;
 
@@ -277,7 +283,6 @@ namespace Helios
 		                          const char* semantics = nullptr);
 
 		ComponentRegistrar& Accessors(HasFunc has, GetPtrFunc get, RemoveFunc remove, AddFunc add);
-		ComponentRegistrar& CustomDraw(ComponentDrawFunc draw);
 
 		/* 组件数据快照的读写（MakeRegistrar 已按组件类型生成，通常无需手工调用） */
 		ComponentRegistrar& Snapshot(ComponentCaptureFunc capture, ComponentRestoreFunc restore);

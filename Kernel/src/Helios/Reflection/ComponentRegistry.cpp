@@ -60,10 +60,18 @@ namespace Helios
 		return *this;
 	}
 
-	ComponentRegistrar& ComponentRegistrar::CustomDraw(ComponentDrawFunc draw)
+	void ComponentRegistry::SetCustomDraw(std::type_index type, ComponentDrawFunc draw)
 	{
-		m_Desc.CustomDraw = draw;
-		return *this;
+		for (ComponentDesc& component : m_Components)
+		{
+			if (component.Type == type)
+			{
+				component.CustomDraw = draw;
+				return;
+			}
+		}
+
+		CORE_LOG_WARN("ComponentRegistry: no component registered for the given type, custom draw ignored.");
 	}
 
 	ComponentRegistrar& ComponentRegistrar::Visible(ComponentVisibleFunc visible)

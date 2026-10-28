@@ -995,4 +995,31 @@ namespace Helios::ImGuiExt
 		return value_changed;
 	}
 
+	/* 行内小标签：占位 + 自绘，回给调用方宽度（好从值列里扣掉这段） */
+	float DrawTagChip(const char* text, float height)
+	{
+		PROFILE_FUNCTION();
+
+		const ImGuiStyle& style = ImGui::GetStyle();
+		if (height <= 0.0f)
+			height = ImGui::GetFrameHeight();
+
+		const ImVec2 text_size = ImGui::CalcTextSize(text);
+		const float width = style.FramePadding.x * 2.0f + text_size.x;
+
+		const ImVec2 pos = ImGui::GetCursorScreenPos();
+		ImGui::Dummy(ImVec2(width, height));
+
+		ImDrawList* draw_list = ImGui::GetWindowDrawList();
+		const ImVec2 max(pos.x + width, pos.y + height);
+		draw_list->AddRectFilled(pos, max, ImGui::GetColorU32(EditorTheme::Token::AccentTint), height * 0.5f);
+		draw_list->AddRect(pos, max,
+			ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.55f)),
+			height * 0.5f, 0, 1.0f);
+		draw_list->AddText(ImVec2(pos.x + style.FramePadding.x, pos.y + (height - text_size.y) * 0.5f),
+			ImGui::GetColorU32(EditorTheme::Token::AccentInk), text);
+
+		return width;
+	}
+
 }

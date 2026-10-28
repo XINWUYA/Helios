@@ -64,6 +64,9 @@ namespace ImGuiExt
 	 * 圆点；数值文本不画在轨道上（用 tooltip，或者画在控件外面）。宽度走 SetNextItemWidth / ItemWidth。 */
 	HELIOS_API bool DrawDotSliderFloat(const char* label, float& value, float v_min, float v_max,
 		const char* format = "%.0f", ImGuiSliderFlags flags = 0);
+	/* 行内小标签（如 Instance）：强调色淡底的小圆角条，只做标识、不吃鼠标；
+	 * 画在光标处并占掉这段宽度，返回宽度供调用方从值列宽度里扣掉。 */
+	HELIOS_API float DrawTagChip(const char* text, float height = 0.0f);
 }
 
 }

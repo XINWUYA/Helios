@@ -1,6 +1,5 @@
 #include "Pch.h"
 #include "Helios/Reflection/ComponentRegistration.h"
-#include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
@@ -26,17 +25,6 @@ namespace Helios
 				/* 属性里存的是相对资产根的形态，入口即转绝对（对象内部路径恒为绝对） */
 				static_cast<SpriteComponent*>(component)->m_Texture = DeviceTexture::Create(ABSOLUTE_PATH(path));
 		}
-
-		/* 贴图是资源引用，需要拖入与悬停预览，故整块自定义绘制；
-		 * BaseColor 与 TilingFactor 走 schema 字段（见下方注册）。
-		 * 返回是否改动：换贴图要生成快照命令（撤销与场景脏标记都靠它）。 */
-		bool DrawSpriteBlock(void* raw)
-		{
-			auto& component = *static_cast<SpriteComponent*>(raw);
-			const SharedPtr<DeviceTexture> before = component.m_Texture;
-			ImGuiExt::DrawTextureUI("Texture", component.m_Texture);
-			return component.m_Texture != before;
-		}
 	}
 
 	void RegisterSpriteComponent()
@@ -52,7 +40,6 @@ namespace Helios
 				{
 					return static_cast<const SpriteComponent*>(component)->m_Texture != nullptr;
 				} })
-			.CustomDraw(&DrawSpriteBlock)
 			.Register();
 	}
 }

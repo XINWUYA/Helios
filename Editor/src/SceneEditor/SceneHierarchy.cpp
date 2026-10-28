@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "SceneHierarchy.h"
+#include "ComponentEditors/ComponentEditors.h"
 #include "MaterialSlotEditing.h"
 #include "EditorCommon.h"
 #include "EditorIcons.h"
@@ -529,6 +530,8 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 组件卡的自定义编辑（资源引用、材质槽…）由编辑器侧装配进注册表 */
+		InstallComponentEditors();
 		BindTreeState();
 	}
 
@@ -536,6 +539,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		InstallComponentEditors();
 		BindTreeState();
 		SetOwnerScene(scene);
 	}
