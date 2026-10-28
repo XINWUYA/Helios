@@ -52,10 +52,18 @@ namespace Helios
 
 	/* 1. 创建FrameBuffer */
 		glGenFramebuffers(1, &m_FrameBufferId);
-		glBindFramebuffer(GL_FRAMEBUFFER, m_FrameBufferId);
+		GLState::BindFramebuffer(m_FrameBufferId);
 #ifdef HELIOS_DEBUG
 		glObjectLabel(GL_FRAMEBUFFER, m_FrameBufferId, -1, name.c_str());
 #endif
+
+		/* 要多重采样、目标又是单采样纹理：画在临时的多重采样 RBO 上，Unbind 时解析回目标 */
+		if (desc.Samples > 1)
+		{
+			CreateMultisampleAttachments(name);
+			GLState::BindFramebuffer(0);
+			return;
+		}
 
 	/* 2. 创建ColorAttachments */
 		if (!!(desc.Usage & RenderBufferUsage::ColorAll))
@@ -102,20 +110,96 @@ namespace Helios
 		}
 
 		/* 解绑 */
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		GLState::BindFramebuffer(0);
 		CHECK_GL_ERROR;
 	}
 
 	OpenGLFrameBuffer::~OpenGLFrameBuffer()
 	{
+		if (GLState::CurrentFramebuffer() == m_FrameBufferId)
+			GLState::BindFramebuffer(0);
+		if (!m_MultisampleRenderbuffers.empty())
+			glDeleteRenderbuffers(static_cast<GLsizei>(m_MultisampleRenderbuffers.size()), m_MultisampleRenderbuffers.data());
+		if (m_ResolveFrameBufferId != 0)
+			glDeleteFramebuffers(1, &m_ResolveFrameBufferId);
 		glDeleteFramebuffers(1, &m_FrameBufferId);
+	}
+
+	/* 多重采样附件：每个颜色 / 深度目标各配一个同格式的多重采样 RBO 挂在主 FBO 上；
+	 * 解析用的 FBO 挂原来的单采样目标，Unbind 时逐个 blit 过去 */
+	void OpenGLFrameBuffer::CreateMultisampleAttachments(const std::string& name)
+	{
+		const auto& desc = m_FrameBufferDesc;
+		const auto make_renderbuffer = [&](const RenderBufferInfo& info, GLenum attachment)
+		{
+			if (info.RenderTarget == nullptr)
+				return;
+			GLuint renderbuffer = 0;
+			glGenRenderbuffers(1, &renderbuffer);
+			glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
+			glRenderbufferStorageMultisample(GL_RENDERBUFFER, static_cast<GLsizei>(desc.Samples),
+				TranslateToOpenGLTextureFormat(info.RenderTarget->GetTextureDesc().Format),
+				static_cast<GLsizei>(desc.ViewportRegion.Width), static_cast<GLsizei>(desc.ViewportRegion.Height));
+			glFramebufferRenderbuffer(GL_FRAMEBUFFER, attachment, GL_RENDERBUFFER, renderbuffer);
+			m_MultisampleRenderbuffers.push_back(renderbuffer);
+		};
+
+		GLenum draw_buffers[MAX_COLOR_ATTACHMENT_NUM] = { GL_NONE };
+		for (uint32_t i = 0; i < desc.ColorRenderBuffers.size() && i < MAX_COLOR_ATTACHMENT_NUM; ++i)
+		{
+			make_renderbuffer(desc.ColorRenderBuffers[i], GL_COLOR_ATTACHMENT0 + i);
+			draw_buffers[i] = GL_COLOR_ATTACHMENT0 + i;
+		}
+		glDrawBuffers(MAX_COLOR_ATTACHMENT_NUM, draw_buffers);
+
+		const bool has_depth = !!(desc.Usage & RenderBufferUsage::Depth) && desc.DepthRenderBuffer.RenderTarget != nullptr;
+		const bool depth_stencil = (desc.Usage & RenderBufferUsage::DepthStencil) == RenderBufferUsage::DepthStencil;
+		if (has_depth)
+			make_renderbuffer(desc.DepthRenderBuffer, depth_stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT);
+		glBindRenderbuffer(GL_RENDERBUFFER, 0);
+		CHECK_GL_FRAMEBUFFER_STATUS(GL_FRAMEBUFFER);
+
+		/* 解析 FBO：挂真正的单采样目标 */
+		glGenFramebuffers(1, &m_ResolveFrameBufferId);
+		GLState::BindFramebuffer(m_ResolveFrameBufferId);
+#ifdef HELIOS_DEBUG
+		glObjectLabel(GL_FRAMEBUFFER, m_ResolveFrameBufferId, -1, (name + "_Resolve").c_str());
+#endif
+		for (uint32_t i = 0; i < desc.ColorRenderBuffers.size() && i < MAX_COLOR_ATTACHMENT_NUM; ++i)
+			AttachARenderBuffer(desc.ColorRenderBuffers[i], GL_COLOR_ATTACHMENT0 + i);
+		if (has_depth)
+			AttachARenderBuffer(desc.DepthRenderBuffer, depth_stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT);
+		CHECK_GL_ERROR;
+	}
+
+	/* 把多重采样内容解析到目标：颜色逐个附件 blit（GL 一次只能从一个读缓冲出），深度一次 */
+	void OpenGLFrameBuffer::ResolveMultisample()
+	{
+		const auto& desc = m_FrameBufferDesc;
+		const GLint width = static_cast<GLint>(desc.ViewportRegion.Width);
+		const GLint height = static_cast<GLint>(desc.ViewportRegion.Height);
+
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_FrameBufferId);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_ResolveFrameBufferId);
+		for (uint32_t i = 0; i < desc.ColorRenderBuffers.size() && i < MAX_COLOR_ATTACHMENT_NUM; ++i)
+		{
+			glReadBuffer(GL_COLOR_ATTACHMENT0 + i);
+			const GLenum draw_buffer = GL_COLOR_ATTACHMENT0 + i;
+			GLenum draw_buffers[MAX_COLOR_ATTACHMENT_NUM] = { GL_NONE };
+			draw_buffers[i] = draw_buffer;
+			glDrawBuffers(static_cast<GLsizei>(i + 1), draw_buffers);
+			glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+		if (!!(desc.Usage & RenderBufferUsage::Depth) && desc.DepthRenderBuffer.RenderTarget != nullptr)
+			glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		CHECK_GL_ERROR;
 	}
 
 	void OpenGLFrameBuffer::Bind(const FrameBufferBindInfo& bind_info)
 	{
 		PROFILE_FUNCTION();
 
-		glBindFramebuffer(GL_FRAMEBUFFER, m_FrameBufferId);
+		GLState::BindFramebuffer(m_FrameBufferId);
 
 		/* 视口与裁剪框都走 RenderAPI：后端那边记着当前值，重复设置可以省掉，
 		 * SetScissor 判断"是否全屏"时也不用再向驱动查询 */
@@ -179,7 +263,9 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		if (m_ResolveFrameBufferId != 0)
+			ResolveMultisample();
+		GLState::BindFramebuffer(0);
 	}
 
 	void OpenGLFrameBuffer::Resize(uint32_t width, uint32_t height)
@@ -203,10 +289,13 @@ namespace Helios
 
 		ASSERT(attachment_index < m_FrameBufferDesc.ColorRenderBuffers.size());
 
-		glBindFramebuffer(GL_FRAMEBUFFER, m_FrameBufferId);
+		/* 多重采样时读解析后的目标（拾取拿到的是屏幕上那个值）；读完把绑定还原 */
+		const GLuint previous_framebuffer = GLState::CurrentFramebuffer();
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_ResolveFrameBufferId != 0 ? m_ResolveFrameBufferId : m_FrameBufferId);
 		glReadBuffer(GL_COLOR_ATTACHMENT0 + attachment_index);
 
 		glReadPixels(x, y, 1, 1, TranslateToOpenGLPixelFormat(pixel_desc.Format), TranslateToOpenGLPixelType(pixel_desc.Type), data);
+		GLState::BindFramebuffer(previous_framebuffer);
 
 		CHECK_GL_ERROR;
 	}
@@ -226,7 +315,8 @@ namespace Helios
 		// Use traditional approach: bind texture to FBO and clear
 		GLuint temp_fbo;
 		glGenFramebuffers(1, &temp_fbo);
-		glBindFramebuffer(GL_FRAMEBUFFER, temp_fbo);
+		const GLuint previous_framebuffer = GLState::CurrentFramebuffer();
+		GLState::BindFramebuffer(temp_fbo);
 		
 		GLenum texture_target = texture->m_TextureTarget;
 		if (texture_target == GL_TEXTURE_CUBE_MAP)
@@ -244,7 +334,7 @@ namespace Helios
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 		{
 			CORE_LOG_ERROR("ClearAttachment: Temporary FBO incomplete, status: 0x{:X}", status);
-			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			GLState::BindFramebuffer(previous_framebuffer);
 			glDeleteFramebuffers(1, &temp_fbo);
 			CHECK_GL_ERROR;
 			return;
@@ -276,7 +366,7 @@ namespace Helios
 			glClearBufferfv(GL_COLOR, 0, clear_color);
 		}
 		
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		GLState::BindFramebuffer(previous_framebuffer);
 		glDeleteFramebuffers(1, &temp_fbo);
 #else
 		// Windows/Linux: Use modern glClearTexImage (OpenGL 4.4+)

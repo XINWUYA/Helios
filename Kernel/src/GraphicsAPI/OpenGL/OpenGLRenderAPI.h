@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <glad/glad.h>
 #include "Helios/Renderer/RenderAPI.h"
 
 namespace Helios
@@ -43,9 +44,8 @@ namespace Helios
 		 * （见 RenderAPI::GenerateMipmap 关于帧内时序的说明） */
 		void GenerateMipmap(const SharedPtr<DeviceTexture>& texture) override;
 
-		/* 默认目标（窗口画布）快照：glReadPixels 回读默认帧缓冲（GL_BACK）当前
-		 * 视口区域，上传到常驻预览纹理（随视口尺寸自动重建、跨帧复用）；
-		 * 行序 = glReadPixels 口径（底行在前，top_down = false，与离屏纹理一致） */
+		/* 默认目标（窗口画布）快照：从默认帧缓冲（GL_BACK）当前视口区域 blit 到常驻预览纹理，
+		 * 全程在 GPU 上；行序底行在前（top_down = false，与离屏纹理一致） */
 		SharedPtr<DeviceTexture> AcquireDefaultTargetSnapshot(bool& top_down) override;
 
 		/* 纹理拷贝（逐 Pass 抓取中间渲染结果用，见 RenderAPI 的说明）：临时 FBO +
@@ -65,6 +65,10 @@ namespace Helios
 	private:
 		/* 获取OpenGL支持的扩展 */
 		void InitOpenGLExtensions();
+
+		/* 拷贝 / 快照用的常驻 FBO（0 = 读、1 = 写） */
+		GLuint AcquireCopyFramebuffer(uint32_t index);
+		GLuint m_CopyFramebuffers[2]{ 0, 0 };
 
 		/* 默认目标快照的常驻预览纹理（AcquireDefaultTargetSnapshot 用；随视口
 		 * 尺寸变化重建、跨帧复用） */

@@ -531,15 +531,40 @@ namespace Helios
 		const uint32_t level_width = std::max(1u, m_TextureDesc.Width >> mip_level);
 		const uint32_t level_height = std::max(1u, m_TextureDesc.Height >> mip_level);
 
+		const size_t slice_bytes = static_cast<size_t>(level_width) * level_height * texel_size;
+		out_data.resize(slice_bytes);
+
+#ifdef __APPLE__
 		/* 立方体贴图的面必须作为独立 target 读取，GL_TEXTURE_CUBE_MAP 本身不可回读 */
 		const GLenum read_target = (m_TextureTarget == GL_TEXTURE_CUBE_MAP)
 			? (GL_TEXTURE_CUBE_MAP_POSITIVE_X + layer)
 			: m_TextureTarget;
 
-		out_data.resize(static_cast<size_t>(level_width) * level_height * texel_size);
-
-		BindTexture(m_TextureTarget, m_TextureId);
-		glGetTexImage(read_target, static_cast<GLint>(mip_level), read_format, read_type, out_data.data());
+		/* 4.1 没有按层读的接口：数组 / 3D 只能整个读出来再取那一层 */
+		if (m_TextureTarget == GL_TEXTURE_2D_ARRAY || m_TextureTarget == GL_TEXTURE_3D)
+		{
+			const uint32_t depth = m_TextureTarget == GL_TEXTURE_3D
+				? std::max(1u, m_TextureDesc.Depth >> mip_level) : std::max(1u, m_TextureDesc.Depth);
+			if (layer >= depth)
+				return false;
+			std::vector<uint8_t> all_slices(slice_bytes * depth);
+			BindTexture(m_TextureTarget, m_TextureId);
+			glGetTexImage(read_target, static_cast<GLint>(mip_level), read_format, read_type, all_slices.data());
+			std::memcpy(out_data.data(), all_slices.data() + slice_bytes * layer, slice_bytes);
+		}
+		else
+		{
+			BindTexture(m_TextureTarget, m_TextureId);
+			glGetTexImage(read_target, static_cast<GLint>(mip_level), read_format, read_type, out_data.data());
+		}
+#else
+		/* 只读要的那一层（立方体的面、数组的层都按 z 偏移寻址），缓冲按单层分配不会越界 */
+		const bool layered = m_TextureTarget == GL_TEXTURE_CUBE_MAP
+			|| m_TextureTarget == GL_TEXTURE_2D_ARRAY || m_TextureTarget == GL_TEXTURE_3D;
+		glGetTextureSubImage(m_TextureId, static_cast<GLint>(mip_level), 0, 0, layered ? static_cast<GLint>(layer) : 0,
+			static_cast<GLsizei>(level_width), static_cast<GLsizei>(level_height), 1,
+			read_format, read_type, static_cast<GLsizei>(slice_bytes), out_data.data());
+#endif
 
 		CHECK_GL_ERROR;
 		return true;

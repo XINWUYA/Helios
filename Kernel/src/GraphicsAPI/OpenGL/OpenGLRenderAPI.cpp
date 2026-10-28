@@ -324,11 +324,9 @@ namespace Helios
 #endif
 	}
 
+	/* 单上下文按顺序执行，Pass 之间不用提交；交换缓冲时驱动自己会 flush */
 	void OpenGLRenderAPI::Flush()
 	{
-		PROFILE_FUNCTION();
-
-		glFlush();
 	}
 
 	void OpenGLRenderAPI::GenerateMipmap(const SharedPtr<DeviceTexture>& texture)
@@ -344,16 +342,14 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* 默认目标的尺寸 / 区域 = 当前 GL 视口：渲染到默认目标的 Pass 已把视口
-		 * 设成它的目标区域（标准情形即整窗）。没有任何 Pass 设过视口时取当前值，
-		 * 尺寸为 0 则视为无可用目标、静默跳过。 */
-		GLint viewport[4] = { 0, 0, 0, 0 };
-		glGetIntegerv(GL_VIEWPORT, viewport);
-		if (viewport[2] <= 0 || viewport[3] <= 0)
+		/* 默认目标的区域 = 当前视口（后端记着，不用查驱动）：渲染到默认目标的 Pass 已把视口
+		 * 设成它的目标区域。没设过视口或尺寸为 0 视为无可用目标、静默跳过 */
+		const ViewportRegion& viewport = GetAppliedViewport();
+		if (viewport.Width == 0 || viewport.Height == 0)
 			return nullptr;
 
-		const uint32_t width = static_cast<uint32_t>(viewport[2]);
-		const uint32_t height = static_cast<uint32_t>(viewport[3]);
+		const uint32_t width = viewport.Width;
+		const uint32_t height = viewport.Height;
 
 		/* 预览纹理跨帧复用；尺寸变化（窗口缩放）时重建 */
 		if (m_DefaultTargetSnapshot == nullptr
@@ -370,22 +366,20 @@ namespace Helios
 			desc.Usage = TextureUsage::Sampleable;
 			m_DefaultTargetSnapshot = DeviceTexture::Create("DefaultTargetSnapshot", desc);
 		}
-		if (m_DefaultTargetSnapshot == nullptr)
+		const auto snapshot = std::dynamic_pointer_cast<OpenGLTexture>(m_DefaultTargetSnapshot);
+		if (snapshot == nullptr)
 			return nullptr;
 
-		/* 回读默认帧缓冲（画上去的是 BACK）当时刻的内容 —— 命令立即执行，
-		 * 此刻拿到的正是"本 Pass 刚画完"的当刻内容；行 0 = 屏幕底行
-		 * （glReadPixels 口径），与引擎离屏纹理同为底行在前 → top_down = false */
-		std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+		/* 在 GPU 上直接从默认帧缓冲 blit 到快照纹理，不经过 CPU；行序同 glReadPixels（底行在前） */
+		const GLuint previous_framebuffer = GLState::CurrentFramebuffer();
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, AcquireCopyFramebuffer(1));
+		glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, snapshot->GetTextureID(), 0);
+		glDrawBuffer(GL_COLOR_ATTACHMENT0);
 		glReadBuffer(GL_BACK);
-		glPixelStorei(GL_PACK_ALIGNMENT, 1);
-		glReadPixels(viewport[0], viewport[1], static_cast<GLsizei>(width),
-			static_cast<GLsizei>(height), GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-
-		PixelDesc pixel_desc;
-		pixel_desc.Format = PixelFormat::RGBA;
-		pixel_desc.Type = PixelType::UnsignedByte;
-		m_DefaultTargetSnapshot->SetData(pixels.data(), pixel_desc);
+		glBlitFramebuffer(viewport.MinX, viewport.MinY, viewport.MinX + static_cast<GLint>(width), viewport.MinY + static_cast<GLint>(height),
+			0, 0, static_cast<GLint>(width), static_cast<GLint>(height), GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		GLState::BindFramebuffer(previous_framebuffer);
 
 		top_down = false;
 		return m_DefaultTargetSnapshot;
@@ -420,15 +414,10 @@ namespace Helios
 		const GLenum attachment = is_depth ? GL_DEPTH_ATTACHMENT : GL_COLOR_ATTACHMENT0;
 		const GLbitfield blit_mask = is_depth ? GL_DEPTH_BUFFER_BIT : GL_COLOR_BUFFER_BIT;
 
-		GLint previous_read_fbo = 0;
-		GLint previous_draw_fbo = 0;
-		glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous_read_fbo);
-		glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &previous_draw_fbo);
-
-		GLuint read_fbo = 0;
-		GLuint draw_fbo = 0;
-		glGenFramebuffers(1, &read_fbo);
-		glGenFramebuffers(1, &draw_fbo);
+		/* 两个拷贝用 FBO 常驻复用；调用点的绑定从后端记录里取，拷完原样还回去 */
+		const GLuint previous_framebuffer = GLState::CurrentFramebuffer();
+		const GLuint read_fbo = AcquireCopyFramebuffer(0);
+		const GLuint draw_fbo = AcquireCopyFramebuffer(1);
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fbo);
 
@@ -494,12 +483,20 @@ namespace Helios
 				src_desc.MipLevels, src_layer);
 		}
 
-		glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(previous_read_fbo));
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(previous_draw_fbo));
-		glDeleteFramebuffers(1, &read_fbo);
-		glDeleteFramebuffers(1, &draw_fbo);
+		/* 附件摘掉，免得常驻 FBO 一直引用着已经释放的纹理 */
+		glFramebufferRenderbuffer(GL_READ_FRAMEBUFFER, attachment, GL_RENDERBUFFER, 0);
+		glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, attachment, GL_RENDERBUFFER, 0);
+		GLState::BindFramebuffer(previous_framebuffer);
 
 		CHECK_GL_ERROR;
+	}
+
+	/* 拷贝 / 快照用的两个 FBO（0 = 读、1 = 写），第一次用时建，之后常驻 */
+	GLuint OpenGLRenderAPI::AcquireCopyFramebuffer(uint32_t index)
+	{
+		if (m_CopyFramebuffers[index] == 0)
+			glGenFramebuffers(1, &m_CopyFramebuffers[index]);
+		return m_CopyFramebuffers[index];
 	}
 
 	/* Debug 组同时驱动 GPU 耗时作用域：组名是抓帧分组与统计面板共用的唯一标签源。
