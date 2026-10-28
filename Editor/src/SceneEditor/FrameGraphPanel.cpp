@@ -4,6 +4,7 @@
 #include "EditorIcons.h"
 #include "ImGui/EditorTheme.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include "Helios/Renderer/FrameGraph/RenderPassNode.h"
@@ -396,9 +397,7 @@ namespace Helios
 		/* 首次出现给一个适合看图的默认尺寸（拖过之后以 ini 记录为准） */
 		ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_FirstUseEver);
 
-		const bool drawn = ImGui::Begin(Panel::kFrameGraph, &visible);
-
-		if (drawn)
+		if (PanelWindow window(Panel::kFrameGraph, &visible); window)
 		{
 			/* 解析当前相机：按指针匹配（渲染图与相机同生命周期，跨帧稳定）；选中不在
 			 * 本帧列表（相机被删除 / 首次打开）→ 回落到首个条目，并清掉旧图上的选中 */
@@ -419,9 +418,8 @@ namespace Helios
 				active_graph = m_SelectedGraph;
 			}
 
-			const bool on_screen = !ImGui::GetCurrentWindow()->SkipItems;
-			m_CaptureRequested = on_screen && m_CaptureEnabled && active_graph != nullptr;
-			m_ViewedGraph = on_screen ? active_graph : nullptr;
+			m_CaptureRequested = m_CaptureEnabled && active_graph != nullptr;
+			m_ViewedGraph = active_graph;
 
 			/* 面板标题由页签承担（"Frame Graph"），面板内不重复标题行 */
 
@@ -693,8 +691,6 @@ namespace Helios
 			m_LastLaneRects.clear();
 			m_LastIconRects.clear();
 		}
-
-		ImGui::End();
 	}
 
 	/* 阶段标识色查询（自检 / 自动化验证用）：名字命中阶段关键字时返回该阶段的

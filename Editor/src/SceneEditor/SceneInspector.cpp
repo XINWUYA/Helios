@@ -9,6 +9,7 @@
 #include "Command/AssetFileOps.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 #include "Svg.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Core/TextureSettings.h"
@@ -220,7 +221,7 @@ namespace Helios
 		 * "还没滚动条"的旧宽度排过一帧（换选中、展开卡片、拖分栏都会触发），
 		 * 面板就能横向滑一下。常驻 = 宽度恒定预留，属性面板永远不能左右滑。
 		 * 被别的页签挡住或折叠时不画，相机预览也随之停掉。 */
-		if (ImGui::Begin(Panel::kProperties, nullptr, ImGuiWindowFlags_AlwaysVerticalScrollbar))
+		if (PanelWindow window(Panel::kProperties, nullptr, ImGuiWindowFlags_AlwaysVerticalScrollbar); window)
 		{
 			if (m_AssetFocus && !m_AssetSelection.empty())
 			{
@@ -236,7 +237,6 @@ namespace Helios
 				ShowEmptyPropertiesHint();
 			}
 		}
-		ImGui::End();
 	}
 
 	/* 面板头部：可见性开关（眼睛）+ 实体图标 + 实体名（就地可编辑）+ 右侧「添加组件」。

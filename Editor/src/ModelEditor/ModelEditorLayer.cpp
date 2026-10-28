@@ -20,6 +20,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 
 namespace Helios
 {
@@ -302,11 +303,11 @@ namespace Helios
 		const bool has_model = (m_pModelInfo != nullptr) && !m_pModelInfo->m_SubModelInfos.empty();
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		const bool is_open = ImGui::Begin(Panel::kModel, &m_IsViewportVisible);
+		PanelWindow window(Panel::kModel, &m_IsViewportVisible);
 		/* 窗口内边距在 Begin 时已取快照；提前弹掉，参数面板的子窗口按默认内边距排卡片 */
 		ImGui::PopStyleVar();
 
-		if (is_open)
+		if (window)
 		{
 			/* 获取窗口范围 */
 			const auto viewport_region_min = ImGui::GetWindowContentRegionMin();
@@ -402,7 +403,6 @@ namespace Helios
 			m_IsViewportHovered = false;
 			m_pEditorCamera->SetHighlightSegment(-1);
 		}
-		ImGui::End();
 	}
 
 	/* 材质参数面板（右栏）：最上方标题栏显示当前模型名，下面基础信息卡 + 每个子模型一张卡。

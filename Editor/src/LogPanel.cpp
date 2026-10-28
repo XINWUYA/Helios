@@ -7,6 +7,7 @@
 #include "EditorCommon.h"
 #include "EditorIcons.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 #include "Helios/Core/Logger.h"
 #include "ImGui/EditorTheme.h"
 
@@ -159,11 +160,9 @@ namespace Helios
 
 		ImGui::SetNextWindowSize(ImVec2(780.0f, 320.0f), ImGuiCond_FirstUseEver);
 
-		if (!ImGui::Begin(Panel::kLog, &visible))
-		{
-			ImGui::End();
+		PanelWindow window(Panel::kLog, &visible);
+		if (!window)
 			return;
-		}
 
 		SyncEntries();
 		UpdateVisibleEntries();
@@ -171,8 +170,6 @@ namespace Helios
 		/* 面板标题由页签承担（"Log"）；面板内不重复标题行，清空动作在工具行右端（见 ShowToolbar） */
 		ShowToolbar();
 		ShowEntries();
-
-		ImGui::End();
 	}
 
 	void LogPanel::SetSearchFilter(const std::string& filter)

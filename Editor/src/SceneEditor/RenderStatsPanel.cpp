@@ -12,6 +12,7 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 #include "FileDialog.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Core/CPUTimerProfiler.h"
@@ -599,13 +600,12 @@ namespace Helios
 		SyncCPUTraceTextSession();
 
 		/* 面板标题由页签承担（图标 + "Stat Info"）；被挡住或折叠时不画三张卡 */
-		if (ImGui::Begin(Panel::kStatInfo))
+		if (PanelWindow window(Panel::kStatInfo); window)
 		{
 			ShowFrameStatsCard();
 			ShowCPUTimingsCard();
 			ShowGPUTimingsCard();
 		}
-		ImGui::End();
 
 		/* 图表放大窗口：独立顶层窗口，必须画在面板窗口之外 */
 		ShowCPUChartWindow();

@@ -4,6 +4,7 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 #include "Command/AssetFileOps.h"
 #include "Command/CreateAssetFileCommand.h"
 #include "Command/CreateAssetFolderCommand.h"
@@ -700,7 +701,7 @@ namespace Helios
 			m_CurrentFileNode = m_RootFileNodeTree; /* 默认为根节点 */
 
 		/* 被别的页签挡住或折叠时 Begin 返回 false：只结算帧末状态，不画也不算 */
-		if (ImGui::Begin(Panel::kResourceBrowser))
+		if (PanelWindow window(Panel::kResourceBrowser); window)
 		{
 			/* 弹层 ID 在面板根作用域上算一次：右键菜单在内容栏与目录树两个子窗口里，
 			 * 各自算 ID 会得到不同的值，弹层就对不上了（见 DrawAssetOperationPopups）。 */
@@ -721,7 +722,6 @@ namespace Helios
 			 * 弹层要的是主题那一档（不补的话首末条目紧贴弹层的上下边）。 */
 			DrawAssetOperationPopups(pane_padding);
 		}
-		ImGui::End();
 
 		ImGui::PopStyleVar();
 

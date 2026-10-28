@@ -8,6 +8,7 @@
 #include "ViewGizmo.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 #include "Command/AssetFileOps.h"
 #include "Command/TransformCommand.h"
 #include "Helios/Application/Application.h"
@@ -652,11 +653,9 @@ namespace Helios
 		if (!m_IsScriptOrderVisible || m_pMainScene == nullptr)
 			return;
 
-		if (!ImGui::Begin(Panel::kScriptOrder, &m_IsScriptOrderVisible))
-		{
-			ImGui::End();
+		PanelWindow window(Panel::kScriptOrder, &m_IsScriptOrderVisible);
+		if (!window)
 			return;
-		}
 
 		struct Row
 		{
@@ -703,7 +702,6 @@ namespace Helios
 		if (rows.empty())
 		{
 			ImGui::TextDisabled("No scripts in this scene.");
-			ImGui::End();
 			return;
 		}
 
@@ -760,8 +758,6 @@ namespace Helios
 
 		ImGui::SameLine();
 		ImGui::TextDisabled(has_draft ? "Unsaved order changes." : "No pending changes.");
-
-		ImGui::End();
 	}
 
 	/* 草稿落到组件上：每个实体一条命令，撤销时整批退回 */

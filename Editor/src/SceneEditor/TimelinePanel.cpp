@@ -6,6 +6,7 @@
 #include "EditorIcons.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 #include "Command/CommandStack.h"
 #include "Helios/Common/PathUtils.h"
 #include "ImGui/EditorTheme.h"
@@ -398,20 +399,16 @@ namespace Helios
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
 			ImVec2(ImGui::GetStyle().WindowPadding.x, 0.0f));
 		ImGui::SetNextWindowSizeConstraints(ImVec2(380.0f, 160.0f), ImVec2(FLT_MAX, FLT_MAX));
-		const bool window_open = ImGui::Begin(Panel::kTimeline, &visible);
+		PanelWindow window(Panel::kTimeline, &visible);
 		ImGui::PopStyleVar();
 
-		if (!window_open)
-		{
-			ImGui::End();
+		if (!window)
 			return;
-		}
 
 		if (m_Clip == nullptr)
 		{
 			m_VisibleTracks.clear();
 			ImGui::TextDisabled("Select an entity with an Animator, then assign a clip in the Animator card.");
-			ImGui::End();
 			return;
 		}
 
@@ -430,10 +427,7 @@ namespace Helios
 
 		/* 顶栏里刚点了"关闭片段"：这一帧别再用空片段往下画，下一帧按选中实体重新解析 */
 		if (m_Clip == nullptr)
-		{
-			ImGui::End();
 			return;
-		}
 
 		DrawBody(*m_pScene, animator);
 		DrawFooterBar();
@@ -464,8 +458,6 @@ namespace Helios
 					PasteSelectedKeys();
 			}
 		}
-
-		ImGui::End();
 	}
 
 	int TimelinePanel::GetTrackCount() const

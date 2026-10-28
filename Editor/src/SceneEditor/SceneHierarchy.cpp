@@ -7,6 +7,7 @@
 #include "Command/AssetFileOps.h"
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
+#include "PanelWindow.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/Utils.h"
@@ -494,7 +495,7 @@ namespace Helios
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pane_padding.x, 0.0f));
 
 		/* 被别的页签挡住或折叠时不建树也不画 */
-		if (ImGui::Begin(Panel::kSceneHierarchy))
+		if (PanelWindow window(Panel::kSceneHierarchy); window)
 		{
 			/* 层级关系每帧现算：子节点列表不作为第二份数据缓存 */
 			EntityChildren children;
@@ -605,7 +606,6 @@ namespace Helios
 			DrawTypeFilterMenu();
 			ImGui::PopStyleVar();
 		}
-		ImGui::End();
 
 		ImGui::PopStyleVar();
 
