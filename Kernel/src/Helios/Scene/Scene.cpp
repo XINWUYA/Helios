@@ -209,6 +209,8 @@ namespace Helios
 		entt::entity chain[kMaxHierarchyDepth];
 		size_t depth = 0;
 		glm::mat4 world{ 1.0f };
+		bool visible = true;
+		bool reached_top = false;
 
 		entt::entity current = entity;
 		while (current != entt::null && depth < kMaxHierarchyDepth && m_Registry.valid(current))
@@ -217,25 +219,50 @@ namespace Helios
 			if (index < m_FrameWorldStamp.size() && m_FrameWorldStamp[index] == m_FrameWorldStampNow)
 			{
 				world = m_FrameWorld[index];
+				visible = m_FrameVisible[index] != 0;
+				reached_top = true;
 				break;
 			}
 			chain[depth++] = current;
 			current = GetParent(current);
 		}
+		/* 父链异常长（畸形层级）按不可见处理，与 IsEntityVisible 同口径 */
+		if (!reached_top && current != entt::null)
+			visible = false;
 
 		while (depth > 0)
 		{
 			const entt::entity node = chain[--depth];
-			if (const auto* transform_component = m_Registry.try_get<TransformComponent>(node))
-				world *= transform_component->GetTransform();
-
 			const size_t index = static_cast<size_t>(entt::to_entity(node));
 			if (index >= m_FrameWorld.size())
 			{
 				m_FrameWorld.resize(index + 1);
+				m_FrameVisible.resize(index + 1, 0);
+				m_FrameEntity.resize(index + 1, entt::null);
+				m_FrameLocal.resize(index + 1);
 				m_FrameWorldStamp.resize(index + 1, 0);
 			}
+
+			if (const auto* transform_component = m_Registry.try_get<TransformComponent>(node))
+			{
+				LocalTransformCache& local = m_FrameLocal[index];
+				if (!local.Valid || local.Position != transform_component->m_Position
+					|| local.Rotation != transform_component->m_Rotation || local.Scale != transform_component->m_Scale)
+				{
+					local.Position = transform_component->m_Position;
+					local.Rotation = transform_component->m_Rotation;
+					local.Scale = transform_component->m_Scale;
+					local.Matrix = transform_component->GetTransform();
+					local.Valid = true;
+				}
+				world *= local.Matrix;
+			}
+			if (const auto* visibility = m_Registry.try_get<VisibilityComponent>(node); visibility != nullptr && !visibility->m_Visible)
+				visible = false;
+
 			m_FrameWorld[index] = world;
+			m_FrameVisible[index] = visible ? 1 : 0;
+			m_FrameEntity[index] = node;
 			m_FrameWorldStamp[index] = m_FrameWorldStampNow;
 		}
 
@@ -243,6 +270,28 @@ namespace Helios
 		static const glm::mat4 s_Identity{ 1.0f };
 		return (index < m_FrameWorldStamp.size() && m_FrameWorldStamp[index] == m_FrameWorldStampNow)
 			? m_FrameWorld[index] : s_Identity;
+	}
+
+	bool Scene::HasFrameRecord(entt::entity entity) const
+	{
+		const size_t index = static_cast<size_t>(entt::to_entity(entity));
+		return m_FrameRecordReadable && m_Registry.valid(entity) && index < m_FrameWorldStamp.size()
+			&& m_FrameWorldStamp[index] == m_FrameWorldStampNow && m_FrameEntity[index] == entity;
+	}
+
+	glm::mat4 Scene::GetRenderWorldTransform(entt::entity entity) const
+	{
+		if (HasFrameRecord(entity))
+			return m_FrameWorld[static_cast<size_t>(entt::to_entity(entity))];
+		return GetWorldTransform(entity);
+	}
+
+	bool Scene::IsEntityInRenderView(entt::entity entity, LayerMask culling_mask) const
+	{
+		if (!HasFrameRecord(entity))
+			return IsEntityInView(entity, culling_mask);
+		return m_FrameVisible[static_cast<size_t>(entt::to_entity(entity))] != 0
+			&& Layers::IsVisible(GetEntityLayerMask(entity), culling_mask);
 	}
 
 	bool Scene::SetParent(entt::entity child, entt::entity parent)
@@ -350,6 +399,7 @@ namespace Helios
 		 * 传下去的是世界变换（沿父链累积），SceneObject 只认识世界空间。
 		 * 具体变换如何写入由各 SceneObject 重写的 SetTransform 决定（多态）。 */
 		/* 新的一帧换个帧戳：上一帧记下的世界变换全部作废（戳回绕到 0 时整表清掉） */
+		m_FrameRecordReadable = false;
 		if (++m_FrameWorldStampNow == 0)
 		{
 			std::fill(m_FrameWorldStamp.begin(), m_FrameWorldStamp.end(), 0u);
@@ -375,9 +425,11 @@ namespace Helios
 				probe_component->m_ReflectionProbe->SetTransform(world_transform);
 				/* 可见性同源传播（与光源"隐藏 = 不照"一致）：隐藏的探针不烘焙、
 				 * 不参与 IBL 选择（注册保留，恢复可见即恢复参与） */
-				probe_component->m_ReflectionProbe->SetEnable(IsEntityVisible(entity));
+				const size_t index = static_cast<size_t>(entt::to_entity(entity));
+				probe_component->m_ReflectionProbe->SetEnable(m_FrameVisible[index] != 0);
 			}
 		}
+		m_FrameRecordReadable = true;
 
 		/* 收集RenderView，并在收集前更新 Camera 的视图/投影矩阵 */
 		m_RenderViews.clear();
@@ -471,6 +523,9 @@ namespace Helios
 		{
 			Renderer::RenderAView(view);
 		}
+
+		/* 渲染完之后的改动（面板 / Gizmo）要现算，等下一次 OnUpdate 重新记 */
+		m_FrameRecordReadable = false;
 	}
 
 	Entity Scene::GetPrimaryCameraEntity()

@@ -70,6 +70,11 @@ namespace Helios
 		 * 句柄无效时返回单位阵。 */
 		[[nodiscard]] glm::mat4 GetWorldTransform(entt::entity entity) const;
 
+		/* 渲染侧用的世界变换与可见判定：本帧 OnUpdate 到 Render 结束之间直接读 OnUpdate 算好的结果，
+		 * 层级不再逐个上溯；其余时候现算，结果与 GetWorldTransform / IsEntityInView 一致 */
+		[[nodiscard]] glm::mat4 GetRenderWorldTransform(entt::entity entity) const;
+		[[nodiscard]] bool IsEntityInRenderView(entt::entity entity, LayerMask culling_mask) const;
+
 		/* 把 child 挂到 parent 下（parent 为 entt::null 表示回到根层级）。
 		 * 保持世界变换不变：局部变换按新的父空间重算（矩阵不可分解时保留原本地变换）。
 		 * child 是 parent 自身或祖先（会成环）、child 已不存在时不做改动并返回 false。 */
@@ -136,11 +141,26 @@ namespace Helios
 		void FlushPendingDestroy();
 
 		/* OnUpdate 推变换用的世界变换：父节点本帧算过就接着乘，不用每个实体都从根重算。
-		 * 结果与 GetWorldTransform 逐位一致，按实体下标存，靠帧戳区分新旧 */
+		 * 结果与 GetWorldTransform 逐位一致，按实体下标存，靠帧戳区分新旧；显隐顺带一起记 */
 		const glm::mat4& FrameWorldTransform(entt::entity entity);
+		/* 本帧记过且还在 OnUpdate 到 Render 之间，渲染侧才能直接读 */
+		[[nodiscard]] bool HasFrameRecord(entt::entity entity) const;
 		std::vector<glm::mat4> m_FrameWorld;
+		std::vector<uint8_t> m_FrameVisible;
+		std::vector<entt::entity> m_FrameEntity; /* 记录时的完整句柄：下标被新实体复用时不认旧记录 */
+		/* 局部矩阵按位置 / 旋转 / 缩放的值缓存：没动过的实体不再重算三角函数 */
+		struct LocalTransformCache
+		{
+			glm::vec3 Position{ 0.0f };
+			glm::vec3 Rotation{ 0.0f };
+			glm::vec3 Scale{ 0.0f };
+			glm::mat4 Matrix{ 1.0f };
+			bool Valid{ false };
+		};
+		std::vector<LocalTransformCache> m_FrameLocal;
 		std::vector<uint32_t> m_FrameWorldStamp;
 		uint32_t m_FrameWorldStampNow{ 0 };
+		bool m_FrameRecordReadable{ false };
 
 		/* 场景中的所有实体都将注册到这里 */
 		entt::registry m_Registry;

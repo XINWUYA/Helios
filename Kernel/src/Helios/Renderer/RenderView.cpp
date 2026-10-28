@@ -219,11 +219,11 @@ namespace Helios
 
 			/* 隐藏的实体（自身或祖先）与看不到的层不进列表：场景视口 / 阴影 /
 			 * 探针烘焙都从这里取对象，一处过滤三处同步（判定收口在 Scene::IsEntityInView）。 */
-			if (!owner_scene->IsEntityInView(entity, culling_mask))
+			if (!owner_scene->IsEntityInRenderView(entity, culling_mask))
 				continue;
 
 			/* 组件里存的是相对父节点的局部变换，画到世界里的必须是沿父链累积的结果 */
-			const glm::mat4 local_2_world = owner_scene->GetWorldTransform(entity);
+			const glm::mat4 local_2_world = owner_scene->GetRenderWorldTransform(entity);
 
 			/* 开了蒙皮画当前姿势的动态段；关掉就回到绑定姿态的源段（口径见 Model::GetRenderSegments） */
 			const auto& mesh_segments = model_component.m_EnableSkinning
@@ -264,7 +264,7 @@ namespace Helios
 		{
 			/* 隐藏的光源不参与光照（与模型的过滤同源：隐藏 = 不画 + 不照）；
 			 * 层同理 —— 相机看不到的层，它的光源也不进本视图 */
-			if (!owner_scene->IsEntityInView(entity, m_CullingMask))
+			if (!owner_scene->IsEntityInRenderView(entity, m_CullingMask))
 				continue;
 
 			auto [transform_component, light_component] = light_entity_view.get<TransformComponent, LightComponent>(entity);

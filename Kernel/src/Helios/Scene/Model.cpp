@@ -289,6 +289,11 @@ namespace Helios
 	/* 由世界变换矩阵写入位置、旋转与缩放 */
 	void Model::SetTransform(const glm::mat4& transform)
 	{
+		if (m_HasPushedTransform && transform == m_PushedTransform)
+			return;
+		m_PushedTransform = transform;
+		m_HasPushedTransform = true;
+
 		/* 位置与旋转由基类统一处理 */
 		SceneObject::SetTransform(transform);
 

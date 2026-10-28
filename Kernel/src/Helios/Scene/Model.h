@@ -67,7 +67,7 @@ namespace Helios
 
 		/* 模型缩放 */
 		[[nodiscard]] const glm::vec3& GetScale() const { return m_Scale; }
-		void SetScale(const glm::vec3& scale) { m_Scale = scale; }
+		void SetScale(const glm::vec3& scale) { m_Scale = scale; m_HasPushedTransform = false; }
 
 		/* 由世界变换矩阵写入位置、旋转与缩放 */
 		void SetTransform(const glm::mat4& transform) override;
@@ -118,6 +118,9 @@ namespace Helios
 		glm::vec3 m_AABBMax;
 		/* 缩放 */
 		glm::vec3 m_Scale{ 1.0f };
+		/* 上次推进来的世界变换：场景每帧都推一遍，没变就不再分解 */
+		glm::mat4 m_PushedTransform{ 1.0f };
+		bool m_HasPushedTransform{ false };
 		/* 蒙皮数据（.mesh 末尾的骨骼段；没有就是静态模型） */
 		SharedPtr<SkeletonData> m_SkinData;
 
