@@ -11,6 +11,7 @@
 #include "Helios/Scene/SceneCommon.h"
 
 #include <cstring>
+#include <regex>
 
 namespace Helios
 {

@@ -113,6 +113,14 @@ namespace Helios
 				return;
 
 			std::lock_guard lock(m_Mutex);
+			if constexpr (std::is_same_v<LoadConfig, NoConfig>)
+			{
+				const auto iter = m_AssetMap.find(path);
+				if (iter != m_AssetMap.end() && iter->second.Asset != nullptr)
+					AssetFactory<AssetType>::Refresh(iter->second.Asset, incoming);
+				return;
+			}
+
 			for (auto& [key, entry] : m_AssetMap)
 			{
 				if (entry.Path == path && entry.Asset != nullptr)
@@ -152,6 +160,10 @@ namespace Helios
 	bool AssetStore<AssetType, LoadConfig>::Contains(const std::string& path) const
 	{
 		std::lock_guard lock(m_Mutex);
+		/* 无加载配置时缓存键就是路径，直接查表 */
+		if constexpr (std::is_same_v<LoadConfig, NoConfig>)
+			return m_AssetMap.find(path) != m_AssetMap.end();
+
 		for (const auto& [key, entry] : m_AssetMap)
 		{
 			if (entry.Path == path)

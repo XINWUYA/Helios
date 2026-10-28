@@ -447,7 +447,7 @@ namespace Helios
 
         for (size_t i = 0; i < count; ++i)
         {
-            auto metal_buffer = std::dynamic_pointer_cast<MetalVertexBuffer>(buffers[i]);
+            auto* metal_buffer = static_cast<MetalVertexBuffer*>(buffers[i].get());
             if (!metal_buffer || !metal_buffer->GetMetalBuffer())
                 continue;
 
@@ -474,7 +474,8 @@ namespace Helios
             return;
         }
 
-        auto metal_vertex_array = std::dynamic_pointer_cast<MetalVertexArray>(vertex_array);
+        /* Metal 后端里的设备对象一定是 Metal 实现，绘制路径上不做 RTTI 转换 */
+        auto* metal_vertex_array = static_cast<MetalVertexArray*>(vertex_array.get());
         if (!metal_vertex_array)
         {
             CORE_LOG_ERROR("Invalid vertex array type!");
@@ -495,7 +496,7 @@ namespace Helios
             return;
         }
 
-        auto metal_index_buffer = std::dynamic_pointer_cast<MetalIndexBuffer>(index_buffer);
+        auto* metal_index_buffer = static_cast<MetalIndexBuffer*>(index_buffer.get());
         if (!metal_index_buffer)
         {
             CORE_LOG_ERROR("Invalid index buffer type!");
@@ -535,7 +536,8 @@ namespace Helios
             return;
         }
 
-        auto metal_vertex_array = std::dynamic_pointer_cast<MetalVertexArray>(vertex_array);
+        /* Metal 后端里的设备对象一定是 Metal 实现，绘制路径上不做 RTTI 转换 */
+        auto* metal_vertex_array = static_cast<MetalVertexArray*>(vertex_array.get());
         if (!metal_vertex_array)
         {
             CORE_LOG_ERROR("Invalid vertex array type!");

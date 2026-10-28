@@ -6,11 +6,13 @@
 
 #include <xxhash.h>
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <iterator>
 #include <optional>
 #include <regex>
 #include <sstream>
+#include <thread>
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
 #include <SPIRV/GlslangToSpv.h>
@@ -775,19 +777,22 @@ namespace Helios
     bool ShaderCompiler::Compile(const std::string& source, ShaderStage stage, ShaderTarget target,
         std::string& output, std::string& error_msg, const std::string& name)
     {
-        /* 从查缓存到写缓存整段串行：见 CompileMutex 的说明 */
-        std::lock_guard lock(CompileMutex());
-
         const std::string hash = ComputeHash(source);
         const std::filesystem::path cache_dir = GetCacheDirectory(target);
         const std::string filename = (name.empty() ? "" : name + "_") + hash + "_" + ShaderStageToString(stage) + GetFileExtension(target);
         const std::string cache_path = (cache_dir / filename).string();
 
+        /* 命中缓存不用排队：缓存文件整份写完才改名落位，读到的不会是半截 */
         if (TryLoadCache(cache_path, output))
         {
             CORE_LOG_INFO("ShaderCompiler cache hit: {}", cache_path);
             return true;
         }
+
+        /* 真编译串行（见 CompileMutex 的说明）；排队期间别人可能已经编好写进去了 */
+        std::lock_guard lock(CompileMutex());
+        if (TryLoadCache(cache_path, output))
+            return true;
 
         if (!CompileInternal(source, stage, target, output, error_msg, name))
             return false;
@@ -893,13 +898,28 @@ namespace Helios
         if (!std::filesystem::exists(dir))
             std::filesystem::create_directories(dir);
 
-        std::ofstream out(cache_path, std::ios::out | std::ios::binary);
-        if (out.is_open())
+        /* 先写临时文件再改名：改名是原子的，别的线程或进程不会读到写了一半的缓存 */
+        const std::string temp_path = cache_path + ".tmp"
+            + std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id()))
+            + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         {
-            out.write(output.data(), output.size());
-            out.flush();
-            out.close();
+            std::ofstream out(temp_path, std::ios::out | std::ios::binary);
+            if (!out.is_open())
+                return;
+            out.write(output.data(), static_cast<std::streamsize>(output.size()));
+            if (!out.good())
+            {
+                out.close();
+                std::error_code ignored;
+                std::filesystem::remove(temp_path, ignored);
+                return;
+            }
         }
+
+        std::error_code error;
+        std::filesystem::rename(temp_path, cache_path, error);
+        if (error)
+            std::filesystem::remove(temp_path, error);
     }
 
     bool ShaderCompiler::CompileInternal(const std::string& source, ShaderStage stage, ShaderTarget target,

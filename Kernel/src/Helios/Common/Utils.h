@@ -2,8 +2,8 @@
 #include "Helios/Common/Export.h"
 #include <cstdint>
 #include <filesystem>
-#include <regex>
 #include <string>
+#include <vector>
 #include <magic_enum.hpp>
 
 namespace Helios
@@ -50,11 +50,25 @@ namespace Helios
 	 */
 	std::string ReplaceFileSuffix(const std::string& path, const std::string& suffix);
 
-	/* split string */
+	/* split string：按字面分隔符切，与原先 regex 切法同口径（中间的空段保留、末尾空段丢弃） */
 	inline std::vector<std::string> Split(const std::string& value, const std::string& delimiter)
 	{
-		const std::regex regex(delimiter);
-		std::vector<std::string> result(std::sregex_token_iterator(value.begin(), value.end(), regex, -1), std::sregex_token_iterator());
+		std::vector<std::string> result;
+		if (delimiter.empty())
+		{
+			if (!value.empty())
+				result.push_back(value);
+			return result;
+		}
+
+		size_t begin = 0;
+		for (size_t found = value.find(delimiter); found != std::string::npos; found = value.find(delimiter, begin))
+		{
+			result.emplace_back(value, begin, found - begin);
+			begin = found + delimiter.size();
+		}
+		if (begin < value.size())
+			result.emplace_back(value, begin);
 		return result;
 	}
 

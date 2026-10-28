@@ -11,6 +11,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <regex>
 
 namespace Helios
 {
@@ -650,7 +651,8 @@ namespace Helios
 
     void MetalShader::Bind()
     {
-        auto* render_api = dynamic_cast<MetalRenderAPI*>(Renderer::GetRenderAPI().get());
+        /* Metal 后端的 RenderAPI 一定是 MetalRenderAPI，每次绘制都走这里，不做 RTTI 转换 */
+        auto* render_api = static_cast<MetalRenderAPI*>(Renderer::GetRenderAPI().get());
         if (!render_api)
             return;
 
@@ -667,7 +669,7 @@ namespace Helios
 
     void MetalShader::BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array)
     {
-        auto metal_vertex_array = std::dynamic_pointer_cast<MetalVertexArray>(vertex_array);
+        auto* metal_vertex_array = static_cast<MetalVertexArray*>(vertex_array.get());
         if (!metal_vertex_array)
             return;
 
