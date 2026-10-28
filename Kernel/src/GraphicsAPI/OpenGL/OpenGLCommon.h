@@ -342,6 +342,29 @@ namespace Helios
 		}
 	}
 
+	/* 后端自己记的绑定状态：GL 上下文只有这一个写者，读这里就不用 glGet（glGet 会让驱动线程同步） */
+	namespace GLState
+	{
+		/* 当前绑在 GL_FRAMEBUFFER 上的帧缓冲 */
+		void BindFramebuffer(GLuint framebuffer);
+		[[nodiscard]] GLuint CurrentFramebuffer();
+
+		/* 绑定点上挂的缓冲区间（target 为 GL_UNIFORM_BUFFER / GL_SHADER_STORAGE_BUFFER，size = 0 表示整块） */
+		struct BufferBinding
+		{
+			GLuint Buffer{ 0 };
+			GLintptr Offset{ 0 };
+			GLsizeiptr Size{ 0 };
+		};
+		void BindBufferRange(GLenum target, GLuint binding, const BufferBinding& range);
+		[[nodiscard]] BufferBinding CurrentBufferRange(GLenum target, GLuint binding);
+
+		/* 当前程序；删 program 前要先把记录清掉，否则同号新 program 会被当成已绑定 */
+		void UseProgram(GLuint program);
+		[[nodiscard]] GLuint CurrentProgram();
+		void ForgetProgram(GLuint program);
+	}
+
 	/* OpenGL 错误检查 */#if HELIOS_DEBUG
 	void CheckGLError(const char* file, const char* func_name, uint32_t line) noexcept;
 	void CheckGLFrameBufferStatus(GLenum target, const char* func_name, uint32_t line) noexcept;

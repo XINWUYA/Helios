@@ -25,6 +25,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		ReleaseVariants();
 		glDeleteVertexArrays(1, &m_VertexArrayId);
 	}
 
@@ -32,7 +33,20 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		glBindVertexArray(m_VertexArrayId);
+		glBindVertexArray(m_ActiveVertexArrayId != 0 ? m_ActiveVertexArrayId : m_VertexArrayId);
+	}
+
+	/* 删掉按着色器签名多建的 VAO，只留基础那个 */
+	void OpenGLVertexArray::ReleaseVariants()
+	{
+		for (const auto& [fingerprint, vertex_array] : m_Variants)
+		{
+			if (vertex_array != m_VertexArrayId)
+				glDeleteVertexArrays(1, &vertex_array);
+		}
+		m_Variants.clear();
+		m_ActiveVertexArrayId = m_VertexArrayId;
+		m_AttributeFingerprint = 0;
 	}
 
 	void OpenGLVertexArray::Unbind() const
@@ -73,8 +87,9 @@ namespace Helios
 		m_VertexCount += vertex_buffer->GetVertexCount();
 		m_VertexBuffers.push_back(vertex_buffer);
 
-		/* 属性指针要等知道着色器声明的 location 才能配，见 ConfigureAttributes */
-		m_AttributeFingerprint = 0;
+		/* 属性指针要等知道着色器声明的 location 才能配（见 ConfigureAttributes）；缓冲变了旧配置全作废 */
+		ReleaseVariants();
+		m_BaseConfigured = false;
 	}
 
 	void OpenGLVertexArray::ConfigureAttributes(const ShaderReflectionData& reflection)
@@ -113,13 +128,40 @@ namespace Helios
 		if (fingerprint == m_AttributeFingerprint)
 			return;
 
-		glBindVertexArray(m_VertexArrayId);
+		/* 每种着色器输入签名各配一个 VAO：阴影只读位置、场景读全部，来回切换不用每次重配 */
+		for (const auto& [cached_fingerprint, vertex_array] : m_Variants)
+		{
+			if (cached_fingerprint == fingerprint)
+			{
+				m_ActiveVertexArrayId = vertex_array;
+				m_AttributeFingerprint = fingerprint;
+				return;
+			}
+		}
 
-		/* 先清掉上一次的配置：同一份 VAO 可能被不同着色器用过 */
-		GLint max_attributes = 0;
-		glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &max_attributes);
-		for (GLint index = 0; index < max_attributes; ++index)
-			glDisableVertexAttribArray(static_cast<GLuint>(index));
+		GLuint target_vertex_array = m_VertexArrayId;
+		if (m_BaseConfigured)
+		{
+			glGenVertexArrays(1, &target_vertex_array);
+			glBindVertexArray(target_vertex_array);
+			if (m_IndexBuffer)
+				m_IndexBuffer->Bind();
+		}
+		else
+		{
+			glBindVertexArray(target_vertex_array);
+
+			/* 基础 VAO 可能配过别的缓冲组合，先全部关掉；属性上限只查一次 */
+			static const GLint max_attributes = []()
+			{
+				GLint value = 16;
+				glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &value);
+				return value;
+			}();
+			for (GLint index = 0; index < max_attributes; ++index)
+				glDisableVertexAttribArray(static_cast<GLuint>(index));
+			m_BaseConfigured = true;
+		}
 
 		uint32_t sequential_location = 0;
 
@@ -196,6 +238,8 @@ namespace Helios
 		}
 
 		glBindVertexArray(0);
+		m_Variants.emplace_back(fingerprint, target_vertex_array);
+		m_ActiveVertexArrayId = target_vertex_array;
 		m_AttributeFingerprint = fingerprint;
 	}
 
@@ -203,8 +247,16 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 每个签名 VAO 都要挂上索引缓冲 */
 		glBindVertexArray(m_VertexArrayId);
 		index_buffer->Bind();
+		for (const auto& [fingerprint, vertex_array] : m_Variants)
+		{
+			if (vertex_array == m_VertexArrayId)
+				continue;
+			glBindVertexArray(vertex_array);
+			index_buffer->Bind();
+		}
 
 		m_IndexBuffer = index_buffer;
 	}

@@ -25,7 +25,14 @@ namespace Helios
 		void ConfigureAttributes(const ShaderReflectionData& reflection);
 
 	private:
+		void ReleaseVariants();
+
+		/* 基础 VAO；绘制时绑的是当前签名对应的那个 */
 		uint32_t m_VertexArrayId{ 0 };
+		uint32_t m_ActiveVertexArrayId{ 0 };
+		bool m_BaseConfigured{ false };
+		/* 着色器输入签名 → VAO（一个网格通常只有两三种） */
+		std::vector<std::pair<uint64_t, uint32_t>> m_Variants;
 		uint32_t m_VertexCount{ 0 };
 		uint64_t m_AttributeFingerprint{ 0 };
 		std::vector<SharedPtr<DeviceVertexBuffer>> m_VertexBuffers;

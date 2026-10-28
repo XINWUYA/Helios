@@ -74,6 +74,15 @@ namespace Helios
 		GLint FindUniformLocation(const std::string& name);
 		std::unordered_map<std::string, GLint> m_UniformLocationCache;
 
+		/* 每个 location 上次写下的值（最大一个 mat4）；值没变返回 true，变了记下新值 */
+		struct UniformValue
+		{
+			uint8_t Bytes[64]{};
+			uint32_t Size{ 0 };
+		};
+		bool IsUniformUnchanged(GLint location, const void* data, uint32_t size);
+		std::unordered_map<GLint, UniformValue> m_UniformValues;
+
 		/* 有阶段编译失败：program 建不完整，IsValid 据此判否 */
 		bool m_CompileFailed{ false };
 

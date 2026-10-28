@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "OpenGLShader.h"
 #include "OpenGLVertexArray.h"
+#include "OpenGLCommon.h"
 
 #ifdef PLATFORM_WINDOWS
 #include <shaderc/shaderc.hpp>
@@ -215,6 +216,7 @@ namespace Helios
 		std::swap(m_AttachedShaders, other.m_AttachedShaders);
 		std::swap(m_IsLinked, other.m_IsLinked);
 		std::swap(m_UniformLocationCache, other.m_UniformLocationCache);
+		std::swap(m_UniformValues, other.m_UniformValues);
 		std::swap(m_CompileFailed, other.m_CompileFailed);
 		std::swap(m_Reflection, other.m_Reflection);
 		std::swap(m_SourceHash, other.m_SourceHash);
@@ -233,6 +235,7 @@ namespace Helios
 			CORE_LOG_DEBUG("[GL] Program #{0} ({1}) destroyed", m_ProgramID, m_DebugName);
 		}
 
+		GLState::ForgetProgram(m_ProgramID);
 		glDeleteProgram(m_ProgramID);
 	}
 
@@ -244,14 +247,27 @@ namespace Helios
 		if (!m_IsLinked)
 			LazyLink();
 
-		glUseProgram(m_ProgramID);
+		GLState::UseProgram(m_ProgramID);
 	}
 
+	/* 不切回 0：下一个 draw 多半还是同一个程序，留着省一次切换 */
 	void OpenGLShader::Unbind()
 	{
-		PROFILE_FUNCTION();
+	}
 
-		glUseProgram(0);
+	/* uniform 值存在程序对象上：同一 location 写的还是上次的值就跳过 */
+	bool OpenGLShader::IsUniformUnchanged(GLint location, const void* data, uint32_t size)
+	{
+		if (location < 0 || size > sizeof(UniformValue::Bytes))
+			return false;
+
+		UniformValue& cached = m_UniformValues[location];
+		if (cached.Size == size && std::memcmp(cached.Bytes, data, size) == 0)
+			return true;
+
+		std::memcpy(cached.Bytes, data, size);
+		cached.Size = size;
+		return false;
 	}
 
 	void OpenGLShader::BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array)
@@ -284,7 +300,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		const GLint location = FindUniformLocation(name);
-		if (location < 0) return;
+		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
 		glUniform1i(location, value);
 	}
 
@@ -302,7 +318,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		const GLint location = FindUniformLocation(name);
-		if (location < 0) return;
+		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
 		glUniform1f(location, value);
 	}
 
@@ -311,7 +327,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		const GLint location = FindUniformLocation(name);
-		if (location < 0) return;
+		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
 		glUniform2f(location, value.x, value.y);
 	}
 
@@ -320,7 +336,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		const GLint location = FindUniformLocation(name);
-		if (location < 0) return;
+		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
 		glUniform3f(location, value.x, value.y, value.z);
 	}
 
@@ -329,7 +345,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		const GLint location = FindUniformLocation(name);
-		if (location < 0) return;
+		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
 		glUniform4f(location, value.x, value.y, value.z, value.w);
 	}
 
@@ -338,7 +354,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		const GLint location = FindUniformLocation(name);
-		if (location < 0) return;
+		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
 		glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(value));
 	}
 
@@ -353,6 +369,20 @@ namespace Helios
 	void OpenGLShader::SetParam(int handle, ParamType type, const void* data)
 	{
 		if (handle < 0 || data == nullptr)
+			return;
+
+		uint32_t size = 0;
+		switch (type)
+		{
+		case ParamType::Int: size = sizeof(int); break;
+		case ParamType::Float: size = sizeof(float); break;
+		case ParamType::Vec2: size = sizeof(glm::vec2); break;
+		case ParamType::Vec3: size = sizeof(glm::vec3); break;
+		case ParamType::Vec4: size = sizeof(glm::vec4); break;
+		case ParamType::Mat4: size = sizeof(glm::mat4); break;
+		case ParamType::Texture: return;
+		}
+		if (IsUniformUnchanged(handle, data, size))
 			return;
 
 		const auto* values = static_cast<const float*>(data);
@@ -626,6 +656,7 @@ namespace Helios
 
 		/* link 之前查到的位置全是无效值，缓存一律作废 */
 		m_UniformLocationCache.clear();
+		m_UniformValues.clear();
 
 		glLinkProgram(program);
 
@@ -678,10 +709,9 @@ namespace Helios
 		 * 个别驱动不暴露 uniform location 的，用 glGetActiveUniform 枚举补上 */
 		if (!m_Reflection.SamplerBindings.empty())
 		{
-			GLint prev_program = 0;
-			glGetIntegerv(GL_CURRENT_PROGRAM, &prev_program);
-
-			glUseProgram(program);
+			/* 链接可能发生在别的程序正绑着的时候（按句柄查 location 会触发），写完要切回去 */
+			const GLuint previous_program = GLState::CurrentProgram();
+			GLState::UseProgram(program);
 
 			GLint num_active = 0;
 			glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &num_active);
@@ -723,7 +753,7 @@ namespace Helios
 			for (const auto& [location, value] : active_units)
 				glUniform1i(location, value);
 
-			glUseProgram(static_cast<GLuint>(prev_program));
+			GLState::UseProgram(previous_program);
 		}
 
 		m_IsLinked = true;

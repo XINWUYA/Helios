@@ -3,6 +3,63 @@
 
 namespace Helios
 {
+	namespace GLState
+	{
+		namespace
+		{
+			GLuint g_Framebuffer = 0;
+			GLuint g_Program = 0;
+			std::unordered_map<uint64_t, BufferBinding> g_BufferBindings;
+		}
+
+		void BindFramebuffer(GLuint framebuffer)
+		{
+			glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+			g_Framebuffer = framebuffer;
+		}
+
+		GLuint CurrentFramebuffer()
+		{
+			return g_Framebuffer;
+		}
+
+		void BindBufferRange(GLenum target, GLuint binding, const BufferBinding& range)
+		{
+			if (range.Buffer != 0 && range.Size > 0)
+				glBindBufferRange(target, binding, range.Buffer, range.Offset, range.Size);
+			else
+				glBindBufferBase(target, binding, range.Buffer);
+			g_BufferBindings[(static_cast<uint64_t>(target) << 32) | binding] = range;
+		}
+
+		BufferBinding CurrentBufferRange(GLenum target, GLuint binding)
+		{
+			const auto iter = g_BufferBindings.find((static_cast<uint64_t>(target) << 32) | binding);
+			return iter != g_BufferBindings.end() ? iter->second : BufferBinding{};
+		}
+
+		void UseProgram(GLuint program)
+		{
+			if (g_Program == program)
+				return;
+			glUseProgram(program);
+			g_Program = program;
+		}
+
+		GLuint CurrentProgram()
+		{
+			return g_Program;
+		}
+
+		void ForgetProgram(GLuint program)
+		{
+			if (g_Program != program)
+				return;
+			glUseProgram(0);
+			g_Program = 0;
+		}
+	}
+
 	/* 检查GLError信息 */
 	void CheckGLError(const char* file, const char* func_name, uint32_t line) noexcept
 	{

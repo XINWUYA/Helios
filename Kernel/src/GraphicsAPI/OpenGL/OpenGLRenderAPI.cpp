@@ -10,52 +10,6 @@
 
 namespace Helios
 {
-#ifndef __APPLE__
-	namespace
-	{
-		/* binding point 是上下文级状态，而引擎的 uniform 缓冲只在创建时绑一次。
-		 * 计算派发临时占用几个点，先记下来、派发完原样还回去（连 offset / size 一起）。 */
-		struct SavedBufferBinding
-		{
-			GLenum Target{ GL_NONE };
-			GLuint Binding{ 0 };
-			GLuint Buffer{ 0 };
-			GLint64 Offset{ 0 };
-			GLint64 Size{ 0 };
-		};
-
-		SavedBufferBinding CaptureBufferBinding(GLenum target, GLuint binding)
-		{
-			SavedBufferBinding saved{};
-			saved.Target = target;
-			saved.Binding = binding;
-
-			const bool is_uniform = target == GL_UNIFORM_BUFFER;
-			GLint buffer = 0;
-			glGetIntegeri_v(is_uniform ? GL_UNIFORM_BUFFER_BINDING : GL_SHADER_STORAGE_BUFFER_BINDING, binding, &buffer);
-			saved.Buffer = static_cast<GLuint>(buffer);
-
-			if (saved.Buffer != 0)
-			{
-				glGetInteger64i_v(is_uniform ? GL_UNIFORM_BUFFER_START : GL_SHADER_STORAGE_BUFFER_START, binding, &saved.Offset);
-				glGetInteger64i_v(is_uniform ? GL_UNIFORM_BUFFER_SIZE : GL_SHADER_STORAGE_BUFFER_SIZE, binding, &saved.Size);
-			}
-			return saved;
-		}
-
-		void RestoreBufferBinding(const SavedBufferBinding& saved)
-		{
-			if (saved.Buffer == 0)
-				glBindBufferBase(saved.Target, saved.Binding, 0);
-			/* glBindBufferRange 要求 size > 0，size 小于等于零即 GL_INVALID_VALUE */
-			else if (saved.Size <= 0)
-				glBindBufferBase(saved.Target, saved.Binding, saved.Buffer);
-			else
-				glBindBufferRange(saved.Target, saved.Binding, saved.Buffer,
-					static_cast<GLintptr>(saved.Offset), static_cast<GLsizeiptr>(saved.Size));
-		}
-	}
-#endif
 	void OpenGLMessageCallback(
 		unsigned source,
 		unsigned type,
@@ -322,12 +276,20 @@ namespace Helios
 
 		gl_shader->Bind();
 
-		std::vector<SavedBufferBinding> saved;
+		/* binding point 是上下文级状态，引擎的 uniform 缓冲靠它常驻。派发临时占用几个点，
+		 * 先从后端记录里取出原值，派发完原样还回去（不查驱动） */
+		struct SavedBinding
+		{
+			GLenum Target;
+			GLuint Binding;
+			GLState::BufferBinding Range;
+		};
+		std::vector<SavedBinding> saved;
 		saved.reserve(resolved.size() + 1);
 		for (const ResolvedBinding& item : resolved)
 		{
-			saved.push_back(CaptureBufferBinding(item.Target, item.Binding));
-			glBindBufferBase(item.Target, item.Binding, item.Buffer);
+			saved.push_back({ item.Target, item.Binding, GLState::CurrentBufferRange(item.Target, item.Binding) });
+			GLState::BindBufferRange(item.Target, item.Binding, { item.Buffer, 0, 0 });
 		}
 
 		/* 这一趟的常量块：拷进临时 UBO，按 std140 最小 16 字节挂到指定 binding */
@@ -347,8 +309,8 @@ namespace Helios
 			}
 			glNamedBufferSubData(m_ComputeParamBuffer, 0, param_size, param_data);
 
-			saved.push_back(CaptureBufferBinding(GL_UNIFORM_BUFFER, param_binding));
-			glBindBufferRange(GL_UNIFORM_BUFFER, param_binding, m_ComputeParamBuffer, 0, block_size);
+			saved.push_back({ GL_UNIFORM_BUFFER, param_binding, GLState::CurrentBufferRange(GL_UNIFORM_BUFFER, param_binding) });
+			GLState::BindBufferRange(GL_UNIFORM_BUFFER, param_binding, { m_ComputeParamBuffer, 0, block_size });
 		}
 
 		glDispatchCompute(group_count, 1, 1);
@@ -356,7 +318,7 @@ namespace Helios
 		glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
 
 		for (auto it = saved.rbegin(); it != saved.rend(); ++it)
-			RestoreBufferBinding(*it);
+			GLState::BindBufferRange(it->Target, it->Binding, it->Range);
 
 		return true;
 #endif
