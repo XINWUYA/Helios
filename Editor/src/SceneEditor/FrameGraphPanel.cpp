@@ -713,6 +713,599 @@ namespace Helios
 		std::snprintf(m_SearchBuffer, sizeof(m_SearchBuffer), "%s", filter.c_str());
 	}
 
+	namespace
+	{
+		struct NodeView
+		{
+			std::string Name;
+			std::string LaneName;   /* 所属行的 Pass 名（自检记录用） */
+			std::string GraphName;  /* 依赖图身份名：连线 / 聚焦 / 搜索按它查（逐层展开的层卡 =
+			                         * 数组资源名；其余节点 = Name） */
+			bool IsPass{ false };   /* Pass 背景区域（行头与背景合并）or 区域内的资源卡 */
+			bool IsCulled{ false };
+			size_t LaneIndex{ 0 };
+			const std::vector<FrameGraphCapture::Output>* Outputs{ nullptr }; /* Pass 背景区域：全部输出（xN 徽标 / 悬停网格） */
+			const FrameGraphCapture::Output* Image{ nullptr };                /* 资源卡内显示的缩略图 */
+			ImVec2 ImageSize{ 0.0f, 0.0f };      /* 图空间尺寸（按宽高比内接） */
+			ImVec2 ImageScreenMin{};             /* 绘制时填充（悬停放大 / 自检用） */
+			ImVec2 ImageScreenMax{};
+			std::string InfoText;                /* 图下方信息行（"宽 x 高  格式"；无图时为空） */
+			float InfoTextWidth{ 0.0f };
+			float Width{ 0.0f };
+			float Height{ 0.0f };
+			float X{ 0.0f };      /* 图空间中心 */
+			float Y{ 0.0f };
+			ImVec2 ScreenMin{};
+			ImVec2 ScreenMax{};
+		};
+
+		struct LaneView
+		{
+			std::string PassName;
+			const StageFill* Stage{ nullptr };
+			bool IsCulled{ false };
+			const std::vector<FrameGraphCapture::Output>* Outputs{ nullptr };
+			size_t HeaderIndex{ 0 };              /* nodes 里的背景区域索引 */
+			std::vector<size_t> ResourceIndices;  /* nodes 里的资源卡索引 */
+			float Y{ 0.0f };                      /* 行背景顶（图空间） */
+			float Height{ 0.0f };                 /* 行背景高（含内边距） */
+			float Width{ 0.0f };                  /* 行内容宽（标题列 + 资源卡） */
+			float ContentCenterY{ 0.0f };         /* 行内容垂直中心 */
+		};
+
+		struct CrossEdge
+		{
+			size_t WriterIndex{ 0 };  /* 源资源卡（nodes 索引） */
+			size_t TargetLane{ 0 };   /* 目标行（lanes 索引） */
+			bool Direct{ false };     /* 相邻行：源卡底 → 目标区域顶（竖直直连） */
+			float ExitX{ 0.0f };      /* 源卡底边的出发 x（图空间；总线走线用） */
+			float ExitY{ 0.0f };      /* 源行下方空档里的左行高度（图空间） */
+			float EntryY{ 0.0f };     /* 进入目标区域左缘的入口高度（图空间） */
+			float RailX{ 0.0f };      /* 总线列（图空间） */
+		};
+
+		/* 布局产物：绘制段按它画卡、连线与高亮 */
+		struct GraphLayout
+		{
+			std::vector<NodeView> Nodes;
+			std::vector<LaneView> Lanes;
+			std::vector<CrossEdge> CrossEdges;
+			std::vector<std::pair<size_t, size_t>> SameRtLinks; /* (上行副本, 下行副本) */
+			float MaxLaneWidth{ 0.0f };
+			float RailsMinX{ -kLanePadding }; /* fit 包围盒要含总线（无连线时 = 行左缘） */
+			/* 名字级邻接：资源的生产 / 消费 Pass、Pass 的输入 / 输出资源、名字是不是 Pass */
+			std::unordered_map<std::string, std::vector<std::string>> ProducersOf;
+			std::unordered_map<std::string, std::vector<std::string>> ConsumersOf;
+			std::unordered_map<std::string, std::vector<std::string>> InputsOf;
+			std::unordered_map<std::string, std::vector<std::string>> OutputsOf;
+			std::unordered_map<std::string, bool> NameIsPass;
+		};
+
+		/* 依赖图的布局（图空间）：行、卡片、跨行连线与名字级邻接都在这里算好，绘制只读它。
+		 * 不碰画布与输入，布局规则见各段注释；edge_links 收集连线的自检记录。 */
+		GraphLayout BuildGraphLayout(FrameGraph& frame_graph, bool show_culled, float title_height,
+			float info_line_height, std::vector<FrameGraphPanel::EdgeLink>& edge_links)
+		{
+			GraphLayout layout;
+			/* ---- 收集行：每个生效 Pass 一行 —— 行头 = 整行背景区域（无缩略图），输出资源卡叠在区域内
+			 * 横排；行序 = Pass 的拓扑深度（生产者在上、消费者在下，最长路径松弛）。 ---- */
+			const DependencyGraph& graph = frame_graph.GetDependencyGraph();
+			const FrameGraphCapture& capture = frame_graph.GetCapture();
+			auto& nodes = layout.Nodes;
+			auto& lanes = layout.Lanes;
+
+			/* 图节点索引 → 名字 / 类型 / 生效性（连接解析与显示判定用） */
+			struct GraphNodeRef
+			{
+				std::string Name;
+				bool IsPass{ false };
+				bool IsValid{ false };
+			};
+			std::unordered_map<uint32_t, GraphNodeRef> node_refs;
+			for (const auto& node : graph.GetNodes())
+			{
+				node_refs[node->Index] = GraphNodeRef{ node->DebugName,
+					DynamicPtrCast<RenderPassNode>(node) != nullptr, node->IsValid() };
+			}
+
+			/* 连接解析：输出连接（Pass → 资源）记生产者、输入连接（资源 → Pass）记消费者 */
+			auto& producers_of = layout.ProducersOf;
+			auto& consumers_of = layout.ConsumersOf;
+			for (const auto& connection : graph.GetConnections())
+			{
+				const auto from_iter = node_refs.find(connection->FromNodeIdx);
+				const auto to_iter = node_refs.find(connection->ToNodeIdx);
+				if (from_iter == node_refs.end() || to_iter == node_refs.end())
+					continue;
+
+				const GraphNodeRef& from = from_iter->second;
+				const GraphNodeRef& to = to_iter->second;
+				if (!from.IsPass && to.IsPass)
+					consumers_of[from.Name].push_back(to.Name);
+				else if (from.IsPass && !to.IsPass)
+					producers_of[to.Name].push_back(from.Name);
+			}
+
+			/* 名字级邻接（聚焦链 / 悬停预览用）：pass → 输入资源（consumers_of 反转）、
+			 * pass → 输出资源（producers_of 反转）、名字 → 是否 Pass（链遍历时区分两侧） */
+			auto& inputs_of = layout.InputsOf;
+			auto& outputs_of = layout.OutputsOf;
+			auto& name_is_pass = layout.NameIsPass;
+			for (const auto& [node_index, ref] : node_refs)
+				name_is_pass[ref.Name] = ref.IsPass;
+			for (const auto& [resource_name, resource_consumers] : consumers_of)
+			{
+				for (const std::string& consumer : resource_consumers)
+					inputs_of[consumer].push_back(resource_name);
+			}
+			for (const auto& [resource_name, resource_producers] : producers_of)
+			{
+				for (const std::string& producer : resource_producers)
+					outputs_of[producer].push_back(resource_name);
+			}
+
+			/* ---- 行序：注册序 = 执行序（图的执行按注册序跑 —— `m_RenderPassNodes` 剔除时只做
+			 * 稳定分区、保持注册序；AddPass 即注册，故 `GetNodes()` 里 Pass 的相对顺序就是执行
+			 * 顺序，与 GPU 计时面板一致）。不做拓扑深度重排：深度松弛经"产出 / 消费"链传播，
+			 * 看不见就地写入的叠加链（升采样回叠 / 天空叠进光照结果 —— 写走输入绑定、不算产出），
+			 * 会把 Composite、AxisPass 这类"链尾"排进 Bloom 链中间。剔除节点留在自己的注册槽位。 ---- */
+			std::vector<std::pair<std::string, bool>> visible_passes; /* (名字, 是否生效) */
+			for (const auto& node : graph.GetNodes())
+			{
+				const GraphNodeRef& ref = node_refs[node->Index];
+				if (ref.IsPass && (show_culled || ref.IsValid))
+					visible_passes.emplace_back(ref.Name, ref.IsValid);
+			}
+
+			/* ---- 建卡：Pass 背景区域（行头与背景合并）+ 区域内的资源卡 ---- */
+			for (const auto& [pass_name, pass_valid] : visible_passes)
+			{
+				LaneView lane;
+				lane.PassName = pass_name;
+				lane.Stage = FindStageFill(pass_name);
+				lane.IsCulled = !pass_valid;
+				lane.Outputs = capture.GetPassOutputs(pass_name);
+				lane.HeaderIndex = nodes.size(); /* 先占卡槽，lanes.push_back 前固定 */
+
+				NodeView header;
+				header.Name = pass_name;
+				header.LaneName = pass_name;
+				header.GraphName = pass_name;
+				header.IsPass = true;
+				header.IsCulled = lane.IsCulled;
+				header.Outputs = lane.Outputs;
+				/* Pass 卡：行头和背景合并成的一张卡（占整行高，名字独占首行、资源内容在带子下面）。
+				 * 宽度按标题带算（多输出加 xN 徽标区），高 = 标题带 + 内容行。 */
+				header.Width = kLanePadding + kNodeIconBox + 6.0f
+					+ ImGui::CalcTextSize(header.Name.c_str()).x + kLanePadding;
+				if (lane.Outputs != nullptr && lane.Outputs->size() > 1)
+				{
+					const std::string count_label = "x" + std::to_string(lane.Outputs->size());
+					header.Width += ImGui::CalcTextSize(count_label.c_str()).x + 6.0f;
+				}
+				header.Height = 0.0f; /* 行布局里取"标题带 + 内容行"的整行高 */
+				header.LaneIndex = lanes.size();
+				nodes.push_back(std::move(header));
+
+				if (lane.Outputs != nullptr)
+				{
+					lane.ResourceIndices.reserve(lane.Outputs->size());
+					for (const FrameGraphCapture::Output& output : *lane.Outputs)
+					{
+						const TextureDesc& desc = output.Preview->GetTextureDesc();
+						const float aspect = desc.Height > 0
+							? static_cast<float>(desc.Width) / static_cast<float>(desc.Height) : 1.0f;
+
+						NodeView card;
+						card.Name = output.Name;
+						card.LaneName = pass_name;
+						card.GraphName = output.ResourceName.empty() ? output.Name : output.ResourceName;
+						card.IsCulled = lane.IsCulled;
+						card.LaneIndex = lanes.size();
+						card.Image = &output;
+						card.ImageSize = FitBox(kResourceImageBox, aspect);
+
+						/* 贴图的尺寸与格式直接显示在卡上（图下方的信息行） */
+						card.InfoText = std::to_string(desc.Width) + " x " + std::to_string(desc.Height)
+							+ "  " + GetEnumName(desc.Format);
+						card.InfoTextWidth = ImGui::CalcTextSize(card.InfoText.c_str()).x;
+
+						/* 卡宽：标题 = 图标 + 间隙 + 名字（居中成组）；信息行与快照图
+						 * 共用窄边距（贴图两侧贴边） */
+						const float text_width = ImGui::CalcTextSize(card.Name.c_str()).x;
+						float content_width = std::max(text_width + kNodeIconBox + 23.0f,
+							card.InfoTextWidth * kInfoTextScale + kImageSidePadding * 2.0f);
+						content_width = std::max(content_width, card.ImageSize.x + kImageSidePadding * 2.0f);
+						card.Width = content_width;
+						card.Height = title_height + card.ImageSize.y + info_line_height + kImageSidePadding;
+
+						lane.ResourceIndices.push_back(nodes.size());
+						nodes.push_back(std::move(card));
+					}
+				}
+
+				lanes.push_back(std::move(lane));
+			}
+
+			/* ---- 行布局（图空间）：资源列 —— 同名资源共享同一列（副本跨行严格对齐、虚线竖直）；
+			 * 其余名字每行从最左起排，取最左可用列 —— 不同名字可共用一列，只要各自出现的行区间
+			 * 不重叠（同行不叠卡；同名副本跨行的虚线也不会横穿别家的卡）。逐层展开的数组后排层
+			 * 因此不会把后面行的资源挤到数组末尾之后。列宽取该列最宽的卡；标题带不占纵列，
+			 * 资源列从区域左内沿起排；背景区域统一宽度。 */
+			std::unordered_map<std::string, std::pair<size_t, size_t>> lane_span_of; /* 名字 → 出现行区间 */
+			std::vector<std::string> resource_names;                                 /* 首现顺序 */
+			for (const LaneView& lane : lanes)
+			{
+				for (const size_t index : lane.ResourceIndices)
+				{
+					const std::string& name = nodes[index].Name;
+					const size_t lane_index = nodes[index].LaneIndex;
+					const auto iter = lane_span_of.find(name);
+					if (iter == lane_span_of.end())
+					{
+						lane_span_of[name] = std::make_pair(lane_index, lane_index);
+						resource_names.push_back(name);
+					}
+					else
+					{
+						iter->second.first = std::min(iter->second.first, lane_index);
+						iter->second.second = std::max(iter->second.second, lane_index);
+					}
+				}
+			}
+
+			std::vector<std::vector<std::string>> column_names; /* 列 → 已占用的名字（复用冲突检查） */
+			std::unordered_map<std::string, size_t> column_of;  /* 资源名 → 列号 */
+			for (const std::string& name : resource_names)
+			{
+				const std::pair<size_t, size_t>& span = lane_span_of[name];
+				size_t target_column = column_names.size(); /* 兜底：没有可用列就新开一列 */
+				for (size_t column = 0; column < column_names.size(); ++column)
+				{
+					bool clash = false;
+					for (const std::string& other : column_names[column])
+					{
+						const std::pair<size_t, size_t>& other_span = lane_span_of[other];
+						if (span.first <= other_span.second && other_span.first <= span.second)
+						{
+							clash = true;
+							break;
+						}
+					}
+					if (!clash)
+					{
+						target_column = column;
+						break;
+					}
+				}
+				if (target_column == column_names.size())
+					column_names.emplace_back();
+				column_names[target_column].push_back(name);
+				column_of[name] = target_column;
+			}
+
+			std::vector<float> column_width(column_names.size(), 0.0f);
+			std::vector<float> column_center(column_names.size(), 0.0f);
+			for (const LaneView& lane : lanes)
+			{
+				for (const size_t index : lane.ResourceIndices)
+				{
+					const size_t column = column_of[nodes[index].Name];
+					column_width[column] = std::max(column_width[column], nodes[index].Width);
+				}
+			}
+			{
+				/* 第一列左缘 = 区域左内边（x = 0）：标题带之下就是资源内容行 */
+				float x_cursor = 0.0f;
+				for (size_t column = 0; column < column_names.size(); ++column)
+				{
+					column_center[column] = x_cursor + column_width[column] * 0.5f;
+					x_cursor += column_width[column] + kNodeGap;
+				}
+			}
+
+			for (LaneView& lane : lanes)
+			{
+				/* 卡片各自就位到自己的列（相同资源跨行对齐）；
+				 * 行宽 = max(标题带宽度, 该行最右资源卡右缘) */
+				float row_right = nodes[lane.HeaderIndex].Width;
+				for (const size_t index : lane.ResourceIndices)
+				{
+					NodeView& card = nodes[index];
+					const size_t column = column_of[card.Name];
+					card.X = column_center[column];
+					row_right = std::max(row_right, card.X + column_width[column] * 0.5f);
+				}
+
+				lane.Width = row_right;
+			}
+
+			/* ---- 同名资源副本链（被多个 Pass 写入的 RT）：相邻行的副本用虚线关联
+			 * —— 副本已列对齐，关联线就是一条竖直虚线；语义 = 同一张 RT 的先后写入
+			 * （与实线依赖箭头区分：无箭头、中性色、虚线 + 两端小圆点） */
+			auto& same_rt_links = layout.SameRtLinks;
+			{
+				std::unordered_map<std::string, size_t> previous_copy;
+				for (const LaneView& lane : lanes)
+				{
+					for (const size_t index : lane.ResourceIndices)
+					{
+						const std::string& name = nodes[index].Name;
+						const auto iter = previous_copy.find(name);
+						if (iter != previous_copy.end())
+							same_rt_links.emplace_back(iter->second, index);
+						previous_copy[name] = index;
+					}
+				}
+			}
+
+			float& max_lane_width = layout.MaxLaneWidth;
+			float y_cursor = 0.0f;
+			/* 行顶 → 资源内容行顶：标题带（行顶 5 + 标题行高）之下隔着 kTitleGap ——
+			 * 名字独占首行，资源卡从标题带下方的一行起排 */
+			const float content_top_offset = kLanePadding * 0.5f + title_height + kTitleGap;
+			for (LaneView& lane : lanes)
+			{
+				/* 行高 = 标题带 + 资源内容行（卡高的最大者；没有资源的行留最小体量） */
+				float content_height = kPassContentMinHeight;
+				for (const size_t index : lane.ResourceIndices)
+					content_height = std::max(content_height, nodes[index].Height);
+
+				lane.Y = y_cursor;
+				lane.Height = content_top_offset + content_height + kLanePadding;
+				lane.ContentCenterY = y_cursor + content_top_offset + content_height * 0.5f;
+				nodes[lane.HeaderIndex].Height = lane.Height; /* Pass 卡 = 整行高 */
+				nodes[lane.HeaderIndex].Y = y_cursor + lane.Height * 0.5f;
+				for (const size_t index : lane.ResourceIndices)
+					nodes[index].Y = lane.ContentCenterY;
+
+				max_lane_width = std::max(max_lane_width, lane.Width);
+				y_cursor += lane.Height + kLaneGap;
+			}
+
+			/* Pass 节点 = 整行的背景区域（行头与背景合并的载体）：统一宽度
+			 * （含左右内边距，所有行对齐）、整行高；输出资源卡叠在区域内部 */
+			for (LaneView& lane : lanes)
+			{
+				NodeView& region = nodes[lane.HeaderIndex];
+				region.X = max_lane_width * 0.5f;
+				region.Width = max_lane_width + kLanePadding * 2.0f;
+			}
+
+			/* ---- 跨行连线规划：相邻直连 / 其余绕左侧总线 ----
+			 * 语义：资源（消费 Pass 读到的"目标行上方最后一次写入"的那份副本）→ 消费它的 Pass 区域。
+			 * 同一资源被多个 Pass 先后写入时（读改写链，如 Bloom mip：先降采样写、后升采样回叠再写），
+			 * 每个消费者都从它真正读到的副本接边；就地写入者（同一资源还被该 Pass 自己继续写，
+			 * 如天空叠进光照结果 / 回叠进 mip）不画实线 —— 该关系已由同名副本虚线链表达，避免叠画。
+			 * 相邻直连 = 源卡底部竖直下行 → 目标区域顶边；其余绕总线（源卡底 → 总线列 → 目标区域入口）。
+			 * 总线在区域左缘之外、不穿卡片，多条边在空档 / 总线 / 入口三处分槽、互不重叠。 */
+			auto& cross_edges = layout.CrossEdges;
+			float& rails_min_x = layout.RailsMinX;
+			{
+				/* 资源（依赖图身份）→ 副本卡集合：常规副本（Name == GraphName）收集成版本序列；
+				 * 层卡（逐层展开，显示名各异、身份同为数组资源）取组首卡（Sequence 最小）作唯一
+				 * 引出源，不让每张层卡各引一条重复连线。同时记录资源首现顺序（收集确定性）。 */
+				std::unordered_map<std::string, std::vector<size_t>> copies_of;      /* GraphName → 常规副本（行序） */
+				std::unordered_map<std::string, size_t> layer_group_first;           /* GraphName → 层组首卡 */
+				std::unordered_map<std::string, std::vector<size_t>> writer_lanes_of; /* GraphName → 写它的行 */
+				std::vector<std::string> resource_order;
+				for (const LaneView& lane : lanes)
+				{
+					for (const size_t index : lane.ResourceIndices)
+					{
+						const NodeView& card = nodes[index];
+						if (card.Image == nullptr)
+							continue;
+
+						if (copies_of.count(card.GraphName) == 0 && layer_group_first.count(card.GraphName) == 0)
+							resource_order.push_back(card.GraphName);
+
+						std::vector<size_t>& writer_lanes = writer_lanes_of[card.GraphName];
+						if (std::find(writer_lanes.begin(), writer_lanes.end(), card.LaneIndex) == writer_lanes.end())
+							writer_lanes.push_back(card.LaneIndex);
+
+						if (card.Name != card.GraphName) /* 层卡：只归组（取组首） */
+						{
+							const auto iter = layer_group_first.find(card.GraphName);
+							if (iter == layer_group_first.end()
+								|| card.Image->Sequence < nodes[iter->second].Image->Sequence)
+								layer_group_first[card.GraphName] = index;
+							continue;
+						}
+
+						copies_of[card.GraphName].push_back(index);
+					}
+				}
+
+				std::unordered_map<std::string, size_t> lane_of_pass;
+				for (size_t l = 0; l < lanes.size(); ++l)
+					lane_of_pass[lanes[l].PassName] = l;
+
+				/* 逐资源、逐消费者选"读出源"：目标行上方、Sequence 最大的副本（层组用组首卡） */
+				for (const std::string& resource_name : resource_order)
+				{
+					const auto consumers_iter = consumers_of.find(resource_name);
+					if (consumers_iter == consumers_of.end())
+						continue;
+
+					for (const std::string& consumer : consumers_iter->second)
+					{
+						const auto target_iter = lane_of_pass.find(consumer);
+						if (target_iter == lane_of_pass.end())
+							continue;
+						const size_t target_lane = target_iter->second;
+
+						/* 就地写入者（同一资源还被这个 Pass 自己继续写）：不画实线（虚线链已表达） */
+						const std::vector<size_t>& writer_lanes = writer_lanes_of[resource_name];
+						if (std::find(writer_lanes.begin(), writer_lanes.end(), target_lane) != writer_lanes.end())
+							continue;
+
+						const NodeView* source = nullptr;
+						const auto copies_iter = copies_of.find(resource_name);
+						if (copies_iter != copies_of.end())
+						{
+							for (const size_t index : copies_iter->second)
+							{
+								const NodeView& candidate = nodes[index];
+								if (candidate.LaneIndex >= target_lane)
+									continue;
+								if (source == nullptr || candidate.Image->Sequence > source->Image->Sequence)
+									source = &candidate;
+							}
+						}
+						const auto layer_iter = layer_group_first.find(resource_name);
+						if (layer_iter != layer_group_first.end())
+						{
+							const NodeView& candidate = nodes[layer_iter->second];
+							if (candidate.LaneIndex < target_lane
+								&& (source == nullptr || candidate.Image->Sequence > source->Image->Sequence))
+								source = &candidate;
+						}
+						if (source == nullptr)
+							continue; /* 目标行上方没有产出副本：不画（次序上读不到） */
+
+						CrossEdge edge;
+						edge.WriterIndex = static_cast<size_t>(source - nodes.data());
+						edge.TargetLane = target_lane;
+						cross_edges.push_back(edge);
+
+						edge_links.push_back(FrameGraphPanel::EdgeLink{ source->Name, source->LaneName, consumer });
+					}
+				}
+
+				std::stable_sort(cross_edges.begin(), cross_edges.end(),
+					[&](const CrossEdge& a, const CrossEdge& b)
+					{
+						const NodeView& card_a = nodes[a.WriterIndex];
+						const NodeView& card_b = nodes[b.WriterIndex];
+						if (card_a.LaneIndex != card_b.LaneIndex)
+							return card_a.LaneIndex < card_b.LaneIndex;
+						if (a.TargetLane != b.TargetLane)
+							return a.TargetLane < b.TargetLane;
+						if (card_a.X != card_b.X)
+							return card_a.X < card_b.X;
+						return a.WriterIndex < b.WriterIndex;
+					});
+
+				/* 相邻行（目标 = 源的下一行）走直连：源卡底竖直下行、直接进
+				 * 目标区域顶边 —— 不参与下面的总线分槽（那条路只有弯线才需要） */
+				for (CrossEdge& edge : cross_edges)
+					edge.Direct = (edge.TargetLane == nodes[edge.WriterIndex].LaneIndex + 1);
+
+				std::vector<CrossEdge*> rail_edges;
+				for (CrossEdge& edge : cross_edges)
+				{
+					if (!edge.Direct)
+						rail_edges.push_back(&edge);
+				}
+
+				/* ① 源行空档分槽：同一条行内的出线各占一个高度（空档等分） */
+				for (size_t begin = 0; begin < rail_edges.size();)
+				{
+					size_t end = begin;
+					const size_t source_lane = nodes[rail_edges[begin]->WriterIndex].LaneIndex;
+					while (end < rail_edges.size()
+						&& nodes[rail_edges[end]->WriterIndex].LaneIndex == source_lane)
+						++end;
+
+					const float gap_top = lanes[source_lane].Y + lanes[source_lane].Height;
+					const size_t count = end - begin;
+					for (size_t k = 0; k < count; ++k)
+					{
+						rail_edges[begin + k]->ExitY = gap_top
+							+ kLaneGap * (static_cast<float>(k + 1) / static_cast<float>(count + 1));
+					}
+
+					/* 同一张卡的出线口沿底边错开（下行段不重叠） */
+					for (size_t card_begin = begin; card_begin < end;)
+					{
+						size_t card_end = card_begin;
+						const size_t writer = rail_edges[card_begin]->WriterIndex;
+						while (card_end < end && rail_edges[card_end]->WriterIndex == writer)
+							++card_end;
+
+						const size_t card_count = card_end - card_begin;
+						const float center_x = nodes[writer].X;
+						for (size_t k = 0; k < card_count; ++k)
+						{
+							rail_edges[card_begin + k]->ExitX = center_x
+								+ (static_cast<float>(k) - (static_cast<float>(card_count) - 1.0f) * 0.5f) * 13.0f;
+						}
+						card_begin = card_end;
+					}
+					begin = end;
+				}
+
+				/* ② 目标卡入口分槽：每条（绕行）边在目标区域左缘上占一个高度、
+				 * 各带一个箭头（不强制收束成一个）—— 区域是整行高的，纵向余量
+				 * 足够，箭头彼此分开；入口按源序自上而下排，间距随区域高收敛 */
+				{
+					std::unordered_map<size_t, std::vector<CrossEdge*>> edges_by_target;
+					for (CrossEdge* edge : rail_edges)
+						edges_by_target[edge->TargetLane].push_back(edge);
+
+					for (auto& [target_lane, targets] : edges_by_target)
+					{
+						const NodeView& card = nodes[lanes[target_lane].HeaderIndex];
+						const size_t count = targets.size();
+						const float available = std::max(card.Height - 24.0f, 12.0f);
+						const float step = std::min(22.0f, available / static_cast<float>(count + 1));
+						for (size_t t = 0; t < count; ++t)
+						{
+							targets[t]->EntryY = card.Y
+								+ (static_cast<float>(t) - (static_cast<float>(count) - 1.0f) * 0.5f) * step;
+						}
+					}
+				}
+
+				/* ③ 总线分列：纵向区间（含端点的折角余量）互不重叠者共用一列，
+				 * 否则往左再起一列 —— 总线上不会出现两条边叠在一起的段 */
+				{
+					constexpr float kRailMargin = 7.0f;
+					std::vector<std::vector<std::pair<float, float>>> rails; /* 每列已占用的 [min, max] */
+					for (CrossEdge* edge : rail_edges)
+					{
+						const float span_min = std::min(edge->ExitY, edge->EntryY) - kRailMargin;
+						const float span_max = std::max(edge->ExitY, edge->EntryY) + kRailMargin;
+
+						size_t rail_index = rails.size();
+						for (size_t r = 0; r < rails.size(); ++r)
+						{
+							bool free = true;
+							for (const auto& span : rails[r])
+							{
+								if (span_min < span.second && span_max > span.first)
+								{
+									free = false;
+									break;
+								}
+							}
+							if (free)
+							{
+								rail_index = r;
+								break;
+							}
+						}
+						if (rail_index == rails.size())
+							rails.emplace_back();
+
+						rails[rail_index].emplace_back(span_min, span_max);
+						edge->RailX = -(kLanePadding + kRailInset)
+							- static_cast<float>(rail_index) * kRailSpacing;
+					}
+
+					if (!rails.empty())
+					{
+						rails_min_x = -(kLanePadding + kRailInset)
+							- static_cast<float>(rails.size() - 1) * kRailSpacing;
+					}
+				}
+			}
+
+			return layout;
+		}
+	}
+
 	/* 依赖图画布：Pass 行布局 —— 每个 Pass 一行、行序 = 注册序（= 执行序，与 GPU 计时面板一致；
 	 * 行头 = 整行背景区域，名字独占首行；输出资源卡叠在区域内，缩略图 = 执行完当刻的快照）。
 	 * Pass 和输出之间不画线（包含即语义）；资源只保留
@@ -763,568 +1356,18 @@ namespace Helios
 		/* 快照图下方"宽 x 高  格式"信息行的高度（图空间） */
 		const float info_line_height = ImGui::GetFontSize() + 2.0f;
 
-		/* ---- 收集行：每个生效 Pass 一行 —— 行头 = 整行背景区域（无缩略图），输出资源卡叠在区域内
-		 * 横排；行序 = Pass 的拓扑深度（生产者在上、消费者在下，最长路径松弛）。 ---- */
-		struct NodeView
-		{
-			std::string Name;
-			std::string LaneName;   /* 所属行的 Pass 名（自检记录用） */
-			std::string GraphName;  /* 依赖图身份名：连线 / 聚焦 / 搜索按它查（逐层展开的层卡 =
-			                         * 数组资源名；其余节点 = Name） */
-			bool IsPass{ false };   /* Pass 背景区域（行头与背景合并）or 区域内的资源卡 */
-			bool IsCulled{ false };
-			size_t LaneIndex{ 0 };
-			const std::vector<FrameGraphCapture::Output>* Outputs{ nullptr }; /* Pass 背景区域：全部输出（xN 徽标 / 悬停网格） */
-			const FrameGraphCapture::Output* Image{ nullptr };                /* 资源卡内显示的缩略图 */
-			ImVec2 ImageSize{ 0.0f, 0.0f };      /* 图空间尺寸（按宽高比内接） */
-			ImVec2 ImageScreenMin{};             /* 绘制时填充（悬停放大 / 自检用） */
-			ImVec2 ImageScreenMax{};
-			std::string InfoText;                /* 图下方信息行（"宽 x 高  格式"；无图时为空） */
-			float InfoTextWidth{ 0.0f };
-			float Width{ 0.0f };
-			float Height{ 0.0f };
-			float X{ 0.0f };      /* 图空间中心 */
-			float Y{ 0.0f };
-			ImVec2 ScreenMin{};
-			ImVec2 ScreenMax{};
-		};
-
-		struct LaneView
-		{
-			std::string PassName;
-			const StageFill* Stage{ nullptr };
-			bool IsCulled{ false };
-			const std::vector<FrameGraphCapture::Output>* Outputs{ nullptr };
-			size_t HeaderIndex{ 0 };              /* nodes 里的背景区域索引 */
-			std::vector<size_t> ResourceIndices;  /* nodes 里的资源卡索引 */
-			float Y{ 0.0f };                      /* 行背景顶（图空间） */
-			float Height{ 0.0f };                 /* 行背景高（含内边距） */
-			float Width{ 0.0f };                  /* 行内容宽（标题列 + 资源卡） */
-			float ContentCenterY{ 0.0f };         /* 行内容垂直中心 */
-		};
-
-		const DependencyGraph& graph = frame_graph.GetDependencyGraph();
-		const FrameGraphCapture& capture = frame_graph.GetCapture();
-		std::vector<NodeView> nodes;
-		std::vector<LaneView> lanes;
-
-		/* 图节点索引 → 名字 / 类型 / 生效性（连接解析与显示判定用） */
-		struct GraphNodeRef
-		{
-			std::string Name;
-			bool IsPass{ false };
-			bool IsValid{ false };
-		};
-		std::unordered_map<uint32_t, GraphNodeRef> node_refs;
-		for (const auto& node : graph.GetNodes())
-		{
-			node_refs[node->Index] = GraphNodeRef{ node->DebugName,
-				DynamicPtrCast<RenderPassNode>(node) != nullptr, node->IsValid() };
-		}
-
-		/* 连接解析：输出连接（Pass → 资源）记生产者、输入连接（资源 → Pass）记消费者 */
-		std::unordered_map<std::string, std::vector<std::string>> producers_of;
-		std::unordered_map<std::string, std::vector<std::string>> consumers_of;
-		for (const auto& connection : graph.GetConnections())
-		{
-			const auto from_iter = node_refs.find(connection->FromNodeIdx);
-			const auto to_iter = node_refs.find(connection->ToNodeIdx);
-			if (from_iter == node_refs.end() || to_iter == node_refs.end())
-				continue;
-
-			const GraphNodeRef& from = from_iter->second;
-			const GraphNodeRef& to = to_iter->second;
-			if (!from.IsPass && to.IsPass)
-				consumers_of[from.Name].push_back(to.Name);
-			else if (from.IsPass && !to.IsPass)
-				producers_of[to.Name].push_back(from.Name);
-		}
-
-		/* 名字级邻接（聚焦链 / 悬停预览用）：pass → 输入资源（consumers_of 反转）、
-		 * pass → 输出资源（producers_of 反转）、名字 → 是否 Pass（链遍历时区分两侧） */
-		std::unordered_map<std::string, std::vector<std::string>> inputs_of;
-		std::unordered_map<std::string, std::vector<std::string>> outputs_of;
-		std::unordered_map<std::string, bool> name_is_pass;
-		for (const auto& [node_index, ref] : node_refs)
-			name_is_pass[ref.Name] = ref.IsPass;
-		for (const auto& [resource_name, resource_consumers] : consumers_of)
-		{
-			for (const std::string& consumer : resource_consumers)
-				inputs_of[consumer].push_back(resource_name);
-		}
-		for (const auto& [resource_name, resource_producers] : producers_of)
-		{
-			for (const std::string& producer : resource_producers)
-				outputs_of[producer].push_back(resource_name);
-		}
-
-		/* ---- 行序：注册序 = 执行序（图的执行按注册序跑 —— `m_RenderPassNodes` 剔除时只做
-		 * 稳定分区、保持注册序；AddPass 即注册，故 `GetNodes()` 里 Pass 的相对顺序就是执行
-		 * 顺序，与 GPU 计时面板一致）。不做拓扑深度重排：深度松弛经"产出 / 消费"链传播，
-		 * 看不见就地写入的叠加链（升采样回叠 / 天空叠进光照结果 —— 写走输入绑定、不算产出），
-		 * 会把 Composite、AxisPass 这类"链尾"排进 Bloom 链中间。剔除节点留在自己的注册槽位。 ---- */
-		std::vector<std::pair<std::string, bool>> visible_passes; /* (名字, 是否生效) */
-		for (const auto& node : graph.GetNodes())
-		{
-			const GraphNodeRef& ref = node_refs[node->Index];
-			if (ref.IsPass && (m_ShowCulled || ref.IsValid))
-				visible_passes.emplace_back(ref.Name, ref.IsValid);
-		}
-
-		/* ---- 建卡：Pass 背景区域（行头与背景合并）+ 区域内的资源卡 ---- */
-		for (const auto& [pass_name, pass_valid] : visible_passes)
-		{
-			LaneView lane;
-			lane.PassName = pass_name;
-			lane.Stage = FindStageFill(pass_name);
-			lane.IsCulled = !pass_valid;
-			lane.Outputs = capture.GetPassOutputs(pass_name);
-			lane.HeaderIndex = nodes.size(); /* 先占卡槽，lanes.push_back 前固定 */
-
-			NodeView header;
-			header.Name = pass_name;
-			header.LaneName = pass_name;
-			header.GraphName = pass_name;
-			header.IsPass = true;
-			header.IsCulled = lane.IsCulled;
-			header.Outputs = lane.Outputs;
-			/* Pass 卡：行头和背景合并成的一张卡（占整行高，名字独占首行、资源内容在带子下面）。
-			 * 宽度按标题带算（多输出加 xN 徽标区），高 = 标题带 + 内容行。 */
-			header.Width = kLanePadding + kNodeIconBox + 6.0f
-				+ ImGui::CalcTextSize(header.Name.c_str()).x + kLanePadding;
-			if (lane.Outputs != nullptr && lane.Outputs->size() > 1)
-			{
-				const std::string count_label = "x" + std::to_string(lane.Outputs->size());
-				header.Width += ImGui::CalcTextSize(count_label.c_str()).x + 6.0f;
-			}
-			header.Height = 0.0f; /* 行布局里取"标题带 + 内容行"的整行高 */
-			header.LaneIndex = lanes.size();
-			nodes.push_back(std::move(header));
-
-			if (lane.Outputs != nullptr)
-			{
-				lane.ResourceIndices.reserve(lane.Outputs->size());
-				for (const FrameGraphCapture::Output& output : *lane.Outputs)
-				{
-					const TextureDesc& desc = output.Preview->GetTextureDesc();
-					const float aspect = desc.Height > 0
-						? static_cast<float>(desc.Width) / static_cast<float>(desc.Height) : 1.0f;
-
-					NodeView card;
-					card.Name = output.Name;
-					card.LaneName = pass_name;
-					card.GraphName = output.ResourceName.empty() ? output.Name : output.ResourceName;
-					card.IsCulled = lane.IsCulled;
-					card.LaneIndex = lanes.size();
-					card.Image = &output;
-					card.ImageSize = FitBox(kResourceImageBox, aspect);
-
-					/* 贴图的尺寸与格式直接显示在卡上（图下方的信息行） */
-					card.InfoText = std::to_string(desc.Width) + " x " + std::to_string(desc.Height)
-						+ "  " + GetEnumName(desc.Format);
-					card.InfoTextWidth = ImGui::CalcTextSize(card.InfoText.c_str()).x;
-
-					/* 卡宽：标题 = 图标 + 间隙 + 名字（居中成组）；信息行与快照图
-					 * 共用窄边距（贴图两侧贴边） */
-					const float text_width = ImGui::CalcTextSize(card.Name.c_str()).x;
-					float content_width = std::max(text_width + kNodeIconBox + 23.0f,
-						card.InfoTextWidth * kInfoTextScale + kImageSidePadding * 2.0f);
-					content_width = std::max(content_width, card.ImageSize.x + kImageSidePadding * 2.0f);
-					card.Width = content_width;
-					card.Height = title_height + card.ImageSize.y + info_line_height + kImageSidePadding;
-
-					lane.ResourceIndices.push_back(nodes.size());
-					nodes.push_back(std::move(card));
-				}
-			}
-
-			lanes.push_back(std::move(lane));
-		}
-
-		/* ---- 行布局（图空间）：资源列 —— 同名资源共享同一列（副本跨行严格对齐、虚线竖直）；
-		 * 其余名字每行从最左起排，取最左可用列 —— 不同名字可共用一列，只要各自出现的行区间
-		 * 不重叠（同行不叠卡；同名副本跨行的虚线也不会横穿别家的卡）。逐层展开的数组后排层
-		 * 因此不会把后面行的资源挤到数组末尾之后。列宽取该列最宽的卡；标题带不占纵列，
-		 * 资源列从区域左内沿起排；背景区域统一宽度。 */
-		std::unordered_map<std::string, std::pair<size_t, size_t>> lane_span_of; /* 名字 → 出现行区间 */
-		std::vector<std::string> resource_names;                                 /* 首现顺序 */
-		for (const LaneView& lane : lanes)
-		{
-			for (const size_t index : lane.ResourceIndices)
-			{
-				const std::string& name = nodes[index].Name;
-				const size_t lane_index = nodes[index].LaneIndex;
-				const auto iter = lane_span_of.find(name);
-				if (iter == lane_span_of.end())
-				{
-					lane_span_of[name] = std::make_pair(lane_index, lane_index);
-					resource_names.push_back(name);
-				}
-				else
-				{
-					iter->second.first = std::min(iter->second.first, lane_index);
-					iter->second.second = std::max(iter->second.second, lane_index);
-				}
-			}
-		}
-
-		std::vector<std::vector<std::string>> column_names; /* 列 → 已占用的名字（复用冲突检查） */
-		std::unordered_map<std::string, size_t> column_of;  /* 资源名 → 列号 */
-		for (const std::string& name : resource_names)
-		{
-			const std::pair<size_t, size_t>& span = lane_span_of[name];
-			size_t target_column = column_names.size(); /* 兜底：没有可用列就新开一列 */
-			for (size_t column = 0; column < column_names.size(); ++column)
-			{
-				bool clash = false;
-				for (const std::string& other : column_names[column])
-				{
-					const std::pair<size_t, size_t>& other_span = lane_span_of[other];
-					if (span.first <= other_span.second && other_span.first <= span.second)
-					{
-						clash = true;
-						break;
-					}
-				}
-				if (!clash)
-				{
-					target_column = column;
-					break;
-				}
-			}
-			if (target_column == column_names.size())
-				column_names.emplace_back();
-			column_names[target_column].push_back(name);
-			column_of[name] = target_column;
-		}
-
-		std::vector<float> column_width(column_names.size(), 0.0f);
-		std::vector<float> column_center(column_names.size(), 0.0f);
-		for (const LaneView& lane : lanes)
-		{
-			for (const size_t index : lane.ResourceIndices)
-			{
-				const size_t column = column_of[nodes[index].Name];
-				column_width[column] = std::max(column_width[column], nodes[index].Width);
-			}
-		}
-		{
-			/* 第一列左缘 = 区域左内边（x = 0）：标题带之下就是资源内容行 */
-			float x_cursor = 0.0f;
-			for (size_t column = 0; column < column_names.size(); ++column)
-			{
-				column_center[column] = x_cursor + column_width[column] * 0.5f;
-				x_cursor += column_width[column] + kNodeGap;
-			}
-		}
-
-		for (LaneView& lane : lanes)
-		{
-			/* 卡片各自就位到自己的列（相同资源跨行对齐）；
-			 * 行宽 = max(标题带宽度, 该行最右资源卡右缘) */
-			float row_right = nodes[lane.HeaderIndex].Width;
-			for (const size_t index : lane.ResourceIndices)
-			{
-				NodeView& card = nodes[index];
-				const size_t column = column_of[card.Name];
-				card.X = column_center[column];
-				row_right = std::max(row_right, card.X + column_width[column] * 0.5f);
-			}
-
-			lane.Width = row_right;
-		}
-
-		/* ---- 同名资源副本链（被多个 Pass 写入的 RT）：相邻行的副本用虚线关联
-		 * —— 副本已列对齐，关联线就是一条竖直虚线；语义 = 同一张 RT 的先后写入
-		 * （与实线依赖箭头区分：无箭头、中性色、虚线 + 两端小圆点） */
-		std::vector<std::pair<size_t, size_t>> same_rt_links; /* (上行副本, 下行副本) */
-		{
-			std::unordered_map<std::string, size_t> previous_copy;
-			for (const LaneView& lane : lanes)
-			{
-				for (const size_t index : lane.ResourceIndices)
-				{
-					const std::string& name = nodes[index].Name;
-					const auto iter = previous_copy.find(name);
-					if (iter != previous_copy.end())
-						same_rt_links.emplace_back(iter->second, index);
-					previous_copy[name] = index;
-				}
-			}
-		}
-
-		float max_lane_width = 0.0f;
-		float y_cursor = 0.0f;
-		/* 行顶 → 资源内容行顶：标题带（行顶 5 + 标题行高）之下隔着 kTitleGap ——
-		 * 名字独占首行，资源卡从标题带下方的一行起排 */
-		const float content_top_offset = kLanePadding * 0.5f + title_height + kTitleGap;
-		for (LaneView& lane : lanes)
-		{
-			/* 行高 = 标题带 + 资源内容行（卡高的最大者；没有资源的行留最小体量） */
-			float content_height = kPassContentMinHeight;
-			for (const size_t index : lane.ResourceIndices)
-				content_height = std::max(content_height, nodes[index].Height);
-
-			lane.Y = y_cursor;
-			lane.Height = content_top_offset + content_height + kLanePadding;
-			lane.ContentCenterY = y_cursor + content_top_offset + content_height * 0.5f;
-			nodes[lane.HeaderIndex].Height = lane.Height; /* Pass 卡 = 整行高 */
-			nodes[lane.HeaderIndex].Y = y_cursor + lane.Height * 0.5f;
-			for (const size_t index : lane.ResourceIndices)
-				nodes[index].Y = lane.ContentCenterY;
-
-			max_lane_width = std::max(max_lane_width, lane.Width);
-			y_cursor += lane.Height + kLaneGap;
-		}
-
-		/* Pass 节点 = 整行的背景区域（行头与背景合并的载体）：统一宽度
-		 * （含左右内边距，所有行对齐）、整行高；输出资源卡叠在区域内部 */
-		for (LaneView& lane : lanes)
-		{
-			NodeView& region = nodes[lane.HeaderIndex];
-			region.X = max_lane_width * 0.5f;
-			region.Width = max_lane_width + kLanePadding * 2.0f;
-		}
-
-		/* ---- 跨行连线规划：相邻直连 / 其余绕左侧总线 ----
-		 * 语义：资源（消费 Pass 读到的"目标行上方最后一次写入"的那份副本）→ 消费它的 Pass 区域。
-		 * 同一资源被多个 Pass 先后写入时（读改写链，如 Bloom mip：先降采样写、后升采样回叠再写），
-		 * 每个消费者都从它真正读到的副本接边；就地写入者（同一资源还被该 Pass 自己继续写，
-		 * 如天空叠进光照结果 / 回叠进 mip）不画实线 —— 该关系已由同名副本虚线链表达，避免叠画。
-		 * 相邻直连 = 源卡底部竖直下行 → 目标区域顶边；其余绕总线（源卡底 → 总线列 → 目标区域入口）。
-		 * 总线在区域左缘之外、不穿卡片，多条边在空档 / 总线 / 入口三处分槽、互不重叠。 */
-		struct CrossEdge
-		{
-			size_t WriterIndex{ 0 };  /* 源资源卡（nodes 索引） */
-			size_t TargetLane{ 0 };   /* 目标行（lanes 索引） */
-			bool Direct{ false };     /* 相邻行：源卡底 → 目标区域顶（竖直直连） */
-			float ExitX{ 0.0f };      /* 源卡底边的出发 x（图空间；总线走线用） */
-			float ExitY{ 0.0f };      /* 源行下方空档里的左行高度（图空间） */
-			float EntryY{ 0.0f };     /* 进入目标区域左缘的入口高度（图空间） */
-			float RailX{ 0.0f };      /* 总线列（图空间） */
-		};
-		std::vector<CrossEdge> cross_edges;
-		float rails_min_x = -kLanePadding; /* fit 包围盒要含总线（无连线时 = 行左缘） */
-		{
-			/* 资源（依赖图身份）→ 副本卡集合：常规副本（Name == GraphName）收集成版本序列；
-			 * 层卡（逐层展开，显示名各异、身份同为数组资源）取组首卡（Sequence 最小）作唯一
-			 * 引出源，不让每张层卡各引一条重复连线。同时记录资源首现顺序（收集确定性）。 */
-			std::unordered_map<std::string, std::vector<size_t>> copies_of;      /* GraphName → 常规副本（行序） */
-			std::unordered_map<std::string, size_t> layer_group_first;           /* GraphName → 层组首卡 */
-			std::unordered_map<std::string, std::vector<size_t>> writer_lanes_of; /* GraphName → 写它的行 */
-			std::vector<std::string> resource_order;
-			for (const LaneView& lane : lanes)
-			{
-				for (const size_t index : lane.ResourceIndices)
-				{
-					const NodeView& card = nodes[index];
-					if (card.Image == nullptr)
-						continue;
-
-					if (copies_of.count(card.GraphName) == 0 && layer_group_first.count(card.GraphName) == 0)
-						resource_order.push_back(card.GraphName);
-
-					std::vector<size_t>& writer_lanes = writer_lanes_of[card.GraphName];
-					if (std::find(writer_lanes.begin(), writer_lanes.end(), card.LaneIndex) == writer_lanes.end())
-						writer_lanes.push_back(card.LaneIndex);
-
-					if (card.Name != card.GraphName) /* 层卡：只归组（取组首） */
-					{
-						const auto iter = layer_group_first.find(card.GraphName);
-						if (iter == layer_group_first.end()
-							|| card.Image->Sequence < nodes[iter->second].Image->Sequence)
-							layer_group_first[card.GraphName] = index;
-						continue;
-					}
-
-					copies_of[card.GraphName].push_back(index);
-				}
-			}
-
-			std::unordered_map<std::string, size_t> lane_of_pass;
-			for (size_t l = 0; l < lanes.size(); ++l)
-				lane_of_pass[lanes[l].PassName] = l;
-
-			/* 逐资源、逐消费者选"读出源"：目标行上方、Sequence 最大的副本（层组用组首卡） */
-			for (const std::string& resource_name : resource_order)
-			{
-				const auto consumers_iter = consumers_of.find(resource_name);
-				if (consumers_iter == consumers_of.end())
-					continue;
-
-				for (const std::string& consumer : consumers_iter->second)
-				{
-					const auto target_iter = lane_of_pass.find(consumer);
-					if (target_iter == lane_of_pass.end())
-						continue;
-					const size_t target_lane = target_iter->second;
-
-					/* 就地写入者（同一资源还被这个 Pass 自己继续写）：不画实线（虚线链已表达） */
-					const std::vector<size_t>& writer_lanes = writer_lanes_of[resource_name];
-					if (std::find(writer_lanes.begin(), writer_lanes.end(), target_lane) != writer_lanes.end())
-						continue;
-
-					const NodeView* source = nullptr;
-					const auto copies_iter = copies_of.find(resource_name);
-					if (copies_iter != copies_of.end())
-					{
-						for (const size_t index : copies_iter->second)
-						{
-							const NodeView& candidate = nodes[index];
-							if (candidate.LaneIndex >= target_lane)
-								continue;
-							if (source == nullptr || candidate.Image->Sequence > source->Image->Sequence)
-								source = &candidate;
-						}
-					}
-					const auto layer_iter = layer_group_first.find(resource_name);
-					if (layer_iter != layer_group_first.end())
-					{
-						const NodeView& candidate = nodes[layer_iter->second];
-						if (candidate.LaneIndex < target_lane
-							&& (source == nullptr || candidate.Image->Sequence > source->Image->Sequence))
-							source = &candidate;
-					}
-					if (source == nullptr)
-						continue; /* 目标行上方没有产出副本：不画（次序上读不到） */
-
-					CrossEdge edge;
-					edge.WriterIndex = static_cast<size_t>(source - nodes.data());
-					edge.TargetLane = target_lane;
-					cross_edges.push_back(edge);
-
-					m_LastEdgeLinks.push_back(EdgeLink{ source->Name, source->LaneName, consumer });
-				}
-			}
-
-			std::stable_sort(cross_edges.begin(), cross_edges.end(),
-				[&](const CrossEdge& a, const CrossEdge& b)
-				{
-					const NodeView& card_a = nodes[a.WriterIndex];
-					const NodeView& card_b = nodes[b.WriterIndex];
-					if (card_a.LaneIndex != card_b.LaneIndex)
-						return card_a.LaneIndex < card_b.LaneIndex;
-					if (a.TargetLane != b.TargetLane)
-						return a.TargetLane < b.TargetLane;
-					if (card_a.X != card_b.X)
-						return card_a.X < card_b.X;
-					return a.WriterIndex < b.WriterIndex;
-				});
-
-			/* 相邻行（目标 = 源的下一行）走直连：源卡底竖直下行、直接进
-			 * 目标区域顶边 —— 不参与下面的总线分槽（那条路只有弯线才需要） */
-			for (CrossEdge& edge : cross_edges)
-				edge.Direct = (edge.TargetLane == nodes[edge.WriterIndex].LaneIndex + 1);
-
-			std::vector<CrossEdge*> rail_edges;
-			for (CrossEdge& edge : cross_edges)
-			{
-				if (!edge.Direct)
-					rail_edges.push_back(&edge);
-			}
-
-			/* ① 源行空档分槽：同一条行内的出线各占一个高度（空档等分） */
-			for (size_t begin = 0; begin < rail_edges.size();)
-			{
-				size_t end = begin;
-				const size_t source_lane = nodes[rail_edges[begin]->WriterIndex].LaneIndex;
-				while (end < rail_edges.size()
-					&& nodes[rail_edges[end]->WriterIndex].LaneIndex == source_lane)
-					++end;
-
-				const float gap_top = lanes[source_lane].Y + lanes[source_lane].Height;
-				const size_t count = end - begin;
-				for (size_t k = 0; k < count; ++k)
-				{
-					rail_edges[begin + k]->ExitY = gap_top
-						+ kLaneGap * (static_cast<float>(k + 1) / static_cast<float>(count + 1));
-				}
-
-				/* 同一张卡的出线口沿底边错开（下行段不重叠） */
-				for (size_t card_begin = begin; card_begin < end;)
-				{
-					size_t card_end = card_begin;
-					const size_t writer = rail_edges[card_begin]->WriterIndex;
-					while (card_end < end && rail_edges[card_end]->WriterIndex == writer)
-						++card_end;
-
-					const size_t card_count = card_end - card_begin;
-					const float center_x = nodes[writer].X;
-					for (size_t k = 0; k < card_count; ++k)
-					{
-						rail_edges[card_begin + k]->ExitX = center_x
-							+ (static_cast<float>(k) - (static_cast<float>(card_count) - 1.0f) * 0.5f) * 13.0f;
-					}
-					card_begin = card_end;
-				}
-				begin = end;
-			}
-
-			/* ② 目标卡入口分槽：每条（绕行）边在目标区域左缘上占一个高度、
-			 * 各带一个箭头（不强制收束成一个）—— 区域是整行高的，纵向余量
-			 * 足够，箭头彼此分开；入口按源序自上而下排，间距随区域高收敛 */
-			{
-				std::unordered_map<size_t, std::vector<CrossEdge*>> edges_by_target;
-				for (CrossEdge* edge : rail_edges)
-					edges_by_target[edge->TargetLane].push_back(edge);
-
-				for (auto& [target_lane, targets] : edges_by_target)
-				{
-					const NodeView& card = nodes[lanes[target_lane].HeaderIndex];
-					const size_t count = targets.size();
-					const float available = std::max(card.Height - 24.0f, 12.0f);
-					const float step = std::min(22.0f, available / static_cast<float>(count + 1));
-					for (size_t t = 0; t < count; ++t)
-					{
-						targets[t]->EntryY = card.Y
-							+ (static_cast<float>(t) - (static_cast<float>(count) - 1.0f) * 0.5f) * step;
-					}
-				}
-			}
-
-			/* ③ 总线分列：纵向区间（含端点的折角余量）互不重叠者共用一列，
-			 * 否则往左再起一列 —— 总线上不会出现两条边叠在一起的段 */
-			{
-				constexpr float kRailMargin = 7.0f;
-				std::vector<std::vector<std::pair<float, float>>> rails; /* 每列已占用的 [min, max] */
-				for (CrossEdge* edge : rail_edges)
-				{
-					const float span_min = std::min(edge->ExitY, edge->EntryY) - kRailMargin;
-					const float span_max = std::max(edge->ExitY, edge->EntryY) + kRailMargin;
-
-					size_t rail_index = rails.size();
-					for (size_t r = 0; r < rails.size(); ++r)
-					{
-						bool free = true;
-						for (const auto& span : rails[r])
-						{
-							if (span_min < span.second && span_max > span.first)
-							{
-								free = false;
-								break;
-							}
-						}
-						if (free)
-						{
-							rail_index = r;
-							break;
-						}
-					}
-					if (rail_index == rails.size())
-						rails.emplace_back();
-
-					rails[rail_index].emplace_back(span_min, span_max);
-					edge->RailX = -(kLanePadding + kRailInset)
-						- static_cast<float>(rail_index) * kRailSpacing;
-				}
-
-				if (!rails.empty())
-				{
-					rails_min_x = -(kLanePadding + kRailInset)
-						- static_cast<float>(rails.size() - 1) * kRailSpacing;
-				}
-			}
-		}
+		GraphLayout layout = BuildGraphLayout(frame_graph, m_ShowCulled, title_height, info_line_height, m_LastEdgeLinks);
+		auto& nodes = layout.Nodes;
+		auto& lanes = layout.Lanes;
+		auto& cross_edges = layout.CrossEdges;
+		auto& same_rt_links = layout.SameRtLinks;
+		const float max_lane_width = layout.MaxLaneWidth;
+		const float rails_min_x = layout.RailsMinX;
+		const auto& producers_of = layout.ProducersOf;
+		const auto& consumers_of = layout.ConsumersOf;
+		const auto& inputs_of = layout.InputsOf;
+		const auto& outputs_of = layout.OutputsOf;
+		auto& name_is_pass = layout.NameIsPass;
 
 		/* ---- 视图变换：首次进入（或点 Fit / 换相机之后）自动适配；屏幕 = 画布中心 + 平移 + 图·缩放 ---- */
 		const auto compute_screen_rects = [&]()
