@@ -217,23 +217,25 @@ namespace Helios::RenderSorting
 
 	/* 阴影投射列表：只挑会写深度图的物体，按剔除方式 + 网格分组 —— 阴影层里投射材质是
 	 * 共用的，切换成本全在剔除方式和顶点缓冲上，同组连着画就摊到一次。
-	 * 没有材质的物体照样投影，剔除方式沿用投射材质的默认值（base_state）。 */
+	 * 没有材质的物体照样投影，剔除方式沿用投射材质的默认值（base_state）。
+	 * caster_indices = 只收这些下标的物体（按级联剔除后的列表），nullptr 收全部。 */
 	inline std::vector<const VisibleMeshObject*> CollectShadowCasterList(
-		const std::vector<VisibleMeshObject>& objects, const RenderRasterState& base_state)
+		const std::vector<VisibleMeshObject>& objects, const RenderRasterState& base_state,
+		const std::vector<uint32_t>* caster_indices = nullptr)
 	{
 		std::vector<std::pair<uint64_t, const VisibleMeshObject*>> entries;
-		entries.reserve(objects.size());
+		entries.reserve(caster_indices != nullptr ? caster_indices->size() : objects.size());
 
-		for (const VisibleMeshObject& object : objects)
+		const auto collect = [&entries, &base_state](const VisibleMeshObject& object)
 		{
 			if (object.MeshSegment == nullptr)
-				continue;
+				return;
 
 			/* 天空盒铺满全屏（z 落远平面）、透明物体投出来是实心影子、关了投影的不写图 */
 			if (object.Material != nullptr && (object.Material->IsSkyBox() || object.Material->IsTransparent()))
-				continue;
+				return;
 			if (!object.CastShadow)
-				continue;
+				return;
 
 			const RenderRasterState& object_state =
 				(object.Material != nullptr) ? object.Material->GetRasterState() : base_state;
@@ -249,6 +251,21 @@ namespace Helios::RenderSorting
 			mix(reinterpret_cast<uintptr_t>(object.MeshSegment->GetMeshPrimitive().VertexArray.get()));
 
 			entries.emplace_back(key, &object);
+		};
+
+		if (caster_indices != nullptr)
+		{
+			for (const uint32_t index : *caster_indices)
+			{
+				/* 下标和可见表同帧生成，越界只可能是列表过期，跳过更安全 */
+				if (index < objects.size())
+					collect(objects[index]);
+			}
+		}
+		else
+		{
+			for (const VisibleMeshObject& object : objects)
+				collect(object);
 		}
 
 		std::stable_sort(entries.begin(), entries.end(),

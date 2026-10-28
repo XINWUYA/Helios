@@ -50,6 +50,21 @@ namespace Helios
 		void SetDepthRange(float depth_range) { m_DepthRange = depth_range; }
 		[[nodiscard]] float GetDepthRange() const { return m_DepthRange; }
 
+		/* 与本级联正交盒相交的投射物下标（指向 RenderView 的可见网格列表）。只在本帧拿得到
+		 * 可见网格时有效：HasCasterList = false 时调用方要退回全量提交。 */
+		void SetCasterIndices(std::vector<uint32_t> indices)
+		{
+			m_CasterIndices = std::move(indices);
+			m_HasCasterList = true;
+		}
+		void ClearCasterList()
+		{
+			m_CasterIndices.clear();
+			m_HasCasterList = false;
+		}
+		[[nodiscard]] bool HasCasterList() const { return m_HasCasterList; }
+		[[nodiscard]] const std::vector<uint32_t>& GetCasterIndices() const { return m_CasterIndices; }
+
 		static glm::mat4 GetDirectionalLightViewMatrix(const glm::vec3& direction, const glm::vec3& origin = {}) noexcept;
 		static glm::mat4 GetPunctualLightViewMatrix(uint8_t face_idx, const glm::vec3& origin) noexcept;
 
@@ -66,6 +81,10 @@ namespace Helios
 
 		/* 光照空间深度跨度（世界单位），级联由 UpdateCascadeMatrices 写入 */
 		float m_DepthRange{ 1.0f };
+
+		/* 本级联要画的投射物下标（见 SetCasterIndices） */
+		std::vector<uint32_t> m_CasterIndices{};
+		bool m_HasCasterList{ false };
 
 		friend class ShadowMapManager;
 	};
@@ -96,7 +115,8 @@ namespace Helios
 
 		/* 依据当前的方向光方向、相机和场景投射物，重算各级联的视图投影矩阵和分割距离（每帧执行前
 		 * 调用，让方向光旋转 / 相机移动实时反映）。mesh_objects = 当前可见网格，把投射物包围盒也
-		 * 纳入光源视锥拟合，防落 near/far 板外被裁；传 nullptr 就退化成只按相机子视锥拟合。 */
+		 * 纳入光源视锥拟合，防落 near/far 板外被裁；顺带记下每级要画的投射物（与正交盒 xy 相交
+		 * 的那些）。传 nullptr 就退化成只按相机子视锥拟合，剔除表同时失效、调用方回退全量提交。 */
 		void UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects);
 
 		/* 重算全部点光/聚光阴影面的视图投影矩阵（位置 / 旋转 / 范围变化即时反映）。
@@ -167,9 +187,8 @@ namespace Helios
 		glm::vec3 m_LastLightDir{ 0.0f };
 		glm::mat4 m_LastViewMat{ 1.0f };
 		glm::mat4 m_LastProjMat{ 1.0f };
-		/* 上次拟合时是否拿到了投射物包围盒：PrepareForShadowMaps（无几何数据）
-		 * 会先用纯子视锥拟合一次，随后 RenderView 带几何再拟合，
-		 * 若不比较该状态，第二次拟合会被脏检测误判为"无变化"而跳过。 */
-		bool m_LastFitHadCasters{ false };
+		/* 上次拟合时可见网格的数量：既用来判断"这轮有没有几何数据"，也决定级联剔除表
+		 * 是否过期 —— 数量变了就重算，否则表里记的下标对不上当前可见表。 */
+		uint32_t m_LastCasterCount{ 0 };
 	};
 }

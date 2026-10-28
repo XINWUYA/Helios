@@ -27,6 +27,10 @@ namespace Helios
 		/* 点光立方体各面视锥的半角（90° 全角） */
 		constexpr float kPointLightFaceFov = 90.0f;
 
+		/* 级联剔除的余量（占投射物自身包围盒尺寸的比例）：AABB 按绑定姿态算，
+		 * 蒙皮动画会把顶点带到盒子外，留点余量免得影子在级联边界闪 */
+		constexpr float kCasterCullMargin = 0.1f;
+
 		/* 阴影图数组的 FrameGraph 资源名：纹理创建与抓取逐层注册共用（避免两处各自漂移） */
 		constexpr const char* kShadowMapTextureName = "ShadowMap";
 	}
@@ -166,14 +170,15 @@ namespace Helios
 			std::fabs(direction.x - m_LastLightDir.x) <= eps &&
 			std::fabs(direction.y - m_LastLightDir.y) <= eps &&
 			std::fabs(direction.z - m_LastLightDir.z) <= eps;
-		/* 是否拿到了投射物包围盒：它参与光源视锥拟合，属于拟合输入的一部分 */
-		const bool has_casters = mesh_objects != nullptr && !mesh_objects->empty();
+		/* 可见网格数量：级联剔除表按它生成，数量变了表就过期 */
+		const uint32_t caster_count = (mesh_objects != nullptr)
+			? static_cast<uint32_t>(mesh_objects->size()) : 0u;
 		const bool unchanged =
 			!m_IsDirty &&
 			dir_equal &&
 			mat_equal(view_mat, m_LastViewMat) &&
 			mat_equal(proj_mat, m_LastProjMat) &&
-			has_casters == m_LastFitHadCasters;
+			caster_count == m_LastCasterCount;
 		if (unchanged)
 			return;
 
@@ -181,7 +186,7 @@ namespace Helios
 		m_LastLightDir = direction;
 		m_LastViewMat = view_mat;
 		m_LastProjMat = proj_mat;
-		m_LastFitHadCasters = has_casters;
+		m_LastCasterCount = caster_count;
 		m_IsDirty = false;
 
 
@@ -206,15 +211,16 @@ namespace Helios
 		/* 收集场景几何体在光照空间的 AABB（每个 MeshSegment 一个）。级联的深度板不能只看相机
 		 * 子视锥：空气和近相机那一段会把 z 跨度撑大，深度图偏黑、精度变差；所以要按"与该级联 xy
 		 * 相交的几何体"来拟合 near / far。顺带记下几何在视线方向的深度区间，分割按它取界。 */
-		struct LightSpaceBounds { glm::vec3 Min; glm::vec3 Max; };
+		struct LightSpaceBounds { glm::vec3 Min; glm::vec3 Max; uint32_t ObjectIndex{ 0 }; };
 		std::vector<LightSpaceBounds> caster_bounds;
 		float scene_near = std::numeric_limits<float>::max();
 		float scene_far = -std::numeric_limits<float>::max();
 		if (mesh_objects)
 		{
 			caster_bounds.reserve(mesh_objects->size());
-			for (const auto& mesh_object : *mesh_objects)
+			for (uint32_t object_index = 0; object_index < static_cast<uint32_t>(mesh_objects->size()); ++object_index)
 			{
+				const auto& mesh_object = (*mesh_objects)[object_index];
 				if (!mesh_object.MeshSegment)
 					continue;
 
@@ -244,7 +250,7 @@ namespace Helios
 					scene_near = std::min(scene_near, depth);
 					scene_far = std::max(scene_far, depth);
 				}
-				caster_bounds.emplace_back(bounds);
+				caster_bounds.emplace_back(LightSpaceBounds{ bounds.Min, bounds.Max, object_index });
 			}
 		}
 
@@ -352,16 +358,24 @@ namespace Helios
 			float ls_depth_z_max = ls_max.z;
 			float geometry_z_min = std::numeric_limits<float>::max();
 			float geometry_z_max = -std::numeric_limits<float>::max();
+
+			/* 本轮要提交的投射物：与正交盒 xy 相交的那些。射不到盒子里的物体，画了也
+			 * 不产生任何阴影，直接跳过 —— 层数越多省得越多。 */
+			std::vector<uint32_t> cascade_casters;
+			cascade_casters.reserve(caster_bounds.size());
 			for (const auto& bounds : caster_bounds)
 			{
-				/* 光空间 xy 的 2D 相交测试 */
-				if (bounds.Max.x < ortho_left || bounds.Min.x > ortho_right)
+				/* 光空间 xy 的 2D 相交测试。带一点余量：AABB 按绑定姿态算，蒙皮动画会把
+				 * 顶点带到盒子外，不留余量影子会在级联边界闪 */
+				const glm::vec3 margin = (bounds.Max - bounds.Min) * kCasterCullMargin;
+				if (bounds.Max.x + margin.x < ortho_left || bounds.Min.x - margin.x > ortho_right)
 					continue;
-				if (bounds.Max.y < ortho_bottom || bounds.Min.y > ortho_top)
+				if (bounds.Max.y + margin.y < ortho_bottom || bounds.Min.y - margin.y > ortho_top)
 					continue;
 
 				geometry_z_min = std::min(geometry_z_min, bounds.Min.z);
 				geometry_z_max = std::max(geometry_z_max, bounds.Max.z);
+				cascade_casters.push_back(bounds.ObjectIndex);
 			}
 			if (geometry_z_min <= geometry_z_max)
 			{
@@ -381,6 +395,12 @@ namespace Helios
 			glm::mat4 light_view_proj_mat = light_proj_mat * light_view_mat;
 			m_CascadeShadowMaps[cascade_id]->SetLightViewProjectionMat(light_view_proj_mat);
 			m_CascadeShadowMaps[cascade_id]->SetDepthRange(ortho_far - ortho_near);
+
+			/* 拿不到可见网格（首次准备那趟）就把表失效，ShadowPass 退回全量提交 */
+			if (mesh_objects != nullptr)
+				m_CascadeShadowMaps[cascade_id]->SetCasterIndices(std::move(cascade_casters));
+			else
+				m_CascadeShadowMaps[cascade_id]->ClearCasterList();
 
 			// 记录该级联远边界（视图空间距离），供着色阶段选择级联
 			cascade_splits[cascade_id] = seg_far;
@@ -496,7 +516,7 @@ namespace Helios
 		m_LastLightDir = glm::vec3(0.0f);
 		m_LastViewMat = glm::mat4(1.0f);
 		m_LastProjMat = glm::mat4(1.0f);
-		m_LastFitHadCasters = false;
+		m_LastCasterCount = 0;
 	}
 
 	/* 准备阴影纹理 */
@@ -640,8 +660,9 @@ namespace Helios
 				auto render_api = Renderer::GetRenderAPI();
 				const uint32_t shadow_size = m_RequiredTextureDesc.Size;
 
-				/* 每层的公共渲染体：清深度 + 全量投射物提交（级联与点光/聚光共用） */
-				const auto render_shadow_layer = [&](uint8_t layer, const SharedPtr<Material>& shadow_material)
+				/* 每层的公共渲染体：清深度 + 提交本层投射物（级联按各自的剔除表，点光/聚光全量） */
+				const auto render_shadow_layer = [&](uint8_t layer, const SharedPtr<Material>& shadow_material,
+					const std::vector<uint32_t>* caster_indices)
 				{
 					/* 绑定FrameBuffer为指定层（统一 Bind 接口，自动设置 viewport 并按层附着 Depth 附件） */
 					render_pass_info->Bind(FrameBufferBindInfo::ToDepthLayer(layer));
@@ -651,7 +672,7 @@ namespace Helios
 
 					/* 投射物按剔除方式和网格分组：同组连着画，管线和顶点缓冲都不换 */
 					const auto caster_list = RenderSorting::CollectShadowCasterList(
-						render_view->GetVisibleMeshObjects(), shadow_material->GetRasterState());
+						render_view->GetVisibleMeshObjects(), shadow_material->GetRasterState(), caster_indices);
 
 					for (const VisibleMeshObject* mesh_object : caster_list)
 					{
@@ -706,7 +727,9 @@ namespace Helios
 						auto shadow_material = make_caster_material();
 						shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
 
-						render_shadow_layer(cascade_id, shadow_material);
+						/* 只提交与该级联正交盒相交的投射物；表没备好时退回全量 */
+						render_shadow_layer(cascade_id, shadow_material,
+							cascade_shadow_map->HasCasterList() ? &cascade_shadow_map->GetCasterIndices() : nullptr);
 						render_api->PopDebugGroup();
 					}
 				}
@@ -724,7 +747,7 @@ namespace Helios
 					shadow_material->SetParameters(ParamType::Mat4, "u_ShadowPassMat",
 						punctual_shadow_map->GetLightViewProjectionMat());
 
-					render_shadow_layer(layer, shadow_material);
+					render_shadow_layer(layer, shadow_material, nullptr);
 					render_api->PopDebugGroup();
 				}
 			});
