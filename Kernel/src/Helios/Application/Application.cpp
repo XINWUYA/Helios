@@ -3,6 +3,7 @@
 #include <GLFW/glfw3.h>
 #include "Helios/Core/CPUTimerProfiler.h"
 #include "Helios/Core/FrameTimeProfiler.h"
+#include "Helios/Core/Jobs.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 #include "Helios/Renderer/Renderer.h"
@@ -20,6 +21,9 @@ namespace Helios
 		ASSERT(!s_pInstance, "Application already exist!");
 		s_pInstance = this;
 		m_Name = window_title;
+
+		/* 线程池先于一切子系统建好，同时收编主线程 */
+		Jobs::Init();
 		m_ConfigName = config_name;
 
 		m_pWindow = DeviceWindow::Create({ window_title, width, height, false, start_maximized });
@@ -38,6 +42,9 @@ namespace Helios
 	Application::~Application()
 	{
 		PROFILE_FUNCTION();
+
+		/* 先收线程：后台任务可能还拿着场景或资源，拆层之前必须停干净 */
+		Jobs::Shutdown();
 
 		m_LayerStack.Release();
 		Renderer::Release();
@@ -91,6 +98,9 @@ namespace Helios
 					/* 帧级渲染准备：GPU 计时器的帧边界。
 					 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
 					Renderer::Update();
+
+					/* 后台任务的收尾回主线程执行，每帧最多花 2ms，剩下的留到下一帧 */
+					Jobs::DrainMain(2000);
 
 					/* 先更新逻辑层和渲染层 */
 					PROFILE_SCOPE("Update Layers");

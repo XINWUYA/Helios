@@ -1,0 +1,12 @@
+HeliosJobs
+
+JobSystem.h, JobSystem.cpp and WorkStealingDequeue.h are derived from
+Filament (https://github.com/google/filament), libs/utils.
+
+Copyright (C) 2016 The Android Open Source Project
+Licensed under the Apache License, Version 2.0
+http://www.apache.org/licenses/LICENSE-2.0
+
+Changes: background queue with priorities, slots and cancellation,
+lock-free job pool, thread-local thread state, adopted threads only
+help with frame jobs, standard library only.

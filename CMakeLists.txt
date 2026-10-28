@@ -153,6 +153,9 @@ configure_file(
 # Add third-party libraries
 add_subdirectory(Libraries/ThirdParty)
 
+# 任务调度库：只由 Kernel 链接，其它模块走 Helios/Core/Jobs.h
+add_subdirectory(Libraries/HeliosJobs)
+
 # 引擎源码与脚本模块共用的头文件目录。脚本要 include 引擎头，两边必须看到同一套
 # 第三方库与同一份配置头，否则类型定义对不上（脚本库是运行期 dlopen 的，编译器不会替我们查）。
 set(HELIOS_ENGINE_INCLUDE_DIRS
