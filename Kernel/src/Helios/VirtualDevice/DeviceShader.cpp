@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "DeviceShader.h"
 #include "Helios/Renderer/Renderer.h"
+#include "Helios/Renderer/ShaderCompiler.h"
 #include "GraphicsAPI/OpenGL/OpenGLShader.h"
 #ifdef PLATFORM_MACOS
 #include "GraphicsAPI/Metal/MetalShader.h"
@@ -66,6 +67,69 @@ namespace Helios
 			CORE_LOG_ERROR("Unknown RenderAPI is unsupported!");
 			return nullptr;
 		}
+	}
+
+	/* 依赖文件的原始字节跟加载时一致：读一遍文件就够了，不用展开也不用编译 */
+	bool DeviceShader::ContentUnchanged() const
+	{
+		if (m_RawHash.empty() || m_Dependencies.empty())
+			return false;
+
+		return ShaderCompiler::HashDependencies(m_Dependencies) == m_RawHash;
+	}
+
+	SharedPtr<DeviceShader> DeviceShader::PrepareReload(const std::string& filepath)
+	{
+		/* 编辑中的源码什么都可能有（比如超长数字让 stoul 抛异常），异常不能漏到调用方 */
+		try
+		{
+			SharedPtr<DeviceShader> prepared = Create(filepath);
+			if (prepared != nullptr)
+				prepared->BuildDeviceObjects();
+			return prepared;
+		}
+		catch (const std::exception& e)
+		{
+			CORE_LOG_ERROR("Shader reload threw for {}: {}", filepath, e.what());
+		}
+		catch (...)
+		{
+			CORE_LOG_ERROR("Shader reload threw an unknown exception for {}", filepath);
+		}
+		return nullptr;
+	}
+
+	/* 热重载：就地建一份新的再换进来，两步都走构造链路的同一份代码 */
+	bool DeviceShader::Reload()
+	{
+		PROFILE_FUNCTION();
+
+		if (m_Path.empty())
+		{
+			CORE_LOG_WARN("Shader was built from embedded source and cannot be reloaded");
+			return false;
+		}
+
+		/* 只碰了文件（编辑器自动保存）不值得重建：这里挡在编译之前 */
+		if (ContentUnchanged())
+			return true;
+
+		const auto start_time = std::chrono::steady_clock::now();
+		const uint32_t generation_before = m_Generation;
+
+		const SharedPtr<DeviceShader> prepared = PrepareReload(m_Path);
+		if (prepared == nullptr || !ApplyPrepared(*prepared))
+			return false;
+
+		/* 依赖表变了但展开结果一样（比如 include 了一个空文件）：不换代，也不记日志 */
+		if (m_Generation == generation_before)
+			return true;
+
+		const double elapsed_ms = std::chrono::duration<double, std::milli>(
+			std::chrono::steady_clock::now() - start_time).count();
+		CORE_LOG_INFO("[Shader] Reloaded {} (#{}, {:.1f} ms)",
+			std::filesystem::path(m_Path).filename().string(), m_Generation, elapsed_ms);
+		return true;
 	}
 
 	namespace

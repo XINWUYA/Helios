@@ -410,9 +410,14 @@ namespace Helios
             return false;
 
         const MetalPipelineDesc desc = BuildPipelineDesc(vertex_layout_hash);
+        const bool failed_before = m_BoundShader->HasPipelineFailed(desc.Hash());
         MTL::RenderPipelineState* pipeline = m_BoundShader->GetPipelineState(desc);
         if (!pipeline)
         {
+            /* 同一组参数只报一次，坏着色器不至于每次绘制刷一条 */
+            if (failed_before)
+                return false;
+
             std::string attachment_formats;
             for (size_t i = 0; i < desc.ColorFormats.size(); ++i)
             {

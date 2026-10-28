@@ -5,6 +5,7 @@
 #include "glm/gtc/type_ptr.hpp"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderAPI.h"
+#include "Helios/Core/AssetManager.h"
 
 #include <Helios/Scene/SceneCommon.h>
 
@@ -165,7 +166,11 @@ namespace Helios
         /* 设置视口为整个窗口，保证ImGui能绘制到屏幕 */
         renderAPI->SetViewport(0, 0, static_cast<uint32_t>(m_DisplayWidth), static_cast<uint32_t>(m_DisplayHeight));
 
-        /* 绑定着色器、UI uniform buffer 与顶点数组 */
+        /* 绑定着色器、UI uniform buffer 与顶点数组。布局每帧同步一次（命中缓存只是查表）：
+         * 着色器热重载后属性位置变了，描述符要按新反射重建 */
+        m_UIShader->BindVertexArray(vertex_array);
+        if (m_UIDepthShader)
+            m_UIDepthShader->BindVertexArray(vertex_array);
         m_UIShader->Bind();
         /* 字体纹理绑定到纹理槽 0（与 GLSL 中 sampler2D u_FontTexture 的 binding 一致） */
         m_UIShader->SetInt("u_FontTexture", 0);
@@ -409,7 +414,9 @@ namespace Helios
 
     void ImGuiRenderer::CreateUIShader()
     {
-        m_UIShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/Overlay/ImGuiUI.glsl"));
+        /* 走资产缓存而不是直建实例：编辑器改 overlay 着色器后热重载能覆盖到 */
+        m_UIShader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+            ABSOLUTE_PATH("Shaders/Overlay/ImGuiUI.glsl"));
         if (m_UIShader)
         {
             /* 把顶点布局交给着色器：OpenGL 在 VAO 中记录属性位置，Metal 需要据此
@@ -429,7 +436,8 @@ namespace Helios
     {
         /* 深度变体：同一顶点布局，片元按 depth2d<float>（Metal）/ 标准深度采样
          * （OpenGL）读取深度并输出灰度，供 Frame Graph 页显示深度附件预览 */
-        m_UIDepthShader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/Overlay/ImGuiUIDepth.glsl"));
+        m_UIDepthShader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+            ABSOLUTE_PATH("Shaders/Overlay/ImGuiUIDepth.glsl"));
         if (m_UIDepthShader)
         {
             for (int slot = 0; slot < kFramesInFlight; ++slot)

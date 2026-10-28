@@ -4,11 +4,25 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "Helios/Common/Export.h"
 #include "Helios/Renderer/RenderCommon.h"
 
 namespace Helios
 {
-    class ShaderCompiler
+    /* 一次加载的附加信息：热重载据此判断"改没改"以及"改的是不是它的依赖" */
+    struct ShaderSourceInfo
+    {
+        /* 展开 include、注入变体、分配槽位之后的各阶段源码哈希（含翻译器版本） */
+        std::string Hash{};
+        /* 原始文件字节的指纹（路径 + 内容 + 翻译器版本），跟展开用的是同一次读取，
+         * 用来挡住"只碰了文件"的重载，比展开与分配槽位便宜得多 */
+        std::string RawHash{};
+        /* 递归展开到的全部文件（主文件排在最前，去重后的绝对路径） */
+        std::vector<std::string> Dependencies{};
+    };
+
+    /* 编辑器也要用它读依赖（属性面板列 include），所以跨模块导出 */
+    class HELIOS_API ShaderCompiler
     {
     public:
         enum class ShaderStage
@@ -28,8 +42,14 @@ namespace Helios
         static ShaderStage StringToShaderStage(const std::string& type);
         static const char* ShaderStageToString(ShaderStage stage);
 
-        /* 读取 shader 文件，递归处理 #include "file" 和 #include <file> */
-        static std::string ReadFile(const std::string& filepath);
+        /* 读取 shader 文件，递归处理 #include "file" 和 #include <file>。
+         * dependencies 非空时收集展开到的文件（绝对路径，去重），供热重载判定失效范围 */
+        static std::string ReadFile(const std::string& filepath,
+            std::vector<std::string>* dependencies = nullptr);
+
+        /* 只读文件算内容指纹，口径与加载时记下的 RawHash 一致；读不到返回空串。
+         * 热重载先用它挡掉"文件没变"，再谈编译。 */
+        static std::string HashDependencies(const std::vector<std::string>& dependencies);
 
         /* 按 #type vertex / #type fragment / #type compute 切分源码 */
         static void PreProcessShaderSrc(const std::string& source,
@@ -43,9 +63,10 @@ namespace Helios
 
         /* 后端统一从这里拿各阶段源码：读文件、展开 include、按 #type 拆阶段，再插变体 define、
          * 自动分配槽位。defines 为空时与不带变体的行为完全一致。
+         * info 非空时输出内容哈希与依赖表（加载完成后不再重读文件）。
          * 读取或分配失败只打日志；读不到文件时返回空表。 */
         static std::unordered_map<ShaderStage, std::string> LoadStageSources(const std::string& filepath,
-            ShaderTarget target, const ShaderVariantDefines& defines = {});
+            ShaderTarget target, const ShaderVariantDefines& defines = {}, ShaderSourceInfo* info = nullptr);
         /* 内嵌源码只做槽位分配；裸 uniform 的 location 只有 Windows 的 GL SPIR-V 路径要写 */
         static void PrepareStageSources(std::unordered_map<ShaderStage, std::string>& stage_sources,
             ShaderTarget target, const std::string& name);
@@ -59,10 +80,24 @@ namespace Helios
         static bool Compile(const std::string& source, ShaderStage stage, ShaderTarget target,
             std::string& output, std::string& error_msg, const std::string& name = "");
 
+        /* 源码内容哈希（含翻译器版本），编译缓存按它命名 */
+        static std::string ComputeHash(const std::string& source);
+
     private:
+        /* 一次读取的上下文：依赖表、各文件原始字节、当前 include 链（查循环用） */
+        struct IncludeContext
+        {
+            std::vector<std::string>* Dependencies{ nullptr };
+            std::vector<std::pair<std::string, std::string>>* Contents{ nullptr };
+            std::vector<std::string> Stack{};
+        };
+
+        static std::string ReadFile(const std::string& filepath, IncludeContext& context);
+        /* 依赖文件的原始字节指纹；有文件读不到时返回空串 */
+        static std::string HashContents(const std::vector<std::pair<std::string, std::string>>& contents);
+
         static std::string TargetToString(ShaderTarget target);
         static std::string GetFileExtension(ShaderTarget target);
-        static std::string ComputeHash(const std::string& source);
         static std::filesystem::path GetCacheDirectory(ShaderTarget target);
 
         static bool TryLoadCache(const std::string& cache_path, std::string& output);

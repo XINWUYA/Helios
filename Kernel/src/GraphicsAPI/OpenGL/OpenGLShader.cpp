@@ -132,7 +132,12 @@ namespace Helios
 
 		CreateShaderCacheDirectoryIfNeed();
 
-		m_OpenGLSourceCodes = ToGLStageSources(ShaderCompiler::LoadStageSources(filepath, ShaderCompiler::ShaderTarget::OpenGL));
+		ShaderSourceInfo source_info;
+		m_OpenGLSourceCodes = ToGLStageSources(ShaderCompiler::LoadStageSources(filepath,
+			ShaderCompiler::ShaderTarget::OpenGL, {}, &source_info));
+		m_SourceHash = std::move(source_info.Hash);
+		m_RawHash = std::move(source_info.RawHash);
+		m_Dependencies = std::move(source_info.Dependencies);
 
 		const auto compute_source = m_OpenGLSourceCodes.find(GL_COMPUTE_SHADER);
 		if (compute_source != m_OpenGLSourceCodes.end())
@@ -156,6 +161,65 @@ namespace Helios
 		m_OpenGLSourceCodes = ToGLStageSources(std::move(stage_sources));
 		
 		CreateShaderProgram();
+	}
+
+	bool OpenGLShader::ApplyPrepared(DeviceShader& prepared)
+	{
+		PROFILE_FUNCTION();
+
+		auto* fresh = dynamic_cast<OpenGLShader*>(&prepared);
+		if (fresh == nullptr)
+			return false;
+
+		/* GL 的链接平时推迟到第一次 Bind，这里当场链一次才能判断成功与否；
+		 * 代价只是这次链接记录的是当前 GL 状态，不影响正确性 */
+		if (fresh->IsValid() && !fresh->m_IsLinked)
+			fresh->LazyLink();
+
+		if (!fresh->IsValid())
+		{
+			CORE_LOG_ERROR("Shader reload failed, keeping the previous version: {}", m_DebugName);
+			return false;
+		}
+
+		/* 图形与计算互换要重建实例（渲染通道对它的用法不同），不在这里处理 */
+		if (fresh->m_IsCompute != m_IsCompute)
+		{
+			CORE_LOG_ERROR("Shader '{}' switched between graphics and compute, reload skipped", m_DebugName);
+			return false;
+		}
+
+		if (!m_SourceHash.empty() && fresh->m_SourceHash == m_SourceHash)
+		{
+			/* 展开结果一样但 include 的增删可能不同，依赖表与原始指纹照样跟上 */
+			m_Dependencies = std::move(fresh->m_Dependencies);
+			m_RawHash = std::move(fresh->m_RawHash);
+			return true;
+		}
+
+		StealFrom(*fresh);
+		++m_Generation;
+		return true;
+	}
+
+	void OpenGLShader::StealFrom(OpenGLShader& other)
+	{
+		std::swap(m_DebugName, other.m_DebugName);
+		std::swap(m_ProgramID, other.m_ProgramID);
+		std::swap(m_IsCompute, other.m_IsCompute);
+		std::swap(m_ThreadGroupSize, other.m_ThreadGroupSize);
+#ifdef PLATFORM_WINDOWS
+		std::swap(m_OpenGLSPIRVs, other.m_OpenGLSPIRVs);
+#endif
+		std::swap(m_OpenGLSourceCodes, other.m_OpenGLSourceCodes);
+		std::swap(m_AttachedShaders, other.m_AttachedShaders);
+		std::swap(m_IsLinked, other.m_IsLinked);
+		std::swap(m_UniformLocationCache, other.m_UniformLocationCache);
+		std::swap(m_CompileFailed, other.m_CompileFailed);
+		std::swap(m_Reflection, other.m_Reflection);
+		std::swap(m_SourceHash, other.m_SourceHash);
+		std::swap(m_RawHash, other.m_RawHash);
+		std::swap(m_Dependencies, other.m_Dependencies);
 	}
 
 	OpenGLShader::~OpenGLShader()
@@ -358,8 +422,10 @@ namespace Helios
 		auto cache_dir = GetShaderCacheDirectory();
 		for (auto&& [shader_type, source] : m_OpenGLSourceCodes)
 		{
+			/* 缓存名带展开后源码的哈希：改了 include 的库、或同名文件在不同目录，都不会拿错缓存 */
 			std::filesystem::path shader_path = m_Path;
-			std::filesystem::path cache_path = cache_dir / (shader_path.filename().string() + GetOpenGLShaderCacheFileExtension(shader_type));
+			std::filesystem::path cache_path = cache_dir / (shader_path.filename().string() + "_"
+				+ ShaderCompiler::ComputeHash(source) + GetOpenGLShaderCacheFileExtension(shader_type));
 
 			std::ifstream in(cache_path, std::ios::in | std::ios::binary);
 			bool cache_valid = false;
@@ -374,18 +440,10 @@ namespace Helios
 				 * 空文件或过小的内容视为无效缓存，必须重新编译 */
 				if (size >= (std::streamoff)sizeof(uint32_t))
 				{
-					/* 仅当缓存文件的修改时间不早于源文件时才视为有效，
-					 * 避免源文件改动后一直使用旧缓存 */
-					std::error_code ec;
-					const auto src_time = std::filesystem::last_write_time(m_Path, ec);
-					const auto cache_time = std::filesystem::last_write_time(cache_path, ec);
-					if (!ec && src_time <= cache_time)
-					{
-						auto& data = m_OpenGLSPIRVs[shader_type];
-						data.resize(static_cast<size_t>(size) / sizeof(uint32_t));
-						in.read((char*)data.data(), size);
-						cache_valid = !data.empty();
-					}
+					auto& data = m_OpenGLSPIRVs[shader_type];
+					data.resize(static_cast<size_t>(size) / sizeof(uint32_t));
+					in.read((char*)data.data(), size);
+					cache_valid = !data.empty();
 				}
 				in.close();
 			}
@@ -397,22 +455,22 @@ namespace Helios
 
 				// Compile cache
 				shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(spirv_source, ShaderTypeToOpenGLShaderCKind(shader_type), m_Path.c_str(), options);
-				if (result.GetCompilationStatus() != shaderc_compilation_status_success)
+				const bool compiled = result.GetCompilationStatus() == shaderc_compilation_status_success;
+				if (!compiled)
 				{
+					/* 热重载会读到写了一半的文件：报错并标记失败，不中断进程 */
 					CORE_LOG_ERROR(result.GetErrorMessage());
-					ASSERT(false);
+					m_CompileFailed = true;
 				}
 
 				auto& data = m_OpenGLSPIRVs[shader_type];
 				data = std::vector<uint32_t>(result.cbegin(), result.cend());
 
 				// Write data to cache file
-				std::ofstream out(cache_path, std::ios::out | std::ios::binary);
-				if (out.is_open())
+				if (compiled)
 				{
+					std::ofstream out(cache_path, std::ios::out | std::ios::binary);
 					out.write((char*)data.data(), data.size() * sizeof(uint32_t));
-					out.flush();
-					out.close();
 				}
 			}
 		}
@@ -503,7 +561,7 @@ namespace Helios
 				std::vector<GLchar> info_log(max_length);
 				glGetShaderInfoLog(shader, max_length, &max_length, &info_log[0]);
 				CORE_LOG_ERROR("Shader compiled failed ({0}):\n{1}", m_Path, info_log.data());
-				ASSERT(false);
+				m_CompileFailed = true;
 
 				// Delete current shader
 				glDeleteShader(shader);
@@ -555,7 +613,7 @@ namespace Helios
 			std::vector<GLchar> info_log(maxLength);
 			glGetProgramInfoLog(program, maxLength, &maxLength, info_log.data());
 			CORE_LOG_ERROR("Shader linking failed ({0}):\n{1}", m_Path, info_log.data());
-			ASSERT(false);
+			m_CompileFailed = true;
 
 			glDeleteProgram(program);
 			m_ProgramID = 0;

@@ -31,6 +31,12 @@ namespace Helios
 		[[nodiscard]] bool IsCompute() const override { return m_IsCompute; }
 		[[nodiscard]] uint32_t GetThreadGroupSize() const override { return m_ThreadGroupSize; }
 
+		/* 换入另一份实例的 program 与反射。GL 的调用要落在有上下文的线程，只该在主线程用 */
+		bool ApplyPrepared(DeviceShader& prepared) override;
+
+		/* 构造是否成功编出了 program（语法错误时为假） */
+		[[nodiscard]] bool IsValid() const { return m_ProgramID != 0 && !m_CompileFailed; }
+
 		/* 把驱动消息里的 "program N" 句柄还原成 shader 名附在消息后。驱动警告只带
 		 * 句柄不带名字，且句柄会复用，需要按当时的登记表反查（实现见 .cpp） */
 		[[nodiscard]] static std::string AnnotateProgramHandlesInMessage(const char* message);
@@ -64,5 +70,11 @@ namespace Helios
 		 * 每次都让驱动按字符串查一遍太浪费；-1 也缓存，省掉反复的空查找。 */
 		GLint FindUniformLocation(const std::string& name);
 		std::unordered_map<std::string, GLint> m_UniformLocationCache;
+
+		/* 有阶段编译失败：program 建不完整，IsValid 据此判否 */
+		bool m_CompileFailed{ false };
+
+		/* 把另一份实例的 program 与反射状态换到本对象，旧状态由 other 析构释放 */
+		void StealFrom(OpenGLShader& other);
 	};
 }

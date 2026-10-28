@@ -175,6 +175,33 @@ namespace Helios
 		/* Shader 反射数据 */
 		[[nodiscard]] const ShaderReflectionData& GetReflectionData() const { return m_Reflection; }
 
+		/* 热重载：重新编译并换掉 GPU 对象，对象地址不变，材质持有的指针继续有效。
+		 * 内容没变时只刷新依赖表；失败返回 false，旧内容原样保留（编辑期存半截代码是常态）。 */
+		bool Reload();
+
+		/* 按路径建一份待换入的实例，可在后台线程调。GPU 侧对象也一并建好，
+		 * 建不出来的实例 ApplyPrepared 会拒收；编译过程抛异常时返回空。 */
+		static SharedPtr<DeviceShader> PrepareReload(const std::string& filepath);
+
+		/* 换入前把 GPU 侧对象建好（Metal 的 library、计算管线），失败则标记无效 */
+		virtual bool BuildDeviceObjects() { return true; }
+
+		/* 把另一份同类型实例的编译产物换进来，只该在主线程调。
+		 * 成功后 prepared 接管旧状态，由调用方销毁；失败则本对象一个字节没动。 */
+		virtual bool ApplyPrepared(DeviceShader& prepared) { (void)prepared; return false; }
+
+		/* 加载时算好的源码哈希与依赖表（含被 include 的文件）。
+		 * 热重载靠它判断"内容真改了没"与"改的是不是它的依赖"。 */
+		[[nodiscard]] const std::string& GetSourceHash() const { return m_SourceHash; }
+		[[nodiscard]] const std::vector<std::string>& GetDependencies() const { return m_Dependencies; }
+
+		/* 依赖文件的原始字节跟加载时一不一样：只读一遍文件就能判定。
+		 * 只碰了文件（编辑器自动保存）时靠它挡在编译之前，亚毫秒。 */
+		[[nodiscard]] bool ContentUnchanged() const;
+
+		/* 每成功重载一次加一：材质据此判断要不要重解析贴图绑定点 */
+		[[nodiscard]] uint32_t GetGeneration() const { return m_Generation; }
+
 		/* 设置Uniform参数 */
 		virtual void SetInt(const std::string& name, int value) = 0;
 		virtual void SetIntArray(const std::string& name, int* values, uint32_t count) = 0;
@@ -212,6 +239,14 @@ namespace Helios
 		std::string m_Path{};
 		/* Shader 反射数据（由各后端在编译/链接阶段填充） */
 		ShaderReflectionData m_Reflection{};
+		/* 展开 include 后各阶段源码的哈希（加载与重载时填） */
+		std::string m_SourceHash{};
+		/* 依赖文件原始字节的指纹：只用来挡"文件没变"的重载 */
+		std::string m_RawHash{};
+		/* 依赖的文件绝对路径：主文件在前，后面是递归展开到的 include */
+		std::vector<std::string> m_Dependencies{};
+		/* 内容版本号：重载成功后加一 */
+		uint32_t m_Generation{ 1 };
 	};
 }
 

@@ -14,6 +14,8 @@ namespace Helios::EditorSettings
 		/* 脚本：产物变了自动重载 / 打开项目时没产物自动编一次 */
 		bool AutoReloadScripts{ true };
 		bool AutoCompileScripts{ true };
+		/* 着色器：源文件（含 include 的公共库）改了自动重载 */
+		bool AutoReloadShaders{ true };
 		/* 编辑器强调色主题（EditorTheme::kThemePresets 的下标） */
 		int Theme{ 0 };
 	};

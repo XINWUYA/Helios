@@ -5,7 +5,9 @@
 #include "Helios/Scene/SceneCommon.h"
 
 #include <xxhash.h>
+#include <algorithm>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <regex>
 #include <sstream>
@@ -372,56 +374,124 @@ namespace Helios
         return "unknown";
     }
 
-    std::string ShaderCompiler::ReadFile(const std::string& filepath)
+    namespace
+    {
+        /* include 展开的递归上限，循环引用另外按 include 链检测 */
+        constexpr size_t kMaxIncludeDepth = 64;
+
+        /* 翻译规则版本：glslang 的编译规则、spirv-cross 的 MSL 版本与绑定槽位约定
+         * 变化时，源码哈希不变但产物该失效。改这些规则请同时递增它。
+         * 内容指纹也带上它，换代后热重载的"没变"判断不会被旧指纹挡住。 */
+        constexpr const char* kTranslatorVersion = "helios-shader-translator-v5";
+
+        /* glslang 的全局状态没有初始化调用可依赖，编译一律串行：
+         * 首次加载在主线程、热重载在后台线程，两者可能撞上 */
+        std::mutex& CompileMutex()
+        {
+            static std::mutex mutex;
+            return mutex;
+        }
+
+        /* 收集依赖：只去重，不影响展开 */
+        void AddDependency(std::vector<std::string>* dependencies, const std::string& path)
+        {
+            if (dependencies == nullptr)
+                return;
+
+            for (const std::string& existing : *dependencies)
+            {
+                if (existing == path)
+                    return;
+            }
+            dependencies->push_back(path);
+        }
+    }
+
+    std::string ShaderCompiler::ReadFile(const std::string& filepath, std::vector<std::string>* dependencies)
+    {
+        IncludeContext context;
+        context.Dependencies = dependencies;
+        return ReadFile(filepath, context);
+    }
+
+    std::string ShaderCompiler::ReadFile(const std::string& filepath, IncludeContext& context)
     {
         PROFILE_FUNCTION();
 
-        std::string result;
-        std::ifstream in(filepath, std::ios::in | std::ios::binary);
-        if (in)
+        /* 同一文件被包含两次照样展开两次，只有出现在当前 include 链上才算循环 */
+        const std::string key = std::filesystem::path(filepath).lexically_normal().generic_string();
+        if (std::find(context.Stack.begin(), context.Stack.end(), key) != context.Stack.end())
         {
-            static const std::regex regex_quote("^[ ]*#[ ]*include[ ]+\"([^\"]+)\".*");
-            static const std::regex regex_angle("^[ ]*#[ ]*include[ ]+<([^>]+)>.*");
-            std::smatch matches;
-            std::string line_str;
-            while (std::getline(in, line_str))
-            {
-                if (line_str.find("#include") != line_str.npos)
-                {
-                    std::string include_file;
-                    bool matched = false;
-                    if (std::regex_search(line_str, matches, regex_quote))
-                    {
-                        include_file = matches.str(1);
-                        matched = true;
-                    }
-                    else if (std::regex_search(line_str, matches, regex_angle))
-                    {
-                        include_file = matches.str(1);
-                        matched = true;
-                    }
+            CORE_LOG_ERROR("Shader include cycle at: {}", filepath);
+            return {};
+        }
+        if (context.Stack.size() >= kMaxIncludeDepth)
+        {
+            CORE_LOG_ERROR("Shader include too deep ({} levels) at: {}", context.Stack.size(), filepath);
+            return {};
+        }
 
-                    if (matched)
-                    {
-                        std::string base_dir = ExtractFileBaseDir(filepath);
-                        result += ReadFile(base_dir + include_file) + '\n';
-                    }
-                    else
-                    {
-                        result += line_str + '\n';
-                    }
+        AddDependency(context.Dependencies, filepath);
+
+        std::ifstream in(filepath, std::ios::in | std::ios::binary);
+        if (!in)
+        {
+            CORE_LOG_ERROR("Could not open shader file: {}", filepath);
+            return {};
+        }
+        const std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+        /* 原始字节只记第一次读到的那份，跟依赖表一一对应 */
+        if (context.Contents != nullptr)
+        {
+            const auto recorded = std::find_if(context.Contents->begin(), context.Contents->end(),
+                [&filepath](const auto& entry) { return entry.first == filepath; });
+            if (recorded == context.Contents->end())
+                context.Contents->emplace_back(filepath, raw);
+        }
+
+        context.Stack.push_back(key);
+
+        std::string result;
+        static const std::regex regex_quote("^[ ]*#[ ]*include[ ]+\"([^\"]+)\".*");
+        static const std::regex regex_angle("^[ ]*#[ ]*include[ ]+<([^>]+)>.*");
+        std::smatch matches;
+        std::string line_str;
+        std::istringstream lines(raw);
+        while (std::getline(lines, line_str))
+        {
+            if (line_str.find("#include") != line_str.npos)
+            {
+                std::string include_file;
+                bool matched = false;
+                if (std::regex_search(line_str, matches, regex_quote))
+                {
+                    include_file = matches.str(1);
+                    matched = true;
+                }
+                else if (std::regex_search(line_str, matches, regex_angle))
+                {
+                    include_file = matches.str(1);
+                    matched = true;
+                }
+
+                if (matched)
+                {
+                    std::string base_dir = ExtractFileBaseDir(filepath);
+                    result += ReadFile(base_dir + include_file, context) + '\n';
                 }
                 else
                 {
                     result += line_str + '\n';
                 }
             }
-        }
-        else
-        {
-            CORE_LOG_ERROR("Could not open shader file: {}", filepath);
+            else
+            {
+                result += line_str + '\n';
+            }
         }
 
+        context.Stack.pop_back();
         return result;
     }
 
@@ -438,8 +508,10 @@ namespace Helios
             const size_t eol = source.find_first_of("\r\n", pos);
             if (eol == std::string::npos)
             {
+                /* 热重载会读到写了一半的文件，这里只报错不中断：
+                 * 调用方看到空表就保留上一份能用的着色器 */
                 CORE_LOG_ERROR("Shader syntax error: #type declaration has no newline.");
-                ASSERT(false, "Syntax error");
+                shader_sources.clear();
                 return;
             }
 
@@ -451,7 +523,7 @@ namespace Helios
             if (next_line_pos == std::string::npos)
             {
                 CORE_LOG_ERROR("Shader syntax error: #type declaration has no shader code.");
-                ASSERT(false, "Syntax error");
+                shader_sources.clear();
                 return;
             }
 
@@ -606,16 +678,46 @@ namespace Helios
     }
 
     std::unordered_map<ShaderCompiler::ShaderStage, std::string> ShaderCompiler::LoadStageSources(
-        const std::string& filepath, ShaderTarget target, const ShaderVariantDefines& defines)
+        const std::string& filepath, ShaderTarget target, const ShaderVariantDefines& defines,
+        ShaderSourceInfo* info)
     {
         std::unordered_map<ShaderStage, std::string> stage_sources;
-        const std::string source = ReadFile(filepath);
+
+        std::vector<std::string> dependencies;
+        std::vector<std::pair<std::string, std::string>> contents;
+        IncludeContext context;
+        if (info != nullptr)
+        {
+            context.Dependencies = &dependencies;
+            context.Contents = &contents;
+        }
+        const std::string source = ReadFile(filepath, context);
+        if (info != nullptr)
+        {
+            /* 读不到也要留下依赖表：文件被改坏或删掉时，热重载仍要知道该盯哪些文件 */
+            info->Hash.clear();
+            info->Dependencies = dependencies;
+            info->RawHash = contents.size() == dependencies.size() ? HashContents(contents) : std::string{};
+        }
         if (source.empty())
             return stage_sources;
 
         PreProcessShaderSrc(source, stage_sources);
         InjectVariantDefines(stage_sources, defines);
         PrepareStageSources(stage_sources, target, ExtractFilename(filepath));
+
+        if (info != nullptr && !stage_sources.empty())
+        {
+            /* 阶段表是无序容器，拼接顺序不能直接遍历，否则同一份源码会有两个哈希 */
+            std::string combined;
+            for (const ShaderStage stage : { ShaderStage::Vertex, ShaderStage::Fragment, ShaderStage::Compute })
+            {
+                const auto it = stage_sources.find(stage);
+                if (it != stage_sources.end())
+                    combined += it->second;
+            }
+            info->Hash = ComputeHash(combined);
+        }
         return stage_sources;
     }
 
@@ -673,6 +775,9 @@ namespace Helios
     bool ShaderCompiler::Compile(const std::string& source, ShaderStage stage, ShaderTarget target,
         std::string& output, std::string& error_msg, const std::string& name)
     {
+        /* 从查缓存到写缓存整段串行：见 CompileMutex 的说明 */
+        std::lock_guard lock(CompileMutex());
+
         const std::string hash = ComputeHash(source);
         const std::filesystem::path cache_dir = GetCacheDirectory(target);
         const std::string filename = (name.empty() ? "" : name + "_") + hash + "_" + ShaderStageToString(stage) + GetFileExtension(target);
@@ -715,15 +820,49 @@ namespace Helios
 
     std::string ShaderCompiler::ComputeHash(const std::string& source)
     {
-        /* 缓存键包含“翻译规则版本”：翻译结果由 glslang 的编译规则、spirv-cross 的
-         * MSL 版本以及 MetalBinding 的绑定槽位约定共同决定，这些配置变化时源码哈希不变，
-         * 旧缓存会被继续复用。因此让版本号参与哈希，修改翻译规则时请同时递增它。 */
-        static constexpr const char* kTranslatorVersion = "helios-shader-translator-v5";
-
+        /* 缓存键包含“翻译规则版本”：见 kTranslatorVersion 的说明 */
         const std::string key = std::string(kTranslatorVersion) + '\n' + source;
         const uint64_t hash = XXH64(key.c_str(), key.length(), 0);
         std::stringstream ss;
         ss << std::hex << std::uppercase << hash;
+        return ss.str();
+    }
+
+    std::string ShaderCompiler::HashDependencies(const std::vector<std::string>& dependencies)
+    {
+        std::vector<std::pair<std::string, std::string>> contents;
+        contents.reserve(dependencies.size());
+        for (const std::string& path : dependencies)
+        {
+            std::ifstream in(path, std::ios::in | std::ios::binary);
+            if (!in)
+                return {};
+            contents.emplace_back(path, std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()));
+        }
+        return HashContents(contents);
+    }
+
+    std::string ShaderCompiler::HashContents(const std::vector<std::pair<std::string, std::string>>& contents)
+    {
+        XXH64_state_t* state = XXH64_createState();
+        if (state == nullptr)
+            return {};
+
+        XXH64_reset(state, 0);
+        XXH64_update(state, kTranslatorVersion, std::strlen(kTranslatorVersion));
+
+        for (const auto& [path, content] : contents)
+        {
+            /* 路径也进指纹：include 增删时哪怕内容一样也算变化 */
+            XXH64_update(state, path.data(), path.size());
+            XXH64_update(state, content.data(), content.size());
+        }
+
+        const uint64_t digest = XXH64_digest(state);
+        XXH64_freeState(state);
+
+        std::stringstream ss;
+        ss << std::hex << std::uppercase << digest;
         return ss.str();
     }
 

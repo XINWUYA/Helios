@@ -44,6 +44,8 @@ namespace Helios::EditorSettings
 				state.AutoReloadScripts = value;
 			else if (key == "AutoCompileScripts")
 				state.AutoCompileScripts = value;
+			else if (key == "AutoReloadShaders")
+				state.AutoReloadShaders = value;
 			else if (key == "Theme")
 				state.Theme = std::atoi(raw.c_str());
 		}
@@ -70,6 +72,7 @@ namespace Helios::EditorSettings
 		file << "GPUSkinning=" << (state.GPUSkinning ? 1 : 0) << "\n";
 		file << "AutoReloadScripts=" << (state.AutoReloadScripts ? 1 : 0) << "\n";
 		file << "AutoCompileScripts=" << (state.AutoCompileScripts ? 1 : 0) << "\n";
+		file << "AutoReloadShaders=" << (state.AutoReloadShaders ? 1 : 0) << "\n";
 		file << "Theme=" << state.Theme << "\n";
 	}
 

@@ -159,6 +159,8 @@ namespace Helios
 		std::string m_Path{};
 		/* Shader */
 		SharedPtr<DeviceShader> m_pShader{ nullptr };
+		/* 上次解析贴图绑定点时 Shader 的版本号：Shader 重载后据此重解析一次 */
+		uint32_t m_ShaderGeneration{ 0 };
 		/* 材质所需的各种参数<ToID(Name), MaterialParamInfo> */
 		ParameterMap m_Parameters{};
 		/* 光栅化状态配置 */

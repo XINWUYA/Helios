@@ -74,6 +74,18 @@ namespace Helios
         [[nodiscard]] bool IsCompute() const override { return m_IsCompute; }
         [[nodiscard]] uint32_t GetThreadGroupSize() const override { return m_ThreadGroupSize; }
 
+        /* 换入另一份实例的编译产物：失败保持原样，成功后代价只有交换本身 */
+        bool ApplyPrepared(DeviceShader& prepared) override;
+
+        /* 后台把 library 与计算管线建好，Metal 编不过 MSL 时在换入前就判失败 */
+        bool BuildDeviceObjects() override;
+
+        /* 构造是否真的拿到了可用的编译产物（语法错误时为空） */
+        [[nodiscard]] bool IsValid() const { return m_Loaded; }
+
+        /* 这组管线参数之前建失败过：失败只报一次，也不每次绘制都重试 */
+        [[nodiscard]] bool HasPipelineFailed(uint64_t key) const { return m_FailedPipelines.count(key) != 0; }
+
     private:
         /* 计算着色器状态 */
         bool m_IsCompute{ false };
@@ -93,6 +105,8 @@ namespace Helios
             bool UseInlineBytes{ true };                      /* 是否走 setBytes 快速路径 */
             MTL::Buffer* Buffer{ nullptr };                   /* 大块数据的后备缓冲区 */
             std::unordered_map<std::string, uint32_t> Offsets; /* 成员名 → 字节偏移 */
+            /* 成员名 → MSL 类型：重载迁移时按它判断类型变没变，大小也由它算 */
+            std::unordered_map<std::string, std::string> Types;
             std::vector<uint8_t> Shadow;                      /* CPU 端影子数据 */
             /* 上次提交的内容指纹：材质参数每帧按名重写一遍，值没变就不必再传 */
             uint64_t CommittedHash{ 0 };
@@ -144,6 +158,28 @@ namespace Helios
         /* 已告警过“未找到同名 uniform”的名字集合：材质每帧都会重试写入，
          * 按名字去重保证同一问题只告警一次，避免刷屏。 */
         std::unordered_set<std::string> m_WarnedMissingUniforms;
+
+        /* 编译产物可用（有 MSL）；内嵌源码实例恒为 true */
+        bool m_Loaded{ false };
+
+        /* 建失败过的管线参数哈希（随重载一起换掉） */
+        std::unordered_set<uint64_t> m_FailedPipelines;
+
+        /* 把另一份实例的编译产物、反射与材质块换到本对象，旧状态留在 other 由它析构释放。
+         * 顶点描述符不换：它来自外部顶点数组，只在属性位置变了时才作废 */
+        void StealFrom(MetalShader& other);
+
+        /* 重载时要搬过去的材质块数值：名字之外带上类型，类型或大小对不上就不搬 */
+        struct SavedMaterialValue
+        {
+            std::string Type{};
+            std::vector<uint8_t> Bytes{};
+        };
+
+        /* 材质块当前值：成员名 → 类型与字节 */
+        [[nodiscard]] std::unordered_map<std::string, SavedMaterialValue> SnapshotMaterialValues() const;
+        /* 按名字写回新布局：同名同类型才搬，新加或改过类型的成员保留源码默认值 */
+        void RestoreMaterialValues(const std::unordered_map<std::string, SavedMaterialValue>& values);
     };
 }
 

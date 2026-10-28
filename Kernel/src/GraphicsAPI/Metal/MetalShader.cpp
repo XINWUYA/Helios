@@ -316,7 +316,12 @@ namespace Helios
 
         m_DebugName = ExtractFilename(filepath);
 
-        auto shader_sources = ShaderCompiler::LoadStageSources(filepath, ShaderCompiler::ShaderTarget::Metal);
+        ShaderSourceInfo source_info;
+        auto shader_sources = ShaderCompiler::LoadStageSources(filepath, ShaderCompiler::ShaderTarget::Metal,
+            {}, &source_info);
+        m_SourceHash = std::move(source_info.Hash);
+        m_RawHash = std::move(source_info.RawHash);
+        m_Dependencies = std::move(source_info.Dependencies);
         if (shader_sources.empty())
         {
             CORE_LOG_ERROR("Failed to read shader file: {}", filepath);
@@ -342,7 +347,11 @@ namespace Helios
             m_Reflection.Clear();
             ReflectFromGLSLSource(glsl);
 
-            CORE_LOG_INFO("Metal compute shader created: {}", m_DebugName);
+            m_Loaded = !m_ComputeMSL.empty();
+            if (!m_Loaded)
+                CORE_LOG_ERROR("Compute shader compile failed: {}", m_DebugName);
+            else
+                CORE_LOG_INFO("Metal compute shader created: {}", m_DebugName);
             return;
         }
 
@@ -353,6 +362,9 @@ namespace Helios
         }
 
         CompileAndReflect(vertex_source->second, fragment_source->second);
+        m_Loaded = !m_VertexMSL.empty() && !m_FragmentMSL.empty();
+        if (!m_Loaded)
+            CORE_LOG_ERROR("Shader compile failed: {}", m_DebugName);
     }
 
     MetalShader::MetalShader(std::string name, const std::string& vertex_src, const std::string& pixel_src)
@@ -366,6 +378,7 @@ namespace Helios
         ShaderCompiler::PrepareStageSources(shader_sources, ShaderCompiler::ShaderTarget::Metal, m_DebugName);
         CompileAndReflect(shader_sources[ShaderCompiler::ShaderStage::Vertex],
             shader_sources[ShaderCompiler::ShaderStage::Fragment]);
+        m_Loaded = !m_VertexMSL.empty() && !m_FragmentMSL.empty();
     }
 
     void MetalShader::CompileAndReflect(const std::string& vertex_src, const std::string& fragment_src)
@@ -393,6 +406,158 @@ namespace Helios
         ParseShaderResources(m_FragmentMSL, false);
 
         CORE_LOG_INFO("Metal shader created: {}", m_DebugName);
+    }
+
+    bool MetalShader::ApplyPrepared(DeviceShader& prepared)
+    {
+        PROFILE_FUNCTION();
+
+        auto* fresh = dynamic_cast<MetalShader*>(&prepared);
+        if (fresh == nullptr || !fresh->IsValid())
+        {
+            CORE_LOG_ERROR("Shader reload failed, keeping the previous version: {}", m_DebugName);
+            return false;
+        }
+
+        /* 图形与计算互换要重建实例（渲染通道对它的用法不同），不在这里处理 */
+        if (fresh->m_IsCompute != m_IsCompute)
+        {
+            CORE_LOG_ERROR("Shader '{}' switched between graphics and compute, reload skipped", m_DebugName);
+            return false;
+        }
+
+        /* 只是碰了文件、内容没变（改注释另说）：什么都不用做 */
+        if (!m_SourceHash.empty() && fresh->m_SourceHash == m_SourceHash)
+        {
+            /* 展开结果一样但 include 的增删可能不同，依赖表与原始指纹照样跟上 */
+            m_Dependencies = std::move(fresh->m_Dependencies);
+            m_RawHash = std::move(fresh->m_RawHash);
+            return true;
+        }
+
+        /* 顶点属性位置没变时，按外部顶点数组建好的描述符继续可用（ImGui 这类只绑一次布局的也不受影响） */
+        const bool same_vertex_layout =
+            fresh->m_Reflection.VertexAttributeLocations == m_Reflection.VertexAttributeLocations;
+
+        /* 材质块里的值按名字搬到新布局，改一行 shader 不该让材质参数错位或清零 */
+        const auto values = SnapshotMaterialValues();
+        StealFrom(*fresh);
+        RestoreMaterialValues(values);
+
+        /* 位置变了旧描述符作废：换给 fresh 随它释放，下次 BindVertexArray 按新反射重建 */
+        if (!same_vertex_layout)
+        {
+            std::swap(m_VertexDescriptor, fresh->m_VertexDescriptor);
+            std::swap(m_VertexDescriptorHash, fresh->m_VertexDescriptorHash);
+            std::swap(m_VertexDescriptors, fresh->m_VertexDescriptors);
+        }
+
+        /* fresh 现在拿着旧库与旧管线，随调用方销毁回收 */
+        ++m_Generation;
+        return true;
+    }
+
+    bool MetalShader::BuildDeviceObjects()
+    {
+        PROFILE_FUNCTION();
+
+        if (!m_Loaded)
+            return false;
+
+        /* 可能跑在后台线程：metal-cpp 的临时字符串要有自动释放池接着 */
+        NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
+        const bool built = m_IsCompute ? GetComputePipelineState() != nullptr : EnsureShaderLibraries();
+        pool->release();
+
+        if (!built)
+        {
+            CORE_LOG_ERROR("Metal failed to build shader objects: {}", m_DebugName);
+            m_Loaded = false;
+        }
+        return built;
+    }
+
+    void MetalShader::StealFrom(MetalShader& other)
+    {
+        std::swap(m_DebugName, other.m_DebugName);
+        std::swap(m_VertexMSL, other.m_VertexMSL);
+        std::swap(m_FragmentMSL, other.m_FragmentMSL);
+        std::swap(m_VertexLibrary, other.m_VertexLibrary);
+        std::swap(m_FragmentLibrary, other.m_FragmentLibrary);
+        std::swap(m_PipelineStates, other.m_PipelineStates);
+        std::swap(m_FailedPipelines, other.m_FailedPipelines);
+        std::swap(m_MaterialBlocks, other.m_MaterialBlocks);
+        std::swap(m_TextureStageMasks, other.m_TextureStageMasks);
+        std::swap(m_DefaultUniformValues, other.m_DefaultUniformValues);
+        std::swap(m_WarnedMissingUniforms, other.m_WarnedMissingUniforms);
+        std::swap(m_IsCompute, other.m_IsCompute);
+        std::swap(m_ThreadGroupSize, other.m_ThreadGroupSize);
+        std::swap(m_ComputeMSL, other.m_ComputeMSL);
+        std::swap(m_ComputeLibrary, other.m_ComputeLibrary);
+        std::swap(m_ComputePipeline, other.m_ComputePipeline);
+        std::swap(m_Reflection, other.m_Reflection);
+        std::swap(m_SourceHash, other.m_SourceHash);
+        std::swap(m_RawHash, other.m_RawHash);
+        std::swap(m_Dependencies, other.m_Dependencies);
+        std::swap(m_Loaded, other.m_Loaded);
+    }
+
+    std::unordered_map<std::string, MetalShader::SavedMaterialValue> MetalShader::SnapshotMaterialValues() const
+    {
+        std::unordered_map<std::string, SavedMaterialValue> values;
+
+        for (const MaterialBlock& block : m_MaterialBlocks)
+        {
+            for (const auto& [name, offset] : block.Offsets)
+            {
+                const auto type_it = block.Types.find(name);
+                if (type_it == block.Types.end())
+                    continue;
+
+                const uint32_t size = GetMaterialTypeSize(type_it->second);
+                if (offset + size > block.Shadow.size())
+                    continue;
+
+                /* 同名成员在顶点与片元各有一份，值一样，取先到的 */
+                if (values.find(name) != values.end())
+                    continue;
+
+                SavedMaterialValue value;
+                value.Type = type_it->second;
+                value.Bytes.assign(block.Shadow.begin() + offset, block.Shadow.begin() + offset + size);
+                values.emplace(name, std::move(value));
+            }
+        }
+        return values;
+    }
+
+    void MetalShader::RestoreMaterialValues(const std::unordered_map<std::string, SavedMaterialValue>& values)
+    {
+        for (MaterialBlock& block : m_MaterialBlocks)
+        {
+            for (const auto& [name, offset] : block.Offsets)
+            {
+                const auto value_it = values.find(name);
+                if (value_it == values.end())
+                    continue;
+
+                /* 搬迁口径：同名同类型才带回。类型变了当新参数处理，留源码默认值，
+                 * 不把旧字节塞进新布局（脚本那边同样是名字加类型对得上才回灌） */
+                const auto type_it = block.Types.find(name);
+                if (type_it == block.Types.end() || type_it->second != value_it->second.Type)
+                    continue;
+
+                const uint32_t size = GetMaterialTypeSize(type_it->second);
+                if (size != value_it->second.Bytes.size() || offset + size > block.Shadow.size())
+                    continue;
+
+                std::memcpy(block.Shadow.data() + offset, value_it->second.Bytes.data(), size);
+            }
+
+            /* 内容变了，下一帧无条件重传 */
+            block.CommittedHash = 0;
+            block.CommittedGeneration = 0;
+        }
     }
 
     MTL::ComputePipelineState* MetalShader::GetComputePipelineState()
@@ -444,6 +609,12 @@ namespace Helios
             m_VertexLibrary->release();
         if (m_FragmentLibrary)
             m_FragmentLibrary->release();
+
+        /* 计算着色器独立一套库与管线（重载时旧对象随本对象析构回收） */
+        if (m_ComputeLibrary)
+            m_ComputeLibrary->release();
+        if (m_ComputePipeline)
+            m_ComputePipeline->release();
 
         for (auto& [key, state] : m_PipelineStates)
         {
@@ -658,6 +829,7 @@ namespace Helios
                 const uint32_t size = GetMaterialTypeSize(type);
                 offset = (offset + alignment - 1u) / alignment * alignment;
                 block.Offsets[member] = offset;
+                block.Types[member] = type;
                 offset += size;
             }
 
@@ -981,7 +1153,15 @@ namespace Helios
         if (it != m_PipelineStates.end())
             return it->second;
 
-        return GetOrCreatePipelineState(desc);
+        if (m_FailedPipelines.count(key) != 0)
+            return nullptr;
+
+        MTL::RenderPipelineState* pipeline = GetOrCreatePipelineState(desc);
+        /* 缺顶点描述符导致的失败不记：补上 BindVertexArray 后同一组参数要能重建 */
+        const bool missing_descriptor = m_VertexDescriptor == nullptr && !m_Reflection.VertexAttributeLocations.empty();
+        if (pipeline == nullptr && !missing_descriptor)
+            m_FailedPipelines.insert(key);
+        return pipeline;
     }
 
     MTL::RenderPipelineState* MetalShader::GetOrCreatePipelineState(const MetalPipelineDesc& desc)
@@ -1074,7 +1254,8 @@ namespace Helios
             error = nullptr;
             pipeline = device->newRenderPipelineState(descriptor, &error);
 
-            if (pipeline != nullptr && pipeline_archive != nullptr)
+            /* 热重载出来的版本不进缓存：编辑期每改一版就多一批条目，缓存文件只会越积越大 */
+            if (pipeline != nullptr && pipeline_archive != nullptr && m_Generation == 1)
                 MetalRuntime::NotifyPipelineCompiled(descriptor);
         }
 
