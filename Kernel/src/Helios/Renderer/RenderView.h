@@ -29,6 +29,8 @@ namespace Helios
 		/* 投影/接受阴影（来自 ModelComponent）：分别为"是否写入阴影图"与"是否采样阴影" */
 		bool CastShadow{ true };
 		bool ReceiveShadow{ true };
+		/* 蒙皮网格的包围盒是绑定姿态，动起来会出界，不参与视锥剔除 */
+		bool Cullable{ true };
 
 		VisibleMeshObject() = default;
 		VisibleMeshObject(int object_id, const glm::mat4& local_2_world,
@@ -37,6 +39,17 @@ namespace Helios
 			: ObjectId(object_id), Local2WorldMat(local_2_world), MeshSegment(mesh_segment), Material(material),
 			  CastShadow(cast_shadow), ReceiveShadow(receive_shadow)
 		{}
+	};
+
+	/* 视锥的四个侧面（裁剪空间 -w <= x, y <= w），相机与点光 / 聚光的阴影面共用。
+	 * 不取近远面：深度约定不影响侧面，四个侧面合起来本身就排除了视点背后的东西 */
+	struct HELIOS_API FrustumSides
+	{
+		glm::vec4 Planes[4]{};
+
+		static FrustumSides FromViewProjection(const glm::mat4& view_projection);
+		/* 包围盒整块落在某个侧面外才算看不见，贴边的照画；没有包围盒或不参与剔除的恒可见 */
+		[[nodiscard]] bool IsOutside(const VisibleMeshObject& object) const;
 	};
 
 	/* 视图类：
@@ -132,8 +145,10 @@ namespace Helios
 		/* 执行渲染当前View */
 		void Execute();
 
-		/* 获取可见MeshSegment */
+		/* 获取可见MeshSegment（已按相机视锥剔除） */
 		[[nodiscard]] const std::vector<VisibleMeshObject>& GetVisibleMeshObjects() const { return m_VisibleMeshObjects; }
+		/* 视锥剔除前的全部对象：画面外的物体也会把影子投进画面，阴影拟合与投射用这份 */
+		[[nodiscard]] const std::vector<VisibleMeshObject>& GetShadowCasterObjects() const { return m_SceneMeshObjects; }
 
 		/* 按给定可见层掩码收集场景对象（模型段 + 解析后的材质），写进 out（不清空）。
 		 * 视图每帧用自身 CullingMask 收集；反射探针烘焙按探针的 CullingMask 调同一份逻辑。 */
@@ -179,6 +194,8 @@ namespace Helios
 		/* 优先级 */
 		int32_t m_Priority{ 0 };
 
+		/* 按层与显隐收集到的全部对象（不做视锥剔除） */
+		std::vector<VisibleMeshObject> m_SceneMeshObjects{};
 		/* 视锥体剔除之后，对当前可见MeshSegment */
 		std::vector<VisibleMeshObject> m_VisibleMeshObjects{};
 		/* 对场景产生影响的光源 */

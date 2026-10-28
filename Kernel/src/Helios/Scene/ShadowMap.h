@@ -50,7 +50,7 @@ namespace Helios
 		void SetDepthRange(float depth_range) { m_DepthRange = depth_range; }
 		[[nodiscard]] float GetDepthRange() const { return m_DepthRange; }
 
-		/* 与本级联正交盒相交的投射物下标（指向 RenderView 的可见网格列表）。只在本帧拿得到
+		/* 与本级联正交盒相交的投射物下标（指向 RenderView 的投射物列表）。只在本帧拿得到
 		 * 可见网格时有效：HasCasterList = false 时调用方要退回全量提交。 */
 		void SetCasterIndices(std::vector<uint32_t> indices)
 		{

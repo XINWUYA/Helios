@@ -672,7 +672,7 @@ namespace Helios
 
 					/* 投射物按剔除方式和网格分组：同组连着画，管线和顶点缓冲都不换 */
 					const auto caster_list = RenderSorting::CollectShadowCasterList(
-						render_view->GetVisibleMeshObjects(), shadow_material->GetRasterState(), caster_indices);
+						render_view->GetShadowCasterObjects(), shadow_material->GetRasterState(), caster_indices);
 
 					for (const VisibleMeshObject* mesh_object : caster_list)
 					{
@@ -737,6 +737,8 @@ namespace Helios
 				/* 渲染点光 / 聚光阴影层：单面矩阵作为材质参数下发，u_CascadeIndex = -1 让 ShadowCaster.glsl
 				 * 走单矩阵分支。注意：参数名必须跟 ShadowCaster.glsl 的裸 uniform 一致（u_ShadowPassMat），
 				 * 也不能跟 LightUniformBuffer 成员重名（撞名编译不过）。 */
+				const auto& casters = render_view->GetShadowCasterObjects();
+				std::vector<uint32_t> face_casters;
 				for (const auto& punctual_shadow_map : m_PunctualShadowMaps)
 				{
 					const uint8_t layer = punctual_shadow_map->GetLayer();
@@ -747,7 +749,15 @@ namespace Helios
 					shadow_material->SetParameters(ParamType::Mat4, "u_ShadowPassMat",
 						punctual_shadow_map->GetLightViewProjectionMat());
 
-					render_shadow_layer(layer, shadow_material, nullptr);
+					/* 只提交落在这一面视锥里的投射物：点光六个面各自只看得到一部分 */
+					const FrustumSides frustum = FrustumSides::FromViewProjection(punctual_shadow_map->GetLightViewProjectionMat());
+					face_casters.clear();
+					for (uint32_t index = 0; index < static_cast<uint32_t>(casters.size()); ++index)
+					{
+						if (!frustum.IsOutside(casters[index]))
+							face_casters.push_back(index);
+					}
+					render_shadow_layer(layer, shadow_material, &face_casters);
 					render_api->PopDebugGroup();
 				}
 			});

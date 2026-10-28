@@ -2,6 +2,8 @@
 #include "RenderView.h"
 #include "FrameGraph/FrameGraph.h"
 #include <Helios/Scene/Scene.h>
+#include <Helios/Scene/Camera.h>
+#include <Helios/Scene/Material.h>
 #include <Helios/Scene/Components.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/ShadowMap.h>
@@ -13,6 +15,48 @@
 
 namespace Helios
 {
+	FrustumSides FrustumSides::FromViewProjection(const glm::mat4& view_projection)
+	{
+		/* glm 按列存，第 i 行 = (m[0][i], m[1][i], m[2][i], m[3][i]) */
+		const auto row = [&view_projection](int index)
+		{
+			return glm::vec4(view_projection[0][index], view_projection[1][index],
+				view_projection[2][index], view_projection[3][index]);
+		};
+		const glm::vec4 row_x = row(0);
+		const glm::vec4 row_y = row(1);
+		const glm::vec4 row_w = row(3);
+		return FrustumSides{ { row_w + row_x, row_w - row_x, row_w + row_y, row_w - row_y } };
+	}
+
+	bool FrustumSides::IsOutside(const VisibleMeshObject& object) const
+	{
+		if (!object.Cullable || object.MeshSegment == nullptr)
+			return false;
+
+		const glm::vec3& local_min = object.MeshSegment->GetAABBMin();
+		const glm::vec3& local_max = object.MeshSegment->GetAABBMax();
+		/* 没设过包围盒（全零）当作未知，不剔 */
+		if (local_min == glm::vec3(0.0f) && local_max == glm::vec3(0.0f))
+			return false;
+
+		/* 局部盒变到世界：中心直接变换，半长按矩阵各轴的绝对值展开 */
+		const glm::mat4& matrix = object.Local2WorldMat;
+		const glm::vec3 half = (local_max - local_min) * 0.5f;
+		const glm::vec3 center = glm::vec3(matrix * glm::vec4((local_min + local_max) * 0.5f, 1.0f));
+		const glm::vec3 extent = glm::abs(glm::vec3(matrix[0])) * half.x
+			+ glm::abs(glm::vec3(matrix[1])) * half.y
+			+ glm::abs(glm::vec3(matrix[2])) * half.z;
+
+		for (const glm::vec4& plane : Planes)
+		{
+			const glm::vec3 normal(plane);
+			if (glm::dot(normal, center) + plane.w + glm::dot(glm::abs(normal), extent) < 0.0f)
+				return true;
+		}
+		return false;
+	}
+
 	RenderView::RenderView(Camera* owner_camera)
 		: m_pOwnerCamera(owner_camera)
 	{
@@ -26,6 +70,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		m_SceneMeshObjects.clear();
 		m_VisibleMeshObjects.clear();
 	}
 
@@ -118,11 +163,11 @@ namespace Helios
 
 		UpdateFrameGraph();
 
-		/* 每帧重算阴影矩阵：级联随方向光旋转 / 相机移动实时更新（传入可见网格：
+		/* 每帧重算阴影矩阵：级联随方向光旋转 / 相机移动实时更新（传入剔除前的投射物：
 		 * 光源视锥拟合需纳入投射物包围盒）；点光/聚光的矩阵随处 → 范围变化即更新。 */
 		if (m_IsHasShadowCast)
 		{
-			m_pShadowMapManager->UpdateCascadeMatrices(GetCullingCamera(), &m_VisibleMeshObjects);
+			m_pShadowMapManager->UpdateCascadeMatrices(GetCullingCamera(), &m_SceneMeshObjects);
 			m_pShadowMapManager->UpdatePunctualMatrices();
 		}
 
@@ -134,11 +179,26 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		m_SceneMeshObjects.clear();
 		m_VisibleMeshObjects.clear();
+		CollectVisibleMeshObjects(m_CullingMask, m_SceneMeshObjects);
 
-		// todo: 视锥体剔除
+		const Camera* camera = GetCullingCamera();
+		if (!m_IsEnableCulling || camera == nullptr)
+		{
+			m_VisibleMeshObjects = m_SceneMeshObjects;
+			return;
+		}
 
-		CollectVisibleMeshObjects(m_CullingMask, m_VisibleMeshObjects);
+		/* 天空盒铺满全屏，跟自己的网格摆在哪无关，恒画 */
+		const FrustumSides frustum = FrustumSides::FromViewProjection(camera->GetViewProjectionMatrix());
+		m_VisibleMeshObjects.reserve(m_SceneMeshObjects.size());
+		for (const VisibleMeshObject& object : m_SceneMeshObjects)
+		{
+			const bool is_sky = object.Material != nullptr && object.Material->IsSkyBox();
+			if (is_sky || !frustum.IsOutside(object))
+				m_VisibleMeshObjects.push_back(object);
+		}
 	}
 
 	void RenderView::CollectVisibleMeshObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const
@@ -169,6 +229,7 @@ namespace Helios
 			const auto& mesh_segments = model_component.m_EnableSkinning
 				? model_component.m_Model->GetRenderSegments()
 				: model_component.m_Model->GetMeshSegments();
+			const bool skinned = model_component.m_EnableSkinning && !model_component.m_Model->IsStaticModel();
 
 			for (const auto& mesh_segment : mesh_segments)
 			{
@@ -177,8 +238,9 @@ namespace Helios
 				/* 收集时按解析链定下最终材质：实体绑定 ?: 模型槽表默认 ?: 内置白模 */
 				const auto material = ResolveSlotMaterial(
 					*model_component.m_Model, mesh_segment->GetSlotIndex(), &model_component.m_SlotOverrides);
-				out.emplace_back((int)entity, local_2_world, mesh_segment, material,
+				auto& object = out.emplace_back((int)entity, local_2_world, mesh_segment, material,
 					model_component.m_CastShadow, model_component.m_ReceiveShadow);
+				object.Cullable = !skinned;
 			}
 		}
 	}
