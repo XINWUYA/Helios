@@ -375,8 +375,9 @@ namespace Helios
 
 	void FrameGraphPanel::OnImGuiRenderer(const std::vector<CameraEntry>& cameras, bool& visible)
 	{
-		/* 抓取请求默认清零：只有本帧真实画出来、且选中了相机的窗口才会重新置位 */
+		/* 抓取请求与可见目标默认清零：只有本帧真实画出来、且选中了相机的窗口才会重新置位 */
 		m_CaptureRequested = false;
+		m_ViewedGraph = nullptr;
 
 		/* 窗口隐藏时（View 菜单取消 / 标题栏关闭）就不提交 Begin —— 本仓 ImGui 的 p_open 只管
 		 * "把关闭按钮写回 false"，继续提交的话已关闭的窗口照样显示；不提交就是隐藏（停靠 / 位置
@@ -417,7 +418,9 @@ namespace Helios
 				active_graph = m_SelectedGraph;
 			}
 
-			m_CaptureRequested = !ImGui::GetCurrentWindow()->SkipItems && m_CaptureEnabled && active_graph != nullptr;
+			const bool on_screen = !ImGui::GetCurrentWindow()->SkipItems;
+			m_CaptureRequested = on_screen && m_CaptureEnabled && active_graph != nullptr;
+			m_ViewedGraph = on_screen ? active_graph : nullptr;
 
 			/* 面板标题由页签承担（"Frame Graph"），面板内不重复标题行 */
 

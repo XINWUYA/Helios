@@ -29,6 +29,8 @@ namespace Helios
 		[[nodiscard]] bool IsCaptureRequested() const { return m_CaptureRequested; }
 		/* 抓取目标 = 当前选中的相机渲染图（未选择 / 无相机时为 nullptr） */
 		[[nodiscard]] const FrameGraph* GetCaptureTarget() const { return m_SelectedGraph; }
+		/* 本帧面板上真正看得见的渲染图（面板隐藏或被挡住时为 nullptr） */
+		[[nodiscard]] const FrameGraph* GetViewedGraph() const { return m_ViewedGraph; }
 
 		/* 上一帧依赖图节点的屏幕矩形（自检 / 自动化验证用） */
 		struct NodeRect
@@ -125,6 +127,7 @@ namespace Helios
 		bool m_ShowCulled{ false };         /* 是否显示被剔除的节点（默认只看生效节点） */
 		bool m_PreviewFlip{ false };        /* 预览图垂直翻转（工具行"反转"开关，见 SetPreviewFlip） */
 		bool m_CaptureRequested{ false };
+		const FrameGraph* m_ViewedGraph{ nullptr };
 		std::string m_SelectedPassName{};
 		FocusRef m_Focus{};                 /* 聚焦的卡片（见 GetFocusedCard） */
 		std::string m_SearchFilter{};       /* 搜索过滤（见 SetSearchFilter） */

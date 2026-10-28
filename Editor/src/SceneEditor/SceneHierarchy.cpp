@@ -557,9 +557,8 @@ namespace Helios
 
 	void SceneHierarchy::SetOwnerScene(const SharedPtr<Scene>& scene)
 	{
-		/* 预览相机登记随场景迁移：先从旧场景摘除（相机生命周期由本面板保证）；
-		 * 新场景上若仍需要预览，下一帧的预览卡会重新登记 */
-		StopCameraPreview();
+		/* 旧场景的相机不能再被当成预览目标 */
+		m_pPreviewCamera = nullptr;
 
 		m_pOwnerScene = scene;
 		m_SelectedEntity = {};
@@ -1609,9 +1608,9 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* 相机预览是"逐帧挣取"的：本帧真的画出了预览卡（可见且展开）才置位，
-		 * 帧末结算 —— 换选中、切资源视图、收起卡片都会让预览自然停掉（见 DrawCameraPreviewCard） */
-		m_CameraPreviewWanted = false;
+		/* 相机预览逐帧挣取：本帧真的画出了预览卡（可见且展开）才置位，
+		 * 换选中、切资源视图、收起卡片都会让预览自然停掉（见 DrawCameraPreviewCard） */
+		m_pPreviewCamera = nullptr;
 
 		/* 句柄非空 ≠ 实体存在（见 Entity::operator bool 的约定）：选中项可能来自
 		 * 撤销后的残留或失效的拾取句柄。组件 GetPtr 对不存在的实体是断言而不是
@@ -1640,10 +1639,6 @@ namespace Helios
 			}
 		}
 		ImGui::End();
-
-		/* 本帧没人要预览：停掉预览相机（不再进场景的渲染视图收集） */
-		if (m_IsCameraPreviewActive && !m_CameraPreviewWanted)
-			StopCameraPreview();
 	}
 
 	/* 面板头部：可见性开关（眼睛）+ 实体图标 + 实体名（就地可编辑）+ 右侧「添加组件」。
@@ -2989,10 +2984,10 @@ namespace Helios
 	}
 
 	/* ==================== 相机预览卡（Camera 组件的附加卡）====================
-	 * 「选中相机 → 看见它拍什么」：画面由工具预览相机渲染（CameraPreview，外部相机登记），
-	 * 本卡只管版式和生命周期。同级平铺（卡片背景走通道、不能嵌套）。 */
+	 * 「选中相机 → 看见它拍什么」：画面就是这台场景相机自己的渲染输出（场景层看到预览请求后
+	 * 打开它的渲染并让它画到纹理），本卡只管版式和请求。同级平铺（卡片背景走通道、不能嵌套）。 */
 
-	void SceneHierarchy::DrawCameraPreviewCard(Entity entity, CameraComponent& component)
+	void SceneHierarchy::DrawCameraPreviewCard(CameraComponent& component)
 	{
 		PROFILE_FUNCTION();
 
@@ -3005,77 +3000,32 @@ namespace Helios
 
 		if (card.Open)
 		{
-			/* 画面宽度铺满卡片，高度按相机宽高比等比缩放，不做高度封顶（封顶会破坏比例）；
-			 * 窄高比相机画面较高时靠面板滚动与渲染尺寸上限保证可用 */
-			const float aspect = camera->GetAspectRatio();
-			const float avail_width = ImGui::GetContentRegionAvail().x;
-			float image_width = avail_width;
-			float image_height = (aspect > 0.0f) ? avail_width / aspect : avail_width;
-
-			/* 渲染尺寸按物理像素（macOS 上不糊，与场景视口同一笔账；Windows 上 ImGui 单位已是物理像素） */
-			const glm::uvec2 render_size = ClampRenderSize(image_width, image_height, ImGuiToPhysicalScale());
-
-			/* 窗口收起 / 停靠标签页被挡住（SkipItems）时不要画面：
-			 * 预览不该在看不见的地方空转（本帧不置请求，帧末结算即停） */
+			/* 窗口收起 / 停靠标签页被挡住（SkipItems）时不要画面：相机不该在看不见的地方空转 */
 			if (!ImGui::GetCurrentWindow()->SkipItems)
-			{
-				m_CameraPreviewWanted = true;
-				SyncCameraPreview(entity, camera, render_size);
-			}
+				m_pPreviewCamera = camera.get();
 
-			/* 本帧渲染的输出（场景渲染在 OnUpdate 里，先于 UI 帧；属性面板画的就是它）。
-			 * UV 不翻转：视图纹理的行序与场景视口一致（见 SceneEditorLayer 的视口贴图）。 */
-			const SharedPtr<DeviceTexture> texture = (m_pCameraPreview != nullptr)
-				? m_pCameraPreview->GetRenderView()->GetRenderTarget() : nullptr;
-			if (texture != nullptr)
+			/* 只认本帧真的渲染过的输出：相机关着时视图里留的是旧帧的纹理句柄。
+			 * 画面宽度铺满卡片，高度按输出纹理的宽高比（与运行时窗口一致）。 */
+			const RenderView* render_view = camera->GetRenderView();
+			const SharedPtr<DeviceTexture> texture = render_view->IsEnableRender()
+				? render_view->GetRenderTarget() : nullptr;
+			if (texture != nullptr && texture->GetWidth() > 0)
 			{
+				const float image_width = ImGui::GetContentRegionAvail().x;
+				const float image_height = image_width * static_cast<float>(texture->GetHeight())
+					/ static_cast<float>(texture->GetWidth());
 				ImGui::Image((ImTextureID)texture.get(), ImVec2(image_width, image_height),
 					ImVec2(0, 1), ImVec2(1, 0));
 			}
 			else
 			{
-				/* 还没有画面（首帧 / 无图形上下文）：占位说明，同帧起画面就绪 */
+				/* 还没有画面（刚开始预览的第一帧）：占位说明，下一帧起画面就绪 */
 				ImGuiExt::DrawCommonTextUI("Preview", "starting...");
 			}
 		}
 
 		PanelChrome::EndCard(card);
 		ImGui::PopID();
-	}
-
-	void SceneHierarchy::SyncCameraPreview(Entity entity, const SharedPtr<Camera>& camera,
-		const glm::uvec2& render_size)
-	{
-		PROFILE_FUNCTION();
-
-		if (m_pOwnerScene == nullptr || camera == nullptr)
-			return;
-
-		if (m_pCameraPreview == nullptr)
-			m_pCameraPreview = CreateUniquePtr<CameraPreview>();
-
-		/* 首次请求：登记为外部相机（此后每帧随场景相机一起被收集渲染） */
-		if (!m_IsCameraPreviewActive)
-		{
-			m_pOwnerScene->AddExternalCamera(m_pCameraPreview.get());
-			m_IsCameraPreviewActive = true;
-		}
-
-		m_pCameraPreview->SyncFrom(*camera, m_pOwnerScene->GetWorldTransform(entity),
-			render_size.x, render_size.y);
-	}
-
-	void SceneHierarchy::StopCameraPreview()
-	{
-		PROFILE_FUNCTION();
-
-		if (!m_IsCameraPreviewActive)
-			return;
-
-		if (m_pOwnerScene != nullptr && m_pCameraPreview != nullptr)
-			m_pOwnerScene->RemoveExternalCamera(m_pCameraPreview.get());
-
-		m_IsCameraPreviewActive = false;
 	}
 
 	/* ==================== 材质资产编辑卡（.mtl 的资源详情）====================
@@ -3514,7 +3464,7 @@ namespace Helios
 				DrawModelMaterialCards(m_SelectedEntity, *static_cast<ModelComponent*>(component));
 			}
 			else if (desc.Type == std::type_index(typeid(CameraComponent)))
-				DrawCameraPreviewCard(m_SelectedEntity, *static_cast<CameraComponent*>(component));
+				DrawCameraPreviewCard(*static_cast<CameraComponent*>(component));
 			ImGui::PopID();
 		}
 	}

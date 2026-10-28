@@ -223,14 +223,16 @@ namespace Helios
 
 	namespace
 	{
-		/* 场景级维护：推进探针烘焙状态机并挂接烘焙 Pass —— 与渲染管线选择无关，两种管线共用 */
+		/* 场景级维护：推进探针烘焙状态机并挂接烘焙 Pass —— 与渲染管线选择无关，两种管线共用。
+		 * 烘焙要用中性阴影图，渲染图里没建阴影 Pass 时只推进状态机。 */
 		void PrepareReflectionProbeBaking(RenderView& render_view, const SharedPtr<Scene>& scene)
 		{
 			auto probe_manager = scene->GetReflectionProbeManager();
 			if (probe_manager)
 			{
 				probe_manager->Prepare();
-				probe_manager->AddBakeReflectionProbePass(&render_view);
+				if (render_view.GetFrameGraph()->GetBlackboard().GetResourceHandle<FrameGraphTexture>("NoShadowMapHandle"))
+					probe_manager->AddBakeReflectionProbePass(&render_view);
 			}
 		}
 	}
@@ -268,14 +270,17 @@ namespace Helios
 				/* 前向：Probe 捕获使用无阴影图；ScenePass 有级联阴影时使用当前视图的阴影图。 */
 				AddShadowMapPasses();
 
-				/* ScenePass（渲染到默认目标） */
-				Forward::AddScenePass(this);
+				if (m_IsOutputToTexture)
+					Forward::AddScenePassToTexture(this);
+				else
+					Forward::AddScenePass(this);
 			}
-
-			/* 场景级维护：探针烘焙（推进状态机 + 挂接烘焙 Pass）—— 与管线选择无关，
-			 * 两支共用；挂在管线之后，烘焙结果从下一帧起被场景 / 光照采样 */
-			PrepareReflectionProbeBaking(*this, scene);
 		}
+
+		/* 探针烘焙挂在管线之后，结果从下一帧起被场景 / 光照采样；
+		 * 自己组织渲染图的相机（编辑器相机）也可能被选中来推进 */
+		if (m_IsBakeReflectionProbes && scene)
+			PrepareReflectionProbeBaking(*this, scene);
 
 		/* 生成当前FrameGraph */
 		m_pFrameGraph->Build();

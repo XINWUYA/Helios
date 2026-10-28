@@ -345,7 +345,8 @@ namespace Helios
 
 			auto* render_view = camera_component.m_Camera->GetRenderView();
 			render_view->SetOwnerScene(shared_from_this());
-			m_RenderViews.emplace_back(render_view);
+			if (render_view->IsEnableRender())
+				m_RenderViews.emplace_back(render_view);
 		}
 
 		/* 外部相机（编辑器视口 / 工具预览等）：登记后与场景相机一起收集，排在场景相机之后 */
@@ -356,7 +357,8 @@ namespace Helios
 
 			auto* render_view = external_camera->GetRenderView();
 			render_view->SetOwnerScene(shared_from_this());
-			m_RenderViews.emplace_back(render_view);
+			if (render_view->IsEnableRender())
+				m_RenderViews.emplace_back(render_view);
 		}
 
 		/* 按优先级进行排序，优先级大的先画 todo：不需要每帧排序 */
@@ -366,6 +368,16 @@ namespace Helios
 			if (!rht) return true;
 			return lft->GetPriority() > rht->GetPriority();
 			});
+
+		/* 探针烘焙每帧只推进一次：交给第一个有画面尺寸的视图，不管它是场景相机还是编辑器相机 */
+		bool bake_assigned = false;
+		for (RenderView* render_view : m_RenderViews)
+		{
+			const ViewportRegion& region = render_view->GetViewportRegion();
+			const bool bake = !bake_assigned && region.Width > 0 && region.Height > 0;
+			render_view->SetBakeReflectionProbes(bake);
+			bake_assigned = bake_assigned || bake;
+		}
 
 		/* 后处理解析（每帧一次）：场景里首个可见且总开关开启的「后处理对象」→ 逐效果采集设置进快照 →
 		 * 推给本帧各视图。搜索按实体 ID 升序取首个（确定性）；隐藏 / 总开关关闭 = 不参与（与探针 / 光源同源）。

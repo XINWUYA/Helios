@@ -9,7 +9,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "CameraPreview.h"
 #include "Command/AssetFileOps.h"
 #include "EditorIcons.h"
 #include "Command/CommandStack.h"
@@ -67,9 +66,9 @@ namespace Helios
 		 * （见 SetSelectedEntity）。传空（切目录 / Esc / 被删掉）则交回实体视图。 */
 		void SetAssetSelection(const std::vector<AssetSelectionEntry>& selection);
 
-		/* 相机预览是否在场景登记中（正在为属性面板渲染预览画面）。
-		 * 面板每帧按「选中了相机 + 预览卡展开 + 面板窗口可见」重新挣取，见 ShowEntityPropertiesUI。 */
-		[[nodiscard]] bool IsCameraPreviewActive() const { return m_IsCameraPreviewActive; }
+		/* 上一帧属性面板正在预览的场景相机（选中了相机 + 预览卡展开 + 面板可见，否则为空）。
+		 * 场景层据此打开这台相机的渲染，预览卡直接显示它自己的输出。 */
+		[[nodiscard]] const Camera* GetPreviewCamera() const { return m_pPreviewCamera; }
 
 		/* 最近一帧每张组件卡的矩形（按显示顺序）。自检 / 自动化验证用，业务代码别依赖。 */
 		struct CardRect
@@ -146,13 +145,9 @@ namespace Helios
 		void DrawOpenInModelEditorButton(const std::string& absolute_path);
 		/* 材质卡主体：当前材质的属性行（Shader + 参数，可就地编辑 → 自动实例化） */
 		bool DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index);
-		/* Camera 的预览卡：被选中相机视野的实时画面（编辑器侧工具预览相机渲染，
-		 * 见 CameraPreview.h）—— 与材质卡同一路数，平铺在组件卡之后（卡片不可嵌套）。 */
-		void DrawCameraPreviewCard(Entity entity, CameraComponent& component);
-		/* 同步一帧预览：首次请求时把预览相机登记为外部相机，此后每帧镜像来源相机参数 */
-		void SyncCameraPreview(Entity entity, const SharedPtr<Camera>& camera, const glm::uvec2& render_size);
-		/* 停止预览：摘除外部相机登记（预览画面不再参与场景渲染） */
-		void StopCameraPreview();
+		/* Camera 的预览卡：显示被选中场景相机自己渲染出的画面 ——
+		 * 与材质卡同一路数，平铺在组件卡之后（卡片不可嵌套）。 */
+		void DrawCameraPreviewCard(CameraComponent& component);
 		/* 组件自定义编辑的合并窗口封口（每帧调用；与 DrawEditableField 同一套事务规则） */
 		void ServiceComponentEditTransaction();
 		/* 顶栏：左端搜索框，右端「类型筛选 + 新建实体」两枚图标按钮（跟资源浏览器同一套版式）。
@@ -350,12 +345,8 @@ namespace Helios
 		AssetRevealFunc m_AssetRevealFunc;
 		/* 模型编辑器入口（Model 卡的按钮）；由上层注入，未注入时点击无动作 */
 		ModelEditorFunc m_ModelEditorFunc;
-		/* 相机预览：编辑器侧工具预览相机（懒创建 —— 没预览过相机的会话不付这份成本） */
-		UniquePtr<CameraPreview> m_pCameraPreview{ nullptr };
-		/* 预览相机已登记进场景（正在渲染预览画面） */
-		bool m_IsCameraPreviewActive{ false };
-		/* 本帧是否请求预览（帧首清零、预览卡置位、帧末结算起停；见 ShowEntityPropertiesUI） */
-		bool m_CameraPreviewWanted{ false };
+		/* 本帧预览卡要看的场景相机（帧首清零、预览卡画出来才置位） */
+		const Camera* m_pPreviewCamera{ nullptr };
 		/* 上一帧每张组件卡的矩形（自检用） */
 		std::vector<CardRect> m_LastCardRects;
 		/* 字段编辑的合并窗口是否已打开（连续拖动合并为一条历史） */

@@ -58,6 +58,18 @@ namespace Helios
 		void SetEnableFrustumCulling(bool enable) { m_IsEnableCulling = enable; }
 		[[nodiscard]] bool IsEnableFrustumCulling() const { return m_IsEnableCulling; }
 
+		/* 关掉后场景不再收集这个视图去渲染，相机矩阵照常更新（缺省开） */
+		void SetEnableRender(bool enable) { m_IsEnableRender = enable; }
+		[[nodiscard]] bool IsEnableRender() const { return m_IsEnableRender; }
+
+		/* 前向默认渲染图改画到视图纹理（缺省画到窗口）：编辑器里窗口被界面盖住，要靠纹理才看得到画面 */
+		void SetOutputToTexture(bool enable) { m_IsOutputToTexture = enable; }
+		[[nodiscard]] bool IsOutputToTexture() const { return m_IsOutputToTexture; }
+
+		/* 本帧由这个视图推进探针烘焙（场景每帧只挑一个视图，见 Scene::OnUpdate） */
+		void SetBakeReflectionProbes(bool enable) { m_IsBakeReflectionProbes = enable; }
+		[[nodiscard]] bool IsBakeReflectionProbes() const { return m_IsBakeReflectionProbes; }
+
 		/* 渲染管线（前向 / 延迟）：决定本视图的渲染图如何组织 —— 缺省的
 		 * UpdateFrameGraph 路径按它分派（自行组织渲染图的相机读它做同样分派）。
 		 * 缺省前向；相机上有同名转发（Camera::SetRenderPipeline）。 */
@@ -146,6 +158,12 @@ namespace Helios
 		ViewportRegion m_ViewportRegion{};
 		/* 是否启用视锥体剔除 */
 		bool m_IsEnableCulling{ true };
+		/* 是否参与场景渲染 */
+		bool m_IsEnableRender{ true };
+		/* 前向默认渲染图是否画到视图纹理 */
+		bool m_IsOutputToTexture{ false };
+		/* 本帧是否推进探针烘焙 */
+		bool m_IsBakeReflectionProbes{ false };
 		/* 渲染管线（前向 / 延迟） */
 		RenderPipeline m_RenderPipeline{ RenderPipeline::Forward };
 		/* 调试视图模式（Surface / Lighting / Analysis / Animation 分类） */

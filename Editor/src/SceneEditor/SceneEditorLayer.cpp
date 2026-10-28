@@ -202,7 +202,7 @@ namespace Helios
 		}
 	}
 
-	/* 场景相机渲染到窗口默认目标：视口区域 = 窗口画布（物理像素）。引擎样例由宿主设置（见
+	/* 场景相机的画面尺寸 = 窗口画布（物理像素），与运行时一致。引擎样例由宿主设置（见
 	 * Samples::SetViewportRegion）；不设置就恒为 0×0（ScenePass 空跑）。逐帧写，窗口缩放 / 换场景
 	 * 都会自动跟上。 */
 	void SceneEditorLayer::UpdateSceneCameraViewports()
@@ -228,6 +228,34 @@ namespace Helios
 				camera_component.m_Camera->GetRenderView()->SetViewportRegion(
 					{ 0, 0, width, height });
 			}
+		}
+	}
+
+	void SceneEditorLayer::UpdateSceneCameraRendering()
+	{
+		PROFILE_FUNCTION();
+
+		if (!m_pMainScene)
+			return;
+
+		/* 运行模式照常渲染，统计面板能看到游戏相机的真实开销 */
+		const bool runtime = (m_PlayMode == PlayMode::Runtime);
+		const FrameGraph* viewed_graph = m_FrameGraphPanel.GetViewedGraph();
+		const Camera* preview_camera = m_SceneHierarchy.GetPreviewCamera();
+
+		entt::registry& registry = m_pMainScene->GetRegistry();
+		const auto camera_view = registry.view<CameraComponent>();
+		for (auto entity : camera_view)
+		{
+			const auto& camera_component = camera_view.get<CameraComponent>(entity);
+			if (camera_component.m_Camera == nullptr)
+				continue;
+
+			RenderView* render_view = camera_component.m_Camera->GetRenderView();
+			const bool viewed = render_view->GetFrameGraph().get() == viewed_graph
+				|| camera_component.m_Camera.get() == preview_camera;
+			render_view->SetEnableRender(runtime || viewed);
+			render_view->SetOutputToTexture(true);
 		}
 	}
 
@@ -1412,6 +1440,7 @@ namespace Helios
 
 		UpdateViewport();
 		UpdateSceneCameraViewports();
+		UpdateSceneCameraRendering();
 
 		/* 相机列表与面板 UI 同源：即使本帧不渲染（视口为 0）也刷新，面板不读过期条目 */
 		CollectCameraEntries();

@@ -125,10 +125,13 @@ namespace Helios
 		void MarkSceneSaved();
 		/* 更新视口 */
 		void UpdateViewport();
-		/* 场景相机（游戏相机）渲染到窗口默认目标：视口区域 = 窗口画布（物理像素）。
+		/* 场景相机（游戏相机）的画面尺寸 = 窗口画布（物理像素）。
 		 * 引擎样例由宿主设置这一尺寸；不设则区域恒为 {0,0,0,0}、ScenePass
 		 * 以 0×0 视口空跑（FrameGraph 页"空车道"的根因之一） */
 		void UpdateSceneCameraViewports();
+		/* 场景相机的窗口画面被编辑器界面盖住：一律画到纹理，编辑模式下只在
+		 * Frame Graph 面板或属性面板预览正看着它时才渲染 */
+		void UpdateSceneCameraRendering();
 		/* 收集本帧可视化可选的相机（编辑器相机在前、场景相机随后）：
 		 * OnUpdate（抓取目标落位）与 OnImGuiRender（面板列表）共用同一份 */
 		void CollectCameraEntries();
