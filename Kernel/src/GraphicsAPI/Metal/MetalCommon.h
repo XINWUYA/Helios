@@ -72,6 +72,9 @@ namespace Helios
         /* 设备是否可用 */
         bool IsAvailable();
 
+        /* 是否支持 Memoryless 纹理（Apple GPU 才有）：只在通道内用的附件可以不占显存 */
+        bool SupportsMemoryless();
+
         /* 当前帧序号（0 .. MaxFramesInFlight-1）。按帧切片的资源据此选取切片，
          * 由 RenderAPI 在每帧结束时推进。 */
         uint32_t FrameIndex();
@@ -105,6 +108,11 @@ namespace Helios
         if (encoder != nullptr && !label.empty())
             encoder->setLabel(NS::String::string(label.c_str(), NS::UTF8StringEncoding));
     }
+
+    /* 私有存储的纹理 CPU 碰不到，上传 / 回读都经共享缓冲用 blit 中转，
+     * 单独提交并等执行完，调用方拿到的就是同步语义 */
+    bool MetalCopyViaStaging(MTL::Texture* texture, bool upload, void* data, uint32_t slice, uint32_t level,
+        const MTL::Origin& origin, const MTL::Size& size, NS::UInteger bytes_per_row, NS::UInteger bytes_per_image);
 
     /* Metal 错误检查宏：记录错误并通过断言在调试期立即暴露问题 */
     #define METAL_CHECK_ERROR(result, msg) \

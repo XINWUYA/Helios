@@ -194,6 +194,14 @@ namespace Helios
         const NS::UInteger bytes_per_row = region_width * bytes_per_pixel;
         const NS::UInteger bytes_per_image = bytes_per_row * region_height;
 
+        if (m_Texture->storageMode() == MTL::StorageModePrivate)
+        {
+            if (!MetalCopyViaStaging(m_Texture, true, data, is_3d ? 0 : offset_z, level, region.origin, region.size,
+                bytes_per_row, bytes_per_image))
+                CORE_LOG_ERROR("MetalTexture::SetData: staging upload failed for '{}'", m_DebugName);
+            return;
+        }
+
         if (is_3d)
         {
             /* 3D 纹理：一次可覆盖多个切片，需要提供 slice 间距 */
@@ -230,13 +238,6 @@ namespace Helios
         if (bytes_per_pixel == 0)
         {
             CORE_LOG_ERROR("MetalTexture::ReadbackPixels: format of '{}' has no fixed texel size", m_DebugName);
-            return false;
-        }
-
-        /* 私有存储的纹理 CPU 不可直接访问，需要先 blit 到可读纹理 */
-        if (m_Texture->storageMode() == MTL::StorageModePrivate)
-        {
-            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: '{}' uses private storage", m_DebugName);
             return false;
         }
 
@@ -279,7 +280,8 @@ namespace Helios
 
         out_data.resize(static_cast<size_t>(bytes_per_image));
 
-        if (!slice_addressed)
+        /* 共享存储且不按切片寻址的直接读；私有存储（渲染目标）和立方图 / 数组走 blit 中转 */
+        if (!slice_addressed && m_Texture->storageMode() != MTL::StorageModePrivate)
         {
             MTL::Region region;
             region.origin.x = 0;
@@ -293,44 +295,14 @@ namespace Helios
             return true;
         }
 
-        /* 切片回读经共享缓冲中转：blit 提交并等待执行结束后内容才可用 */
-        MTL::Device* device = MetalRuntime::Device();
-        MTL::CommandQueue* queue = MetalRuntime::Queue();
-        if (device == nullptr || queue == nullptr)
+        const bool is_3d = texture_type == MTL::TextureType3D;
+        if (!MetalCopyViaStaging(m_Texture, false, out_data.data(), is_3d ? 0 : read_slice, mip_level,
+            MTL::Origin(0, 0, is_3d ? read_slice : 0), MTL::Size(level_width, level_height, 1),
+            bytes_per_row, bytes_per_image))
         {
-            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: Metal device / command queue unavailable");
+            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: staging readback failed for '{}'", m_DebugName);
             return false;
         }
-
-        MTL::Buffer* staging_buffer = device->newBuffer(bytes_per_image, MTL::ResourceStorageModeShared);
-        if (staging_buffer == nullptr)
-        {
-            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: failed to allocate {} byte staging buffer",
-                bytes_per_image);
-            return false;
-        }
-
-        MTL::CommandBuffer* command_buffer = queue->commandBuffer();
-        MTL::BlitCommandEncoder* blit_encoder = command_buffer ? command_buffer->blitCommandEncoder() : nullptr;
-        if (blit_encoder == nullptr)
-        {
-            staging_buffer->release();
-            CORE_LOG_ERROR("MetalTexture::ReadbackPixels: failed to create blit encoder");
-            return false;
-        }
-
-        SetMetalEncoderLabel(blit_encoder, "ReadbackPixels");
-
-        blit_encoder->copyFromTexture(m_Texture, read_slice, mip_level,
-            MTL::Origin(0, 0, 0), MTL::Size(level_width, level_height, 1),
-            staging_buffer, 0, bytes_per_row, bytes_per_image);
-        blit_encoder->endEncoding();
-        /* 编码器与命令缓冲区由 Metal 自动释放池管理，此处不手动 release */
-        command_buffer->commit();
-        command_buffer->waitUntilCompleted();
-
-        std::memcpy(out_data.data(), staging_buffer->contents(), bytes_per_image);
-        staging_buffer->release();
         return true;
     }
 
@@ -396,8 +368,6 @@ namespace Helios
         texture_desc->setWidth(width);
         texture_desc->setHeight(height);
         texture_desc->setMipmapLevelCount(mip_levels);
-        /* MetalStorage::TextureOptions 同时限定了存储模式，此处取其存储模式部分 */
-        texture_desc->setStorageMode(static_cast<MTL::StorageMode>(MetalStorage::TextureOptions));
 
         if (multisample)
             texture_desc->setSampleCount(samples);
@@ -430,6 +400,13 @@ namespace Helios
             usage |= MTL::TextureUsageRenderTarget;
         }
         texture_desc->setUsage(usage);
+
+        /* 渲染目标用私有存储：Apple GPU 只给私有纹理做无损压缩，带宽省一截；
+         * 普通贴图保持共享存储，CPU 上传直接 replaceRegion */
+        const bool render_target = (usage & MTL::TextureUsageRenderTarget) != 0;
+        texture_desc->setStorageMode(render_target || multisample
+            ? MTL::StorageModePrivate
+            : static_cast<MTL::StorageMode>(MetalStorage::TextureOptions));
 
         m_Texture = device->newTexture(texture_desc);
         texture_desc->release();

@@ -115,34 +115,29 @@ namespace Helios
 			desc.ColorClearValues = render_pass_data->Descriptor.ColorClearValues;
 			desc.PreserveContent = render_pass_data->Descriptor.PreserveContent;
 
-			/* 准备Color Attachments */
+			/* 深度 / 模板只在图内用：本 Pass 是最后一个用它的、又没导出也没在抓取，画完就不必写回。
+			 * 颜色附件会被拾取、视图输出等在帧外按 Pass 读，一律写回 */
+			const bool may_discard = m_RenderPassDatas.size() == 1 && !m_OwnerFrameGraph.GetCapture().IsEnabled();
+			const auto to_render_buffer = [&](FrameGraphResourceHandle handle, bool depth_or_stencil)
+			{
+				const auto resource = m_OwnerFrameGraph.GetResource(handle);
+				const auto fg_texture = StaticPtrCast<const Resource<FrameGraphTexture>>(resource);
+				const bool discard = depth_or_stencil && may_discard && !resource->IsExported()
+					&& resource->GetLastPassNode().get() == this;
+				return RenderBufferInfo{ fg_texture->GetResource().Texture, fg_texture->GetSubDescriptor().Level,
+					fg_texture->GetSubDescriptor().Layer, discard };
+			};
+
 			desc.ColorRenderBuffers.reserve(MAX_COLOR_ATTACHMENT_NUM);
 			for (uint32_t i = 0; i < MAX_COLOR_ATTACHMENT_NUM; ++i)
 			{
 				if (render_pass_data->ValidAttachments[i])
-				{
-					const auto fg_texture = StaticPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[i]));
-					desc.ColorRenderBuffers.push_back({ fg_texture->GetResource().Texture, fg_texture->GetSubDescriptor().Level, fg_texture->GetSubDescriptor().Layer });
-				}
+					desc.ColorRenderBuffers.push_back(to_render_buffer(render_pass_data->ValidAttachments[i], false));
 			}
-
-			/* 准备Depth Attachment */
-			if (render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM])
-			{
-				const auto fg_texture = StaticPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM]));
-				desc.DepthRenderBuffer.RenderTarget = fg_texture->GetResource().Texture;
-				desc.DepthRenderBuffer.Level = fg_texture->GetSubDescriptor().Level;
-				desc.DepthRenderBuffer.Layer = fg_texture->GetSubDescriptor().Layer;
-			}
-
-			/* 准备Stencil Attachment */
-			if (render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM + 1])
-			{
-				const auto fg_texture = StaticPtrCast<const Resource<FrameGraphTexture>>(m_OwnerFrameGraph.GetResource(render_pass_data->ValidAttachments[MAX_COLOR_ATTACHMENT_NUM + 1]));
-				desc.StencilRenderBuffer.RenderTarget = fg_texture->GetResource().Texture;
-				desc.StencilRenderBuffer.Level = fg_texture->GetSubDescriptor().Level;
-				desc.StencilRenderBuffer.Layer = fg_texture->GetSubDescriptor().Layer;
-			}
+			if (render_pass_data->ValidAttachments[FrameGraphPassInfo::DEPTH_ATTACHMENT_IDX])
+				desc.DepthRenderBuffer = to_render_buffer(render_pass_data->ValidAttachments[FrameGraphPassInfo::DEPTH_ATTACHMENT_IDX], true);
+			if (render_pass_data->ValidAttachments[FrameGraphPassInfo::STENCIL_ATTACHMENT_IDX])
+				desc.StencilRenderBuffer = to_render_buffer(render_pass_data->ValidAttachments[FrameGraphPassInfo::STENCIL_ATTACHMENT_IDX], true);
 
 			/* 没有附件的 Pass（如 SideEffect Pass）直接渲染到默认 RT，不需要创建 FrameBuffer */
 			if (render_pass_data->RenderBufferUsage == RenderBufferUsage::None)

@@ -162,7 +162,7 @@ namespace Helios
 	{
 		const auto same_render_buffer = [](const RenderBufferInfo& a, const RenderBufferInfo& b)
 		{
-			return a.RenderTarget == b.RenderTarget && a.Level == b.Level && a.Layer == b.Layer;
+			return a.RenderTarget == b.RenderTarget && a.Level == b.Level && a.Layer == b.Layer && a.Discard == b.Discard;
 		};
 
 		if (lhs.Samples != rhs.Samples

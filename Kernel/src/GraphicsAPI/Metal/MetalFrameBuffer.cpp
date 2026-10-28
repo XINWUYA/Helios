@@ -166,17 +166,19 @@ namespace Helios
             return;
         }
 
-        if (texture->storageMode() == MTL::StorageModePrivate)
-        {
-            CORE_LOG_ERROR("MetalFrameBuffer::ReadPixel: attachment {} uses private storage",
-                attachment_index);
-            return;
-        }
-
         const uint32_t bytes_per_pixel = GetPixelDescBytesPerPixel(pixel_desc);
         if (bytes_per_pixel == 0)
         {
             CORE_LOG_ERROR("MetalFrameBuffer::ReadPixel: unsupported pixel desc");
+            return;
+        }
+
+        /* 渲染目标是私有存储，经共享缓冲中转读这一个像素 */
+        if (texture->storageMode() == MTL::StorageModePrivate)
+        {
+            if (!MetalCopyViaStaging(texture, false, data, 0, 0, MTL::Origin(x, y, 0), MTL::Size(1, 1, 1),
+                bytes_per_pixel, bytes_per_pixel))
+                CORE_LOG_ERROR("MetalFrameBuffer::ReadPixel: staging readback failed on attachment {}", attachment_index);
             return;
         }
 
@@ -298,7 +300,7 @@ namespace Helios
         return texture;
     }
 
-    MTL::Texture* MetalFrameBuffer::CreateAttachmentTexture(const TextureDesc& desc, uint32_t samples)
+    MTL::Texture* MetalFrameBuffer::CreateAttachmentTexture(const TextureDesc& desc, uint32_t samples, bool memoryless)
     {
         MTL::Device* device = MetalRuntime::Device();
         if (!device)
@@ -333,14 +335,12 @@ namespace Helios
             texture_desc->setArrayLength(std::max(1u, desc.Depth));
 
         if (samples > 1)
-        {
             texture_desc->setSampleCount(samples);
-        }
-        else
-        {
-            /* 单采样附件保持 CPU 可读，便于 ReadPixel 与截图；多重采样附件无法回读 */
-            texture_desc->setStorageMode(static_cast<MTL::StorageMode>(MetalStorage::TextureOptions));
-        }
+
+        /* 只在通道内用的附件（多重采样临时附件、自带深度）不落显存；其余用私有存储拿压缩 */
+        texture_desc->setStorageMode(memoryless && MetalRuntime::SupportsMemoryless()
+            ? MTL::StorageModeMemoryless
+            : MTL::StorageModePrivate);
 
         MTL::Texture* texture = device->newTexture(texture_desc);
         texture_desc->release();
@@ -352,6 +352,8 @@ namespace Helios
         const uint32_t width = m_FrameBufferDesc.ViewportRegion.Width;
         const uint32_t height = m_FrameBufferDesc.ViewportRegion.Height;
         const uint32_t samples = std::max(1u, m_FrameBufferDesc.Samples);
+        /* 叠加 Pass 要读回上一趟的内容，临时附件就不能是 Memoryless */
+        const bool transient = !m_FrameBufferDesc.PreserveContent;
 
         /* 颜色附件：优先复用 RenderTarget；当要求 MSAA 而目标是单采样纹理时，
          * 额外创建多重采样附件用于绘制，并在通道结束时解析回目标纹理。 */
@@ -369,7 +371,7 @@ namespace Helios
                 attachment_desc.Depth = render_buffer.RenderTarget->GetTextureDesc().Depth;
                 attachment_desc.Samples = samples;
 
-                MTL::Texture* multisample = CreateAttachmentTexture(attachment_desc, samples);
+                MTL::Texture* multisample = CreateAttachmentTexture(attachment_desc, samples, transient);
                 if (multisample)
                 {
                     m_ColorAttachments.push_back(multisample);
@@ -397,7 +399,7 @@ namespace Helios
             attachment_desc.SamplerType = SamplerType::Sampler2D;
             attachment_desc.Samples = samples;
 
-            MTL::Texture* created = CreateAttachmentTexture(attachment_desc, samples);
+            MTL::Texture* created = CreateAttachmentTexture(attachment_desc, samples, false);
             m_ColorAttachments.push_back(created);
             m_ColorResolveTextures.push_back(nullptr);
         }
@@ -420,7 +422,7 @@ namespace Helios
             attachment_desc.Depth = m_FrameBufferDesc.DepthRenderBuffer.RenderTarget->GetTextureDesc().Depth;
             attachment_desc.Samples = samples;
 
-            m_DepthAttachment = CreateAttachmentTexture(attachment_desc, samples);
+            m_DepthAttachment = CreateAttachmentTexture(attachment_desc, samples, transient);
             if (m_DepthAttachment)
                 m_DepthResolveTexture = depth_target;
             else
@@ -439,7 +441,8 @@ namespace Helios
             attachment_desc.Format = TextureFormat::Depth24Stencil8;
             attachment_desc.SamplerType = SamplerType::Sampler2D;
             attachment_desc.Samples = samples;
-            m_DepthAttachment = CreateAttachmentTexture(attachment_desc, samples);
+            m_DepthAttachment = CreateAttachmentTexture(attachment_desc, samples, true);
+            m_OwnsDepthAttachment = true;
         }
 
         /* 模板附件：优先使用独立的 StencilRenderBuffer；
@@ -498,15 +501,22 @@ namespace Helios
             }
             else
             {
-                attachment->setStoreAction(MTL::StoreActionStore);
+                const bool discard = i < m_FrameBufferDesc.ColorRenderBuffers.size()
+                    && m_FrameBufferDesc.ColorRenderBuffers[i].Discard;
+                attachment->setStoreAction(discard ? MTL::StoreActionDontCare : MTL::StoreActionStore);
             }
         }
+
+        /* 自带的深度外面写不进也读不到：每趟清空、不写回；
+         * 渲染图给的深度按它判定的最后一次使用决定要不要写回 */
+        const bool discard_depth = m_OwnsDepthAttachment || m_FrameBufferDesc.DepthRenderBuffer.Discard;
+        const MTL::LoadAction depth_load_action = m_OwnsDepthAttachment ? MTL::LoadActionClear : load_action;
 
         if (m_DepthAttachment)
         {
             auto* attachment = m_RenderPassDescriptor->depthAttachment();
             attachment->setTexture(m_DepthAttachment);
-            attachment->setLoadAction(load_action);
+            attachment->setLoadAction(depth_load_action);
             /* Reversed-Z：远平面深度为 0，清零取 0 */
             attachment->setClearDepth(0.0);
 
@@ -517,16 +527,19 @@ namespace Helios
             }
             else
             {
-                attachment->setStoreAction(MTL::StoreActionStore);
+                attachment->setStoreAction(discard_depth ? MTL::StoreActionDontCare : MTL::StoreActionStore);
             }
         }
 
         if (m_StencilAttachment)
         {
+            /* 模板和深度共用一张时跟着深度走 */
+            const bool discard_stencil = m_StencilAttachment == m_DepthAttachment
+                ? discard_depth : m_FrameBufferDesc.StencilRenderBuffer.Discard;
             auto* attachment = m_RenderPassDescriptor->stencilAttachment();
             attachment->setTexture(m_StencilAttachment);
-            attachment->setLoadAction(load_action);
-            attachment->setStoreAction(MTL::StoreActionStore);
+            attachment->setLoadAction(m_StencilAttachment == m_DepthAttachment ? depth_load_action : load_action);
+            attachment->setStoreAction(discard_stencil ? MTL::StoreActionDontCare : MTL::StoreActionStore);
             attachment->setClearStencil(0);
         }
     }
@@ -558,6 +571,7 @@ namespace Helios
             m_DepthAttachment->release();
             m_DepthAttachment = nullptr;
         }
+        m_OwnsDepthAttachment = false;
 
         if (m_StencilAttachment)
         {

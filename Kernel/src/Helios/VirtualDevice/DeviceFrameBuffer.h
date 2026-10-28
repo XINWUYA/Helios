@@ -13,6 +13,7 @@ namespace Helios
 		SharedPtr<DeviceTexture> RenderTarget{ nullptr };	/* 经CreateTexture创建的RenderBuffer */
 		uint16_t Level{ 0 };								/* Mip level */
 		uint16_t Layer{ 0 };								/* CubeMap's face or 3DTexture's slice */
+		bool Discard{ false };								/* 本趟画完就没人再读：通道结束不必写回显存 */
 	};
 
 	/* 绑定目标附件类型：指明层绑定模式下要定位到哪个附件。 */

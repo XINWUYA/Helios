@@ -162,6 +162,11 @@ namespace Helios
             return g_Device != nullptr;
         }
 
+        bool SupportsMemoryless()
+        {
+            return g_Device != nullptr && g_Device->supportsFamily(MTL::GPUFamilyApple1);
+        }
+
         uint32_t FrameIndex()
         {
             return g_FrameIndex;
@@ -243,6 +248,44 @@ namespace Helios
             if (g_PipelineArchiveDirty)
                 WritePipelineArchive();
         }
+    }
+
+    bool MetalCopyViaStaging(MTL::Texture* texture, bool upload, void* data, uint32_t slice, uint32_t level,
+        const MTL::Origin& origin, const MTL::Size& size, NS::UInteger bytes_per_row, NS::UInteger bytes_per_image)
+    {
+        MTL::Device* device = MetalRuntime::Device();
+        MTL::CommandQueue* queue = MetalRuntime::Queue();
+        if (device == nullptr || queue == nullptr)
+            return false;
+
+        const NS::UInteger total_bytes = bytes_per_image * std::max<NS::UInteger>(1, size.depth);
+        MTL::Buffer* staging_buffer = upload
+            ? device->newBuffer(data, total_bytes, MTL::ResourceStorageModeShared)
+            : device->newBuffer(total_bytes, MTL::ResourceStorageModeShared);
+        if (staging_buffer == nullptr)
+            return false;
+
+        MTL::CommandBuffer* command_buffer = queue->commandBuffer();
+        MTL::BlitCommandEncoder* blit_encoder = command_buffer ? command_buffer->blitCommandEncoder() : nullptr;
+        if (blit_encoder == nullptr)
+        {
+            staging_buffer->release();
+            return false;
+        }
+
+        SetMetalEncoderLabel(blit_encoder, upload ? "UploadPixels" : "ReadbackPixels");
+        if (upload)
+            blit_encoder->copyFromBuffer(staging_buffer, 0, bytes_per_row, bytes_per_image, size, texture, slice, level, origin);
+        else
+            blit_encoder->copyFromTexture(texture, slice, level, origin, size, staging_buffer, 0, bytes_per_row, bytes_per_image);
+        blit_encoder->endEncoding();
+        command_buffer->commit();
+        command_buffer->waitUntilCompleted();
+
+        if (!upload)
+            std::memcpy(data, staging_buffer->contents(), total_bytes);
+        staging_buffer->release();
+        return true;
     }
 }
 

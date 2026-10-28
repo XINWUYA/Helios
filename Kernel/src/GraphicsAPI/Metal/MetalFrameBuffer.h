@@ -42,8 +42,8 @@ namespace Helios
         /* 取出 RenderTarget 对应的 MTL::Texture（已 retain）；不存在时返回空 */
         MTL::Texture* AcquireRenderTargetTexture(const RenderBufferInfo& render_buffer);
 
-        /* 创建（可能为多重采样的）附件纹理，并按需登记解析目标 */
-        MTL::Texture* CreateAttachmentTexture(const TextureDesc& desc, uint32_t samples);
+        /* 创建（可能为多重采样的）附件纹理；memoryless = 只在通道内用、不落显存 */
+        MTL::Texture* CreateAttachmentTexture(const TextureDesc& desc, uint32_t samples, bool memoryless);
 
         MTL::RenderPassDescriptor* m_RenderPassDescriptor{ nullptr };
 
@@ -52,6 +52,8 @@ namespace Helios
         std::vector<MTL::Texture*> m_ColorAttachments;
         MTL::Texture* m_DepthAttachment{ nullptr };
         MTL::Texture* m_StencilAttachment{ nullptr };
+        /* 深度是本类自己补的（描述里没给），外面读不到 */
+        bool m_OwnsDepthAttachment{ false };
 
         /* MSAA 解析目标：绘制发生在多重采样附件上，通道结束时解析到这些单采样纹理 */
         std::vector<MTL::Texture*> m_ColorResolveTextures;
