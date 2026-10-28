@@ -662,32 +662,33 @@ namespace Helios
 		m_TreeRows.clear();
 		m_HasOpenBranch = false;
 
-		/* 层级关系每帧现算：子节点列表不作为第二份数据缓存 */
-		EntityChildren children;
-		std::vector<Entity> roots;
-		BuildHierarchy(children, roots);
-
-		/* 过滤时先算出"要显示的实体"：名字与类型都命中的 + 它们的全部祖先 */
-		FilterSet visible;
-		const FilterSet* filter = nullptr;
-		if (HasActiveFilter())
-		{
-			CollectFilteredEntities(visible);
-			filter = &visible;
-		}
-
-		const int total_count = (m_pOwnerScene != nullptr)
-			? static_cast<int>(m_pOwnerScene->GetRegistry().size()) : 0;
-		const int shown_count = (filter != nullptr) ? static_cast<int>(visible.size()) : total_count;
-
 		/* 一个面板 = 顶栏（搜索 + 类型筛选 + 新建）+ 实体树（子窗口，自己滚）+ 底栏（实体计数）。
 		 * 面板本身不带上下内边距：顶栏贴面板上边、底栏贴下边（栏高由栏自己说了算）；
 		 * 左右内边距保留，顶栏控件与树的每一行对得上同一条竖线。 */
 		const ImVec2 pane_padding = ImGui::GetStyle().WindowPadding;
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pane_padding.x, 0.0f));
 
-		ImGui::Begin(Panel::kSceneHierarchy);
+		/* 被别的页签挡住或折叠时不建树也不画 */
+		if (ImGui::Begin(Panel::kSceneHierarchy))
 		{
+			/* 层级关系每帧现算：子节点列表不作为第二份数据缓存 */
+			EntityChildren children;
+			std::vector<Entity> roots;
+			BuildHierarchy(children, roots);
+
+			/* 过滤时先算出"要显示的实体"：名字与类型都命中的 + 它们的全部祖先 */
+			FilterSet visible;
+			const FilterSet* filter = nullptr;
+			if (HasActiveFilter())
+			{
+				CollectFilteredEntities(visible);
+				filter = &visible;
+			}
+
+			const int total_count = (m_pOwnerScene != nullptr)
+				? static_cast<int>(m_pOwnerScene->GetRegistry().size()) : 0;
+			const int shown_count = (filter != nullptr) ? static_cast<int>(visible.size()) : total_count;
+
 			/* 弹层 ID 在面板根作用域上算一次：按钮（开）与菜单（画）的作用域必须一致，
 			 * 两边才按同一个 ID 对接。 */
 			m_PopupNewEntity = ImGui::GetID("##NewEntityMenu");
@@ -1612,17 +1613,18 @@ namespace Helios
 		 * 帧末结算 —— 换选中、切资源视图、收起卡片都会让预览自然停掉（见 DrawCameraPreviewCard） */
 		m_CameraPreviewWanted = false;
 
+		/* 句柄非空 ≠ 实体存在（见 Entity::operator bool 的约定）：选中项可能来自
+		 * 撤销后的残留或失效的拾取句柄。组件 GetPtr 对不存在的实体是断言而不是
+		 * 返回空指针，所以这里先兜一道。 */
+		if (m_SelectedEntity && (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(m_SelectedEntity)))
+			m_SelectedEntity = {};
+
 		/* 常驻竖向滚动条（AlwaysVerticalScrollbar）：滚动条出现会抽走右侧约 10px，内容若按
 		 * "还没滚动条"的旧宽度排过一帧（换选中、展开卡片、拖分栏都会触发），
-		 * 面板就能横向滑一下。常驻 = 宽度恒定预留，属性面板永远不能左右滑。 */
-		ImGui::Begin(Panel::kProperties, nullptr, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+		 * 面板就能横向滑一下。常驻 = 宽度恒定预留，属性面板永远不能左右滑。
+		 * 被别的页签挡住或折叠时不画，相机预览也随之停掉。 */
+		if (ImGui::Begin(Panel::kProperties, nullptr, ImGuiWindowFlags_AlwaysVerticalScrollbar))
 		{
-			/* 句柄非空 ≠ 实体存在（见 Entity::operator bool 的约定）：选中项可能来自
-			 * 撤销后的残留或失效的拾取句柄。组件 GetPtr 对不存在的实体是断言而不是
-			 * 返回空指针，所以这里先兜一道。 */
-			if (m_SelectedEntity && (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(m_SelectedEntity)))
-				m_SelectedEntity = {};
-
 			if (m_AssetFocus && !m_AssetSelection.empty())
 			{
 				ShowAssetProperties();

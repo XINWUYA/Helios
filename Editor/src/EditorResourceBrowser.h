@@ -414,9 +414,12 @@ namespace Helios
 		char m_Filter[64]{};
 		/* 按类型筛选（工具行下拉） */
 		TypeFilter m_TypeFilter{ TypeFilter::All };
-		/* 本帧的过滤结果：小写化的过滤词 + 通过过滤的节点（命中项 + 它们的全部祖先）。
-		 * 每帧现算一次，不留第二份"是否显示"的缓存。 */
+		/* 过滤结果：小写化的过滤词、自身命中的节点、通过过滤的节点（命中项 + 它们的全部祖先）。
+		 * 只在过滤词变了或目录树重建后重算（m_FilterText 记上次算时的原文）。 */
 		std::string m_FilterNeedle;
+		std::string m_FilterText;
+		bool m_FilterDirty{ true };
+		std::unordered_set<const FileNode*> m_MatchedNodes;
 		std::unordered_set<const FileNode*> m_VisibleNodes;
 		void FillBrowserFilter();
 

@@ -269,6 +269,14 @@ namespace Helios
 			ImGui::Dummy(ImVec2(width, ImMax(line_height, lines.size() * line_height)));
 		}
 
+		/* 不进资源树的目录项：点开头的（.DS_Store、.git、.helios 等）和项目根下的 Cache（编译与导入产物）。
+		 * relative_path 是相对项目根的路径，建树和目录比对共用这一条规则。 */
+		bool IsHiddenAssetEntry(const std::filesystem::path& relative_path)
+		{
+			const std::string name = PathToUtf8(relative_path.filename());
+			return name.empty() || name.front() == '.' || relative_path == std::filesystem::path("Cache");
+		}
+
 		/* 统计资源目录（含根目录）的目录数量与最新写入时间。
 		 * 新增 / 删除文件会更新其所在目录的时间戳，因此只需读目录，不必 stat 每个文件。 */
 		void CollectDirectoryStamp(size_t& out_count, std::filesystem::file_time_type& out_newest)
@@ -279,12 +287,21 @@ namespace Helios
 			out_count = 1;
 			out_newest = std::filesystem::last_write_time(g_ProjectPath, error);
 
-			for (const auto& entry : std::filesystem::recursive_directory_iterator(
-				g_ProjectPath, std::filesystem::directory_options::skip_permission_denied))
+			for (std::filesystem::recursive_directory_iterator iter(g_ProjectPath,
+					std::filesystem::directory_options::skip_permission_denied, error), end;
+				!error && iter != end; iter.increment(error))
 			{
+				const std::filesystem::directory_entry& entry = *iter;
 				std::error_code entry_error;
 				if (!entry.is_directory(entry_error))
 					continue;
+
+				/* 不在树里的目录也不比对：脚本和 shader 编译写 Cache 不该让整棵树重建 */
+				if (IsHiddenAssetEntry(entry.path().lexically_relative(g_ProjectPath)))
+				{
+					iter.disable_recursion_pending();
+					continue;
+				}
 
 				++out_count;
 
@@ -414,8 +431,7 @@ namespace Helios
 
 	bool EditorResourceBrowser::PassesContentFilter(const FileNode& node) const
 	{
-		return MatchesTypeFilter(m_TypeFilter, node.Type)
-			&& ContainsCaseInsensitive(node.FilePath.c_str(), m_FilterNeedle);
+		return MatchesTypeFilter(m_TypeFilter, node.Type) && m_MatchedNodes.count(&node) != 0;
 	}
 
 	SharedPtr<DeviceTexture> EditorResourceBrowser::ThumbnailOf(FileNode& node)
@@ -463,14 +479,21 @@ namespace Helios
 		return node.ParentNode.expired() ? ProjectRootName() : node.FileName;
 	}
 
-	/* 本帧的过滤结果：自底向上一次遍历，命中的节点与它们的祖先都算可见
+	/* 过滤结果：自底向上一次遍历，命中的节点与它们的祖先都算可见
 	 * （祖先不留下的话，命中的文件会挂在看不见的目录里）。
 	 * 过滤词为空时全部命中 —— 于是「不显示」只有"不在集合里"这一条判据。 */
 	void EditorResourceBrowser::FillBrowserFilter()
 	{
 		PROFILE_FUNCTION();
 
+		/* 过滤词和目录树都没变就沿用上次的结果 */
+		if (!m_FilterDirty && m_FilterText == m_Filter)
+			return;
+
+		m_FilterDirty = false;
+		m_FilterText = m_Filter;
 		m_FilterNeedle = ToLowercase(m_Filter);
+		m_MatchedNodes.clear();
 		m_VisibleNodes.clear();
 
 		std::function<bool(const SharedPtr<FileNode>&)> visit = [&](const SharedPtr<FileNode>& node) -> bool
@@ -478,7 +501,11 @@ namespace Helios
 			if (node == nullptr)
 				return false;
 
-			bool visible = ContainsCaseInsensitive(node->FilePath.c_str(), m_FilterNeedle);
+			const bool matched = ContainsCaseInsensitive(node->FilePath.c_str(), m_FilterNeedle);
+			if (matched)
+				m_MatchedNodes.insert(node.get());
+
+			bool visible = matched;
 			for (const auto& child : node->ChildNodes)
 				visible = visit(child) || visible; /* 注意顺序：先把孩子算完 */
 
@@ -553,6 +580,7 @@ namespace Helios
 			m_RootFileNodeTree = CreateSharedPtr<FileNode>(PathToUtf8(g_ProjectPath), "", FileType::Folder, 0, -1);
 			BuildFileNodeTree(m_RootFileNodeTree);
 			UpdateDirectoryStamp();
+			m_FilterDirty = true;
 			/* 树重建 = 磁盘上不一定哪些文件变了（外部增删也走这里）：材质下拉的 shader 清单跟着重扫 */
 			InvalidateShaderOptions();
 
@@ -652,7 +680,7 @@ namespace Helios
 			m_RevealCurrentNode = true;
 		}
 
-		/* 过滤结果每帧现算：过滤词与目录树两者都可能变 */
+		/* 过滤词或目录树变了才重算 */
 		FillBrowserFilter();
 
 		/* 一个面板 = 顶部一行（图标 + 搜索 / 筛选）+ 左右两栏（目录树 | 内容区）+ 右栏底部的
@@ -668,11 +696,12 @@ namespace Helios
 			ImGui::SetNextWindowFocus();
 		}
 
-		ImGui::Begin(Panel::kResourceBrowser);
-		{
-			if (!m_CurrentFileNode)
-				m_CurrentFileNode = m_RootFileNodeTree; /* 默认为根节点 */
+		if (!m_CurrentFileNode)
+			m_CurrentFileNode = m_RootFileNodeTree; /* 默认为根节点 */
 
+		/* 被别的页签挡住或折叠时 Begin 返回 false：只结算帧末状态，不画也不算 */
+		if (ImGui::Begin(Panel::kResourceBrowser))
+		{
 			/* 弹层 ID 在面板根作用域上算一次：右键菜单在内容栏与目录树两个子窗口里，
 			 * 各自算 ID 会得到不同的值，弹层就对不上了（见 DrawAssetOperationPopups）。 */
 			m_PopupNewMenu = ImGui::GetID("##NewAssetMenu");
@@ -2607,11 +2636,9 @@ namespace Helios
 			auto filename = relative_path.filename();
 			const std::string file_name = PathToUtf8(filename);
 
-			/* 以 '.' 开头的（.DS_Store、.git、项目的回收站……）一律不进资源树：
-			 * 它们不是资源，列出来只会碍事（删除资源的回收站就放在 Assets 旁边，
-			 * 万一有人把 Assets 指到别处、回收站落进去，也不会被当成资产显示出来）。
+			/* 点开头的项和项目 Cache 不是资源（规则见 IsHiddenAssetEntry）；
 			 * .texmeta 是贴图的伴生设置，同样不算独立资源。 */
-			if (file_name.empty() || file_name.front() == '.' || TextureSettingsStore::IsMetaPath(file_name))
+			if (IsHiddenAssetEntry(relative_path) || TextureSettingsStore::IsMetaPath(file_name))
 				continue;
 
 			/* 创建一个文件节点 */

@@ -598,10 +598,9 @@ namespace Helios
 		/* 追踪文本与录制同起同停（状态驱动、每帧一次；面板收起 / 换视图也照常结算） */
 		SyncCPUTraceTextSession();
 
-		ImGui::Begin(Panel::kStatInfo);
+		/* 面板标题由页签承担（图标 + "Stat Info"）；被挡住或折叠时不画三张卡 */
+		if (ImGui::Begin(Panel::kStatInfo))
 		{
-			/* 面板标题由页签承担（图标 + "Stat Info"），面板内不再重复一行 */
-
 			ShowFrameStatsCard();
 			ShowCPUTimingsCard();
 			ShowGPUTimingsCard();

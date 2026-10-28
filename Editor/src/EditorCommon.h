@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <glm/glm.hpp>
 #include <imgui.h>
 #include <string>
@@ -98,10 +99,9 @@ namespace Helios
 		if (lowercase_needle.empty())
 			return true;
 
-		std::string lowercase_haystack(haystack);
-		std::transform(lowercase_haystack.begin(), lowercase_haystack.end(),
-			lowercase_haystack.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-		return lowercase_haystack.find(lowercase_needle) != std::string::npos;
+		/* 边比边转小写，不复制原串：搜索框每帧对大量条目调用 */
+		const char* end = haystack + std::strlen(haystack);
+		return std::search(haystack, end, lowercase_needle.begin(), lowercase_needle.end(),
+			[](char lhs, char rhs) { return static_cast<char>(std::tolower(static_cast<unsigned char>(lhs))) == rhs; }) != end;
 	}
 }
