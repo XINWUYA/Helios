@@ -691,6 +691,8 @@ namespace Helios::PanelChrome
 		float  Right{ 0.0f };       /* 卡右端 x */
 		float  HeaderHeight{ 0.0f };
 		float  ContentX{ 0.0f };    /* 卡头标题之后的 x */
+		float  TitleEndX{ 0.0f };    /* 标题文字的右端 x（徽章从这里往后排） */
+		float  HeaderActionX{ 0.0f }; /* 卡头右端动作位的左缘（徽章不许越过它） */
 		float  Pad{ 0.0f };         /* 卡内留白（背景向左右各外扩这么多） */
 		bool   Open{ true };
 		bool   ActionClicked{ false };  /* 卡头右端的动作按钮被点了（调用方据此开菜单） */
@@ -812,9 +814,40 @@ namespace Helios::PanelChrome
 			ImGui::GetColorU32(EditorTheme::Token::Text), title);
 
 		card.ContentX = cursor_x;
+		card.TitleEndX = cursor_x + ImGui::CalcTextSize(title).x;
+		card.HeaderActionX = (action_width > 0.0f) ? (card.Right - action_width) : card.Right;
 		card.Open = *open;
 		card.HeaderHovered = header_hovered || action_hovered;
 		return card;
+	}
+
+	/* 卡头徽章：标题右侧一枚小圆角标签（如 Instance），只做标识、不抢卡头的点击。
+	 * 必须在 BeginCard 之后、卡身之前调 —— 那时绘制通道还是卡头那一层。 */
+	inline void DrawCardBadge(const Card& card, const char* text, const char* tooltip = nullptr)
+	{
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const ImVec2 text_size = ImGui::CalcTextSize(text);
+		const float height = ImGui::GetFontSize() + style.FramePadding.y;
+		const float pad_x = style.FramePadding.x;
+
+		const ImVec2 min(card.TitleEndX + style.ItemInnerSpacing.x,
+			card.Min.y + (card.HeaderHeight - height) * 0.5f);
+		const ImVec2 max(min.x + pad_x * 2.0f + text_size.x, min.y + height);
+
+		/* 标题长到徽章没地方放：宁可不画，也别压住标题或右端动作位 */
+		if (max.x > card.HeaderActionX - style.ItemInnerSpacing.x)
+			return;
+
+		ImDrawList* draw_list = ImGui::GetWindowDrawList();
+		draw_list->AddRectFilled(min, max, ImGui::GetColorU32(EditorTheme::Token::AccentTint), height * 0.5f);
+		draw_list->AddRect(min, max,
+			ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.55f)), height * 0.5f, 0, 1.0f);
+		draw_list->AddText(ImVec2(min.x + pad_x, min.y + (height - text_size.y) * 0.5f),
+			ImGui::GetColorU32(EditorTheme::Token::AccentInk), text);
+
+		if (tooltip != nullptr && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)
+			&& ImGui::IsMouseHoveringRect(min, max))
+			ImGui::SetTooltip("%s", tooltip);
 	}
 
 	/* 卡身内容与 EndCard 之间的补充间距（内容不全用属性行时，可自己排一行后调用） */

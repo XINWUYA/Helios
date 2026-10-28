@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Material ShaderPath="Shaders/SolidShader.glsl" RenderQueue="2000">
+    <Parameters>
+        <ParamInfo Type="5" Name="u_Color" Value="1.000000 0.000000 0.000000 1.000000"/>
+    </Parameters>
+    <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthTest="true" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true"/>
+</Material>

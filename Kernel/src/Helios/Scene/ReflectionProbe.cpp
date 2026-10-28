@@ -7,6 +7,7 @@
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderCommon.h>
 #include <Helios/Common/Math.h>
+#include <Helios/Core/AssetManager.h>
 #include <Helios/Scene/Camera.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/Material.h>
@@ -682,7 +683,9 @@ namespace Helios
         /* 仅烘焙天空盒 */
         if (m_BakeConfig.BakeSkyBoxOnly && m_pSkyBoxTexture)
         {
-            auto shader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ReflectionProbe/EquirectToCube.glsl"));
+            /* 走资产缓存而不是直建实例：同一路径拿到同一实例，热重载才覆盖得到 */
+            auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+                ABSOLUTE_PATH("Shaders/ReflectionProbe/EquirectToCube.glsl"));
             auto material = Material::Create(shader);
             material->SetTexture("u_EquirectangularMap", m_pSkyBoxTexture);
 
@@ -792,7 +795,8 @@ namespace Helios
             m_BakeResult.IrradianceMap = DeviceTexture::Create(GetDebugName() + "_IrradianceMap", irradiance_desc);
         }
 
-        auto shader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ReflectionProbe/Irradiance.glsl"));
+        auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+            ABSOLUTE_PATH("Shaders/ReflectionProbe/Irradiance.glsl"));
         auto material = Material::Create(shader);
         material->SetTexture("u_EnvironmentMap", m_BakeResult.EnvColorCubemap);
 
@@ -842,7 +846,8 @@ namespace Helios
             m_BakeResult.PrefilterMap = DeviceTexture::Create(GetDebugName() + "_PrefilterMap", prefilter_desc);
         }
 
-        auto shader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ReflectionProbe/Prefilter.glsl"));
+        auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+            ABSOLUTE_PATH("Shaders/ReflectionProbe/Prefilter.glsl"));
         auto material = Material::Create(shader);
         material->SetTexture("u_EnvironmentMap", m_BakeResult.EnvColorCubemap);
 
@@ -1154,7 +1159,8 @@ namespace Helios
         auto fb = DeviceFrameBuffer::Create("BRDFLutMap_FrameBuffer", desc);
         fb->Bind();
         {
-            auto shader = DeviceShader::Create(ABSOLUTE_PATH("Shaders/ReflectionProbe/BRDFLut.glsl"));
+            auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+                ABSOLUTE_PATH("Shaders/ReflectionProbe/BRDFLut.glsl"));
             auto material = Material::Create(shader);
 
             Renderer::Clear();

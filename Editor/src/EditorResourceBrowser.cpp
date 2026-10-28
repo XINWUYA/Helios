@@ -79,23 +79,43 @@ namespace Helios
 
 		/* 顶栏「新建」菜单里能建的文件类型（文件夹单列，不算文件）。这张表是"能建哪些资源"
 		 * 的唯一来源：菜单项、名字预填、后缀约束、初始内容全靠它。只列资源树认得出类型的格式；
-		 * 最后一项是兜底的不限后缀（.glsl / .mat 自己写后缀）。 */
+		 * 最后一项是兜底的不限后缀（.json / .mat 自己写后缀）。 */
 		struct CreatableFileType
 		{
 			const char* MenuLabel;
 			const char* Extension;    /* 含点；空 = 不限后缀（用户自己写） */
 			const char* DefaultStem;  /* 弹层里预填的名字（不带后缀） */
 			Icons::Id   Icon;         /* 「新建」下拉里的条目图标 */
+			const char* FixedFolder;  /* 固定落点（相对项目根）；空 = 当前目录 */
 		};
 
 		constexpr CreatableFileType kCreatableFiles[] =
 		{
-			{ "Scene",          ".scn",      "New Scene",          Icons::Id::FileScene },
-			{ "Material Graph", ".mtlgraph", "New Material Graph", Icons::Id::FileMtlGraph },
-			{ "Material",       ".mtl",      "New Material",       Icons::Id::FileMaterial },
-			{ "Animation Clip", ".anim",     "New Animation",      Icons::Id::AnimationClip },
-			{ "File...",        "",          "New File",           Icons::Id::File },
+			{ "Scene",          ".scn",      "New Scene",          Icons::Id::FileScene,     nullptr },
+			{ "Material Graph", ".mtlgraph", "New Material Graph", Icons::Id::FileMtlGraph,  nullptr },
+			{ "Material",       ".mtl",      "New Material",       Icons::Id::FileMaterial,  nullptr },
+			/* 项目里的 shader 走同一套相对路径：写在 Shaders 下，材质里填 Shaders/<名字>.glsl */
+			{ "Shader",         ".glsl",     "NewShader",          Icons::Id::FileShader,    "Shaders" },
+			{ "Animation Clip", ".anim",     "New Animation",      Icons::Id::AnimationClip, nullptr },
+			/* 脚本只认项目根下的 Scripts：脚本构建收不到别处的 .cpp，建了也是死文件 */
+			{ "Script",         ".cpp",      "NewScript",          Icons::Id::FileCppSource, "Scripts" },
+			{ "File...",        "",          "New File",           Icons::Id::File,          nullptr },
 		};
+
+		/* 新建文件的落点：有固定落点的类型（脚本 / 着色器）已经在里面就按当前目录走，
+		 * 否则回到那一层 —— 新建的项会被选中，浏览器跟着跳过去，不会"建了看不见"。 */
+		std::string TargetFolderFor(const CreatableFileType& type, const std::string& current)
+		{
+			if (type.FixedFolder == nullptr)
+				return current;
+
+			const std::filesystem::path relative = PathFromUtf8(current);
+			if (!relative.empty()
+				&& ToLowercase(PathToUtf8(*relative.begin()).c_str()) == ToLowercase(type.FixedFolder))
+				return current;
+
+			return type.FixedFolder;
+		}
 
 		/* 忽略大小写的"以 suffix 结尾"：新建文件时判断用户有没有自己把后缀写上。
 		 * 后缀都短，直接按字符比，省得为它引入一份大小写无关的字符串设施。 */
@@ -533,6 +553,8 @@ namespace Helios
 			m_RootFileNodeTree = CreateSharedPtr<FileNode>(PathToUtf8(g_ProjectPath), "", FileType::Folder, 0, -1);
 			BuildFileNodeTree(m_RootFileNodeTree);
 			UpdateDirectoryStamp();
+			/* 树重建 = 磁盘上不一定哪些文件变了（外部增删也走这里）：材质下拉的 shader 清单跟着重扫 */
+			InvalidateShaderOptions();
 
 			/* 文件操作（含撤销 / 重做）改过路径：先把要找回的路径对齐到新位置。
 			 * 按前缀替换而不是全等 —— 改名的是一个目录时，它下面的路径也一起变了
@@ -757,6 +779,18 @@ namespace Helios
 						}
 					}
 				}
+
+				/* 空白处右键在资源根下新建（跟拖到空白 = 提升到根是同一条位置关系），
+				 * 行上右键仍走各行自己的菜单。菜单样式得压在 Begin 之前：面板把纵向内边距
+				 * 压成了 0，不补首末条目就贴着弹层的上下边。 */
+				PanelChrome::PushMenuStyle();
+				if (ImGui::BeginPopupContextWindow("##FolderTreeBackground",
+						ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+				{
+					DrawBackgroundContextMenuItems(std::string());
+					ImGui::EndPopup();
+				}
+				PanelChrome::PopMenuStyle();
 
 				ImGui::EndChild();
 				ImGui::PopClipRect();
@@ -1249,6 +1283,11 @@ namespace Helios
 
 	std::filesystem::path EditorResourceBrowser::AbsoluteAssetPath(const std::string& relative_path)
 	{
+		/* 空路径 = 资源根（右键目录树空白处、拖到空白都拿它当落点）：落成项目根。
+		 * 留空会被当成相对路径用，新建 / 搬移的东西就跑到进程的工作目录里去了。 */
+		if (relative_path.empty())
+			return g_ProjectPath;
+
 		return ResolveAssetPath(PathFromUtf8(relative_path));
 	}
 
@@ -1313,6 +1352,8 @@ namespace Helios
 	{
 		/* 撤销 / 重做也要立刻看到结果：不等 0.5s 的目录轮询 */
 		m_IsDirty = true;
+		/* 材质下拉的 shader 清单同样是"资源树的一部分"，增删改名后要重扫 */
+		InvalidateShaderOptions();
 
 		if (from.empty())
 		{
@@ -1440,7 +1481,7 @@ namespace Helios
 		}
 
 		const CreatableFileType& type = kCreatableFiles[chosen - 1];
-		OpenNewFilePopup(type.Extension, type.DefaultStem, current);
+		OpenNewFilePopup(type.Extension, type.DefaultStem, TargetFolderFor(type, current));
 	}
 
 	/* 顶栏「筛选」下拉：类型单选列表（All types + 各类型，图标跟内容区同一套映射）。点行
@@ -1652,10 +1693,11 @@ namespace Helios
 			}
 			else if (is_file)
 			{
-				/* 初始内容按最终后缀取：补出来的后缀也算（.scn 给一份空场景的骨架） */
+				/* 初始内容按最终后缀取：补出来的后缀也算（.scn 给一份空场景的骨架）。
+				 * 主干一起带上 —— 脚本模板里的类名就是它。 */
 				const std::string extension = PathToUtf8(target.extension());
 				ExecuteCommand(CreateUniquePtr<CreateAssetFileCommand>(
-					this, target, AssetFileTemplate(extension)));
+					this, target, AssetFileTemplate(extension, PathToUtf8(target.stem()))));
 			}
 			else
 			{
@@ -1821,16 +1863,14 @@ namespace Helios
 			OpenDeletePopup({ path });
 	}
 
-	void EditorResourceBrowser::DrawBackgroundContextMenuItems()
+	void EditorResourceBrowser::DrawBackgroundContextMenuItems(const std::string& parent_path)
 	{
-		const std::string current = (m_CurrentFileNode != nullptr) ? m_CurrentFileNode->FilePath : std::string();
-
 		if (PanelChrome::MenuItemText("New Folder"))
-			OpenNewFolderPopup(current);
+			OpenNewFolderPopup(parent_path);
 
 		if (PanelChrome::MenuItemText("Show in file explorer"))
 		{
-			std::filesystem::path shown = std::filesystem::absolute(AbsoluteAssetPath(current)).make_preferred();
+			std::filesystem::path shown = std::filesystem::absolute(AbsoluteAssetPath(parent_path)).make_preferred();
 			const std::string shown_utf8 = PathToUtf8(shown);
 			OpenFileExplorer(shown_utf8.c_str());
 		}
@@ -1883,7 +1923,7 @@ namespace Helios
 
 		ImGui::SetCursorScreenPos(ImVec2(new_x, control_y));
 		if (Icons::IconButton(Icons::Id::NewAsset, ImVec2(action_size, action_size), false,
-			"New asset  (folder / scene / material graph / file)"))
+			"New asset  (folder / scene / material / shader / script / file)"))
 		{
 			ImGui::OpenPopup(m_PopupNewMenu);
 		}
@@ -2544,13 +2584,17 @@ namespace Helios
 		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !clicked_an_item)
 			ClearRenameCandidate();
 
-		/* 空处右键 = 在当前目录下操作（新建文件夹）；条目自己有一份菜单（NoOpenOverItems 分开） */
+		/* 空处右键 = 在当前目录下操作（新建文件夹）；条目自己有一份菜单（NoOpenOverItems 分开）。
+		 * 菜单样式同样压在 Begin 之前，理由见目录树那处。 */
+		PanelChrome::PushMenuStyle();
 		if (ImGui::BeginPopupContextWindow("##AssetBackground",
 				ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
 		{
-			DrawBackgroundContextMenuItems();
+			DrawBackgroundContextMenuItems(
+				(m_CurrentFileNode != nullptr) ? m_CurrentFileNode->FilePath : std::string());
 			ImGui::EndPopup();
 		}
+		PanelChrome::PopMenuStyle();
 	}
 
 	void EditorResourceBrowser::BuildFileNodeTree(const SharedPtr<FileNode>& parent_node)

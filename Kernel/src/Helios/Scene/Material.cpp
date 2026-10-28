@@ -40,6 +40,7 @@ namespace Helios
 		m_pShader = shader;
 		/* Shader更换，binding布局也随之改变，刷新Shader的反射结果 */
 		RefreshTextureBindings();
+		m_ShaderGeneration = shader != nullptr ? shader->GetGeneration() : 0;
 	}
 
 	bool Material::IsSkyBox() const
@@ -171,6 +172,14 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* Shader 重载换代后反射可能变了（加一个采样器，后面的槽位整体位移），
+		 * 这里比一次版本号，变了就重解析贴图绑定点。O(1)，不必遍历材质表 */
+		if (m_pShader->GetGeneration() != m_ShaderGeneration)
+		{
+			m_ShaderGeneration = m_pShader->GetGeneration();
+			RefreshTextureBindings();
+		}
+
 		/* 先绑定Shader */
 		m_pShader->Bind();
 
@@ -285,6 +294,8 @@ namespace Helios
 		clone->m_Parameters = m_Parameters; /* 参数表逐条拷贝；纹理的 SharedPtr 共享 */
 		clone->m_RasterState = m_RasterState;
 		clone->m_RenderQueue = m_RenderQueue;
+		/* 槽位是按这个版本号解出来的，一起带过去，首次 Bind 不必再解一遍 */
+		clone->m_ShaderGeneration = m_ShaderGeneration;
 		return clone;
 	}
 
@@ -301,6 +312,7 @@ namespace Helios
 
 		/* Shader 与参数都可能换了：纹理参数的绑定点统一按新 Shader 重解析 */
 		RefreshTextureBindings();
+		m_ShaderGeneration = m_pShader != nullptr ? m_pShader->GetGeneration() : 0;
 	}
 
 	/* 只保留当前 Shader 声明的参数 */

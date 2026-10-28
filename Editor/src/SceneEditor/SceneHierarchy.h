@@ -26,7 +26,8 @@ namespace Helios
 
 	/* 场景实体层级树 + 属性面板。层级树按父子关系展开；层级面板 = 顶栏（搜索 + 筛选 + 新建）+
 	 * 实体树（子窗口）+ 底栏（计数），版式跟资源浏览器同源。行右端是可见性开关（眼睛）。
-	 * 属性面板的组件 UI 由 ComponentRegistry 驱动，新增组件照 Builtin/ 建注册文件即可。 */
+	 * 属性面板的组件 UI 由 ComponentRegistry 驱动：字段表在 Kernel 的 Builtin/，
+	 * 自定义编辑在 ComponentEditors/（构造时装配）。 */
 	class SceneHierarchy
 	{
 	public:
@@ -212,6 +213,16 @@ namespace Helios
 		void DrawAssetDetailsCard(const AssetSelectionEntry& entry);
 		/* 图片的采样与格式设置（写 .texmeta 并原地重载，材质等持有者立即生效） */
 		void DrawTextureSettingsSection(const std::string& absolute_path);
+		/* shader 源码的 include 依赖（与深挖行同一个缓存键刷新）：相对路径 + 能不能在资源浏览器
+		 * 里定位 —— 引擎内置的不在浏览器那棵树上，点了没处去 */
+		struct ShaderIncludeRow
+		{
+			std::string Relative;
+			bool Revealable{ false };
+		};
+		std::vector<ShaderIncludeRow> m_AssetShaderIncludes;
+		/* 详情卡里的一条 include 依赖：整行命中，能定位的那条点击跳到资源浏览器 */
+		void DrawShaderIncludeRow(const ShaderIncludeRow& include);
 		/* .mtl 的材质编辑卡：每条目一张，同级平铺在详情卡之后（与 probe 图卡同一路数）——
 		 * Shader 可选可改、参数与光栅化状态可就地编辑；改动即时热更（同步缓存里的
 		 * 共享材质 → 场景窗口立刻可见），「Apply」（没有改动时禁用）只负责序列化回文件 */
@@ -324,10 +335,10 @@ namespace Helios
 			SharedPtr<DeviceTexture> Texture;   /* 十字展开预览；无图形上下文时为空 */
 		};
 		std::vector<ProbeImageCard> m_AssetProbeCards;
-		/* 材质资产（.mtl）的编辑缓冲与可选 Shader：与深挖详情同一缓存键（路径 + 写入时间）
-		 * 从磁盘读入；编辑只改缓冲（不碰场景与缓存），点「Apply」才序列化回文件。 */
+		/* 材质资产（.mtl）的编辑缓冲：与深挖详情同一缓存键（路径 + 写入时间）从磁盘读入；
+		 * 编辑只改缓冲（不碰场景与缓存），点「Apply」才序列化回文件。
+		 * 可选 Shader 清单不在这里存 —— 归 AssetFileOps 统一缓存（见 CollectShaderOptions）。 */
 		SharedPtr<Material> m_AssetMaterial;
-		std::vector<std::string> m_AssetMaterialShaderOptions;
 		/* 编辑缓冲有没有未保存的改动（Apply 按钮的禁用依据）：改 Shader / 参数时置位，
 		 * 重读缓冲（换选中项 / 文件变化 / Apply 写盘后）清掉 */
 		bool m_AssetMaterialDirty{ false };

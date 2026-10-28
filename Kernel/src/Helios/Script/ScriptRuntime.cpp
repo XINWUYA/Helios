@@ -250,6 +250,8 @@ namespace Helios
 			{
 				for (const ScriptFieldDesc& field : desc->Fields)
 				{
+					/* 回灌口径与着色器那边一致：同名同类型才带回来，类型变了当新字段处理。
+					 * 文本值的大小由类型定，所以类型对上就够了 */
 					if (property.Name == field.Name && property.Type == field.Type)
 					{
 						ApplyScriptPropertyText(*slot.Instance, field, property.Value);

@@ -1,7 +1,9 @@
 ﻿#include "Pch.h"
 #include "Command/AssetFileOps.h"
 #include "Helios/Core/TextureSettings.h"
+#include <algorithm>
 #include <cctype>
+#include <fstream>
 
 namespace Helios
 {
@@ -46,6 +48,116 @@ namespace Helios
 			}
 
 			return true;
+		}
+
+		/* 脚本类名从文件名来：非法字符换下划线，首字符不是字母就补个 S 打头。
+		 * 模板里的类名跟文件名对得上，用户不用先想名字再对齐两处。 */
+		std::string ScriptClassName(const std::string& stem)
+		{
+			std::string class_name = stem.empty() ? std::string("NewScript") : stem;
+
+			for (char& character : class_name)
+			{
+				if (!std::isalnum(static_cast<unsigned char>(character)) && character != '_')
+					character = '_';
+			}
+
+			if (!std::isalpha(static_cast<unsigned char>(class_name.front())))
+				class_name.insert(class_name.begin(), 'S');
+
+			return class_name;
+		}
+
+		/* 引擎内置 shader 里只有这个目录是"给场景物体选的材质"，其余是管线内部用的
+		 * （后处理 / 天空 / 覆盖层 / 计算） */
+		constexpr const char* kEngineMaterialShaderDir = "Shaders/MaterialShaders/";
+
+		/* shader 清单缓存：整棵工程扫一遍是 O(文件数)，材质下拉不该每次打开都付这个钱。
+		 * 资源树一有增删改名就置脏（见 InvalidateShaderOptions），换工程时按根路径再比一次。 */
+		struct ShaderOptionCache
+		{
+			std::filesystem::path ProjectRoot;
+			std::vector<std::string> Options;
+			bool Dirty{ true };
+		};
+
+		ShaderOptionCache& GetShaderOptionCache()
+		{
+			static ShaderOptionCache cache;
+			return cache;
+		}
+
+		/* 一个根下的候选：收 .glsl 且源码里带 stage 声明（与编译器切分的判据一致），
+		 * directory 为空 = 不限目录。Cache 目录（编译产物）整棵跳过。 */
+		void ScanShaderOptions(const std::filesystem::path& root, const std::string& directory,
+			std::vector<std::string>& options)
+		{
+			/* 目录按小写比：资源目录是用户自己建的，大小写不该影响能不能选到 */
+			std::string directory_lower = directory;
+			for (char& character : directory_lower)
+			{
+				if (character >= 'A' && character <= 'Z')
+					character = static_cast<char>(character - 'A' + 'a');
+			}
+
+			std::error_code error;
+			for (std::filesystem::recursive_directory_iterator iter(root,
+					std::filesystem::directory_options::skip_permission_denied, error), end;
+				iter != end; iter.increment(error))
+			{
+				if (error)
+					break;
+
+				const std::filesystem::directory_entry& item = *iter;
+				if (item.is_directory())
+				{
+					if (item.path().filename() == "Cache")
+						iter.disable_recursion_pending();
+					continue;
+				}
+
+				if (!item.is_regular_file())
+					continue;
+
+				std::string extension = PathToUtf8(item.path().extension());
+				for (char& character : extension)
+				{
+					if (character >= 'A' && character <= 'Z')
+						character = static_cast<char>(character - 'A' + 'a');
+				}
+				if (extension != ".glsl")
+					continue;
+
+				const std::string relative = PathToUtf8(ToAssetRelative(item.path()));
+
+				std::string lowered = relative;
+				for (char& character : lowered)
+				{
+					if (character >= 'A' && character <= 'Z')
+						character = static_cast<char>(character - 'A' + 'a');
+				}
+				if (!directory_lower.empty() && lowered.rfind(directory_lower, 0) != 0)
+					continue;
+
+				bool has_stage = false;
+				std::ifstream source(item.path(), std::ios::binary);
+				for (std::string line; std::getline(source, line); )
+				{
+					if (line.find("#type") != std::string::npos)
+					{
+						has_stage = true;
+						break;
+					}
+				}
+				if (!has_stage)
+					continue;
+
+				/* 项目根先扫，同名的内置 shader 不再重复列一遍 */
+				if (std::find(options.begin(), options.end(), relative) != options.end())
+					continue;
+
+				options.emplace_back(relative);
+			}
 		}
 	}
 
@@ -177,7 +289,7 @@ namespace Helios
 		return candidate;
 	}
 
-	std::string AssetFileTemplate(const std::string& extension)
+	std::string AssetFileTemplate(const std::string& extension, const std::string& stem)
 	{
 		/* 扩展名比较一律大小写不敏感：资源树认类型时也这么做（BuildFileNodeTree 把扩展名转大写） */
 		std::string ext = extension;
@@ -218,15 +330,15 @@ namespace Helios
 			return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
 				"<Material ShaderPath=\"Shaders/MaterialShaders/PBRStandard.glsl\">\n"
 				"    <Parameters>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_AlbedoTexture\" Value=\"Textures/White.png\"/></ParamInfo>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_SpecularTexture\" Value=\"Textures/Black.png\"/></ParamInfo>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_NormalTexture\" Value=\"Textures/normal.png\"/></ParamInfo>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_BumpTexture\" Value=\"Textures/Black.png\"/></ParamInfo>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_DisplacementTexture\" Value=\"Textures/Black.png\"/></ParamInfo>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_RoughnessTexture\" Value=\"Textures/White.png\"/></ParamInfo>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_MetallicTexture\" Value=\"Textures/Black.png\"/></ParamInfo>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_EmissiveTexture\" Value=\"Textures/Black.png\"/></ParamInfo>\n"
-				"        <ParamInfo Type=\"0\" Name=\"u_AmbientTexture\" Value=\"Textures/Black.png\"/></ParamInfo>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_AlbedoTexture\" Value=\"Textures/White.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_SpecularTexture\" Value=\"Textures/Black.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_NormalTexture\" Value=\"Textures/normal.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_BumpTexture\" Value=\"Textures/Black.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_DisplacementTexture\" Value=\"Textures/Black.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_RoughnessTexture\" Value=\"Textures/White.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_MetallicTexture\" Value=\"Textures/Black.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_EmissiveTexture\" Value=\"Textures/Black.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_AmbientTexture\" Value=\"Textures/Black.png\"/>\n"
 				"    </Parameters>\n"
 				"</Material>\n";
 		}
@@ -239,7 +351,94 @@ namespace Helios
 				"</Animation>\n";
 		}
 
-		/* 认不出的（.glsl / .txt / .mat …）：空文件。模板内容不该由我们凭空发明，
+		/* GLSL 着色器：两段式（顶点 + 片元），挂到材质上就能画出色块。
+		 * 引擎统一块照 Uniforms.glsl 抄了一份，自包含才能放在项目任何目录下。 */
+		if (ext == ".glsl")
+		{
+			return R"GLSL(#type vertex
+#version 410 core
+
+/* 引擎统一变量块（与 Builtin/Uniforms.glsl 同一份布局）：binding 0 视图、binding 1 物体 */
+layout(std140, binding = 0) uniform ViewUniformBuffer
+{
+	mat4 u_ViewMat;
+	mat4 u_ProjectionMat;
+	mat4 u_ViewProjectionMat;
+	vec3 u_ViewPos;
+	uint u_FrameCounter;
+};
+
+layout(std140, binding = 1) uniform ObjectUniformBuffer
+{
+	mat4 u_Local2WorldMat;
+	int  u_ObjectId;
+	float u_ReceiveShadow;
+};
+
+/* 顶点属性按引擎约定：0 位置 / 1 法线 / 2 颜色 / 3 UV / 4 切线 */
+layout(location = 0) in vec3 a_Position;
+
+void main()
+{
+	gl_Position = u_ViewProjectionMat * u_Local2WorldMat * vec4(a_Position, 1.0f);
+}
+
+
+#type fragment
+#version 410 core
+
+/* 物体块要在片元里再声明一次（同名同布局）；ObjectId 供视口点击拾取 */
+layout(std140, binding = 1) uniform ObjectUniformBuffer
+{
+	mat4 u_Local2WorldMat;
+	int  u_ObjectId;
+	float u_ReceiveShadow;
+};
+
+/* 带 @property 的 uniform 会出现在材质面板；@type(color) 让 vec4 画成取色器 */
+uniform vec4 u_Color = vec4(0.8f, 0.8f, 0.9f, 1.0f); // @property @type(color)
+
+layout(location = 0) out vec4 OutFragColor;
+layout(location = 1) out float ObjectId;
+
+void main()
+{
+	OutFragColor = u_Color;
+	ObjectId = float(u_ObjectId);
+}
+)GLSL";
+		}
+
+		/* C++ 脚本：类名与文件名一致，建完直接重编就能挂到实体上 */
+		if (ext == ".cpp")
+		{
+			const std::string name = ScriptClassName(stem);
+
+			std::string content;
+			content += "/* " + name + "：脚本模板。OnUpdate 每帧跑一次，Runtime 模式下生效。 */\n";
+			content += "#include \"Helios/Script/ScriptRegistry.h\"\n";
+			content += "#include \"Helios/Scene/Components.h\"\n";
+			content += "\n";
+			content += "namespace\n";
+			content += "{\n";
+			content += "\tclass " + name + " : public Helios::Script\n";
+			content += "\t{\n";
+			content += "\tpublic:\n";
+			content += "\t\tvoid OnUpdate(float delta_time) override\n";
+			content += "\t\t{\n";
+			content += "\t\t\t(void)delta_time;\n";
+			content += "\t\t}\n";
+			content += "\n";
+			content += "\t\tfloat m_Speed{ 1.0f };\n";
+			content += "\t};\n";
+			content += "}\n";
+			content += "\n";
+			content += "HELIOS_SCRIPT(" + name + ",\n";
+			content += "\tHELIOS_SCRIPT_FIELD(&" + name + "::m_Speed, \"Speed\", Helios::FieldType::Float))\n";
+			return content;
+		}
+
+		/* 认不出的（.txt / .json …）：空文件。模板内容不该由我们凭空发明，
 		 * 用户要什么自己写 —— 至少文件已经在正确的目录里了。 */
 		return {};
 	}
@@ -319,5 +518,30 @@ namespace Helios
 		}
 
 		return true;
+	}
+
+	const std::vector<std::string>& CollectShaderOptions()
+	{
+		ShaderOptionCache& cache = GetShaderOptionCache();
+
+		/* 换工程时清单里的相对路径已经不对了：按根路径再比一次，不同就重扫 */
+		if (!cache.Dirty && cache.ProjectRoot == g_ProjectPath)
+			return cache.Options;
+
+		cache.ProjectRoot = g_ProjectPath;
+		cache.Dirty = false;
+		cache.Options.clear();
+
+		/* 工程根整棵树都算（shader 放哪一层都能选到），引擎根只收 MaterialShaders */
+		ScanShaderOptions(g_ProjectPath, {}, cache.Options);
+		ScanShaderOptions(g_EngineResPath, kEngineMaterialShaderDir, cache.Options);
+
+		std::sort(cache.Options.begin(), cache.Options.end());
+		return cache.Options;
+	}
+
+	void InvalidateShaderOptions()
+	{
+		GetShaderOptionCache().Dirty = true;
 	}
 }

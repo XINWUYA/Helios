@@ -9,6 +9,8 @@
 #include "PanelLayoutRestore.h"
 #include "ScriptModule.h"
 
+#include "Helios/Renderer/ShaderReloader.h"
+
 namespace Helios
 {
 	class DeviceTexture;
@@ -75,6 +77,8 @@ namespace Helios
 		bool m_ShowStyleEditor{ false };
 		/* C++ 脚本模块：编译与加载都在这里，脚本类注册进 ScriptRegistry */
 		ScriptModule m_ScriptModule;
+		/* 着色器热重载：盯依赖文件的修改时间，改了就地换掉 */
+		ShaderReloader m_ShaderReloader;
 		/* Settings 菜单的全局开关（跟项目本地存，见 EditorSettings） */
 		EditorSettings::State m_Settings{};
 		/* 菜单栏左端的品牌记号：白色线稿贴图，按强调色着色（与启动页同一张） */

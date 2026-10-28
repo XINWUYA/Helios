@@ -6,12 +6,12 @@
 #include "PanelChrome.h"
 #include "PanelRegistry.h"
 #include "FileDialog.h"
+#include "Command/AssetFileOps.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Renderer/Renderer.h"
-#include <cctype>
 #include <fstream>
 
 namespace Helios
@@ -49,6 +49,7 @@ namespace Helios
 		EditorSettings::Apply(m_Settings);
 		m_ScriptModule.SetAutoReloadEnabled(m_Settings.AutoReloadScripts);
 		m_ScriptModule.SetAutoCompileEnabled(m_Settings.AutoCompileScripts);
+		m_ShaderReloader.SetAutoReloadEnabled(m_Settings.AutoReloadShaders);
 
 		/* 启动时把已编译好的脚本模块挂上：类注册进 ScriptRegistry，属性面板与场景加载才有类可用 */
 		m_ScriptModule.LoadLatest();
@@ -287,18 +288,8 @@ namespace Helios
 			return;
 		}
 
-		std::string class_name = ExtractFilename(path);
-		if (class_name.empty())
-			class_name = "NewScript";
-
-		/* 类名得是合法标识符：非法字符换下划线，首字符补前缀 */
-		for (char& character : class_name)
-		{
-			if (!std::isalnum(static_cast<unsigned char>(character)) && character != '_')
-				character = '_';
-		}
-		if (!std::isalpha(static_cast<unsigned char>(class_name.front())))
-			class_name.insert(class_name.begin(), 'S');
+		/* 模板与资源浏览器「新建 > Script」是同一份，类名跟着文件名走 */
+		const std::string content = AssetFileTemplate(".cpp", PathToUtf8(target.stem()));
 
 		std::ofstream file(target, std::ios::binary | std::ios::trunc);
 		if (!file.is_open())
@@ -307,26 +298,7 @@ namespace Helios
 			return;
 		}
 
-		file << "/* " << class_name << "：脚本模板。OnUpdate 每帧跑一次，Runtime 模式下生效。 */\n"
-			<< "#include \"Helios/Script/ScriptRegistry.h\"\n"
-			<< "#include \"Helios/Scene/Components.h\"\n"
-			<< "\n"
-			<< "namespace\n"
-			<< "{\n"
-			<< "\tclass " << class_name << " : public Helios::Script\n"
-			<< "\t{\n"
-			<< "\tpublic:\n"
-			<< "\t\tvoid OnUpdate(float delta_time) override\n"
-			<< "\t\t{\n"
-			<< "\t\t\t(void)delta_time;\n"
-			<< "\t\t}\n"
-			<< "\n"
-			<< "\t\tfloat m_Speed{ 1.0f };\n"
-			<< "\t};\n"
-			<< "}\n"
-			<< "\n"
-			<< "HELIOS_SCRIPT(" << class_name << ",\n"
-			<< "\tHELIOS_SCRIPT_FIELD(&" << class_name << "::m_Speed, \"Speed\", Helios::FieldType::Float))\n";
+		file << content;
 		file.close();
 
 		CORE_LOG_INFO("[Script] Created {}. Pick Scripts > Recompile to load it.", path);
@@ -586,6 +558,42 @@ namespace Helios
 					ImGui::Separator();
 					ImGui::TextDisabled("%s", m_ScriptModule.GetStatus().c_str());
 					ImGui::TextDisabled("%d class(es) registered", m_ScriptModule.GetClassCount());
+					ImGui::EndMenu();
+				}
+
+				/* Shaders：着色器热重载 */
+				if (ImGui::BeginMenu("Shaders"))
+				{
+					if (ImGui::MenuItem("Reload All"))
+					{
+						const size_t reloaded = m_ShaderReloader.ReloadAll();
+						EDITOR_LOG_INFO("[Shader] Reloaded {} of {} cached shaders", reloaded,
+							AssetManager::Instance().GetCount<DeviceShader>());
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Reload every cached shader whose files differ from the loaded version, ignoring timestamps");
+
+					if (ImGui::MenuItem("Reload Changed"))
+						m_ShaderReloader.ReloadChanged();
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Reload only the shaders whose files changed");
+
+					ImGui::Separator();
+
+					bool auto_reload_shaders = m_Settings.AutoReloadShaders;
+					if (ImGui::MenuItem("Auto Reload", nullptr, &auto_reload_shaders))
+					{
+						m_Settings.AutoReloadShaders = auto_reload_shaders;
+						m_ShaderReloader.SetAutoReloadEnabled(auto_reload_shaders);
+						EditorSettings::Save(m_Settings);
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Reload a shader as soon as its file or an included file changes");
+
+					ImGui::Separator();
+					ImGui::TextDisabled("%d cached, %d queued",
+						static_cast<int>(AssetManager::Instance().GetCount<DeviceShader>()),
+						static_cast<int>(m_ShaderReloader.GetPendingCount()));
 					ImGui::EndMenu();
 				}
 
@@ -941,5 +949,8 @@ namespace Helios
 
 		/* IDE 那边编好的脚本产物自动跟上：轮询产物时间戳，编译成功才重载 */
 		m_ScriptModule.TickAutoReload(delta_time);
+
+		/* 着色器同理：盯依赖文件的修改时间，改了就地重载（帧边界提交，不打断绘制） */
+		m_ShaderReloader.Tick(delta_time);
 	}
 }

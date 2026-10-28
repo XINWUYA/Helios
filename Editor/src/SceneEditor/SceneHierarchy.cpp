@@ -32,6 +32,7 @@
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Renderer/PostProcess/Effects/Bloom.h"
+#include "Helios/Renderer/ShaderCompiler.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <tinyxml2.h>
 #include <algorithm>
@@ -130,6 +131,16 @@ namespace Helios
 
 		/* 卡内分区隔离线（画在材质卡那一段，详情卡与组件卡尾也要用） */
 		void DrawCardSectionDivider();
+
+		/* 只有 .glsl 源码谈得上 include 依赖；.metal 是编译产物，里面引用的 <metal_stdlib> 不是我们的 */
+		bool IsGlslSource(const std::filesystem::path& path)
+		{
+			std::string extension = PathToUtf8(path.extension());
+			for (char& character : extension)
+				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+
+			return extension == ".glsl";
+		}
 
 		class ComponentCustomDrawCommand final : public ICommand
 		{
@@ -2085,6 +2096,15 @@ namespace Helios
 			DrawOpenInModelEditorButton(PathToUtf8(absolute_path));
 		}
 
+		/* shader 的 include 依赖：卡尾列出被引用的文件（项目里的那条点了就跳到资源浏览器） */
+		if (!entry.IsFolder && entry.Kind == AssetFileKind::Shader && !m_AssetShaderIncludes.empty())
+		{
+			DrawCardSectionDivider();
+			ImGuiExt::DrawCommonTextUI("Includes", std::to_string(m_AssetShaderIncludes.size()));
+			for (const ShaderIncludeRow& include : m_AssetShaderIncludes)
+				DrawShaderIncludeRow(include);
+		}
+
 		PanelChrome::EndCard(card);
 
 		/* .probe：三张烘焙图各一张卡片 —— 同级平铺在详情卡之后（卡片通道不可嵌套，
@@ -2163,6 +2183,39 @@ namespace Helios
 		DrawAssetMaterialCards(absolute_path);
 	}
 
+	/* 一条 include 依赖：整行可点（悬停有底色），图标与路径自己画在 Selectable 上（菜单行同一套；
+	 * 自绘不进排版，超长路径由窗口裁掉、撑不出横滑）。项目里的那条点了在资源浏览器里定位。 */
+	void SceneHierarchy::DrawShaderIncludeRow(const ShaderIncludeRow& include)
+	{
+		PROFILE_FUNCTION();
+
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float icon_size = ImGui::GetFontSize();
+
+		ImGui::PushID(include.Relative.c_str());
+		const bool clicked = ImGui::Selectable("##row", false,
+			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SpanAvailWidth);
+		ImGui::PopID();
+
+		/* 图标与文字都画在 Selectable 之后：悬停底色已经落好，不会被盖住 */
+		const ImVec2 min = ImGui::GetItemRectMin();
+		const ImVec2 max = ImGui::GetItemRectMax();
+		const float center_y = (min.y + max.y) * 0.5f;
+		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
+		const ImU32 text_color = ImGui::GetColorU32(EditorTheme::Token::Text);
+
+		Icons::Draw(draw_list, Icons::Id::FileShader,
+			ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y), icon_size, text_color);
+		draw_list->AddText(ImVec2(min.x + style.FramePadding.x + icon_size + style.ItemInnerSpacing.x,
+			center_y - ImGui::GetFontSize() * 0.5f), text_color, include.Relative.c_str());
+
+		if (ImGui::IsItemHovered() && include.Revealable)
+			ImGui::SetTooltip("Click to reveal in the resource browser");
+
+		if (clicked && include.Revealable && m_AssetRevealFunc)
+			m_AssetRevealFunc(include.Relative);
+	}
+
 	void SceneHierarchy::DrawMultiAssetCard()
 	{
 		PROFILE_FUNCTION();
@@ -2220,9 +2273,9 @@ namespace Helios
 		{
 			m_AssetDetailPath.clear();
 			m_AssetDetailRows.clear();
+			m_AssetShaderIncludes.clear();
 			m_AssetProbeCards.clear();
 			m_AssetMaterial = nullptr;
-			m_AssetMaterialShaderOptions.clear();
 			m_AssetMaterialDirty = false;
 			return;
 		}
@@ -2233,9 +2286,9 @@ namespace Helios
 		m_AssetDetailPath = entry.Path;
 		m_AssetDetailWriteTime = write_time;
 		m_AssetDetailRows.clear();
+		m_AssetShaderIncludes.clear();
 		m_AssetProbeCards.clear();
 		m_AssetMaterial = nullptr;
-		m_AssetMaterialShaderOptions.clear();
 		m_AssetMaterialDirty = false;
 
 		if (entry.Kind == AssetFileKind::Image)
@@ -2365,8 +2418,22 @@ namespace Helios
 				m_AssetDetailRows.emplace_back("Material", "unreadable");
 			}
 
-			m_AssetMaterialShaderOptions = MaterialParamUI::CollectShaderOptions();
 			m_AssetMaterialDirty = false;	/* 刚读上来的缓冲与文件一致（Apply 的禁用依据） */
+		}
+		else if (entry.Kind == AssetFileKind::Shader && IsGlslSource(absolute_path))
+		{
+			/* shader 依赖：只读源码展开一遍 include（不编译），主文件之外的都是被引用的文件 */
+			std::vector<std::string> dependencies;
+			ShaderCompiler::ReadFile(PathToUtf8(absolute_path), &dependencies);
+
+			for (size_t index = 1; index < dependencies.size(); ++index)
+			{
+				/* 落在引擎根上的那份（内置库）浏览器树里没有：只能看，点不出结果 */
+				const std::string relative = AssetRelativePath(PathFromUtf8(dependencies[index]));
+				const std::filesystem::path relative_path = PathFromUtf8(relative);
+				m_AssetShaderIncludes.push_back({ relative, !relative_path.is_absolute()
+					&& std::filesystem::exists(g_ProjectPath / relative_path) });
+			}
 		}
 	}
 
@@ -2874,6 +2941,16 @@ namespace Helios
 			const std::string title = "Material · " + slot.Name;
 			const PanelChrome::Card card = PanelChrome::BeginCard(title.c_str(), Icons::Id::FileMaterial);
 
+			/* 改了参数就地克隆出来的副本：卡头挂一枚 Instance，否则看着跟 .mtl 资产没两样 */
+			const auto override_iter = component.m_SlotOverrides.find(slot.Name);
+			if (override_iter != component.m_SlotOverrides.end() && override_iter->second.IsInstance
+				&& override_iter->second.pMaterial != nullptr)
+			{
+				PanelChrome::DrawCardBadge(card, "Instance",
+					"Edited copy for this slot — changes don't go into the material asset\n"
+					"Reset in the Materials row re-clones from the asset");
+			}
+
 			if (card.Open)
 			{
 				/* 与 DrawComponentBlock 同一套撤销语义：快照 + 事务合并 */
@@ -3010,7 +3087,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		/* Shader 行（与模型编辑器共用同一控件）：点开菜单换 Shader，选中后记脏 + 热更新 */
-		if (MaterialParamUI::DrawMaterialShaderRow(material, m_AssetMaterialShaderOptions))
+		if (MaterialParamUI::DrawMaterialShaderRow(material))
 			on_edit();
 		/* 参数行：集合来自 Shader 反射（换 Shader 后立即按新 Shader 列行）；值取编辑缓冲，
 		 * 反射声明而缓冲里还没有的先显示反射默认值 —— 编辑时才落进缓冲；

@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace Helios
 {
@@ -73,8 +74,9 @@ namespace Helios
 std::filesystem::path MakeUniquePath(const std::filesystem::path& dir, const std::string& file_name);
 
 /* 新建资源文件的初始内容：按扩展名给一份最小可用模板（认不出的就给空文件）。模板是
- * "能被现有加载器读进去"的最简形态（空场景 / 空材质图）。extension 形如 ".scn"，空串 = 无扩展名。 */
-std::string AssetFileTemplate(const std::string& extension);
+ * "能被现有加载器读进去"的最简形态（空场景 / 空材质图）。extension 形如 ".scn"，空串 = 无扩展名。
+ * stem 只有 .cpp 脚本用得上：模板里的类名跟着文件名走，改完能直接编。 */
+std::string AssetFileTemplate(const std::string& extension, const std::string& stem = std::string());
 
 	/* 移到回收站：落到 <trash_root>/<扁平化的相对路径>[ 序号]。
 	 * 失败（源不存在 / 建不了回收站 / 移动失败）返回 false 并写原因。 */
@@ -84,4 +86,15 @@ std::string AssetFileTemplate(const std::string& extension);
 	/* 从回收站搬回 target（父目录不存在会一并建出来，撤销"删除一个文件夹"时用得上） */
 	bool RestoreAssetFromTrash(const std::filesystem::path& trashed, const std::filesystem::path& target,
 		std::string& out_error);
+
+	/* 能挂到材质上的 Shader 清单（相对路径，字典序）：工程根整棵树都算 —— shader 放在工程哪一层
+	 * 都能选到；引擎根只收 Shaders/MaterialShaders（其余是后处理 / 天空 / 覆盖层 / 计算这类管线
+	 * 内部用的）。只认含 stage 声明（#type）的 .glsl，库文件与 Cache 目录跳过。
+	 *
+	 * 扫一遍是 O(文件数)（约 1µs/文件），清单因此缓存在这里：资源有增删 / 改名后调
+	 * InvalidateShaderOptions 让它重扫，菜单打开这种高频调用不必每次都走磁盘。 */
+	const std::vector<std::string>& CollectShaderOptions();
+
+	/* 资源树变了：下次取清单时重扫 */
+	void InvalidateShaderOptions();
 }

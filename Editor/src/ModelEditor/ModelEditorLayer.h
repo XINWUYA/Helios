@@ -173,8 +173,6 @@ namespace Helios
 		/* 本帧悬停的子模型卡索引：对应网格段在预览里高亮（见 EditorCamera::SetHighlightSegment）；
 		 * 只有多个子网格时才置位，-1 = 没有悬停 */
 		int m_HighlightedSubModel{ -1 };
-		/* Shader 选择菜单的可选清单缓存（菜单打开时重扫） */
-		std::vector<std::string> m_ShaderOptions;
 		/* 贴图点击定位（见 SetAssetRevealFunc；未注入时点击无效果） */
 		AssetRevealFunc m_AssetRevealFunc;
 		/* 打开模型后待取景：视口尺寸就绪的下一帧再按包围球聚焦（见 ShowModelInScene） */

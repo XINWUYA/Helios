@@ -255,8 +255,8 @@ namespace Helios
 
 		/* 右键菜单的条目（在已经开好的 popup 里画） */
 		void DrawAssetContextMenuItems(const std::string& path, bool is_folder);
-		/* 空处右键：在当前目录下新建 */
-		void DrawBackgroundContextMenuItems();
+		/* 空处右键：在 parent_path 下新建（内容区传当前目录，目录树传资源根） */
+		void DrawBackgroundContextMenuItems(const std::string& parent_path);
 		/* 各弹层（新建资源 / 新建文件夹 / 新建文件 / 重命名 / 删除确认）都画在面板根作用域（右键
 		 * 菜单在子窗口里，各自算出来的 ID 不同）。theme_padding 是主题的窗口内边距（面板压成了 0），
 		 * 弹层用它补回上下内边距。 */

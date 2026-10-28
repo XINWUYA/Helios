@@ -14,8 +14,10 @@
 #include <imgui.h>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "EditorCommon.h"
 #include "EditorIcons.h"
 #include "PanelChrome.h"
+#include "Command/AssetFileOps.h"
 #include "Helios/ImGui/EditorTheme.h"
 #include "Helios/ImGui/ImGuiExtensions.h"
 #include "Helios/Core/AssetManager.h"
@@ -219,85 +221,11 @@ namespace Helios::MaterialParamUI
 		}
 	}
 
-	/* 材质下拉的目录白名单：只有这里放"给场景物体选的材质" */
-	inline constexpr const char* kShaderMenuDir = "Shaders/MaterialShaders/";
-
-	/* 可选 Shader：只收 MaterialShaders 目录下含 stage 声明的 .glsl（相对路径，字典序）——
-	 * 管线内 shader 与库文件都不进清单；跳过 Cache（编译产物目录），整树扫。
-	 * 引擎内置的与项目自己加的都要列，同名以项目里的为准。
-	 * 调用方缓存清单，在选中变化 / 菜单打开时重扫。 */
-	inline std::vector<std::string> CollectShaderOptions()
-	{
-		std::vector<std::string> options;
-
-		const auto scan_root = [&options](const std::filesystem::path& root)
-		{
-			std::error_code error;
-			for (std::filesystem::recursive_directory_iterator iter(root,
-					std::filesystem::directory_options::skip_permission_denied, error), end;
-				iter != end; iter.increment(error))
-			{
-				if (error)
-					break;
-
-				const std::filesystem::directory_entry& item = *iter;
-				if (item.is_directory())
-				{
-					if (item.path().filename() == "Cache")
-						iter.disable_recursion_pending();
-					continue;
-				}
-
-				if (!item.is_regular_file())
-					continue;
-
-				std::string extension = PathToUtf8(item.path().extension());
-				for (char& character : extension)
-				{
-					if (character >= 'A' && character <= 'Z')
-						character = static_cast<char>(character - 'A' + 'a');
-				}
-				if (extension != ".glsl")
-					continue;
-
-				const std::string relative = RELATIVE_PATH(PathToUtf8(item.path()));
-				if (relative.rfind(kShaderMenuDir, 0) != 0)
-					continue;
-
-				/* 目录里也得含 stage 声明（与编译器的切分判据一致），防库文件混进来 */
-				bool has_stage = false;
-				std::ifstream source(item.path(), std::ios::binary);
-				for (std::string line; std::getline(source, line); )
-				{
-					if (line.find("#type") != std::string::npos)
-					{
-						has_stage = true;
-						break;
-					}
-				}
-				if (!has_stage)
-					continue;
-
-				/* 项目根先扫，同名的内置 shader 不再重复列一遍 */
-				if (std::find(options.begin(), options.end(), relative) != options.end())
-					continue;
-
-				options.emplace_back(relative);
-			}
-		};
-
-		scan_root(g_ProjectPath);
-		scan_root(g_EngineResPath);
-
-		std::sort(options.begin(), options.end());
-		return options;
-	}
-
 	/* Shader 选择行（标签 + 下拉按钮 + 按目录分组的选择菜单）：
 	 * 按钮上显示当前 Shader 的文件名、右缘一枚朝下的箭头；悬停看全路径；
-	 * 菜单打开时重扫可选清单；当前 Shader 不在清单里（资产外路径之类）时树顶补一条。
+	 * 当前 Shader 不在清单里（资产外路径之类）时树顶补一条。
 	 * 返回 true = 选中了新的 Shader（已 SetShader，调用方按需热更）。 */
-	inline std::string DrawMaterialShaderPicker(const Material& material, std::vector<std::string>& options_cache)
+	inline std::string DrawMaterialShaderPicker(const Material& material)
 	{
 		const SharedPtr<DeviceShader> shader = material.GetShader();
 		const std::string current = (shader != nullptr) ? RELATIVE_PATH(shader->GetPath()) : std::string();
@@ -348,14 +276,10 @@ namespace Helios::MaterialParamUI
 		ImGui::SetNextWindowSizeConstraints(ImVec2(Scaled(200.0f), 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 		if (ImGui::BeginPopup("##ShaderMenu"))
 		{
-			/* 菜单打开时重扫一遍可选 Shader：平时清单由调用方按需刷新，新建的 .glsl
-			 * 不必等那些时机 —— 一开菜单就能选到 */
-			if (ImGui::IsWindowAppearing())
-				options_cache = CollectShaderOptions();
+			const std::vector<std::string>& options = CollectShaderOptions();
+			std::vector<ShaderMenuNode> nodes = BuildShaderMenuTree(options);
 
-			std::vector<ShaderMenuNode> nodes = BuildShaderMenuTree(options_cache);
-
-			/* 清单都窝在同一条目录链里时（如 Assets/Shaders/MaterialShaders/…）逐层脱掉空壳，
+			/* 清单都窝在同一条目录链里时（如 Shaders/MaterialShaders/…）逐层脱掉空壳，
 			 * 顶层直接放内容。注意：先搬到局部再赋回 —— children 住在 nodes 自己的缓冲里，直接
 			 * 自引用 move 行为未定义（实测会得到空树）。 */
 			while (nodes.size() == 1 && nodes[0].IsFolder())
@@ -366,7 +290,7 @@ namespace Helios::MaterialParamUI
 
 			/* 当前 Shader 不在清单里（资产外路径之类）：树顶补一条，选中态照常能看到 */
 			if (!current.empty()
-				&& std::find(options_cache.begin(), options_cache.end(), current) == options_cache.end())
+				&& std::find(options.begin(), options.end(), current) == options.end())
 				nodes.insert(nodes.begin(), ShaderMenuNode{ current, current, {} });
 
 			DrawShaderMenuLevel(nodes, current, picked);
@@ -378,9 +302,9 @@ namespace Helios::MaterialParamUI
 	}
 
 	/* 直接改材质的 Shader：资产编辑缓冲这类"就地写"的场合用 */
-	inline bool DrawMaterialShaderRow(Material& material, std::vector<std::string>& options_cache)
+	inline bool DrawMaterialShaderRow(Material& material)
 	{
-		const std::string picked = DrawMaterialShaderPicker(material, options_cache);
+		const std::string picked = DrawMaterialShaderPicker(material);
 		if (picked.empty())
 			return false;
 
@@ -408,7 +332,8 @@ namespace Helios::MaterialParamUI
 	/* 一条材质参数行：值画在临时缓冲上，改动经 write_back 落进目标材质（槽位 → 自动实例化
 	 * 写回；资产编辑缓冲 / 模型编辑器 → 直接写）。行对齐：标签跟 frame 高控件垂直居中。
 	 * 贴图行只画缩略图（点击定位、拖入替换、悬停看大图）。
-	 * spec 决定标签文案与控件形态（@property 显示名 / @type / @range）。 */
+	 * spec 决定标签文案与控件形态（@property 显示名 / @type / @range）：标了 @type(color) 的
+	 * vec3 / vec4 画取色器 —— 色块点开是取色盘，右边照旧能填分量（float 显示，0 到 1）。 */
 	inline void DrawMaterialParamRow(const MaterialParamInfo& param_info, const MaterialPropertySpec& spec,
 		const std::function<void(const std::string&)>& reveal_asset,
 		const std::function<void(ParamType, const std::string&, const std::any&)>& write_back)
@@ -540,7 +465,7 @@ namespace Helios::MaterialParamUI
 				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
 				if (spec.Widget == "color")
-					edited = ImGui::ColorEdit3("##Value", glm::value_ptr(value));
+					edited = ImGui::ColorEdit3("##Value", glm::value_ptr(value), ImGuiColorEditFlags_Float);
 				else
 					edited = ImGui::DragFloat3("##Value", glm::value_ptr(value), spec.Step > 0.0f ? spec.Step : 0.01f,
 						spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);
@@ -555,7 +480,8 @@ namespace Helios::MaterialParamUI
 				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
 				if (spec.Widget == "color")
-					edited = ImGui::ColorEdit4("##Value", glm::value_ptr(value));
+					edited = ImGui::ColorEdit4("##Value", glm::value_ptr(value),
+						ImGuiColorEditFlags_Float | ImGuiColorEditFlags_AlphaBar);
 				else
 					edited = ImGui::DragFloat4("##Value", glm::value_ptr(value), spec.Step > 0.0f ? spec.Step : 0.01f,
 						spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);

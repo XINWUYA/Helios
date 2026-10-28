@@ -817,6 +817,15 @@ namespace Helios
 			const PanelChrome::Card card = PanelChrome::BeginCard(
 				sub_model_info->Name.empty() ? "Unnamed" : sub_model_info->Name.c_str(), Icons::Id::Model);
 
+			/* 槽位挂的是改过的副本：卡头挂一枚 Instance（导出时落成模型旁边独立的 .mtl） */
+			const auto override_iter = m_SlotOverrides.find(slot->Name);
+			if (override_iter != m_SlotOverrides.end() && override_iter->second.IsInstance
+				&& override_iter->second.pMaterial != nullptr)
+			{
+				PanelChrome::DrawCardBadge(card, "Instance",
+					"Edited copy of the slot material — exported as its own .mtl, the source asset is untouched");
+			}
+
 			if (allow_highlight && card.HeaderHovered)
 				m_HighlightedSubModel = static_cast<int>(i);
 
@@ -834,7 +843,7 @@ namespace Helios
 				DrawSubModelMaterialRefRow(static_cast<int>(i));
 
 				/* 换 Shader 先落到实例上：共享的模型默认 / 材质资产不能被就地改 */
-				const std::string picked = MaterialParamUI::DrawMaterialShaderPicker(*material, m_ShaderOptions);
+				const std::string picked = MaterialParamUI::DrawMaterialShaderPicker(*material);
 				if (!picked.empty())
 				{
 					bool changed = false;
