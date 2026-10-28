@@ -26,7 +26,7 @@ namespace Helios
 	/* 场景实体层级树 + 属性面板。层级树按父子关系展开；层级面板 = 顶栏（搜索 + 筛选 + 新建）+
 	 * 实体树（子窗口）+ 底栏（计数），版式跟资源浏览器同源。行右端是可见性开关（眼睛）。
 	 * 属性面板的组件 UI 由 ComponentRegistry 驱动：字段表在 Kernel 的 Builtin/，
-	 * 自定义编辑在 ComponentEditors/（构造时装配）。 */
+	 * 自定义编辑在 ComponentEditors/（构造时装配）。层级树实现在 SceneHierarchy.cpp，属性面板在 SceneInspector.cpp。 */
 	class SceneHierarchy
 	{
 	public:
