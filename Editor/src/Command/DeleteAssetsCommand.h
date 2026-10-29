@@ -2,8 +2,8 @@
 #include <filesystem>
 #include <string>
 #include <vector>
-#include "Command/Command.h"
-#include "Command/AssetFileOps.h"
+#include "Command.h"
+#include "AssetFileOps.h"
 
 namespace Helios
 {

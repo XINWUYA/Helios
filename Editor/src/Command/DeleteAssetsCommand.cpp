@@ -1,5 +1,5 @@
 #include "Pch.h"
-#include "Command/DeleteAssetsCommand.h"
+#include "DeleteAssetsCommand.h"
 
 namespace Helios
 {

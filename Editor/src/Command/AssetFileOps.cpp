@@ -1,5 +1,5 @@
 ﻿#include "Pch.h"
-#include "Command/AssetFileOps.h"
+#include "AssetFileOps.h"
 #include "Helios/Core/TextureSettings.h"
 #include <algorithm>
 #include <cctype>

@@ -2,7 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
-#include "Command/Command.h"
+#include "Command.h"
 #include "Helios/Common/Common.h"
 
 namespace Helios

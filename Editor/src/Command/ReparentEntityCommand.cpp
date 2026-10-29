@@ -1,5 +1,5 @@
 ﻿#include "Pch.h"
-#include "Command/ReparentEntityCommand.h"
+#include "ReparentEntityCommand.h"
 
 namespace Helios
 {

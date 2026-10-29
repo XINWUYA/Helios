@@ -95,7 +95,7 @@ elseif(APPLE)
     target_link_libraries(Editor PRIVATE ${COCOA_FRAMEWORK})
 
     # 文件对话框走 Cocoa 的 NSOpenPanel，要按 Objective-C++ 编
-    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/FileDialog.cpp"
+    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/Common/FileDialog.cpp"
         PROPERTIES
             COMPILE_FLAGS "-x objective-c++"
             SKIP_PRECOMPILE_HEADERS ON

@@ -1,8 +1,8 @@
 #pragma once
 #include <filesystem>
 #include <string>
-#include "Command/Command.h"
-#include "Command/AssetFileOps.h"
+#include "Command.h"
+#include "AssetFileOps.h"
 
 namespace Helios
 {

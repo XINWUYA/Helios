@@ -1,5 +1,5 @@
 ﻿#include "Pch.h"
-#include "EditorApp.h"
+#include "App/EditorApp.h"
 
 #ifdef _WIN32
 #define _CRTDBG_MAP_ALLOC

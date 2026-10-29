@@ -3,7 +3,7 @@
 namespace Helios
 {
 	/* 内置组件注册清单：Builtin/ 下每个文件负责一个组件的数据部分（字段表、序列化补充、
-	 * 可添加形态）。自定义绘制在编辑器侧装配，见 Editor/src/SceneEditor/ComponentEditors。
+	 * 可添加形态）。自定义绘制在编辑器侧装配，见 Editor/src/Panels/SceneEditor/ComponentEditors。
 	 * 新增内置组件 = 新建一个注册文件，再到清单补一行。
 	 * 注册顺序决定 Inspector 卡片顺序、Add 菜单顺序与场景元素写出顺序。 */
 

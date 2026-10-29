@@ -1,5 +1,5 @@
 #include "Pch.h"
-#include "Command/CreateEntityCommand.h"
+#include "CreateEntityCommand.h"
 
 namespace Helios
 {

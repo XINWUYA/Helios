@@ -1,5 +1,5 @@
 ﻿#include "Pch.h"
-#include "Command/CreateAssetFileCommand.h"
+#include "CreateAssetFileCommand.h"
 
 namespace Helios
 {

@@ -1,5 +1,5 @@
 #include "Pch.h"
-#include "Command/DeleteEntityCommand.h"
+#include "DeleteEntityCommand.h"
 #include "Helios/Scene/Components.h"
 
 namespace Helios

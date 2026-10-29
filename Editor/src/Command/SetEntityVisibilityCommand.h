@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "Command/Command.h"
+#include "Command.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/Entity.h"
 #include "Helios/Scene/Scene.h"

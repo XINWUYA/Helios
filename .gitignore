@@ -42,6 +42,8 @@ bld/
 [Oo]ut/
 [Ll]og/
 [Ll]ogs/
+# 编辑器日志面板是源码目录，不按构建日志忽略
+!Editor/src/Panels/Log/
 intermediates/
 
 # Visual Studio 2015/2017 cache/options directory

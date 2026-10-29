@@ -1,5 +1,5 @@
 #include "Pch.h"
-#include "Command/RemoveComponentCommand.h"
+#include "RemoveComponentCommand.h"
 
 namespace Helios
 {

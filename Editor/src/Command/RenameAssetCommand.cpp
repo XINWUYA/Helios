@@ -1,5 +1,5 @@
 ﻿#include "Pch.h"
-#include "Command/RenameAssetCommand.h"
+#include "RenameAssetCommand.h"
 #include "Helios/Core/TextureSettings.h"
 
 namespace Helios

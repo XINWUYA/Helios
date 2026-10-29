@@ -1,5 +1,5 @@
 #pragma once
-#include "Command/Command.h"
+#include "Command.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/Entity.h"
 
