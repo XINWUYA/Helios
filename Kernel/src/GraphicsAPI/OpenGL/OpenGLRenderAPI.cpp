@@ -97,6 +97,11 @@ namespace Helios
 
 	/* 应用光栅化状态：只下发变化的字段。驱动虽然也会折叠重复配置，
 	 * 但每次调用仍要走一遍参数校验，逐 draw 累起来不划算。 */
+	uint32_t OpenGLRenderAPI::GetStateSerial() const
+	{
+		return GLState::StateSerial();
+	}
+
 	void OpenGLRenderAPI::ApplyRasterState(RenderRasterState raster_state)
 	{
 		PROFILE_FUNCTION();

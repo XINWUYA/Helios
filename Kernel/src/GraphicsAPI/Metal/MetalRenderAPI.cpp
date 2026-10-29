@@ -250,6 +250,11 @@ namespace Helios
          * 描述符时写入，因此这里无需（也无法）在编码中途发起清除。 */
     }
 
+    uint32_t MetalRenderAPI::GetStateSerial() const
+    {
+        return MetalRuntime::EncoderGeneration();
+    }
+
     void MetalRenderAPI::ApplyRasterState(RenderRasterState raster_state)
     {
         PROFILE_FUNCTION();

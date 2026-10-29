@@ -230,7 +230,35 @@ namespace Helios
 			? per_draw->RasterStateOverride.value()
 			: material->GetRasterState());
 
-		material->Bind(per_draw != nullptr ? per_draw->FillMissing : MaterialFill::None);
+		/* 排序把同材质的对象排在一起：上一笔写过的参数这一笔还是那些值，重复绑定可以省掉。
+		 * 有覆盖参数的那一笔除外 —— 它改过 Shader 上的值，下一笔必须重写回去 */
+		const uint8_t fill_missing = per_draw != nullptr ? per_draw->FillMissing : MaterialFill::None;
+		const bool has_overrides = per_draw != nullptr && !per_draw->Overrides.empty();
+		const uint32_t shader_generation = material->GetShader()->GetGeneration();
+		const uint32_t state_serial = m_pRenderAPI->GetStateSerial();
+		static const Material* s_LastBoundMaterial = nullptr;
+		static uint32_t s_LastBoundRevision = 0;
+		static uint32_t s_LastBoundGeneration = 0;
+		static uint32_t s_LastBoundSerial = 0;
+		static uint8_t s_LastBoundFill = 0;
+		static bool s_LastHadOverrides = false;
+
+		const bool bind_ready = !has_overrides && !s_LastHadOverrides
+			&& s_LastBoundMaterial == material.get()
+			&& s_LastBoundRevision == material->GetRevision()
+			&& s_LastBoundGeneration == shader_generation
+			&& s_LastBoundSerial == state_serial
+			&& s_LastBoundFill == fill_missing;
+		if (!bind_ready)
+		{
+			material->Bind(fill_missing);
+			s_LastBoundMaterial = material.get();
+			s_LastBoundRevision = material->GetRevision();
+			s_LastBoundGeneration = shader_generation;
+			s_LastBoundSerial = state_serial;
+			s_LastBoundFill = fill_missing;
+		}
+		s_LastHadOverrides = has_overrides;
 
 		/* per-draw 覆盖：只写当前绑定的 Shader / 纹理，不落材质对象（共享材质保持只读） */
 		if (per_draw != nullptr)

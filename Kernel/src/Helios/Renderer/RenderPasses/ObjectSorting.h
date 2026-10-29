@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+#include "Helios/Core/Profiler.h"
 #include "Helios/Renderer/RenderView.h"
 #include "Helios/Scene/Material.h"
 #include "Helios/Scene/Mesh.h"
@@ -109,6 +110,8 @@ namespace Helios::RenderSorting
 		const std::vector<VisibleMeshObject>& objects, bool transparent, const glm::vec3& view_position,
 		Filter filter)
 	{
+		PROFILE_FUNCTION();
+
 		struct DrawEntry
 		{
 			int32_t Queue{ 0 };
@@ -181,6 +184,8 @@ namespace Helios::RenderSorting
 	inline std::vector<const VisibleMeshObject*> CollectGBufferList(
 		const std::vector<VisibleMeshObject>& objects)
 	{
+		PROFILE_FUNCTION();
+
 		std::vector<std::pair<uint64_t, const VisibleMeshObject*>> entries;
 		entries.reserve(objects.size());
 
@@ -223,6 +228,8 @@ namespace Helios::RenderSorting
 		const std::vector<VisibleMeshObject>& objects, const RenderRasterState& base_state,
 		const std::vector<uint32_t>* caster_indices = nullptr)
 	{
+		PROFILE_FUNCTION();
+
 		std::vector<std::pair<uint64_t, const VisibleMeshObject*>> entries;
 		entries.reserve(caster_indices != nullptr ? caster_indices->size() : objects.size());
 

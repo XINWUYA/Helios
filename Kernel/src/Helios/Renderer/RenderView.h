@@ -113,7 +113,13 @@ namespace Helios
 		[[nodiscard]] const ViewportRegion& GetViewportRegion() const { return m_ViewportRegion; }
 
 		/* 设置所属的Scene */
-		void SetOwnerScene(const SharedPtr<Scene>& scene) { m_pOwnerScene = scene; }
+		void SetOwnerScene(const SharedPtr<Scene>& scene)
+		{
+			/* 换了场景要重新注册阴影光源：上一份注册结果指向旧场景的光源 */
+			if (m_pOwnerScene.lock() != scene)
+				m_ShadowLightSignatures.clear();
+			m_pOwnerScene = scene;
+		}
         SharedPtr<Scene> GetOwnerScene() const { return m_pOwnerScene.lock(); }
 
 		/* 优先级 */
@@ -200,6 +206,10 @@ namespace Helios
 		std::vector<VisibleMeshObject> m_VisibleMeshObjects{};
 		/* 对场景产生影响的光源 */
 		std::vector<SharedPtr<Light>> m_ValidLights{};
+		/* 上一帧注册进阴影管理器的光源（含阴影配置签名）：同一批光源不必重建，
+		 * 重建会把级联矩阵整份作废，等于每帧拿全场景投射物重新拟合一遍 */
+		std::vector<SharedPtr<Light>> m_ShadowLights{};
+		std::vector<uint64_t> m_ShadowLightSignatures{};
 
 		/* 当前View的渲染结果输出到该RenderTarget */
 		FrameGraphResourceHandle m_RenderTargetHandle{};

@@ -9,6 +9,7 @@ namespace Helios
 		{
 			GLuint g_Framebuffer = 0;
 			GLuint g_Program = 0;
+			uint32_t g_StateSerial = 1;
 			std::unordered_map<uint64_t, BufferBinding> g_BufferBindings;
 		}
 
@@ -16,6 +17,7 @@ namespace Helios
 		{
 			glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
 			g_Framebuffer = framebuffer;
+			++g_StateSerial;
 		}
 
 		GLuint CurrentFramebuffer()
@@ -32,6 +34,11 @@ namespace Helios
 			g_BufferBindings[(static_cast<uint64_t>(target) << 32) | binding] = range;
 		}
 
+		uint32_t StateSerial()
+		{
+			return g_StateSerial;
+		}
+
 		BufferBinding CurrentBufferRange(GLenum target, GLuint binding)
 		{
 			const auto iter = g_BufferBindings.find((static_cast<uint64_t>(target) << 32) | binding);
@@ -44,6 +51,7 @@ namespace Helios
 				return;
 			glUseProgram(program);
 			g_Program = program;
+			++g_StateSerial;
 		}
 
 		GLuint CurrentProgram()
@@ -57,6 +65,7 @@ namespace Helios
 				return;
 			glUseProgram(0);
 			g_Program = 0;
+			++g_StateSerial;
 		}
 	}
 

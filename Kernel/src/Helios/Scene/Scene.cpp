@@ -406,28 +406,41 @@ namespace Helios
 			m_FrameWorldStampNow = 1;
 		}
 
-		const auto transform_view = m_Registry.view<TransformComponent>();
-		for (auto entity : transform_view)
+		/* 先把本帧的世界变换全部算出来（局部矩阵按值缓存，没动过的实体只有一次查表），
+		 * 渲染侧读到的才是同一份快照。这一步不能省：只有 Transform 的节点也要入快照 */
+		for (const entt::entity entity : m_Registry.view<TransformComponent>())
+			FrameWorldTransform(entity);
+
+		/* 再按组件类型分开推送，不再对每个实体挨个 try_get 四种组件：
+		 * 模型最多，一个视图走完；光 / 相机 / 探针各自数量很少 */
+		for (auto [entity, model_component] : m_Registry.view<ModelComponent>().each())
 		{
-			const glm::mat4& world_transform = FrameWorldTransform(entity);
+			if (model_component.m_Model)
+				model_component.m_Model->SetTransform(FrameWorldTransform(entity));
+		}
 
-			if (auto* model_component = m_Registry.try_get<ModelComponent>(entity); model_component && model_component->m_Model)
-				model_component->m_Model->SetTransform(world_transform);
+		for (auto [entity, light_component] : m_Registry.view<LightComponent>().each())
+		{
+			if (light_component.m_Light)
+				light_component.m_Light->SetTransform(FrameWorldTransform(entity));
+		}
 
-			if (auto* light_component = m_Registry.try_get<LightComponent>(entity); light_component && light_component->m_Light)
-				light_component->m_Light->SetTransform(world_transform);
+		for (auto [entity, camera_component] : m_Registry.view<CameraComponent>().each())
+		{
+			if (camera_component.m_Camera)
+				camera_component.m_Camera->SetTransform(FrameWorldTransform(entity));
+		}
 
-			if (auto* camera_component = m_Registry.try_get<CameraComponent>(entity); camera_component && camera_component->m_Camera)
-				camera_component->m_Camera->SetTransform(world_transform);
+		for (auto [entity, probe_component] : m_Registry.view<ReflectionProbeComponent>().each())
+		{
+			if (!probe_component.m_ReflectionProbe)
+				continue;
 
-			if (auto* probe_component = m_Registry.try_get<ReflectionProbeComponent>(entity); probe_component && probe_component->m_ReflectionProbe)
-			{
-				probe_component->m_ReflectionProbe->SetTransform(world_transform);
-				/* 可见性同源传播（与光源"隐藏 = 不照"一致）：隐藏的探针不烘焙、
-				 * 不参与 IBL 选择（注册保留，恢复可见即恢复参与） */
-				const size_t index = static_cast<size_t>(entt::to_entity(entity));
-				probe_component->m_ReflectionProbe->SetEnable(m_FrameVisible[index] != 0);
-			}
+			probe_component.m_ReflectionProbe->SetTransform(FrameWorldTransform(entity));
+			/* 可见性同源传播（与光源"隐藏 = 不照"一致）：隐藏的探针不烘焙、
+			 * 不参与 IBL 选择（注册保留，恢复可见即恢复参与） */
+			const size_t index = static_cast<size_t>(entt::to_entity(entity));
+			probe_component.m_ReflectionProbe->SetEnable(m_FrameVisible[index] != 0);
 		}
 		m_FrameRecordReadable = true;
 

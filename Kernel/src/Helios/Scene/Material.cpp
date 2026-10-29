@@ -45,50 +45,71 @@ namespace Helios
 		m_ShaderGeneration = shader != nullptr ? shader->GetGeneration() : 0;
 	}
 
+	/* 能力位跟 Shader 的版本号绑定：热重载换代后重算一次 */
+	bool Material::ShaderFlagsReady() const
+	{
+		return m_HasShaderFlags
+			&& m_FlagsGeneration == (m_pShader != nullptr ? m_pShader->GetGeneration() : 0);
+	}
+
+	/* 能力位一次算清：这几个判据每帧按对象查成千上万次，不能每次都翻反射表 */
+	void Material::RefreshShaderFlags() const
+	{
+		m_HasShaderFlags = true;
+		m_FlagsGeneration = m_pShader != nullptr ? m_pShader->GetGeneration() : 0;
+		m_IsSkyBox = false;
+		m_SupportsIBL = false;
+		m_SupportsDirectLighting = false;
+		m_SupportsGBuffer = false;
+		if (m_pShader == nullptr)
+			return;
+
+		/* 天空盒以着色器为单一来源（样例场景的约定同源）：资产里的天空就是
+		 * "网格 + SkyBox.glsl 材质"，由顶点着色器折叠成全屏天空 */
+		static BuiltinAsset<DeviceShader> s_skybox_shader("Shaders/Sky/SkyBox.glsl");
+		m_IsSkyBox = m_pShader == s_skybox_shader.Get();
+
+		/* IBL 判据 = 声明了 IBL 契约的辐照度采样器（只能按 sampler 反射查）：裸 uniform
+		 * u_UseIBL 在 Metal 反射里查不到，拿它门控会恒为假 */
+		m_SupportsIBL = m_pShader->GetUniformBinding("u_IrradianceMap") >= 0;
+
+		/* 直接光照判据 = 声明了 u_ComposeAmbientEmission（Unlit 类不声明）。反射表为空 =
+		 * 后端拿不到裸 uniform 声明（GL 的 SPIR-V 反射路径），退回 IBL 契约近似判断 */
+		const auto& reflection = m_pShader->GetReflectionData();
+		m_SupportsDirectLighting = !reflection.MaterialParams.empty()
+			? reflection.FindMaterialParam("u_ComposeAmbientEmission") != nullptr
+			: m_SupportsIBL;
+
+		/* G-Buffer 判据 = 声明了标准材质契约的主采样器：自定义着色器的裸 uniform 转不过去 */
+		m_SupportsGBuffer = m_pShader->GetUniformBinding("u_AlbedoTexture") >= 0;
+	}
+
 	bool Material::IsSkyBox() const
 	{
-		PROFILE_FUNCTION();
-
-		/* 天空盒的识别以着色器为单一来源（样例场景的约定同源）：资产里的天空
-		 * 就是"网格 + SkyBox.glsl 材质"，由顶点着色器折叠成全屏天空。
-		 * AssetManager 按路径缓存，指针比较即可。 */
-		static BuiltinAsset<DeviceShader> s_skybox_shader("Shaders/Sky/SkyBox.glsl");
-		return m_pShader != nullptr && m_pShader == s_skybox_shader.Get();
+		if (!ShaderFlagsReady())
+			RefreshShaderFlags();
+		return m_IsSkyBox;
 	}
 
 	bool Material::SupportsIBL() const
 	{
-		PROFILE_FUNCTION();
-
-		/* 判据 = 声明了 IBL 契约的辐照度采样器（只能按 sampler 反射来查）；不能查 u_UseIBL ——
-		 * 裸 uniform 在 Metal 反射里查不到，拿它做门控会恒为假、per-draw 的探针绑定永远发不出去。 */
-		return m_pShader != nullptr && m_pShader->GetUniformBinding("u_IrradianceMap") >= 0;
+		if (!ShaderFlagsReady())
+			RefreshShaderFlags();
+		return m_SupportsIBL;
 	}
 
 	bool Material::SupportsDirectLighting() const
 	{
-		PROFILE_FUNCTION();
-
-		if (m_pShader == nullptr)
-			return false;
-
-		/* 判据 = 声明了直接光照契约的 u_ComposeAmbientEmission（Unlit 类不声明）。反射表为空 =
-		 * 后端拿不到裸 uniform 的声明（GL 的 SPIR-V 反射路径），就退回 IBL 契约近似判断 —— 完整
-		 * 光照的着色器都会声明 IBL 采样器。 */
-		const auto& reflection = m_pShader->GetReflectionData();
-		if (!reflection.MaterialParams.empty())
-			return reflection.FindMaterialParam("u_ComposeAmbientEmission") != nullptr;
-
-		return SupportsIBL();
+		if (!ShaderFlagsReady())
+			RefreshShaderFlags();
+		return m_SupportsDirectLighting;
 	}
 
 	bool Material::SupportsGBuffer() const
 	{
-		PROFILE_FUNCTION();
-
-		/* 判据 = 声明了标准材质契约的主采样器：G-Buffer 只能承载 MaterialLit 那套参数
-		 * （贴图 + 顶点色），自定义着色器的裸 uniform 转不过去。 */
-		return m_pShader != nullptr && m_pShader->GetUniformBinding("u_AlbedoTexture") >= 0;
+		if (!ShaderFlagsReady())
+			RefreshShaderFlags();
+		return m_SupportsGBuffer;
 	}
 
 	void Material::SetParameters(ParamType type, const std::string& name, const std::any& param)

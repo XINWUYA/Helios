@@ -19,6 +19,9 @@ namespace Helios
 		/* 应用光栅化状态 */
 		void ApplyRasterState(RenderRasterState raster_state) override;
 
+		/* 绘制状态代号（见 GLState::StateSerial）：换帧缓冲或换程序后上一笔的绑定不再可信 */
+		[[nodiscard]] uint32_t GetStateSerial() const override;
+
 		/* 绘制调用 */
 		void DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count = 0, uint32_t index_offset = 0) override;
 		void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) override;

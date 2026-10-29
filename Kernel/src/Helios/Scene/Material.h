@@ -64,6 +64,8 @@ namespace Helios
 
 		/* 设置Shader */
 		void SetShader(const SharedPtr<DeviceShader>& shader);
+		/* 参数版本号：增删改参数、换 Shader 都加一。渲染侧据此跳过没变的重复绑定 */
+		[[nodiscard]] uint32_t GetRevision() const { return m_Revision; }
 		[[nodiscard]] const SharedPtr<DeviceShader>& GetShader() const { return m_pShader; }
 		/* 是否天空盒材质：以 SkyBox.glsl 为着色器的材质（天空盒的几何约定：
 		 * 顶点着色器把网格铺满全屏、深度取远平面）。这类材质不进延迟管线 G-Buffer、
@@ -221,6 +223,15 @@ namespace Helios
 		SharedPtr<DeviceShader> m_pShader{ nullptr };
 		/* 上次解析贴图绑定点时 Shader 的版本号：Shader 重载后据此重解析一次 */
 		uint32_t m_ShaderGeneration{ 0 };
+		/* 着色器能力位：SetShader 与热重载换代后算一次，绘制热路径直接读 */
+		void RefreshShaderFlags() const;
+		[[nodiscard]] bool ShaderFlagsReady() const;
+		mutable bool m_HasShaderFlags{ false };
+		mutable uint32_t m_FlagsGeneration{ 0 };
+		mutable bool m_IsSkyBox{ false };
+		mutable bool m_SupportsIBL{ false };
+		mutable bool m_SupportsDirectLighting{ false };
+		mutable bool m_SupportsGBuffer{ false };
 		/* 材质所需的各种参数<ToID(Name), MaterialParamInfo> */
 		ParameterMap m_Parameters{};
 		/* 光栅化状态配置 */

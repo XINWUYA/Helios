@@ -30,6 +30,9 @@ namespace Helios
         /* 记录光栅化状态并应用到当前编码器 */
         void ApplyRasterState(RenderRasterState raster_state) override;
 
+        /* 绘制状态代号 = 编码器世代号：换编码器之后管道状态全没了，上一笔的材质绑定不能复用 */
+        [[nodiscard]] uint32_t GetStateSerial() const override;
+
         void DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
             uint32_t index_count = 0, uint32_t index_offset = 0) override;
         void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) override;

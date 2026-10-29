@@ -245,6 +245,28 @@ namespace Helios
 		}
 	}
 
+	namespace
+	{
+		/* 阴影光源的签名：指针、类型、阴影图尺寸、级联数 —— 任一项变了才重建阴影管理器 */
+		uint64_t ShadowLightSignature(const Light& light)
+		{
+			uint64_t signature = 0xCBF29CE484222325ULL;
+			const auto mix = [&signature](uint64_t value)
+			{
+				signature ^= value;
+				signature *= 0x100000001B3ULL;
+			};
+			mix(reinterpret_cast<uintptr_t>(&light));
+			mix(static_cast<uint64_t>(light.GetLightType()));
+			if (const auto& info = light.GetShadowMapInfo())
+			{
+				mix(info->Size);
+				mix(info->CascadeCnt);
+			}
+			return signature;
+		}
+	}
+
 	/* 准备光源信息 */
 	void RenderView::PrepareLights()
 	{
@@ -252,12 +274,13 @@ namespace Helios
 
 		m_ValidLights.clear();
 		m_IsHasShadowCast = false;
-		m_pShadowMapManager->Reset();
 
 		/* 收集所有光源 */
 		const auto owner_scene = m_pOwnerScene.lock();
 		if (!owner_scene)
 			return;
+
+		std::vector<SharedPtr<Light>> shadow_lights;
 
 		const auto light_entity_view = owner_scene->GetRegistry().view<TransformComponent, LightComponent>();
 		for (auto& entity : light_entity_view)
@@ -273,14 +296,27 @@ namespace Helios
 				m_ValidLights.emplace_back(light_component.m_Light);
 
 				if (light_component.m_Light->IsCastShadow())
-					m_pShadowMapManager->RegisterShadowLight(light_component.m_Light);
+					shadow_lights.emplace_back(light_component.m_Light);
 			}
+		}
+
+		/* 投影光源是同一批就沿用上一帧的注册结果（级联矩阵的脏检测另有方向 / 相机比较） */
+		std::vector<uint64_t> signatures;
+		signatures.reserve(shadow_lights.size());
+		for (const auto& light : shadow_lights)
+			signatures.push_back(ShadowLightSignature(*light));
+		if (signatures != m_ShadowLightSignatures)
+		{
+			m_pShadowMapManager->Reset();
+			for (const auto& light : shadow_lights)
+				m_pShadowMapManager->RegisterShadowLight(light);
+			m_ShadowLights = shadow_lights;
+			m_ShadowLightSignatures = std::move(signatures);
+			m_pShadowMapManager->PrepareForShadowMaps(owner_scene, GetCullingCamera());
 		}
 
 		m_IsHasShadowCast = !m_pShadowMapManager->GetCascadeShadowMaps().empty()
 			|| !m_pShadowMapManager->GetPunctualShadowMaps().empty();
-		if (m_IsHasShadowCast)
-			m_pShadowMapManager->PrepareForShadowMaps(owner_scene, GetCullingCamera());
 	}
 
 	namespace

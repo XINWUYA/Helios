@@ -98,6 +98,10 @@ namespace Helios
 	 * （OpenGL）无需实现，由默认空实现覆盖。 */
 	virtual void PrepareNextFrame() {}
 
+	/* 绘制状态代号：换编码器 / 换帧缓冲这类"隐式状态"一变就加一。
+	 * Renderer::Submit 拿它判断上一笔的材质绑定是否还生效。返回 0 表示后端不跟踪，永远重绑。 */
+	[[nodiscard]] virtual uint32_t GetStateSerial() const { return 0; }
+
 	/* 使用平台 */
 	static int GetAPI() { return m_API; }
 	/* 创建当前API */

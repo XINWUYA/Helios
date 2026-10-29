@@ -363,6 +363,10 @@ namespace Helios
 		void UseProgram(GLuint program);
 		[[nodiscard]] GLuint CurrentProgram();
 		void ForgetProgram(GLuint program);
+
+		/* 绘制状态代号：换帧缓冲或换程序就加一。渲染侧据此判断上一笔的材质绑定能否复用
+		 * （程序没换、目标没换，绑过的 uniform / 纹理都还在） */
+		[[nodiscard]] uint32_t StateSerial();
 	}
 
 	/* OpenGL 错误检查 */#if HELIOS_DEBUG
