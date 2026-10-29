@@ -750,11 +750,12 @@ namespace Helios
 						punctual_shadow_map->GetLightViewProjectionMat());
 
 					/* 只提交落在这一面视锥里的投射物：点光六个面各自只看得到一部分 */
-					const FrustumSides frustum = FrustumSides::FromViewProjection(punctual_shadow_map->GetLightViewProjectionMat());
+					const Frustum face_frustum = Frustum::FromViewProjection(
+						punctual_shadow_map->GetLightViewProjectionMat());
 					face_casters.clear();
 					for (uint32_t index = 0; index < static_cast<uint32_t>(casters.size()); ++index)
 					{
-						if (!frustum.IsOutside(casters[index]))
+						if (!face_frustum.IsOutside(casters[index]))
 							face_casters.push_back(index);
 					}
 					render_shadow_layer(layer, shadow_material, &face_casters);

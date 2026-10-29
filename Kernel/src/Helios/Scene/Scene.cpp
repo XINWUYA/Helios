@@ -348,6 +348,7 @@ namespace Helios
 		/* 实体销毁会触发组件的 OnRemoved（反射探针随之从管理器注销），
 		 * 但管理器仍可能持有引用，一并清空以保证不留上一份场景的残留。 */
 		m_Registry.clear();
+		m_MeshIndex.Clear();
 
 		if (m_pReflectionProbeManager != nullptr)
 			m_pReflectionProbeManager->ClearProbes();
@@ -413,11 +414,41 @@ namespace Helios
 
 		/* 再按组件类型分开推送，不再对每个实体挨个 try_get 四种组件：
 		 * 模型最多，一个视图走完；光 / 相机 / 探针各自数量很少 */
+		m_MeshIndex.BeginSync();
+		m_SkyBoxEntities.clear();
 		for (auto [entity, model_component] : m_Registry.view<ModelComponent>().each())
 		{
-			if (model_component.m_Model)
-				model_component.m_Model->SetTransform(FrameWorldTransform(entity));
+			if (!model_component.m_Model)
+				continue;
+
+			const glm::mat4& world = FrameWorldTransform(entity);
+			model_component.m_Model->SetTransform(world);
+
+			/* 天空盒铺满全屏、跟网格摆在哪无关：不进空间索引，单独记一份给视图补进列表 */
+			bool is_sky = model_component.m_Model->IsSkyBoxMaterial();
+			for (const auto& [slot_name, slot_override] : model_component.m_SlotOverrides)
+			{
+				if (slot_override.pMaterial != nullptr && slot_override.pMaterial->IsSkyBox())
+				{
+					is_sky = true;
+					break;
+				}
+			}
+			if (is_sky)
+			{
+				if (m_FrameVisible[static_cast<size_t>(entt::to_entity(entity))] != 0)
+					m_SkyBoxEntities.push_back(entity);
+				continue;
+			}
+
+			/* 空间索引与渲染解耦：这里只写包围盒 / 层 / 显隐，剔除留给查询方。
+			 * 蒙皮网格的包围盒是绑定姿态，标成不可剔（进"恒参与"表） */
+			const bool skinned = model_component.m_EnableSkinning && !model_component.m_Model->IsStaticModel();
+			m_MeshIndex.Sync(entity, world, model_component.m_Model->GetLocalBounds(),
+				GetEntityLayerMask(entity), m_FrameVisible[static_cast<size_t>(entt::to_entity(entity))] != 0,
+				!skinned);
 		}
+		m_MeshIndex.EndSync();
 
 		for (auto [entity, light_component] : m_Registry.view<LightComponent>().each())
 		{

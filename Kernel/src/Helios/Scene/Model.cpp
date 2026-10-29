@@ -306,6 +306,11 @@ namespace Helios
 	}
 
 	/* 添加一个MeshSegment到模型 */
+	MeshBounds Model::GetLocalBounds() const
+	{
+		return MeshBounds{ m_AABBMin, m_AABBMax };
+	}
+
 	void Model::AddMeshSegment(const SharedPtr<MeshSegment>& mesh_segment)
 	{
 		m_MeshSegments.emplace_back(mesh_segment);
@@ -515,6 +520,7 @@ namespace Helios
 			model->m_MaterialSlots.reserve(entries.size());
 			for (const ModelManifest::Slot& entry : entries)
 				model->m_MaterialSlots.push_back(ResolveManifestSlot(entry));
+		model->m_SkyBoxMaterialValid = false;
 
 			model->EnsureMaterialSlots();
 			return model;
@@ -689,12 +695,27 @@ namespace Helios
 	}
 
 	/* 添加一个材质槽 */
+	bool Model::IsSkyBoxMaterial() const
+	{
+		if (!m_SkyBoxMaterialValid)
+		{
+			m_HasSkyBoxMaterial = std::any_of(m_MaterialSlots.begin(), m_MaterialSlots.end(),
+				[](const MaterialSlot& slot)
+				{
+					return slot.pDefault != nullptr && slot.pDefault->IsSkyBox();
+				});
+			m_SkyBoxMaterialValid = true;
+		}
+		return m_HasSkyBoxMaterial;
+	}
+
 	void Model::AddMaterialSlot(const std::string& name, const SharedPtr<Material>& material)
 	{
 		MaterialSlot slot;
 		slot.Name = name;
 		slot.pDefault = material;
 		m_MaterialSlots.emplace_back(std::move(slot));
+		m_SkyBoxMaterialValid = false;
 	}
 
 	const MaterialSlot* Model::GetSlotByName(const std::string& name) const

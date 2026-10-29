@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <glm/glm.hpp>
 #include "Material.h"
+#include "Mesh.h"
 #include <memory>
 #include "SceneObject.h"
 
@@ -77,6 +78,13 @@ namespace Helios
 		/* 获取所有MeshSegments */
 		[[nodiscard]] const std::vector<SharedPtr<MeshSegment>>& GetMeshSegments() const { return m_MeshSegments; }
 
+		/* 局部空间的包围盒（各段合起来，AddMeshSegment 时累计好）：
+		 * 空间索引用它，逐段剔除留到收集时再判 */
+		[[nodiscard]] MeshBounds GetLocalBounds() const;
+
+		/* 槽表里有没有天空盒材质：天空铺满全屏、与网格摆在哪无关，不参与空间剔除 */
+		[[nodiscard]] bool IsSkyBoxMaterial() const;
+
 		/* 画到屏幕上的段：骨骼模型是当前姿势的动态段，静态模型就是自己的段。
 		 * 渲染收集与编辑器的线框 / 高亮叠加都走这里，口径只有一个。 */
 		[[nodiscard]] virtual const std::vector<SharedPtr<MeshSegment>>& GetRenderSegments() const
@@ -118,6 +126,9 @@ namespace Helios
 		glm::vec3 m_AABBMax;
 		/* 缩放 */
 		glm::vec3 m_Scale{ 1.0f };
+		/* 天空盒材质的判定缓存：槽表变了才重算 */
+		mutable bool m_HasSkyBoxMaterial{ false };
+		mutable bool m_SkyBoxMaterialValid{ false };
 		/* 上次推进来的世界变换：场景每帧都推一遍，没变就不再分解 */
 		glm::mat4 m_PushedTransform{ 1.0f };
 		bool m_HasPushedTransform{ false };

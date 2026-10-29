@@ -21,6 +21,18 @@ namespace Helios
 		}
 	};
 
+	/* 网格包围盒（局部空间）：空间索引与剔除共用，没设过时全零 = 未知 */
+	struct MeshBounds
+	{
+		glm::vec3 Min{ 0.0f };
+		glm::vec3 Max{ 0.0f };
+
+		[[nodiscard]] bool IsValid() const
+		{
+			return Min != glm::vec3(0.0f) || Max != glm::vec3(0.0f);
+		}
+	};
+
 	/* 网格数据类：隶属模型，一个模型可有多个 MeshSegment。每个 Segment 声明自己属于哪个
 	 * "材质槽"（几何只描述材质需求）；具体绑哪份材质，由模型槽表的默认和实体槽的覆盖决定。 */
 	class MeshSegment

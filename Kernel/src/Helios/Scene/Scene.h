@@ -5,6 +5,7 @@
 #include <vector>
 #include "AnimationRuntime.h"
 #include "LayerMask.h"
+#include "MeshInstanceIndex.h"
 
 namespace tinyxml2
 {
@@ -47,6 +48,11 @@ namespace Helios
 
 		/* 实体是否还存在（句柄非空不代表实体还在） */
 		[[nodiscard]] bool IsEntityValid(entt::entity entity) const { return m_Registry.valid(entity); }
+
+		/* 网格实例的空间索引：OnUpdate 每帧同步，渲染侧按视锥 / 范围查询（见 MeshInstanceIndex） */
+		[[nodiscard]] const MeshInstanceIndex& GetMeshInstanceIndex() const { return m_MeshIndex; }
+		/* 天空盒实体：铺满全屏、与网格位置无关，不进空间索引，各视图自己补进列表 */
+		[[nodiscard]] const std::vector<entt::entity>& GetSkyBoxEntities() const { return m_SkyBoxEntities; }
 
 		/* 父节点；没有父节点（或父节点已失效）时返回 entt::null */
 		[[nodiscard]] entt::entity GetParent(entt::entity entity) const;
@@ -161,6 +167,11 @@ namespace Helios
 		std::vector<uint32_t> m_FrameWorldStamp;
 		uint32_t m_FrameWorldStampNow{ 0 };
 		bool m_FrameRecordReadable{ false };
+
+		/* 网格实例的空间索引（均匀网格）：剔除按格子查，不再每帧扫全场景 */
+		MeshInstanceIndex m_MeshIndex;
+		/* 本帧算出来的天空盒实体（不进索引，见 GetSkyBoxEntities） */
+		std::vector<entt::entity> m_SkyBoxEntities;
 
 		/* 场景中的所有实体都将注册到这里 */
 		entt::registry m_Registry;

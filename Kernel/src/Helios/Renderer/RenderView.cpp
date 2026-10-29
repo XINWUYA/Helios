@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "RenderView.h"
 #include "FrameGraph/FrameGraph.h"
+#include <Helios/Scene/MeshInstanceIndex.h>
 #include <Helios/Scene/Scene.h>
 #include <Helios/Scene/Camera.h>
 #include <Helios/Scene/Material.h>
@@ -15,7 +16,7 @@
 
 namespace Helios
 {
-	FrustumSides FrustumSides::FromViewProjection(const glm::mat4& view_projection)
+	Frustum Frustum::FromViewProjection(const glm::mat4& view_projection)
 	{
 		/* glm 按列存，第 i 行 = (m[0][i], m[1][i], m[2][i], m[3][i]) */
 		const auto row = [&view_projection](int index)
@@ -25,36 +26,88 @@ namespace Helios
 		};
 		const glm::vec4 row_x = row(0);
 		const glm::vec4 row_y = row(1);
+		const glm::vec4 row_z = row(2);
 		const glm::vec4 row_w = row(3);
-		return FrustumSides{ { row_w + row_x, row_w - row_x, row_w + row_y, row_w - row_y } };
+		/* 侧面 |x| <= w、|y| <= w；深度按 ZO 的 0 <= z <= w（Reversed-Z 只是近远两端对调，
+		 * 围出来的还是这块体积），所以两个深度面一起加上不用管约定 */
+		Frustum frustum;
+		frustum.Planes[0] = row_w + row_x;
+		frustum.Planes[1] = row_w - row_x;
+		frustum.Planes[2] = row_w + row_y;
+		frustum.Planes[3] = row_w - row_y;
+		frustum.Planes[4] = row_z;
+		frustum.Planes[5] = row_w - row_z;
+		frustum.ViewProjection = view_projection;
+		return frustum;
 	}
 
-	bool FrustumSides::IsOutside(const VisibleMeshObject& object) const
+	bool Frustum::IsOutside(const VisibleMeshObject& object) const
 	{
-		if (!object.Cullable || object.MeshSegment == nullptr)
+		if (!object.Cullable)
 			return false;
 
-		const glm::vec3& local_min = object.MeshSegment->GetAABBMin();
-		const glm::vec3& local_max = object.MeshSegment->GetAABBMax();
-		/* 没设过包围盒（全零）当作未知，不剔 */
-		if (local_min == glm::vec3(0.0f) && local_max == glm::vec3(0.0f))
-			return false;
+		glm::vec3 center = object.WorldCenter;
+		glm::vec3 extent = object.WorldExtent;
+		if (!object.HasWorldBounds)
+		{
+			/* 没在收集时量过（手工构造的对象）：现算一次，局部盒变到世界 ——
+			 * 中心直接变换，半长按矩阵各轴的绝对值展开 */
+			if (object.MeshSegment == nullptr)
+				return false;
 
-		/* 局部盒变到世界：中心直接变换，半长按矩阵各轴的绝对值展开 */
-		const glm::mat4& matrix = object.Local2WorldMat;
-		const glm::vec3 half = (local_max - local_min) * 0.5f;
-		const glm::vec3 center = glm::vec3(matrix * glm::vec4((local_min + local_max) * 0.5f, 1.0f));
-		const glm::vec3 extent = glm::abs(glm::vec3(matrix[0])) * half.x
-			+ glm::abs(glm::vec3(matrix[1])) * half.y
-			+ glm::abs(glm::vec3(matrix[2])) * half.z;
+			const glm::vec3& local_min = object.MeshSegment->GetAABBMin();
+			const glm::vec3& local_max = object.MeshSegment->GetAABBMax();
+			/* 没设过包围盒（全零）当作未知，不剔 */
+			if (local_min == glm::vec3(0.0f) && local_max == glm::vec3(0.0f))
+				return false;
 
+			const glm::mat4& matrix = object.Local2WorldMat;
+			const glm::vec3 half = (local_max - local_min) * 0.5f;
+			center = glm::vec3(matrix * glm::vec4((local_min + local_max) * 0.5f, 1.0f));
+			extent = glm::abs(glm::vec3(matrix[0])) * half.x
+				+ glm::abs(glm::vec3(matrix[1])) * half.y
+				+ glm::abs(glm::vec3(matrix[2])) * half.z;
+		}
+
+		return IsOutside(center, extent);
+	}
+
+	bool Frustum::IsOutside(const glm::vec3& center, const glm::vec3& extent) const
+	{
 		for (const glm::vec4& plane : Planes)
 		{
+			/* 平面没归一化也没关系：只看符号，支撑函数 n·c + |n|·e 照样对 */
 			const glm::vec3 normal(plane);
 			if (glm::dot(normal, center) + plane.w + glm::dot(glm::abs(normal), extent) < 0.0f)
 				return true;
 		}
 		return false;
+	}
+
+	void Frustum::GetWorldBounds(glm::vec3& bounds_min, glm::vec3& bounds_max) const
+	{
+		const glm::mat4 inverse = glm::inverse(ViewProjection);
+		bounds_min = glm::vec3(std::numeric_limits<float>::max());
+		bounds_max = glm::vec3(-std::numeric_limits<float>::max());
+
+		/* 两个深度端点都取：Reversed-Z 下 0 是远、1 是近，八个角点合起来是同一块体积 */
+		for (int depth = 0; depth <= 1; ++depth)
+		{
+			for (int y = -1; y <= 1; y += 2)
+			{
+				for (int x = -1; x <= 1; x += 2)
+				{
+					const glm::vec4 clip = inverse * glm::vec4(static_cast<float>(x), static_cast<float>(y),
+						static_cast<float>(depth), 1.0f);
+					if (std::abs(clip.w) < 1e-6f)
+						continue;
+
+					const glm::vec3 world = glm::vec3(clip) / clip.w;
+					bounds_min = glm::min(bounds_min, world);
+					bounds_max = glm::max(bounds_max, world);
+				}
+			}
+		}
 	}
 
 	RenderView::RenderView(Camera* owner_camera)
@@ -174,75 +227,244 @@ namespace Helios
 		m_pFrameGraph->Execute();
 	}
 
-	/* 视锥体剔除 */
+	/* 按实体把网格段组装成可绘制对象：材质解析、世界包围盒都在这里定下来 */
+	void RenderView::BuildMeshObjects(const Scene& scene, const std::vector<entt::entity>& entities,
+		std::vector<VisibleMeshObject>& out) const
+	{
+		PROFILE_FUNCTION();
+
+		out.reserve(out.size() + entities.size());
+		for (const entt::entity entity : entities)
+		{
+			if (!scene.IsEntityValid(entity))
+				continue;
+
+			const auto* model_component = scene.GetRegistry().try_get<ModelComponent>(entity);
+			if (model_component == nullptr || !model_component->m_Model)
+				continue;
+
+			/* 组件里存的是相对父节点的局部变换，画到世界里的必须是沿父链累积的结果 */
+			const glm::mat4 local_2_world = scene.GetRenderWorldTransform(entity);
+
+			/* 开了蒙皮画当前姿势的动态段；关掉就回到绑定姿态的源段（口径见 Model::GetRenderSegments） */
+			const auto& mesh_segments = model_component->m_EnableSkinning
+				? model_component->m_Model->GetRenderSegments()
+				: model_component->m_Model->GetMeshSegments();
+			const bool skinned = model_component->m_EnableSkinning && !model_component->m_Model->IsStaticModel();
+
+			for (const auto& mesh_segment : mesh_segments)
+			{
+				/* 收集时按解析链定下最终材质：实体绑定 ?: 模型槽表默认 ?: 内置白模 */
+				const auto material = ResolveSlotMaterial(
+					*model_component->m_Model, mesh_segment->GetSlotIndex(), &model_component->m_SlotOverrides);
+				auto& object = out.emplace_back((int)entity, local_2_world, mesh_segment, material,
+					model_component->m_CastShadow, model_component->m_ReceiveShadow);
+				object.Cullable = !skinned;
+
+				/* 世界包围盒量一次：相机视锥 / 各级联 / 点光每个面都拿它做判定 */
+				const glm::vec3& local_min = mesh_segment->GetAABBMin();
+				const glm::vec3& local_max = mesh_segment->GetAABBMax();
+				if (local_min != glm::vec3(0.0f) || local_max != glm::vec3(0.0f))
+				{
+					const glm::vec3 half = (local_max - local_min) * 0.5f;
+					object.WorldCenter = glm::vec3(local_2_world * glm::vec4((local_min + local_max) * 0.5f, 1.0f));
+					object.WorldExtent = glm::abs(glm::vec3(local_2_world[0])) * half.x
+						+ glm::abs(glm::vec3(local_2_world[1])) * half.y
+						+ glm::abs(glm::vec3(local_2_world[2])) * half.z;
+					object.HasWorldBounds = true;
+				}
+			}
+		}
+	}
+
+	/* 全量收集（没有空间索引可用时的兜底：没走 OnUpdate 的检查程序、新建的空场景） */
+	void RenderView::CollectVisibleMeshObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const
+	{
+		PROFILE_FUNCTION();
+
+		const auto owner_scene = m_pOwnerScene.lock();
+		if (!owner_scene)
+			return;
+
+		std::vector<entt::entity> entities;
+		const auto model_entity_view = owner_scene->GetRegistry().view<TransformComponent, ModelComponent>();
+		entities.reserve(model_entity_view.size_hint());
+		for (const auto& entity : model_entity_view)
+		{
+			/* 隐藏的实体（自身或祖先）与看不到的层不进列表：场景视口 / 阴影 /
+			 * 探针烘焙都从这里取对象，一处过滤三处同步（判定收口在 Scene::IsEntityInView）。 */
+			if (owner_scene->IsEntityInRenderView(entity, culling_mask))
+				entities.push_back(entity);
+		}
+
+		BuildMeshObjects(*owner_scene, entities, out);
+	}
+
+	namespace
+	{
+		/* 阴影能影响到的世界范围（相机为中心）：
+		 * 方向光按 ShadowFar 的两倍铺 —— 影子从投射物那里打过来，投射物可以比接收面更远；
+		 * 点光 / 聚光按光源范围加光源到相机的距离。没有投影光源时返回 false。 */
+		bool ComputeShadowBounds(const Scene& scene, const Camera* camera, glm::vec3& bounds_min, glm::vec3& bounds_max)
+		{
+			if (camera == nullptr)
+				return false;
+
+			const glm::vec3 center = camera->GetPosition();
+			float radius = 0.0f;
+			bool found = false;
+
+			for (auto [entity, light_component] : scene.GetRegistry().view<LightComponent>().each())
+			{
+				const auto& light = light_component.m_Light;
+				if (light == nullptr || !light->IsCastShadow())
+					continue;
+
+				found = true;
+				if (light->GetLightType() == LightType::Directional)
+				{
+					const auto& shadow_info = light->GetShadowMapInfo();
+					const float reach = (shadow_info != nullptr && shadow_info->ShadowFar > 0.0f)
+						? shadow_info->ShadowFar : camera->GetFarClip();
+					radius = std::max(radius, reach * 2.0f);
+				}
+				else if (const auto punctual = std::dynamic_pointer_cast<PunctualLight>(light))
+				{
+					radius = std::max(radius, punctual->GetRange() + glm::distance(punctual->GetPosition(), center));
+				}
+			}
+
+			if (!found)
+				return false;
+
+			bounds_min = center - glm::vec3(radius);
+			bounds_max = center + glm::vec3(radius);
+			return true;
+		}
+	}
+
+	/* 视锥体剔除：空间索引按视锥查候选，再逐个组装成可绘制对象 */
 	void RenderView::PrepareVisibleObjects()
 	{
 		PROFILE_FUNCTION();
 
 		m_SceneMeshObjects.clear();
 		m_VisibleMeshObjects.clear();
-		CollectVisibleMeshObjects(m_CullingMask, m_SceneMeshObjects);
 
-		const Camera* camera = GetCullingCamera();
-		if (!m_IsEnableCulling || camera == nullptr)
-		{
-			m_VisibleMeshObjects = m_SceneMeshObjects;
-			return;
-		}
-
-		/* 天空盒铺满全屏，跟自己的网格摆在哪无关，恒画 */
-		const FrustumSides frustum = FrustumSides::FromViewProjection(camera->GetViewProjectionMatrix());
-		m_VisibleMeshObjects.reserve(m_SceneMeshObjects.size());
-		for (const VisibleMeshObject& object : m_SceneMeshObjects)
-		{
-			const bool is_sky = object.Material != nullptr && object.Material->IsSkyBox();
-			if (is_sky || !frustum.IsOutside(object))
-				m_VisibleMeshObjects.push_back(object);
-		}
-	}
-
-	void RenderView::CollectVisibleMeshObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const
-	{
-		PROFILE_FUNCTION();
-
-		/* 收集所有模型 */
 		const auto owner_scene = m_pOwnerScene.lock();
 		if (!owner_scene)
 			return;
 
-		const auto model_entity_view = owner_scene->GetRegistry().view<TransformComponent, ModelComponent>();
-		for (auto& entity : model_entity_view)
+		const Camera* camera = GetCullingCamera();
+		const MeshInstanceIndex& index = owner_scene->GetMeshInstanceIndex();
+
+		/* 索引还没同步（没走 OnUpdate）：退回全量扫描，行为与以前一致 */
+		if (index.IsEmpty())
 		{
-			const auto& model_component = model_entity_view.get<ModelComponent>(entity);
-			if (!model_component.m_Model)
-				 continue;
-
-			/* 隐藏的实体（自身或祖先）与看不到的层不进列表：场景视口 / 阴影 /
-			 * 探针烘焙都从这里取对象，一处过滤三处同步（判定收口在 Scene::IsEntityInView）。 */
-			if (!owner_scene->IsEntityInRenderView(entity, culling_mask))
-				continue;
-
-			/* 组件里存的是相对父节点的局部变换，画到世界里的必须是沿父链累积的结果 */
-			const glm::mat4 local_2_world = owner_scene->GetRenderWorldTransform(entity);
-
-			/* 开了蒙皮画当前姿势的动态段；关掉就回到绑定姿态的源段（口径见 Model::GetRenderSegments） */
-			const auto& mesh_segments = model_component.m_EnableSkinning
-				? model_component.m_Model->GetRenderSegments()
-				: model_component.m_Model->GetMeshSegments();
-			const bool skinned = model_component.m_EnableSkinning && !model_component.m_Model->IsStaticModel();
-
-			for (const auto& mesh_segment : mesh_segments)
+			CollectVisibleMeshObjects(m_CullingMask, m_SceneMeshObjects);
+			if (!m_IsEnableCulling || camera == nullptr)
 			{
-				// todo: 执行剔除
-				//if ()
-				/* 收集时按解析链定下最终材质：实体绑定 ?: 模型槽表默认 ?: 内置白模 */
-				const auto material = ResolveSlotMaterial(
-					*model_component.m_Model, mesh_segment->GetSlotIndex(), &model_component.m_SlotOverrides);
-				auto& object = out.emplace_back((int)entity, local_2_world, mesh_segment, material,
-					model_component.m_CastShadow, model_component.m_ReceiveShadow);
-				object.Cullable = !skinned;
+				m_VisibleMeshObjects = m_SceneMeshObjects;
+				return;
+			}
+
+			const Frustum frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
+			m_VisibleMeshObjects.reserve(m_SceneMeshObjects.size());
+			for (const VisibleMeshObject& object : m_SceneMeshObjects)
+			{
+				const bool is_sky = object.Material != nullptr && object.Material->IsSkyBox();
+				if (is_sky || !frustum.IsOutside(object))
+					m_VisibleMeshObjects.push_back(object);
+			}
+			return;
+		}
+
+		/* 查询范围 = 视锥 ∪ 阴影范围：一次查询、一次组装，再按各自口径分拣。
+		 * 两趟查询会把同一批对象组装两遍（材质解析才是大头），三万个对象时差出一倍 */
+		Frustum frustum;
+		const bool cull = m_IsEnableCulling && camera != nullptr;
+		bool has_query = false;
+		glm::vec3 query_min(0.0f);
+		glm::vec3 query_max(0.0f);
+
+		if (cull)
+		{
+			frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
+			frustum.GetWorldBounds(query_min, query_max);
+			has_query = true;
+		}
+
+		glm::vec3 shadow_min(0.0f);
+		glm::vec3 shadow_max(0.0f);
+		const bool has_shadow = ComputeShadowBounds(*owner_scene, camera, shadow_min, shadow_max);
+		if (has_shadow)
+		{
+			query_min = has_query ? glm::min(query_min, shadow_min) : shadow_min;
+			query_max = has_query ? glm::max(query_max, shadow_max) : shadow_max;
+			has_query = true;
+		}
+
+		std::vector<entt::entity> candidates;
+		if (has_query)
+			index.QueryBounds(query_min, query_max, m_CullingMask, candidates);
+		else
+			index.QueryAll(m_CullingMask, candidates);
+
+		std::vector<VisibleMeshObject> built;
+		BuildMeshObjects(*owner_scene, candidates, built);
+
+		/* 分拣：投射物按阴影范围，可见按视锥（天空恒可见；没有包围盒的对象两边都收）。
+		 * 阴影范围盖住整个查询范围时（大阴影距离的常见情形）候选全是投射物，直接整份接管 */
+		const bool all_casters = has_shadow && has_query
+			&& shadow_min.x <= query_min.x && shadow_min.y <= query_min.y && shadow_min.z <= query_min.z
+			&& shadow_max.x >= query_max.x && shadow_max.y >= query_max.y && shadow_max.z >= query_max.z;
+
+		if (!has_shadow)
+		{
+			/* 没有投影光源：投射物列表留空 */
+		}
+		else if (all_casters)
+		{
+			m_SceneMeshObjects = built;
+		}
+		else
+		{
+			for (const VisibleMeshObject& object : built)
+			{
+				if (!object.HasWorldBounds
+					|| (object.WorldCenter.x + object.WorldExtent.x >= shadow_min.x
+						&& object.WorldCenter.x - object.WorldExtent.x <= shadow_max.x
+						&& object.WorldCenter.y + object.WorldExtent.y >= shadow_min.y
+						&& object.WorldCenter.y - object.WorldExtent.y <= shadow_max.y
+						&& object.WorldCenter.z + object.WorldExtent.z >= shadow_min.z
+						&& object.WorldCenter.z - object.WorldExtent.z <= shadow_max.z))
+					m_SceneMeshObjects.push_back(object);
 			}
 		}
+
+		if (!cull)
+		{
+			m_VisibleMeshObjects = std::move(built);
+		}
+		else
+		{
+			m_VisibleMeshObjects.reserve(built.size());
+			for (const VisibleMeshObject& object : built)
+			{
+				if ((object.Material != nullptr && object.Material->IsSkyBox())
+					|| !object.HasWorldBounds || !frustum.IsOutside(object))
+					m_VisibleMeshObjects.push_back(object);
+			}
+		}
+
+		/* 天空盒不进空间索引：不看网格位置，按层补进可见列表 */
+		candidates.clear();
+		for (const entt::entity entity : owner_scene->GetSkyBoxEntities())
+		{
+			if (Layers::IsVisible(owner_scene->GetEntityLayerMask(entity), m_CullingMask))
+				candidates.push_back(entity);
+		}
+		BuildMeshObjects(*owner_scene, candidates, m_VisibleMeshObjects);
 	}
 
 	namespace

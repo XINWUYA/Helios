@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <entt/entt.hpp>
 #include "RenderCommon.h"
 #include <glm/glm.hpp>
 
@@ -31,6 +32,11 @@ namespace Helios
 		bool ReceiveShadow{ true };
 		/* 蒙皮网格的包围盒是绑定姿态，动起来会出界，不参与视锥剔除 */
 		bool Cullable{ true };
+		/* 世界空间包围盒：收集时算一次，相机视锥 / 级联 / 点光各面共用，
+		 * 剔除时不再每趟把局部盒乘一遍矩阵。没设过局部盒时为 false */
+		glm::vec3 WorldCenter{ 0.0f };
+		glm::vec3 WorldExtent{ 0.0f };
+		bool HasWorldBounds{ false };
 
 		VisibleMeshObject() = default;
 		VisibleMeshObject(int object_id, const glm::mat4& local_2_world,
@@ -41,18 +47,22 @@ namespace Helios
 		{}
 	};
 
-	/* 视锥的四个侧面（裁剪空间 -w <= x, y <= w），相机与点光 / 聚光的阴影面共用。
-	 * 不取近远面：透视投影下 w = -z，视点背后 w 为负，|x| <= w 天然不成立，侧面已经把背后排除了；
-	 * 近远只切"贴脸"和"超远"那点零星物体，正常场景剔不掉几个，却要给每个物体多算两次点积。
-	 * 于是这里得到的是视锥的超集：只会多画、不会漏画，多出来的由 GPU 裁剪阶段丢掉。
-	 * 正交投影下这四个面只是一个无限长的方柱（w 恒为 1），近远之外的物体照样进列表 */
-	struct HELIOS_API FrustumSides
+	/* 视锥的 6 个裁剪空间平面（ZO 深度约定：0 <= z <= w），相机与点光 / 聚光的阴影面共用。
+	 * 近远面一起进判定：大世界里视距之外、光源范围之外的物体要能整批剔掉，四个侧面做不到；
+	 * 正交投影下也只有近远面能封口（侧面只是无限长的方柱）。
+	 * 透视投影下 w = -z，视点背后 w 为负，|x| <= w 天然不成立，侧面顺带排除了背后。 */
+	struct HELIOS_API Frustum
 	{
-		glm::vec4 Planes[4]{};
+		glm::vec4 Planes[6]{};
+		/* 生成它的视图投影矩阵：算视锥的世界包围盒（空间索引要查格子范围）用 */
+		glm::mat4 ViewProjection{ 1.0f };
 
-		static FrustumSides FromViewProjection(const glm::mat4& view_projection);
-		/* 包围盒整块落在某个侧面外才算看不见，贴边的照画；没有包围盒或不参与剔除的恒可见 */
+		static Frustum FromViewProjection(const glm::mat4& view_projection);
+		/* 包围盒整块落在某个面外才算看不见，贴边的照画；没有包围盒或不参与剔除的恒可见 */
 		[[nodiscard]] bool IsOutside(const VisibleMeshObject& object) const;
+		[[nodiscard]] bool IsOutside(const glm::vec3& center, const glm::vec3& extent) const;
+		/* 视锥的世界空间包围盒（8 个角点求包围，不区分深度朝向） */
+		void GetWorldBounds(glm::vec3& bounds_min, glm::vec3& bounds_max) const;
 	};
 
 	/* 视图类：
@@ -156,7 +166,8 @@ namespace Helios
 
 		/* 获取可见MeshSegment（已按相机视锥剔除） */
 		[[nodiscard]] const std::vector<VisibleMeshObject>& GetVisibleMeshObjects() const { return m_VisibleMeshObjects; }
-		/* 视锥剔除前的全部对象：画面外的物体也会把影子投进画面，阴影拟合与投射用这份 */
+		/* 阴影照得到的范围里的对象（不做相机剔除）：画面外的物体也会把影子投进画面，
+		 * 阴影拟合与投射用这份 */
 		[[nodiscard]] const std::vector<VisibleMeshObject>& GetShadowCasterObjects() const { return m_SceneMeshObjects; }
 
 		/* 按给定可见层掩码收集场景对象（模型段 + 解析后的材质），写进 out（不清空）。
@@ -172,6 +183,9 @@ namespace Helios
 	private:
 		/* 视锥体剔除，仅保留对当前RenderView可见的对象 */
 		void PrepareVisibleObjects();
+		/* 按实体组装可绘制对象（材质解析 + 世界包围盒），索引查询出来的候选走这里 */
+		void BuildMeshObjects(const Scene& scene, const std::vector<entt::entity>& entities,
+			std::vector<VisibleMeshObject>& out) const;
 		/* 准备光源信息 */
 		void PrepareLights();
 		/* 更新FrameGraph */
