@@ -50,10 +50,15 @@ namespace Helios::MaterialParamUI
 		};
 		static std::unordered_map<const DeviceShader*, CacheEntry> s_Cache;
 
-		CacheEntry& cached = s_Cache[shader.get()];
-		if (cached.Shader.lock() == shader && cached.Generation == shader->GetGeneration())
-			return cached.Entries;
+		if (const auto hit = s_Cache.find(shader.get()); hit != s_Cache.end()
+			&& hit->second.Shader.lock() == shader && hit->second.Generation == shader->GetGeneration())
+			return hit->second.Entries;
 
+		/* 要重建时顺手清掉已经销毁的 Shader 留下的条目，缓存不会越攒越多 */
+		for (auto iter = s_Cache.begin(); iter != s_Cache.end();)
+			iter = iter->second.Shader.expired() ? s_Cache.erase(iter) : std::next(iter);
+
+		CacheEntry& cached = s_Cache[shader.get()];
 		cached.Shader = shader;
 		cached.Generation = shader->GetGeneration();
 		cached.Entries.clear();
