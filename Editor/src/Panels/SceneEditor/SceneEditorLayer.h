@@ -82,13 +82,13 @@ namespace Helios
 		void SetDebugViewMode(DebugViewMode mode) { m_pEditorCamera->SetDebugViewMode(mode); }
 		[[nodiscard]] DebugViewMode GetDebugViewMode() const { return m_pEditorCamera->GetDebugViewMode(); }
 
-		/* 资源定位通道（跨面板能力）：层级面板画材质卡的贴图，点击要定位到资源浏览器。
-		 * 面板不查 Layer —— 由装配层（EditorApp）接线后直接转发给层级面板。 */
+		/* 资源定位通道（跨面板能力）：属性面板画材质卡的贴图，点击要定位到资源浏览器。
+		 * 面板不查 Layer —— 由装配层（EditorApp）接线后直接转发给属性面板。 */
 		using AssetRevealFunc = std::function<void(const std::string&)>;
 		void SetAssetRevealFunc(AssetRevealFunc func);
 
 		/* 资源选中通道（跨面板能力，反方向）：资源浏览器选中资源 → 属性面板显示它的详情。
-		 * 同样由装配层接线，转发给层级面板（属性面板与层级树同属一个面板实现）。 */
+		 * 同样由装配层接线，转发给属性面板。 */
 		void SetAssetSelection(const std::vector<AssetSelectionEntry>& selection);
 
 		/* 模型编辑器入口（跨面板能力）：属性面板 Model 卡里的「Open in Model Editor」按钮点击 →

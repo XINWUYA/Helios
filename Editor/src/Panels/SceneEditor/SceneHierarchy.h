@@ -1,32 +1,24 @@
 ﻿#pragma once
 #include <cstdint>
-#include <filesystem>
-#include <functional>
 #include <imgui.h>
 #include <map>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <utility>
 #include <vector>
-#include "Command/AssetFileOps.h"
+#include "SceneInspector.h"
 #include "UI/EditorIcons.h"
 #include "Command/CommandStack.h"
-#include "Helios/Core/TextureSettings.h"
-#include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Entity.h"
 
 namespace Helios
 {
 	class Scene;
-	class DeviceTexture;
-	class Material;
 	struct EntityTemplateDesc;
 
-	/* 场景实体层级树 + 属性面板。层级树按父子关系展开；层级面板 = 顶栏（搜索 + 筛选 + 新建）+
-	 * 实体树（子窗口）+ 底栏（计数），版式跟资源浏览器同源。行右端是可见性开关（眼睛）。
-	 * 属性面板的组件 UI 由 ComponentRegistry 驱动：字段表在 Kernel 的 Builtin/，
-	 * 自定义编辑在 ComponentEditors/（构造时装配）。层级树实现在 SceneHierarchy.cpp，属性面板在 SceneInspector.cpp。 */
+	/* 场景实体层级树，并持有属性面板（SceneInspector）。层级树按父子关系展开；层级面板 = 顶栏
+	 * （搜索 + 筛选 + 新建）+ 实体树（子窗口）+ 底栏（计数），版式跟资源浏览器同源。行右端是可见性
+	 * 开关（眼睛）。选中实体只在这里记一份，每帧交给属性面板去画。 */
 	class SceneHierarchy
 	{
 	public:
@@ -45,43 +37,21 @@ namespace Helios
 		/* 场景有无未保存的改动：根节点名字后面据此显示脏标记。
 		 * 由所属 Layer 每帧推送（见 SceneEditorLayer::OnImGuiRender），不缓存副本以免脱节。 */
 		void SetSceneDirty(bool dirty) { m_SceneDirty = dirty; }
-		/* 编辑历史：字段改动经命令栈落地（未设置时直接改数据） */
-		void SetCommandStack(CommandStack* command_stack) { m_pCommandStack = command_stack; }
-		/* 资源定位通道（跨面板能力）：材质卡里的贴图点击 → 资源浏览器切目录并选中。
-		 * 由上层接线注入（装配层 → SceneEditorLayer → 这里），面板不查 Layer。 */
-		using AssetRevealFunc = std::function<void(const std::string&)>;
-		void SetAssetRevealFunc(AssetRevealFunc func) { m_AssetRevealFunc = std::move(func); }
-		/* 模型编辑器入口（跨面板能力）：Model 卡里的「Open in Model Editor」按钮点击 → 打开该模型。
-		 * 同样由上层接线注入（装配层 → SceneEditorLayer → 这里），未注入时点击无动作。 */
-		using ModelEditorFunc = std::function<void(const std::string&)>;
-		void SetModelEditorFunc(ModelEditorFunc func) { m_ModelEditorFunc = std::move(func); }
-		/* 绘制相关UI */
+		/* 编辑历史：层级树与属性面板的改动都经它落地（未设置时直接改数据） */
+		void SetCommandStack(CommandStack* command_stack)
+		{
+			m_pCommandStack = command_stack;
+			m_Inspector.SetCommandStack(command_stack);
+		}
+		/* 绘制层级树，再画属性面板 */
 		void OnImGuiRender();
-		/* 选中实体 */
+		/* 选中实体：点实体同时把属性面板切回组件视图 */
 		const Entity& GetSelectedEntity() const { return m_SelectedEntity; }
 		void SetSelectedEntity(const Entity& entity);
 
-		/* 资源选中（跨面板能力，由外壳接线：资源浏览器 → 这里）：
-		 * 属性面板切换到该资源的详细内容；最近一次选择说了算 —— 点实体即切回组件视图
-		 * （见 SetSelectedEntity）。传空（切目录 / Esc / 被删掉）则交回实体视图。 */
-		void SetAssetSelection(const std::vector<AssetSelectionEntry>& selection);
-
-		/* 上一帧属性面板正在预览的场景相机（选中了相机 + 预览卡展开 + 面板可见，否则为空）。
-		 * 场景层据此打开这台相机的渲染，预览卡直接显示它自己的输出。 */
-		[[nodiscard]] const Camera* GetPreviewCamera() const { return m_pPreviewCamera; }
-
-		/* 最近一帧每张组件卡的矩形（按显示顺序）。自检 / 自动化验证用，业务代码别依赖。 */
-		struct CardRect
-		{
-			std::string Name;
-			ImVec2 Min;
-			ImVec2 Max;         /* 整张卡的下沿（收起时就是卡头下沿） */
-			float HeaderHeight;
-		};
-		const std::vector<CardRect>& GetLastCardRects() const { return m_LastCardRects; }
-
-		/* 把某张组件卡上移 / 下移一格（属性面板的卡头菜单用）：真的挪了才返回 true */
-		bool MoveComponentCard(const std::string& name, int delta);
+		/* 属性面板：资源选中、跨面板入口、预览相机等只跟它有关的接口直接从这里取 */
+		SceneInspector& GetInspector() { return m_Inspector; }
+		const SceneInspector& GetInspector() const { return m_Inspector; }
 
 	private:
 		/* 父节点 -> 子节点。每帧由当前层级关系现算：父子关系只有 ParentComponent
@@ -107,11 +77,6 @@ namespace Helios
 			COUNT
 		};
 
-		/* 字段控件的绘制回调：拿到字段元数据与可写的存储。
-		 * 偏移字段拿到的是组件内的原位地址，访问器字段拿到的是栈上缓冲
-		 * （回写由 DrawEditableField 负责），两者对回调是透明的。 */
-		using FieldDrawFunc = void (*)(const FieldDesc& field, void* field_ptr);
-
 		/* 一次待落地的挂接请求：ImGui 遍历结束后才改层级 */
 		struct PendingReparent
 		{
@@ -132,24 +97,6 @@ namespace Helios
 
 		/* 显示场景实体列表UI */
 		void ShowSceneHierarchyUI();
-		/* 层级里拖入 .mesh = 给实体挂 / 换模型：
-		 * 无组件先补组件（AddComponentCommand）、再设模型（组件快照命令）——两步都可撤销。
-		 * entity 按值（轻量句柄）：树遍历里拿到的是 const Entity&，拷贝一份再改。 */
-		void ApplyDroppedMeshToEntity(Entity entity, const std::string& absolute_path);
-
-		/* Model 的材质卡：每槽一张，排在 Model 组件卡之后（卡片背景走绘制通道、通道不可嵌套，
-		 * "卡中卡"画不出来 —— 所以材质详情不能画在组件卡里，只能同级平铺）。 */
-		void DrawModelMaterialCards(Entity entity, ModelComponent& component);
-		/* Model 编辑器的入口按钮：模型是文件资产时才有（内建模型没有资产文件，不出现）。
-		 * 画在当前卡片里 —— 实体侧在 Model 组件卡尾部，资源侧在详情卡尾部。 */
-		void DrawOpenInModelEditorButton(const std::string& absolute_path);
-		/* 材质卡主体：当前材质的属性行（Shader + 参数，可就地编辑 → 自动实例化） */
-		bool DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index);
-		/* Camera 的预览卡：显示被选中场景相机自己渲染出的画面 ——
-		 * 与材质卡同一路数，平铺在组件卡之后（卡片不可嵌套）。 */
-		void DrawCameraPreviewCard(CameraComponent& component);
-		/* 组件自定义编辑的合并窗口封口（每帧调用；与 DrawEditableField 同一套事务规则） */
-		void ServiceComponentEditTransaction();
 		/* 顶栏：左端搜索框，右端「类型筛选 + 新建实体」两枚图标按钮（跟资源浏览器同一套版式）。
 		 * 放不下就压窄搜索框、右端不参与退让。筛选是纯图标按钮，点击弹类型单选菜单，生效时高亮。 */
 		void ShowHierarchyTopBar();
@@ -201,85 +148,10 @@ namespace Helios
 		void ApplyDropOutsidePanel();
 		/* 改变父节点（保持世界变换）；有命令栈时可撤销 */
 		void ReparentEntity(Entity entity, entt::entity parent);
-		/* 显示选中实体属性 */
-		void ShowEntityPropertiesUI();
-		/* 显示选中的资源（头部 + 详情卡；多选时是摘要） */
-		void ShowAssetProperties();
-		/* 资源的详情卡：类型（卡头）/ 路径 / 大小 / 修改时间 + 类型相关的深挖行 + 图片预览 */
-		void DrawAssetDetailsCard(const AssetSelectionEntry& entry);
-		/* 图片的采样与格式设置（写 .texmeta 并原地重载，材质等持有者立即生效） */
-		void DrawTextureSettingsSection(const std::string& absolute_path);
-		/* shader 源码的 include 依赖（与深挖行同一个缓存键刷新）：相对路径 + 能不能在资源浏览器
-		 * 里定位 —— 引擎内置的不在浏览器那棵树上，点了没处去 */
-		struct ShaderIncludeRow
-		{
-			std::string Relative;
-			bool Revealable{ false };
-		};
-		std::vector<ShaderIncludeRow> m_AssetShaderIncludes;
-		/* 详情卡里的一条 include 依赖：整行命中，能定位的那条点击跳到资源浏览器 */
-		void DrawShaderIncludeRow(const ShaderIncludeRow& include);
-		/* .mtl 的材质编辑卡：每条目一张，同级平铺在详情卡之后（与 probe 图卡同一路数）——
-		 * Shader 可选可改、参数与光栅化状态可就地编辑；改动即时热更（同步缓存里的
-		 * 共享材质 → 场景窗口立刻可见），「Apply」（没有改动时禁用）只负责序列化回文件 */
-		void DrawAssetMaterialCards(const std::filesystem::path& absolute_path);
-		/* 材质编辑卡的卡身：Shader 下拉（按目录分组的子菜单）+ 参数行 + 光栅化状态行；
-		 * on_edit：任何改动走这里（调用方记脏 + 热更新） */
-		void DrawAssetMaterialBody(Material& material, const std::function<void()>& on_edit);
-		/* 「Apply」：保存修改并序列化到本地，并同步材质管理器里已缓存的共享实例 */
-		void ApplyAssetMaterialEdits(const std::filesystem::path& absolute_path);
-		/* 多选摘要卡：数量 / 合计大小 / 类型分布 */
-		void DrawMultiAssetCard();
-		/* 按 (路径, 写入时间) 缓存类型相关的深挖详情（图片尺寸 / 场景统计）——
-		 * 要读文件内容的那种，只在选中项或文件变化时重算 */
-		void RefreshAssetDetailRows(const AssetSelectionEntry& entry);
-		/* 切某张烘焙图卡的预览 mip：重开缓存文件（数据不常驻）、按新层级重生成十字展开图 */
-		void ApplyProbeCardMip(size_t card_index, int mip);
-		/* 面板头部：实体图标 + 名字 + 新增组件入口（让属性面板自带上下文） */
-		void ShowPropertiesHeader();
-		/* 显示选中实体的全部组件（遍历 ComponentRegistry，不认识具体类型） */
-		void ShowEntityComponents();
-		/* 当前可见的组件卡（按用户存的顺序排好；绘制与移动共用这一份） */
-		std::vector<const ComponentDesc*> CollectOrderedComponentDescs();
-		/* 当前可见组件卡的显示顺序（组件名） */
-		std::vector<std::string> VisibleComponentOrder();
-		/* 拖拽落点：把 source 插到 target 前面 / 后面 */
-		void DropComponentCard(const std::string& source, const std::string& target, bool after);
-		/* 顺序写回场景（空表 = 回到注册顺序） */
-		void StoreComponentCardOrder(const std::vector<std::string>& names);
-		/* 无选中实体时的空状态提示 */
-		void ShowEmptyPropertiesHint();
-		/* 增加组件按钮（菜单项同样来自注册表） */
-		void ShowAddComponentButton();
-
 		/* 按预设新建实体；有命令栈时实体本身也进编辑历史 */
 		Entity CreateEntityFromTemplate(const EntityTemplateDesc& template_desc);
 		/* 删除实体；有命令栈时可撤销 */
 		void DeleteEntity(Entity entity);
-		/* 设置实体自身的可见性（层级行右端的眼睛开关）；有命令栈时可撤销。
-		 * visible 为目标状态：隐藏 = 补 Visibility 组件并置 false，显示 = 去组件（缺席 = 可见）。 */
-		void SetEntityVisibility(Entity entity, bool visible);
-
-		/* 按字段元数据生成控件；编辑前后各取一次值，有变化则生成字段改动命令 */
-		void DrawComponentFieldsBySchema(const ComponentDesc& desc, Entity& entity, void* component);
-		/* 单个字段的编辑：取快照 → 交给 draw 画控件 → 比较 → 有变化则生成历史命令。
-		 * 事务（连续拖动/输入合并成一条历史）也在这里开合，因此组件卡里的字段与
-		 * 面板头部就地编辑的实体名共享同一套撤销语义。 */
-		void DrawEditableField(const ComponentDesc& desc, Entity& entity, void* component,
-		                       const FieldDesc& field, FieldDrawFunc draw);
-		/* 组件卡尾部的一行动作按钮（如 Model 卡的「Open in Model Editor」）：
-		 * 标签为空表示没有；点击回调由调用方按组件准备。 */
-		struct ComponentCardFooter
-		{
-			const char* Label{ nullptr };
-			std::function<void()> Clicked;
-		};
-
-		/* 绘制单个组件块：卡片 = 卡头（折叠箭头 + 组件图标 + 名称 + 右侧菜单）+ 卡身（字段）。
-		 * order_index / order_count 是本帧在面板里的位置，给菜单的上下移动判断边界。
-		 * footer 非空时在卡身末尾补一行按钮（跟着卡片一起折叠）。 */
-		void DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component,
-		                        int order_index, int order_count, const ComponentCardFooter* footer = nullptr);
 
 		/* 所属场景 */
 		SharedPtr<Scene> m_pOwnerScene;
@@ -301,61 +173,14 @@ namespace Helios
 		bool m_TreeStateDirty{ false };
 		/* 场景有未保存的改动（由所属 Layer 每帧推送） */
 		bool m_SceneDirty{ false };
-		/* 选中实体 */
+		/* 选中实体（层级树与属性面板共用这一份） */
 		Entity m_SelectedEntity;
-		/* 资源浏览器里选中的资源（由外壳推送；空 = 没有） */
-		std::vector<AssetSelectionEntry> m_AssetSelection;
-		/* 属性面板正显示资源详情（最近一次选择是资源） */
-		bool m_AssetFocus{ false };
-		/* 深挖详情的缓存键（路径 + 写入时间）与结果行 */
-		std::string m_AssetDetailPath;
-		std::filesystem::file_time_type m_AssetDetailWriteTime{};
-		std::vector<std::pair<std::string, std::string>> m_AssetDetailRows;
-		/* 贴图设置草稿：换贴图时重新取，Apply 才落盘 */
-		std::string m_TextureSettingsPath;
-		TextureSettings m_TextureSettingsEdit;
-		TextureSettings m_TextureSettingsSaved;
-		bool m_TextureSettingsDirty{ false };
-		/* .probe 文件的烘焙结果图卡（跟深挖行用同一个缓存键刷新；同级平铺在详情卡后面）：每张烘焙图
-		 * （环境 / 辐照度 / 预滤波）一张卡（名字 + 规格 + 十字展开预览）；多层带「Mip」切换。 */
-		struct ProbeImageCard
-		{
-			std::string Label;                  /* 显示名（Environment / Irradiance / Prefilter） */
-			std::string Spec;                   /* "512 x 512, RGBA16F, 10 mips" */
-			std::string SourcePath;             /* .probe 绝对路径（切 mip 时重读；缓存数据不常驻） */
-			std::string TextureName;            /* 设备纹理名（缓存文件名 + 标签） */
-			int ImageIndex{ 0 };                /* 该图在缓存文件里的序号 */
-			int Mip{ 0 };                       /* 当前预览的 mip 层级 */
-			int MipCount{ 1 };                  /* 缓存里的 mip 层数（> 1 才画切换行） */
-			uint32_t Mip0Size{ 0 };             /* mip0 边长（组合框标签用） */
-			SharedPtr<DeviceTexture> Texture;   /* 十字展开预览；无图形上下文时为空 */
-		};
-		std::vector<ProbeImageCard> m_AssetProbeCards;
-		/* 材质资产（.mtl）的编辑缓冲：与深挖详情同一缓存键（路径 + 写入时间）从磁盘读入；
-		 * 编辑只改缓冲（不碰场景与缓存），点「Apply」才序列化回文件。
-		 * 可选 Shader 清单不在这里存 —— 归 AssetFileOps 统一缓存（见 CollectShaderOptions）。 */
-		SharedPtr<Material> m_AssetMaterial;
-		/* 编辑缓冲有没有未保存的改动（Apply 按钮的禁用依据）：改 Shader / 参数时置位，
-		 * 重读缓冲（换选中项 / 文件变化 / Apply 写盘后）清掉 */
-		bool m_AssetMaterialDirty{ false };
+		/* 属性面板 */
+		SceneInspector m_Inspector;
 		/* 本帧请求的挂接（拖拽） */
 		PendingReparent m_PendingReparent;
 		/* 编辑历史（由所属 Layer 注入） */
 		CommandStack* m_pCommandStack{ nullptr };
-		/* 资源定位（材质卡的贴图点击）；由上层注入，未注入时点击无动作 */
-		AssetRevealFunc m_AssetRevealFunc;
-		/* 模型编辑器入口（Model 卡的按钮）；由上层注入，未注入时点击无动作 */
-		ModelEditorFunc m_ModelEditorFunc;
-		/* 本帧预览卡要看的场景相机（帧首清零、预览卡画出来才置位） */
-		const Camera* m_pPreviewCamera{ nullptr };
-		/* 上一帧每张组件卡的矩形（自检用） */
-		std::vector<CardRect> m_LastCardRects;
-		/* 字段编辑的合并窗口是否已打开（连续拖动合并为一条历史） */
-		bool m_FieldEditTransactionOpen{ false };
-		/* 组件自定义绘制的合并窗口是否已打开（同上，走 CustomDraw 通道：材质参数拖动等） */
-		bool m_ComponentEditTransactionOpen{ false };
-		/* 「添加组件」菜单的过滤词：组件一多，菜单需要能搜 */
-		char m_AddComponentFilter[64]{};
 		/* 顶栏「新建实体」菜单的过滤词（与添加组件菜单同款：打开即清空并聚焦） */
 		char m_NewEntityFilter[64]{};
 		/* 层级面板的过滤词（空 = 不过滤） */

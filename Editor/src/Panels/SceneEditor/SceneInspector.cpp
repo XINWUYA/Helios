@@ -1,6 +1,7 @@
 #include "Pch.h"
-#include "SceneHierarchy.h"
+#include "SceneInspector.h"
 #include "SceneHierarchyShared.h"
+#include "ComponentEditors/ComponentEditors.h"
 #include "Material/MaterialSlotEditing.h"
 #include "Common/EditorCommon.h"
 #include "UI/EditorIcons.h"
@@ -36,11 +37,12 @@
 #include <unordered_map>
 #include <vector>
 
-/* 属性检视器：选中实体的组件卡、资源详情与材质卡（层级树在 SceneHierarchy.cpp） */
+/* 属性面板：选中实体的组件卡、资源详情与材质卡 */
 namespace Helios
 {
 	using SceneHierarchyShared::ResolveEntityIcon;
 	using SceneHierarchyShared::DrawVisibilityToggle;
+	using SceneHierarchyShared::SetEntityVisibility;
 
 	namespace
 	{
@@ -203,19 +205,44 @@ namespace Helios
 		}
 	}
 
-	void SceneHierarchy::ShowEntityPropertiesUI()
+	SceneInspector::SceneInspector()
 	{
 		PROFILE_FUNCTION();
+
+		/* 组件卡的自定义编辑（资源引用、材质槽…）由编辑器侧装配进注册表 */
+		InstallComponentEditors();
+	}
+
+	void SceneInspector::SetOwnerScene(const SharedPtr<Scene>& scene)
+	{
+		/* 旧场景的相机不能再被当成预览目标 */
+		m_pPreviewCamera = nullptr;
+
+		m_pOwnerScene = scene;
+		m_Entity = {};
+
+		/* 场景已更换，字段编辑的合并窗口不再有效 */
+		m_FieldEditTransactionOpen = false;
+	}
+
+	void SceneInspector::SetAssetSelection(const std::vector<AssetSelectionEntry>& selection)
+	{
+		m_AssetSelection = selection;
+
+		/* 非空 = 刚点了资源（含同一项被再次点选）：切到资源详情；
+		 * 空（切目录 / Esc / 选中项被删）则交回实体视图。 */
+		m_AssetFocus = !m_AssetSelection.empty();
+	}
+
+	void SceneInspector::OnImGuiRender(const Entity& entity)
+	{
+		PROFILE_FUNCTION();
+
+		m_Entity = entity;
 
 		/* 相机预览逐帧挣取：本帧真的画出了预览卡（可见且展开）才置位，
 		 * 换选中、切资源视图、收起卡片都会让预览自然停掉（见 DrawCameraPreviewCard） */
 		m_pPreviewCamera = nullptr;
-
-		/* 句柄非空 ≠ 实体存在（见 Entity::operator bool 的约定）：选中项可能来自
-		 * 撤销后的残留或失效的拾取句柄。组件 GetPtr 对不存在的实体是断言而不是
-		 * 返回空指针，所以这里先兜一道。 */
-		if (m_SelectedEntity && (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(m_SelectedEntity)))
-			m_SelectedEntity = {};
 
 		/* 常驻竖向滚动条（AlwaysVerticalScrollbar）：滚动条出现会抽走右侧约 10px，内容若按
 		 * "还没滚动条"的旧宽度排过一帧（换选中、展开卡片、拖分栏都会触发），
@@ -227,7 +254,7 @@ namespace Helios
 			{
 				ShowAssetProperties();
 			}
-			else if (m_SelectedEntity)
+			else if (m_Entity)
 			{
 				ShowPropertiesHeader();
 				ShowEntityComponents();
@@ -242,7 +269,7 @@ namespace Helios
 	/* 面板头部：可见性开关（眼睛）+ 实体图标 + 实体名（就地可编辑）+ 右侧「添加组件」。
 	 * 头部自带上下文 —— 不必回头看层级树才知道正在编辑哪个实体；
 	 * 实体名与可见性也不再单独占卡（同一条信息只说一次，见 IsEditedInPanelHeader）。 */
-	void SceneHierarchy::ShowPropertiesHeader()
+	void SceneInspector::ShowPropertiesHeader()
 	{
 		PROFILE_FUNCTION();
 
@@ -250,7 +277,7 @@ namespace Helios
 		 * 直接画在标题栏左边 —— 与层级行右端是同一枚眼睛、同一套交互。 */
 		const float eye_size = ImGui::GetFrameHeight();
 		const PanelChrome::HeaderRow header = PanelChrome::BeginHeaderRow(
-			ResolveEntityIcon(m_SelectedEntity), eye_size + ImGui::GetStyle().ItemInnerSpacing.x);
+			ResolveEntityIcon(m_Entity), eye_size + ImGui::GetStyle().ItemInnerSpacing.x);
 
 		/* 实体名：就地编辑，与组件字段走同一条命令路径（可撤销）。
 		 * 头部行里"由字段驱动"的只有 Name 一个 —— 取它的第一个文本字段就地绘制；
@@ -261,10 +288,10 @@ namespace Helios
 				continue;
 
 			/* GetPtr 对没有该组件的实体是断言而不是返回空指针，必须先 Has 再取。 */
-			if (desc.Has == nullptr || !desc.Has(m_SelectedEntity))
+			if (desc.Has == nullptr || !desc.Has(m_Entity))
 				break;
 
-			void* component = desc.GetPtr(m_SelectedEntity);
+			void* component = desc.GetPtr(m_Entity);
 			if (component == nullptr)
 				break;
 
@@ -273,7 +300,7 @@ namespace Helios
 				if (field.Type != FieldType::String)
 					continue;
 
-				DrawEditableField(desc, m_SelectedEntity, component, field, &DrawHeaderNameControl);
+				DrawEditableField(desc, m_Entity, component, field, &DrawHeaderNameControl);
 				break;
 			}
 
@@ -288,19 +315,19 @@ namespace Helios
 		/* 可见性开关放行首的空档里（名字与「添加组件」都提交完了，这里补那把空档填上；
 		 * 图标/名字的起点在 BeginHeaderRow 里已按这一格让过位）。眼睛画自身状态：
 		 * 点它只写自己那一行 —— 与层级行右端共用同一份按钮实现。 */
-		const bool self_hidden = m_SelectedEntity.HasComponent<VisibilityComponent>()
-			&& !m_SelectedEntity.GetComponent<VisibilityComponent>().m_Visible;
+		const bool self_hidden = m_Entity.HasComponent<VisibilityComponent>()
+			&& !m_Entity.GetComponent<VisibilityComponent>().m_Visible;
 		if (DrawVisibilityToggle("##HeaderVisibility", header.Min,
 			ImVec2(header.Min.x + eye_size, header.Min.y + eye_size), self_hidden, /*reveal_icon=*/true))
 		{
-			SetEntityVisibility(m_SelectedEntity, self_hidden);
+			SetEntityVisibility(m_pOwnerScene, m_pCommandStack, m_Entity, self_hidden);
 		}
 
 		PanelChrome::EndHeaderRow(header);
 	}
 
 	/* 没有选中实体时的提示：空面板要说清"为什么是空的、该怎么办" */
-	void SceneHierarchy::ShowEmptyPropertiesHint()
+	void SceneInspector::ShowEmptyPropertiesHint()
 	{
 		PROFILE_FUNCTION();
 
@@ -322,7 +349,7 @@ namespace Helios
 
 	/* ==================== 资源详情（属性面板） ====================
 	 * 资源浏览器选中资源时显示它的详细内容。最近一次选择说了算：
-	 * 点实体即切回组件视图（见 SetSelectedEntity）；这里的绘制全部只读。 */
+	 * 点实体即切回组件视图（见 ClearAssetFocus）；这里的绘制全部只读。 */
 
 	namespace
 	{
@@ -395,7 +422,7 @@ namespace Helios
 
 	}
 
-	void SceneHierarchy::ShowAssetProperties()
+	void SceneInspector::ShowAssetProperties()
 	{
 		PROFILE_FUNCTION();
 
@@ -411,7 +438,7 @@ namespace Helios
 			DrawMultiAssetCard();
 	}
 
-	void SceneHierarchy::DrawTextureSettingsSection(const std::string& absolute_path)
+	void SceneInspector::DrawTextureSettingsSection(const std::string& absolute_path)
 	{
 		TextureSettingsStore& store = TextureSettingsStore::Instance();
 
@@ -574,7 +601,7 @@ namespace Helios
 		}
 	}
 
-	void SceneHierarchy::DrawAssetDetailsCard(const AssetSelectionEntry& entry)
+	void SceneInspector::DrawAssetDetailsCard(const AssetSelectionEntry& entry)
 	{
 		PROFILE_FUNCTION();
 
@@ -776,7 +803,7 @@ namespace Helios
 
 	/* 一条 include 依赖：整行可点（悬停有底色），图标与路径自己画在 Selectable 上（菜单行同一套；
 	 * 自绘不进排版，超长路径由窗口裁掉、撑不出横滑）。项目里的那条点了在资源浏览器里定位。 */
-	void SceneHierarchy::DrawShaderIncludeRow(const ShaderIncludeRow& include)
+	void SceneInspector::DrawShaderIncludeRow(const ShaderIncludeRow& include)
 	{
 		PROFILE_FUNCTION();
 
@@ -807,7 +834,7 @@ namespace Helios
 			m_AssetRevealFunc(include.Relative);
 	}
 
-	void SceneHierarchy::DrawMultiAssetCard()
+	void SceneInspector::DrawMultiAssetCard()
 	{
 		PROFILE_FUNCTION();
 
@@ -849,7 +876,7 @@ namespace Helios
 		PanelChrome::EndCard(card);
 	}
 
-	void SceneHierarchy::RefreshAssetDetailRows(const AssetSelectionEntry& entry)
+	void SceneInspector::RefreshAssetDetailRows(const AssetSelectionEntry& entry)
 	{
 		PROFILE_FUNCTION();
 
@@ -1031,7 +1058,7 @@ namespace Helios
 	/* 切换某张烘焙图卡的预览 mip：重开缓存文件（数据不常驻 —— 切层是低频动作，
 	 * 重读一遍文件最省内存）、按新层级重生成十字展开图。
 	 * 读不到（损坏 / 丢失 / 序号越界）：图留空，卡照常显示。 */
-	void SceneHierarchy::ApplyProbeCardMip(size_t card_index, int mip)
+	void SceneInspector::ApplyProbeCardMip(size_t card_index, int mip)
 	{
 		ProbeImageCard& card = m_AssetProbeCards[card_index];
 		card.Mip = mip;
@@ -1138,7 +1165,7 @@ namespace Helios
 
 	/* 单个字段的编辑：取快照 → 画控件 → 比较 → 有变化就生成历史命令。组件卡的字段和面板
 	 * 头部的实体名都走这里 —— 撤销语义只有这一份实现（名字连改十次也只留一条历史）。 */
-	void SceneHierarchy::DrawEditableField(const ComponentDesc& desc, Entity& entity, void* component,
+	void SceneInspector::DrawEditableField(const ComponentDesc& desc, Entity& entity, void* component,
 	                                       const FieldDesc& field, FieldDrawFunc draw)
 	{
 		/* 上一帧有控件活跃、这一帧没有 → 一次编辑结束，给命令栈封口。
@@ -1213,7 +1240,7 @@ namespace Helios
 	}
 
 	/* 按字段元数据生成控件（组件卡的卡身） */
-	void SceneHierarchy::DrawComponentFieldsBySchema(const ComponentDesc& desc, Entity& entity, void* component)
+	void SceneInspector::DrawComponentFieldsBySchema(const ComponentDesc& desc, Entity& entity, void* component)
 	{
 		for (const FieldDesc& field : desc.Fields)
 		{
@@ -1412,7 +1439,7 @@ namespace Helios
 
 	/* 组件自定义编辑的合并窗口封口（每帧调用；与 DrawEditableField 同一套事务规则）：
 	 * 上一帧有控件活跃、这一帧没有 → 一次连续编辑结束，给命令栈封口。 */
-	void SceneHierarchy::ServiceComponentEditTransaction()
+	void SceneInspector::ServiceComponentEditTransaction()
 	{
 		const bool item_active = ImGui::IsAnyItemActive();
 		if (m_ComponentEditTransactionOpen && !item_active)
@@ -1424,7 +1451,7 @@ namespace Helios
 	}
 
 	/* 材质卡主体：Shader 行 + 参数行（可就地编辑 → 自动实例化） */
-	bool SceneHierarchy::DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index)
+	bool SceneInspector::DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index)
 	{
 		bool changed = false;
 
@@ -1494,7 +1521,7 @@ namespace Helios
 
 	/* 「Open in Model Editor」按钮：文件模型才有可编辑的东西（内建 / 空模型没有路径）。
 	 * 画在所在卡片的卡身末尾，铺满内容宽 —— 实体侧是 Model 组件卡，资源侧是详情卡。 */
-	void SceneHierarchy::DrawOpenInModelEditorButton(const std::string& absolute_path)
+	void SceneInspector::DrawOpenInModelEditorButton(const std::string& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
@@ -1507,7 +1534,7 @@ namespace Helios
 	}
 
 	/* Model 的材质卡：每槽一张，排在 Model 组件卡之后同级平铺。 */
-	void SceneHierarchy::DrawModelMaterialCards(Entity entity, ModelComponent& component)
+	void SceneInspector::DrawModelMaterialCards(Entity entity, ModelComponent& component)
 	{
 		PROFILE_FUNCTION();
 
@@ -1581,7 +1608,7 @@ namespace Helios
 	 * 「选中相机 → 看见它拍什么」：画面就是这台场景相机自己的渲染输出（场景层看到预览请求后
 	 * 打开它的渲染并让它画到纹理），本卡只管版式和请求。同级平铺（卡片背景走通道、不能嵌套）。 */
 
-	void SceneHierarchy::DrawCameraPreviewCard(CameraComponent& component)
+	void SceneInspector::DrawCameraPreviewCard(CameraComponent& component)
 	{
 		PROFILE_FUNCTION();
 
@@ -1628,7 +1655,7 @@ namespace Helios
 
 	/* 卡身：Shader 下拉（按目录分组的子菜单）+ 参数行 + 光栅化状态行（与 Model 材质卡共用控件）。
 	 * on_edit：任何改动走这里 —— 调用方记脏并做热更新（同步缓存里的共享材质）。 */
-	void SceneHierarchy::DrawAssetMaterialBody(Material& material, const std::function<void()>& on_edit)
+	void SceneInspector::DrawAssetMaterialBody(Material& material, const std::function<void()>& on_edit)
 	{
 		PROFILE_FUNCTION();
 
@@ -1682,7 +1709,7 @@ namespace Helios
 	}
 
 	/* 单条材质资产：卡身 + Apply */
-	void SceneHierarchy::DrawAssetMaterialCards(const std::filesystem::path& absolute_path)
+	void SceneInspector::DrawAssetMaterialCards(const std::filesystem::path& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
@@ -1717,7 +1744,7 @@ namespace Helios
 	}
 
 	/* 「Apply」：保存修改并序列化到本地，再同步共享材质缓存 */
-	void SceneHierarchy::ApplyAssetMaterialEdits(const std::filesystem::path& absolute_path)
+	void SceneInspector::ApplyAssetMaterialEdits(const std::filesystem::path& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
@@ -1736,9 +1763,9 @@ namespace Helios
 		AssetManager::Instance().Refresh<Material>(path, m_AssetMaterial);
 	}
 
-	/* 层级里拖入 .mesh：给实体挂 / 换模型。
+	/* 给实体挂 / 换模型（层级里拖入 .mesh 走这里）：
 	 * 无组件先补组件（AddComponentCommand）、再设模型（组件快照命令）——两步都可撤销。 */
-	void SceneHierarchy::ApplyDroppedMeshToEntity(Entity entity, const std::string& absolute_path)
+	void SceneInspector::ApplyDroppedMeshToEntity(Entity entity, const std::string& absolute_path)
 	{
 		PROFILE_FUNCTION();
 
@@ -1781,7 +1808,7 @@ namespace Helios
 	/* 绘制单个组件块：卡头（折叠箭头 + 图标 + 组件名 + 右侧菜单）+ 卡身（schema 字段 +
 	 * 组件自定义绘制）。卡片版式来自 PanelChrome，各面板共用。
 	 * 卡头可以拖着重排，菜单里也有逐格上移 / 下移。 */
-	void SceneHierarchy::DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component,
+	void SceneInspector::DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component,
 		int order_index, int order_count, const ComponentCardFooter* footer)
 	{
 		PROFILE_FUNCTION();
@@ -1889,7 +1916,7 @@ namespace Helios
 
 	/* 当前可见的组件卡，按用户存的顺序排：记过的按记录先后，没记过的保持注册顺序跟在后面。
 	 * 组件被移除后顺序表里的旧名字自然失效（找不到就不参与排序）。 */
-	std::vector<const ComponentDesc*> SceneHierarchy::CollectOrderedComponentDescs()
+	std::vector<const ComponentDesc*> SceneInspector::CollectOrderedComponentDescs()
 	{
 		std::vector<const ComponentDesc*> descs;
 
@@ -1900,10 +1927,10 @@ namespace Helios
 			if (IsEditedInPanelHeader(desc))
 				continue;
 
-			if (desc.Has == nullptr || !desc.Has(m_SelectedEntity))
+			if (desc.Has == nullptr || !desc.Has(m_Entity))
 				continue;
 
-			void* component = (desc.GetPtr != nullptr) ? desc.GetPtr(m_SelectedEntity) : nullptr;
+			void* component = (desc.GetPtr != nullptr) ? desc.GetPtr(m_Entity) : nullptr;
 			if (component == nullptr)
 				continue;
 
@@ -1917,7 +1944,7 @@ namespace Helios
 		if (m_pOwnerScene == nullptr)
 			return descs;
 
-		const std::vector<std::string>& order = m_pOwnerScene->GetComponentOrder(m_SelectedEntity);
+		const std::vector<std::string>& order = m_pOwnerScene->GetComponentOrder(m_Entity);
 		if (order.empty())
 			return descs;
 
@@ -1944,7 +1971,7 @@ namespace Helios
 		return descs;
 	}
 
-	std::vector<std::string> SceneHierarchy::VisibleComponentOrder()
+	std::vector<std::string> SceneInspector::VisibleComponentOrder()
 	{
 		std::vector<std::string> names;
 		for (const ComponentDesc* desc : CollectOrderedComponentDescs())
@@ -1952,28 +1979,28 @@ namespace Helios
 		return names;
 	}
 
-	void SceneHierarchy::StoreComponentCardOrder(const std::vector<std::string>& names)
+	void SceneInspector::StoreComponentCardOrder(const std::vector<std::string>& names)
 	{
-		if (m_pOwnerScene == nullptr || !m_SelectedEntity)
+		if (m_pOwnerScene == nullptr || !m_Entity)
 			return;
 
 		/* 顺序变了才记一笔：拖拽 / 上移下移都进编辑历史，场景的未保存标记也跟着亮 */
-		std::vector<std::string> before = m_pOwnerScene->GetComponentOrder(m_SelectedEntity);
+		std::vector<std::string> before = m_pOwnerScene->GetComponentOrder(m_Entity);
 		if (before == names)
 			return;
 
 		if (m_pCommandStack != nullptr)
 		{
 			m_pCommandStack->Execute(CreateUniquePtr<SetComponentOrderCommand>(
-				m_pOwnerScene, m_SelectedEntity, std::move(before), names));
+				m_pOwnerScene, m_Entity, std::move(before), names));
 		}
 		else
 		{
-			m_pOwnerScene->SetComponentOrder(m_SelectedEntity, names);
+			m_pOwnerScene->SetComponentOrder(m_Entity, names);
 		}
 	}
 
-	bool SceneHierarchy::MoveComponentCard(const std::string& name, int delta)
+	bool SceneInspector::MoveComponentCard(const std::string& name, int delta)
 	{
 		if (delta == 0)
 			return false;
@@ -1993,7 +2020,7 @@ namespace Helios
 		return true;
 	}
 
-	void SceneHierarchy::DropComponentCard(const std::string& source, const std::string& target, bool after)
+	void SceneInspector::DropComponentCard(const std::string& source, const std::string& target, bool after)
 	{
 		if (source == target)
 			return;
@@ -2014,7 +2041,7 @@ namespace Helios
 		StoreComponentCardOrder(order);
 	}
 
-	void SceneHierarchy::ShowEntityComponents()
+	void SceneInspector::ShowEntityComponents()
 	{
 		PROFILE_FUNCTION();
 
@@ -2026,7 +2053,7 @@ namespace Helios
 		for (int i = 0; i < count; ++i)
 		{
 			const ComponentDesc& desc = *descs[static_cast<size_t>(i)];
-			void* component = (desc.GetPtr != nullptr) ? desc.GetPtr(m_SelectedEntity) : nullptr;
+			void* component = (desc.GetPtr != nullptr) ? desc.GetPtr(m_Entity) : nullptr;
 
 			ImGui::PushID(static_cast<int>(desc.Type.hash_code()));
 
@@ -2048,14 +2075,14 @@ namespace Helios
 				}
 			}
 
-			DrawComponentBlock(desc, m_SelectedEntity, component, i, count,
+			DrawComponentBlock(desc, m_Entity, component, i, count,
 				model_footer.Label != nullptr ? &model_footer : nullptr);
 
 			/* Model 的材质卡 / Camera 的预览卡：各自排在组件卡之后同级平铺
 			 * （卡片背景走绘制通道、通道不可嵌套 —— 附加卡画不进组件卡里）。 */
 			if (desc.Type == std::type_index(typeid(ModelComponent)))
 			{
-				DrawModelMaterialCards(m_SelectedEntity, *static_cast<ModelComponent*>(component));
+				DrawModelMaterialCards(m_Entity, *static_cast<ModelComponent*>(component));
 			}
 			else if (desc.Type == std::type_index(typeid(CameraComponent)))
 				DrawCameraPreviewCard(*static_cast<CameraComponent*>(component));
@@ -2066,7 +2093,7 @@ namespace Helios
 	/* 增加组件按钮：菜单项来自注册表（bAddable == false 的组件不出现，如 Name / Transform）。
 	 * 组件一多，菜单很难找 —— 顶部给一个过滤框，打开即自动聚焦。
 	 * 图标是全编辑器「新建 / 添加」入口统一的那枚加号。 */
-	void SceneHierarchy::ShowAddComponentButton()
+	void SceneInspector::ShowAddComponentButton()
 	{
 		PROFILE_FUNCTION();
 
@@ -2114,11 +2141,11 @@ namespace Helios
 					if (m_pCommandStack != nullptr)
 					{
 						m_pCommandStack->Execute(CreateUniquePtr<AddComponentCommand>(
-							m_SelectedEntity, desc.Name, variant.Add, desc.Remove));
+							m_Entity, desc.Name, variant.Add, desc.Remove));
 					}
 					else
 					{
-						variant.Add(m_SelectedEntity);
+						variant.Add(m_Entity);
 					}
 
 					ImGui::CloseCurrentPopup();

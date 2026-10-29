@@ -1,7 +1,6 @@
 ﻿#include "Pch.h"
 #include "SceneHierarchy.h"
 #include "SceneHierarchyShared.h"
-#include "ComponentEditors/ComponentEditors.h"
 #include "Common/EditorCommon.h"
 #include "UI/EditorIcons.h"
 #include "Command/AssetFileOps.h"
@@ -32,6 +31,7 @@ namespace Helios
 {
 	using SceneHierarchyShared::ResolveEntityIcon;
 	using SceneHierarchyShared::DrawVisibilityToggle;
+	using SceneHierarchyShared::SetEntityVisibility;
 
 	namespace
 	{
@@ -305,7 +305,7 @@ namespace Helios
 		}
 	}
 
-	/* 层级树与属性检视器共用：实体图标、可见性开关（声明见 SceneHierarchyShared.h） */
+	/* 层级树与属性面板共用：实体图标、可见性开关（声明见 SceneHierarchyShared.h） */
 	namespace SceneHierarchyShared
 	{
 		/* 没有任何可识别组件的实体（只有 Name / Transform）用通用图标 */
@@ -362,14 +362,29 @@ namespace Helios
 
 			return pressed;
 		}
+
+		/* 相机不受影响；探针隐藏后不烘焙、也不参与 IBL */
+		void SetEntityVisibility(const SharedPtr<Scene>& scene, CommandStack* command_stack,
+			Entity entity, bool visible)
+		{
+			PROFILE_FUNCTION();
+
+			if (scene == nullptr || !scene->IsEntityValid(entity))
+				return;
+
+			/* 无命令栈时也要走同一份应用逻辑：命令自带"补组件 / 去组件"的完整语义 */
+			auto command = CreateUniquePtr<SetEntityVisibilityCommand>(scene, entity, visible);
+			if (command_stack != nullptr)
+				command_stack->Execute(std::move(command));
+			else
+				command->Do();
+		}
 	}
 
 	SceneHierarchy::SceneHierarchy()
 	{
 		PROFILE_FUNCTION();
 
-		/* 组件卡的自定义编辑（资源引用、材质槽…）由编辑器侧装配进注册表 */
-		InstallComponentEditors();
 		BindTreeState();
 	}
 
@@ -377,21 +392,15 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		InstallComponentEditors();
 		BindTreeState();
 		SetOwnerScene(scene);
 	}
 
 	void SceneHierarchy::SetOwnerScene(const SharedPtr<Scene>& scene)
 	{
-		/* 旧场景的相机不能再被当成预览目标 */
-		m_pPreviewCamera = nullptr;
-
 		m_pOwnerScene = scene;
 		m_SelectedEntity = {};
-
-		/* 场景已更换，字段编辑的合并窗口不再有效 */
-		m_FieldEditTransactionOpen = false;
+		m_Inspector.SetOwnerScene(scene);
 
 		/* 上一份场景里的挂接请求指向的句柄已经无效 */
 		m_PendingReparent = {};
@@ -455,8 +464,14 @@ namespace Helios
 		/* 场景实体列表 */
 		ShowSceneHierarchyUI();
 
+		/* 句柄非空 ≠ 实体存在（见 Entity::operator bool 的约定）：选中项可能来自撤销后的残留、
+		 * 失效的拾取句柄，或刚在树里连同祖先一起删掉。组件 GetPtr 对不存在的实体是断言而不是
+		 * 返回空指针，所以交给属性面板之前先兜一道。 */
+		if (m_SelectedEntity && (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(m_SelectedEntity)))
+			m_SelectedEntity = {};
+
 		/* 实体属性 */
-		ShowEntityPropertiesUI();
+		m_Inspector.OnImGuiRender(m_SelectedEntity);
 	}
 
 	void SceneHierarchy::SetSelectedEntity(const Entity& entity)
@@ -464,17 +479,7 @@ namespace Helios
 		m_SelectedEntity = entity;
 
 		/* 最近一次选择说了算：点实体（层级 / 视口）把属性面板切回组件视图 */
-		m_AssetFocus = false;
-	}
-
-	/* 资源选中（跨面板能力，由外壳接线：资源浏览器 → 这里）。 */
-	void SceneHierarchy::SetAssetSelection(const std::vector<AssetSelectionEntry>& selection)
-	{
-		m_AssetSelection = selection;
-
-		/* 非空 = 刚点了资源（含同一项被再次点选）：切到资源详情；
-		 * 空（切目录 / Esc / 选中项被删）则交回实体视图。 */
-		m_AssetFocus = !m_AssetSelection.empty();
+		m_Inspector.ClearAssetFocus();
 	}
 
 	void SceneHierarchy::ShowSceneHierarchyUI()
@@ -1257,7 +1262,7 @@ namespace Helios
 					const std::string extension = LowercaseExtension(relative_path);
 
 					if (extension == ".mesh" || extension == ".model")
-						ApplyDroppedMeshToEntity(entity, PathToUtf8(ResolveAssetPath(relative_path)));
+						m_Inspector.ApplyDroppedMeshToEntity(entity, PathToUtf8(ResolveAssetPath(relative_path)));
 				}
 			}
 
@@ -1301,7 +1306,7 @@ namespace Helios
 
 		/* 点一下 = 翻转到当前的反面（目标值就是"现在的自身状态"） */
 		if (eye_pressed)
-			SetEntityVisibility(entity, self_hidden);
+			SetEntityVisibility(m_pOwnerScene, m_pCommandStack, entity, self_hidden);
 
 		/* 展开子节点（叶子节点没有 TreePush，无需 TreePop） */
 		if (has_children && is_opened)
@@ -1410,22 +1415,5 @@ namespace Helios
 
 		if (m_SelectedEntity == entity)
 			SetSelectedEntity({});
-	}
-
-	/* 设置实体可见性（走命令栈、可撤销）：visible 是目标状态 —— 隐藏 = 补上组件置 false、
-	 * 显示 = 移除组件（没有组件 = 可见）。相机不受影响；探针隐藏后不烘焙、也不参与 IBL。 */
-	void SceneHierarchy::SetEntityVisibility(Entity entity, bool visible)
-	{
-		PROFILE_FUNCTION();
-
-		if (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(entity))
-			return;
-
-		/* 无命令栈时也要走同一份应用逻辑：命令自带"补组件 / 去组件"的完整语义 */
-		auto command = CreateUniquePtr<SetEntityVisibilityCommand>(m_pOwnerScene, entity, visible);
-		if (m_pCommandStack != nullptr)
-			m_pCommandStack->Execute(std::move(command));
-		else
-			command->Do();
 	}
 }

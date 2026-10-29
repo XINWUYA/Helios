@@ -110,22 +110,22 @@ namespace Helios
 		ILayer::OnDetached();
 	}
 
-	/* 资源定位通道：转给层级面板（材质卡里的贴图点击用它定位资源浏览器）。 */
+	/* 资源定位通道：转给属性面板（材质卡里的贴图点击用它定位资源浏览器）。 */
 	void SceneEditorLayer::SetAssetRevealFunc(AssetRevealFunc func)
 	{
-		m_SceneHierarchy.SetAssetRevealFunc(std::move(func));
+		m_SceneHierarchy.GetInspector().SetAssetRevealFunc(std::move(func));
 	}
 
-	/* 资源选中通道：转给层级面板（属性面板显示资源的详细内容）。 */
+	/* 资源选中通道：转给属性面板（显示资源的详细内容）。 */
 	void SceneEditorLayer::SetAssetSelection(const std::vector<AssetSelectionEntry>& selection)
 	{
-		m_SceneHierarchy.SetAssetSelection(selection);
+		m_SceneHierarchy.GetInspector().SetAssetSelection(selection);
 	}
 
-	/* 模型编辑器入口：转给层级面板（Model 卡里的「Open in Model Editor」按钮用它打开模型编辑器）。 */
+	/* 模型编辑器入口：转给属性面板（Model 卡里的「Open in Model Editor」按钮用它打开模型编辑器）。 */
 	void SceneEditorLayer::SetModelEditorFunc(ModelEditorFunc func)
 	{
-		m_SceneHierarchy.SetModelEditorFunc(std::move(func));
+		m_SceneHierarchy.GetInspector().SetModelEditorFunc(std::move(func));
 	}
 
 	void SceneEditorLayer::OnImGuiRender()
@@ -242,7 +242,7 @@ namespace Helios
 		/* 运行模式照常渲染，统计面板能看到游戏相机的真实开销 */
 		const bool runtime = (m_PlayMode == PlayMode::Runtime);
 		const FrameGraph* viewed_graph = m_FrameGraphPanel.GetViewedGraph();
-		const Camera* preview_camera = m_SceneHierarchy.GetPreviewCamera();
+		const Camera* preview_camera = m_SceneHierarchy.GetInspector().GetPreviewCamera();
 
 		entt::registry& registry = m_pMainScene->GetRegistry();
 		const auto camera_view = registry.view<CameraComponent>();
