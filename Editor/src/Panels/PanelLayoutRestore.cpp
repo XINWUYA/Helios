@@ -74,7 +74,7 @@ namespace Helios
 		}
 
 		std::vector<std::string> pending;
-		for (const auto& panel : Panel::kDefaultLayout)
+		for (const auto& panel : Panel::kPanels)
 		{
 			const auto node_it = window_node.find(panel.Id);
 			if (node_it == window_node.end() || node_window_count[node_it->second] < 2)

@@ -56,7 +56,7 @@ namespace Helios
 		/* 新建脚本模板：选个路径，生成带注册宏的 .cpp，编一次就能挂到实体上 */
 		void CreateScriptTemplate();
 
-		/* 按 Panel::kDefaultLayout 用 DockBuilder 构建默认停靠布局。
+		/* 按 Panel::kPanels 用 DockBuilder 构建默认停靠布局。
 		 * 必须在同一帧的 DockSpace() 之前调用（DockBuilder 的调用时序要求）；
 		 * size 需与随后 DockSpace() 实际占用的区域一致。 */
 		void BuildDefaultLayout(ImGuiID dockspace_id, const ImVec2& size);
@@ -67,8 +67,6 @@ namespace Helios
 		EditorResourceBrowser m_ResourceBrowser;
 		/* 日志窗口（Kernel / Editor 的运行时输出；数据源 = LogBuffer） */
 		LogPanel m_LogPanel;
-		/* 日志窗口是否显示（View 菜单 / 窗口右上角关闭按钮同源） */
-		bool m_IsLogVisible{ true };
 		/* 上次关闭时的停靠前台页签恢复（等启动首帧的聚焦级联过去后逐帧应用） */
 		PanelLayoutRestore m_LayoutRestore;
 		/* 用户请求重置布局（View → Reset Layout），下一帧生效 */

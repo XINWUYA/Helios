@@ -147,7 +147,7 @@ namespace Helios
 		/* 时间轴：读当前选中实体（或其最近的 Animator 祖先）的片段；
 		 * 放在属性面板之后 —— 录制要看到这一帧的属性改动 */
 		m_TimelinePanel.OnImGuiRender(m_pMainScene.get(), m_SceneHierarchy.GetSelectedEntity(),
-			&m_CommandStack, m_IsTimelineVisible);
+			&m_CommandStack, Panel::VisibleFlag(Panel::kTimeline));
 
 		/* 双击 .anim 打开：面板提交过之后再切页签，停在别的页签上的时间轴才会跳到前台 */
 		if (m_FocusTimelineRequested)
@@ -159,7 +159,7 @@ namespace Helios
 		/* 渲染图可视化页（依赖图 + 各 Pass 的中间渲染结果）：
 		 * 窗口隐藏时由面板自身跳过提交（恢复入口在 View 菜单），但仍逐帧调用，
 		 * 抓取请求的置位 / 清零都在面板内部结算 */
-		m_FrameGraphPanel.OnImGuiRenderer(m_CameraEntries, m_IsFrameGraphVisible);
+		m_FrameGraphPanel.OnImGuiRenderer(m_CameraEntries, Panel::VisibleFlag(Panel::kFrameGraph));
 
 		DrawScriptOrderWindow();
 
@@ -411,7 +411,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		if (event == nullptr || !m_IsViewportVisible)
+		if (event == nullptr || !Panel::IsVisible(Panel::kScene))
 			return false;
 
 		const float x = event->GetX();
@@ -581,7 +581,7 @@ namespace Helios
 		/* 新建 / 打开场景后场景视口必须可见：它同时是视口窗口被关闭后的恢复入口，
 		 * 否则用户新建了一个空场景却看不到它。 */
 		m_IsActivated = true;
-		m_IsViewportVisible = true;
+		Panel::SetVisible(Panel::kScene, true);
 	}
 
 	void SceneEditorLayer::NewScene()
@@ -607,7 +607,7 @@ namespace Helios
 
 	bool SceneEditorLayer::WantsTimelineArrowKeys() const
 	{
-		return m_IsTimelineVisible && m_TimelinePanel.WantsArrowKeys();
+		return Panel::IsVisible(Panel::kTimeline) && m_TimelinePanel.WantsArrowKeys();
 	}
 
 	void SceneEditorLayer::OpenAnimationClip(const std::string& path)
@@ -623,7 +623,7 @@ namespace Helios
 
 		EDITOR_LOG_INFO("Edit animation clip: {}.", path);
 		m_TimelinePanel.OpenClip(clip);
-		m_IsTimelineVisible = true;
+		Panel::SetVisible(Panel::kTimeline, true);
 		m_FocusTimelineRequested = true;
 	}
 
@@ -650,10 +650,10 @@ namespace Helios
 	/* 脚本执行顺序总表：表格里改的是草稿，点 Apply 才写进组件（一条命令，可撤销） */
 	void SceneEditorLayer::DrawScriptOrderWindow()
 	{
-		if (!m_IsScriptOrderVisible || m_pMainScene == nullptr)
+		if (!Panel::IsVisible(Panel::kScriptOrder) || m_pMainScene == nullptr)
 			return;
 
-		PanelWindow window(Panel::kScriptOrder, &m_IsScriptOrderVisible);
+		PanelWindow window(Panel::kScriptOrder, &Panel::VisibleFlag(Panel::kScriptOrder));
 		if (!window)
 			return;
 
@@ -919,7 +919,7 @@ namespace Helios
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 		/* 每帧都必须调用 Begin：窗口被关闭（点 X 或 View 菜单取消勾选）时它返回 false，
 		 * 只有继续调用才可能重新显示（关闭时不画内容即可）。 */
-		if (ImGui::Begin(Panel::kScene, &m_IsViewportVisible))
+		if (ImGui::Begin(Panel::kScene, &Panel::VisibleFlag(Panel::kScene)))
 		{
 			/* 获取窗口范围 */
 			const auto viewport_region_min = ImGui::GetWindowContentRegionMin();

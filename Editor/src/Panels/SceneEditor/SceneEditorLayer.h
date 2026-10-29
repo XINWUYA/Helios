@@ -61,24 +61,6 @@ namespace Helios
 		void Active(bool active = true) { m_IsActivated = active; }
 		bool IsActivated() const { return m_IsActivated; }
 
-		/* 场景视口窗口显隐（窗口右上角关闭按钮 / View 菜单）。
-		 * 与 m_IsActivated 分开：关掉视口只隐藏这一个窗口，
-		 * 层级、属性、统计面板与场景数据都不受影响。 */
-		void SetViewportVisible(bool visible) { m_IsViewportVisible = visible; }
-		[[nodiscard]] bool IsViewportVisible() const { return m_IsViewportVisible; }
-
-		/* 渲染图可视化页（Frame Graph）窗口显隐（与视口同一套模式：窗口关闭按钮 / View 菜单） */
-		void SetFrameGraphVisible(bool visible) { m_IsFrameGraphVisible = visible; }
-		[[nodiscard]] bool IsFrameGraphVisible() const { return m_IsFrameGraphVisible; }
-
-		/* 时间轴窗口显隐（同上） */
-		void SetTimelineVisible(bool visible) { m_IsTimelineVisible = visible; }
-		[[nodiscard]] bool IsTimelineVisible() const { return m_IsTimelineVisible; }
-
-		/* 脚本执行顺序总表窗口显隐（Settings 菜单打开，默认不占布局） */
-		void SetScriptOrderVisible(bool visible) { m_IsScriptOrderVisible = visible; }
-		[[nodiscard]] bool IsScriptOrderVisible() const { return m_IsScriptOrderVisible; }
-
 		void SetGizmoType(int type) { m_GizmoType = type; }
 		/* 操作 gizmo 的轴基：true = 实体局部轴，false = 世界轴 */
 		void SetGizmoLocalSpace(bool local) { m_GizmoLocalSpace = local; }
@@ -220,19 +202,12 @@ namespace Helios
 		std::filesystem::path m_RuntimeSnapshotPath;
 		/* 当前编辑器是否被启用 */
 		bool m_IsActivated{ true };
-		/* 场景视口窗口是否显示 */
-		bool m_IsViewportVisible{ true };
 		/* 渲染图可视化页：依赖图 + 各 Pass 的中间渲染结果（抓取开关由面板自持） */
 		FrameGraphPanel m_FrameGraphPanel;
-		/* 渲染图可视化页窗口是否显示 */
-		bool m_IsFrameGraphVisible{ true };
-		/* 时间轴面板与窗口显隐 */
+		/* 时间轴面板 */
 		TimelinePanel m_TimelinePanel;
-		bool m_IsTimelineVisible{ true };
 		/* 打开片段后要求把时间轴页签切到前台（下一帧 SetWindowFocus） */
 		bool m_FocusTimelineRequested{ false };
-		/* 脚本执行顺序总表窗口是否显示（Settings 菜单打开） */
-		bool m_IsScriptOrderVisible{ false };
 		/* 顺序表的草稿：key = 实体句柄 << 32 | 槽位下标，点 Apply 才写进组件 */
 		std::unordered_map<uint64_t, int> m_ScriptOrderDraft;
 		/* 本帧可视化可选的相机（渲染图与相机同生命周期，指针跨帧稳定） */

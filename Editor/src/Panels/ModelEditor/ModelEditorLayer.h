@@ -36,9 +36,6 @@ namespace Helios
 		void Active(bool active = true) { m_IsActivated = active; }
 		bool IsActivated() const { return m_IsActivated; }
 
-		/* 模型视口窗口显隐（与 m_IsActivated 分开，理由同 SceneEditorLayer） */
-		void SetViewportVisible(bool visible) { m_IsViewportVisible = visible; }
-		[[nodiscard]] bool IsViewportVisible() const { return m_IsViewportVisible; }
 
 		/* 编辑器相机（自检用：断言打开模型后的取景） */
 		[[nodiscard]] EditorCamera* GetEditorCamera() { return m_pEditorCamera.get(); }
@@ -162,8 +159,6 @@ namespace Helios
 
 		/* 当前窗口是否被激活 */
 		bool m_IsActivated{ false };
-		/* 模型视口窗口是否显示 */
-		bool m_IsViewportVisible{ true };
 		/* 材质参数面板是否展开（右上角开关切换） */
 		bool m_IsParamsPanelOpen{ true };
 		/* 本帧指针是否悬停在面板折叠开关上（收起态它盖在视口角上，要挡掉视口悬停） */

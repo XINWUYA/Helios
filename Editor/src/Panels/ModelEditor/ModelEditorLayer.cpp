@@ -293,7 +293,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		/* 窗口已关闭：不提交也不画；悬停授权与高亮一并清掉，不留指向已关窗口的残影 */
-		if (!m_IsViewportVisible)
+		if (!Panel::IsVisible(Panel::kModel))
 		{
 			m_IsViewportHovered = false;
 			m_pEditorCamera->SetHighlightSegment(-1);
@@ -303,7 +303,7 @@ namespace Helios
 		const bool has_model = (m_pModelInfo != nullptr) && !m_pModelInfo->m_SubModelInfos.empty();
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		PanelWindow window(Panel::kModel, &m_IsViewportVisible);
+		PanelWindow window(Panel::kModel, &Panel::VisibleFlag(Panel::kModel));
 		/* 窗口内边距在 Begin 时已取快照；提前弹掉，参数面板的子窗口按默认内边距排卡片 */
 		ImGui::PopStyleVar();
 
@@ -1039,7 +1039,7 @@ namespace Helios
 
 		/* 模型已就绪：层与视口窗口一并唤回，导入结果必然可见 */
 		m_IsActivated = true;
-		m_IsViewportVisible = true;
+		Panel::SetVisible(Panel::kModel, true);
 	}
 
 	/* 打开模型（属性面板 / 资源面板入口） */
@@ -1052,7 +1052,7 @@ namespace Helios
 
 		/* 模型已就绪：层与视口窗口一并唤回（同导入） */
 		m_IsActivated = true;
-		m_IsViewportVisible = true;
+		Panel::SetVisible(Panel::kModel, true);
 	}
 
 	/* 打开模型文件：.mesh 直接加载；交换格式（obj / fbx / gltf / glb / dae / stl）先走内核

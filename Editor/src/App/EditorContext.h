@@ -45,9 +45,6 @@ namespace Helios
 		 * 文件操作同样有效。命令不涉及场景改动时，自己声明 AffectsSceneDocument() 为假。 */
 		void Execute(UniquePtr<ICommand> command);
 
-		[[nodiscard]] bool IsScriptOrderVisible();
-		void SetScriptOrderVisible(bool visible);
-
 		/* ---- 运行 / Gizmo 状态（本类持有权威值，再转发给场景面板）---- */
 		[[nodiscard]] int GetGizmoType() const { return m_GizmoType; }
 		void SetGizmoType(int type);
@@ -78,20 +75,6 @@ namespace Helios
 		void SetSceneEditorActive(bool active);
 		[[nodiscard]] bool IsModelEditorActive();
 		void SetModelEditorActive(bool active);
-
-		/* ---- 视口窗口显隐：与「整层启用」分开，是窗口右上角关闭按钮的恢复入口 ---- */
-		[[nodiscard]] bool IsSceneViewportVisible();
-		void SetSceneViewportVisible(bool visible);
-		[[nodiscard]] bool IsModelViewportVisible();
-		void SetModelViewportVisible(bool visible);
-
-		/* ---- 渲染图可视化页（Frame Graph）窗口显隐 ---- */
-		[[nodiscard]] bool IsFrameGraphVisible();
-		void SetFrameGraphVisible(bool visible);
-
-		/* ---- 时间轴窗口显隐 ---- */
-		[[nodiscard]] bool IsTimelineVisible();
-		void SetTimelineVisible(bool visible);
 
 		/* 模型导入（ModelEditor 面板） */
 		void ImportModel();

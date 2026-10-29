@@ -3,8 +3,8 @@
 
 namespace Helios
 {
-	/* 面板注册表：窗口名和默认停靠的唯一数据源。窗口名集中成常量、要改只改这个文件；带工厂和
-	 * 可见性的完整面板注册（IEditorPanel）不归本模块管。 */
+	/* 面板注册表：窗口名、默认停靠、开关菜单与可见性的唯一数据源。
+	 * 新增一个停靠窗口 = 这里加常量和一行 kPanels，面板自己用 PanelWindow 提交窗口。 */
 	namespace Panel
 	{
 		/* 窗口键 = ImGui 窗口名（这里都无 ### 后缀，故即整个名字）。
@@ -34,25 +34,49 @@ namespace Helios
 			RightTop,     /* 右栏上半（属性 / 模型参数） */
 			RightBottom,  /* 右栏下半（统计） */
 			CenterBottom, /* 中栏下半（日志窗口） */
+			Floating,     /* 不进默认布局，打开时浮动 */
+		};
+
+		/* 开关放在哪个菜单里：None = 常驻窗口，没有关闭按钮 */
+		enum class Menu : uint8_t
+		{
+			None = 0,
+			View,
+			Scripts,
 		};
 
 		struct Desc
 		{
-			const char* Id;     /* 窗口键 */
-			DockSlot    Slot;   /* 默认停靠槽位 */
+			const char* Id;                 /* 窗口键 */
+			DockSlot    Slot;               /* 默认停靠槽位 */
+			Menu        ToggleMenu;         /* 开关所在菜单 */
+			const char* MenuLabel;          /* 菜单里的名字 */
+			bool        DefaultVisible;     /* 启动时开不开 */
+			const char* Tooltip{ nullptr }; /* 菜单项悬停说明 */
 		};
 
-		/* 默认布局表：调整默认分栏只改这里 */
-		inline constexpr Desc kDefaultLayout[] = {
-			{ kSceneHierarchy,  DockSlot::LeftTop     },
-			{ kResourceBrowser, DockSlot::LeftBottom  },
-			{ kScene,           DockSlot::Center      },
-			{ kModel,           DockSlot::Center      },
-			{ kFrameGraph,      DockSlot::Center      },
-			{ kProperties,      DockSlot::RightTop    },
-			{ kStatInfo,        DockSlot::RightBottom },
-			{ kLog,             DockSlot::CenterBottom },
-			{ kTimeline,        DockSlot::CenterBottom },
+		/* 全部停靠窗口：调整默认分栏、菜单开关都只改这里 */
+		inline constexpr Desc kPanels[] = {
+			{ kSceneHierarchy,  DockSlot::LeftTop,      Menu::None,    nullptr,          true },
+			{ kResourceBrowser, DockSlot::LeftBottom,   Menu::None,    nullptr,          true },
+			{ kScene,           DockSlot::Center,       Menu::View,    "Scene Viewport", true },
+			{ kModel,           DockSlot::Center,       Menu::View,    "Model Viewport", true },
+			{ kFrameGraph,      DockSlot::Center,       Menu::View,    "Frame Graph",    true },
+			{ kProperties,      DockSlot::RightTop,     Menu::None,    nullptr,          true },
+			{ kStatInfo,        DockSlot::RightBottom,  Menu::None,    nullptr,          true },
+			{ kLog,             DockSlot::CenterBottom, Menu::View,    "Log",            true },
+			{ kTimeline,        DockSlot::CenterBottom, Menu::View,    "Timeline",       true },
+			{ kScriptOrder,     DockSlot::Floating,     Menu::Scripts, "Script Order",   false,
+				"脚本的全局执行顺序，按 Order 升序" },
 		};
+
+		/* 窗口开关的唯一存放处：PanelWindow、菜单和各层读写的都是这一份。
+		 * 只登记了开关菜单的窗口才有意义；常驻窗口恒为 true。 */
+		bool& VisibleFlag(const char* id);
+		inline bool IsVisible(const char* id) { return VisibleFlag(id); }
+		inline void SetVisible(const char* id, bool visible) { VisibleFlag(id) = visible; }
+
+		/* 在当前打开的菜单里按表画出这一组窗口的开关项 */
+		void DrawToggleMenuItems(Menu menu);
 	}
 }

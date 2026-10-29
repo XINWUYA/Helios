@@ -210,66 +210,6 @@ namespace Helios
 			layer->Active(active);
 	}
 
-	bool EditorContext::IsSceneViewportVisible()
-	{
-		const auto* layer = GetSceneLayer();
-		return layer != nullptr && layer->IsViewportVisible();
-	}
-
-	void EditorContext::SetSceneViewportVisible(bool visible)
-	{
-		if (auto* layer = GetSceneLayer())
-			layer->SetViewportVisible(visible);
-	}
-
-	bool EditorContext::IsModelViewportVisible()
-	{
-		const auto* layer = GetModelLayer();
-		return layer != nullptr && layer->IsViewportVisible();
-	}
-
-	void EditorContext::SetModelViewportVisible(bool visible)
-	{
-		if (auto* layer = GetModelLayer())
-			layer->SetViewportVisible(visible);
-	}
-
-	bool EditorContext::IsFrameGraphVisible()
-	{
-		const auto* layer = GetSceneLayer();
-		return layer != nullptr && layer->IsFrameGraphVisible();
-	}
-
-	void EditorContext::SetFrameGraphVisible(bool visible)
-	{
-		if (auto* layer = GetSceneLayer())
-			layer->SetFrameGraphVisible(visible);
-	}
-
-	bool EditorContext::IsScriptOrderVisible()
-	{
-		const auto* layer = GetSceneLayer();
-		return layer != nullptr && layer->IsScriptOrderVisible();
-	}
-
-	void EditorContext::SetScriptOrderVisible(bool visible)
-	{
-		if (auto* layer = GetSceneLayer())
-			layer->SetScriptOrderVisible(visible);
-	}
-
-	bool EditorContext::IsTimelineVisible()
-	{
-		const auto* layer = GetSceneLayer();
-		return layer != nullptr && layer->IsTimelineVisible();
-	}
-
-	void EditorContext::SetTimelineVisible(bool visible)
-	{
-		if (auto* layer = GetSceneLayer())
-			layer->SetTimelineVisible(visible);
-	}
-
 	void EditorContext::ImportModel()
 	{
 		if (auto* layer = GetModelLayer())

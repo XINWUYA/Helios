@@ -91,7 +91,7 @@ namespace Helios
 		/* 资源管理窗口 */
 		m_ResourceBrowser.OnImGuiRenderer();
 		/* 日志窗口（Kernel / Editor 的运行时输出） */
-		m_LogPanel.OnImGuiRender(m_IsLogVisible);
+		m_LogPanel.OnImGuiRender(Panel::VisibleFlag(Panel::kLog));
 	}
 
 	void MainEditorLayer::OnEvent(IEvent* event)
@@ -265,8 +265,11 @@ namespace Helios
 			}
 		};
 
-		for (const auto& desc : Panel::kDefaultLayout)
-			ImGui::DockBuilderDockWindow(desc.Id, slot_to_node(desc.Slot));
+		for (const auto& desc : Panel::kPanels)
+		{
+			if (desc.Slot != Panel::DockSlot::Floating)
+				ImGui::DockBuilderDockWindow(desc.Id, slot_to_node(desc.Slot));
+		}
 
 		ImGui::DockBuilderFinish(dockspace_id);
 	}
@@ -452,24 +455,8 @@ namespace Helios
 				 * 场景的新建 / 打开也会自动唤回视口窗口，避免「关掉后再也打不开」。 */
 				if (ImGui::BeginMenu("View"))
 				{
-					bool scene_viewport_visible = m_Context.IsSceneViewportVisible();
-					if (ImGui::MenuItem("Scene Viewport", nullptr, &scene_viewport_visible))
-						m_Context.SetSceneViewportVisible(scene_viewport_visible);
-
-					bool model_viewport_visible = m_Context.IsModelViewportVisible();
-					if (ImGui::MenuItem("Model Viewport", nullptr, &model_viewport_visible))
-						m_Context.SetModelViewportVisible(model_viewport_visible);
-
-					bool frame_graph_visible = m_Context.IsFrameGraphVisible();
-					if (ImGui::MenuItem("Frame Graph", nullptr, &frame_graph_visible))
-						m_Context.SetFrameGraphVisible(frame_graph_visible);
-
-					bool timeline_visible = m_Context.IsTimelineVisible();
-					if (ImGui::MenuItem("Timeline", nullptr, &timeline_visible))
-						m_Context.SetTimelineVisible(timeline_visible);
-
-					/* 日志窗口：显隐状态在本层（窗口由本层提交） */
-					ImGui::MenuItem("Log", nullptr, &m_IsLogVisible);
+					/* 各窗口的开关按注册表画（Panel::kPanels） */
+					Panel::DrawToggleMenuItems(Panel::Menu::View);
 
 					ImGui::Separator();
 
@@ -549,11 +536,7 @@ namespace Helios
 
 					/* 脚本执行顺序：全场景一张表，Order 小的先跑 */
 					ImGui::Separator();
-					bool script_order = m_Context.IsScriptOrderVisible();
-					if (ImGui::MenuItem("Script Order", nullptr, &script_order))
-						m_Context.SetScriptOrderVisible(script_order);
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("脚本的全局执行顺序，按 Order 升序");
+					Panel::DrawToggleMenuItems(Panel::Menu::Scripts);
 
 					ImGui::Separator();
 					ImGui::TextDisabled("%s", m_ScriptModule.GetStatus().c_str());
