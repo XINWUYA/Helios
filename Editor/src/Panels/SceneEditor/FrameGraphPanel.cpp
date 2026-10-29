@@ -777,27 +777,19 @@ namespace Helios
 			std::unordered_map<std::string, bool> NameIsPass;
 		};
 
-		/* 依赖图的布局（图空间）：行、卡片、跨行连线与名字级邻接都在这里算好，绘制只读它。
-		 * 不碰画布与输入，布局规则见各段注释；edge_links 收集连线的自检记录。 */
-		GraphLayout BuildGraphLayout(FrameGraph& frame_graph, bool show_culled, float title_height,
-			float info_line_height, std::vector<FrameGraphPanel::EdgeLink>& edge_links)
+		/* 图节点索引 → 名字 / 类型 / 生效性（连接解析与显示判定用） */
+		struct GraphNodeRef
 		{
-			GraphLayout layout;
-			/* ---- 收集行：每个生效 Pass 一行 —— 行头 = 整行背景区域（无缩略图），输出资源卡叠在区域内
-			 * 横排；行序 = Pass 的拓扑深度（生产者在上、消费者在下，最长路径松弛）。 ---- */
-			const DependencyGraph& graph = frame_graph.GetDependencyGraph();
-			const FrameGraphCapture& capture = frame_graph.GetCapture();
-			auto& nodes = layout.Nodes;
-			auto& lanes = layout.Lanes;
+			std::string Name;
+			bool IsPass{ false };
+			bool IsValid{ false };
+		};
+		using GraphNodeRefs = std::unordered_map<uint32_t, GraphNodeRef>;
 
-			/* 图节点索引 → 名字 / 类型 / 生效性（连接解析与显示判定用） */
-			struct GraphNodeRef
-			{
-				std::string Name;
-				bool IsPass{ false };
-				bool IsValid{ false };
-			};
-			std::unordered_map<uint32_t, GraphNodeRef> node_refs;
+		/* 连接解析：资源的生产 / 消费 Pass、Pass 的输入 / 输出资源都记到布局上（聚焦链和连线都靠它） */
+		GraphNodeRefs ResolveGraphLinks(const DependencyGraph& graph, GraphLayout& layout)
+		{
+			GraphNodeRefs node_refs;
 			for (const auto& node : graph.GetNodes())
 			{
 				node_refs[node->Index] = GraphNodeRef{ node->DebugName,
@@ -805,8 +797,6 @@ namespace Helios
 			}
 
 			/* 连接解析：输出连接（Pass → 资源）记生产者、输入连接（资源 → Pass）记消费者 */
-			auto& producers_of = layout.ProducersOf;
-			auto& consumers_of = layout.ConsumersOf;
 			for (const auto& connection : graph.GetConnections())
 			{
 				const auto from_iter = node_refs.find(connection->FromNodeIdx);
@@ -817,29 +807,32 @@ namespace Helios
 				const GraphNodeRef& from = from_iter->second;
 				const GraphNodeRef& to = to_iter->second;
 				if (!from.IsPass && to.IsPass)
-					consumers_of[from.Name].push_back(to.Name);
+					layout.ConsumersOf[from.Name].push_back(to.Name);
 				else if (from.IsPass && !to.IsPass)
-					producers_of[to.Name].push_back(from.Name);
+					layout.ProducersOf[to.Name].push_back(from.Name);
 			}
 
 			/* 名字级邻接（聚焦链 / 悬停预览用）：pass → 输入资源（consumers_of 反转）、
 			 * pass → 输出资源（producers_of 反转）、名字 → 是否 Pass（链遍历时区分两侧） */
-			auto& inputs_of = layout.InputsOf;
-			auto& outputs_of = layout.OutputsOf;
-			auto& name_is_pass = layout.NameIsPass;
 			for (const auto& [node_index, ref] : node_refs)
-				name_is_pass[ref.Name] = ref.IsPass;
-			for (const auto& [resource_name, resource_consumers] : consumers_of)
+				layout.NameIsPass[ref.Name] = ref.IsPass;
+			for (const auto& [resource_name, resource_consumers] : layout.ConsumersOf)
 			{
 				for (const std::string& consumer : resource_consumers)
-					inputs_of[consumer].push_back(resource_name);
+					layout.InputsOf[consumer].push_back(resource_name);
 			}
-			for (const auto& [resource_name, resource_producers] : producers_of)
+			for (const auto& [resource_name, resource_producers] : layout.ProducersOf)
 			{
 				for (const std::string& producer : resource_producers)
-					outputs_of[producer].push_back(resource_name);
+					layout.OutputsOf[producer].push_back(resource_name);
 			}
 
+			return node_refs;
+		}
+
+		std::vector<std::pair<std::string, bool>> CollectVisiblePasses(const DependencyGraph& graph,
+			GraphNodeRefs& node_refs, bool show_culled)
+		{
 			/* ---- 行序：注册序 = 执行序（图的执行按注册序跑 —— `m_RenderPassNodes` 剔除时只做
 			 * 稳定分区、保持注册序；AddPass 即注册，故 `GetNodes()` 里 Pass 的相对顺序就是执行
 			 * 顺序，与 GPU 计时面板一致）。不做拓扑深度重排：深度松弛经"产出 / 消费"链传播，
@@ -853,6 +846,12 @@ namespace Helios
 					visible_passes.emplace_back(ref.Name, ref.IsValid);
 			}
 
+			return visible_passes;
+		}
+
+		void BuildLaneCards(GraphLayout& layout, const FrameGraphCapture& capture,
+			const std::vector<std::pair<std::string, bool>>& visible_passes, float title_height, float info_line_height)
+		{
 			/* ---- 建卡：Pass 背景区域（行头与背景合并）+ 区域内的资源卡 ---- */
 			for (const auto& [pass_name, pass_valid] : visible_passes)
 			{
@@ -861,7 +860,7 @@ namespace Helios
 				lane.Stage = FindStageFill(pass_name);
 				lane.IsCulled = !pass_valid;
 				lane.Outputs = capture.GetPassOutputs(pass_name);
-				lane.HeaderIndex = nodes.size(); /* 先占卡槽，lanes.push_back 前固定 */
+				lane.HeaderIndex = layout.Nodes.size(); /* 先占卡槽，layout.Lanes.push_back 前固定 */
 
 				NodeView header;
 				header.Name = pass_name;
@@ -880,8 +879,8 @@ namespace Helios
 					header.Width += ImGui::CalcTextSize(count_label.c_str()).x + 6.0f;
 				}
 				header.Height = 0.0f; /* 行布局里取"标题带 + 内容行"的整行高 */
-				header.LaneIndex = lanes.size();
-				nodes.push_back(std::move(header));
+				header.LaneIndex = layout.Lanes.size();
+				layout.Nodes.push_back(std::move(header));
 
 				if (lane.Outputs != nullptr)
 				{
@@ -897,7 +896,7 @@ namespace Helios
 						card.LaneName = pass_name;
 						card.GraphName = output.ResourceName.empty() ? output.Name : output.ResourceName;
 						card.IsCulled = lane.IsCulled;
-						card.LaneIndex = lanes.size();
+						card.LaneIndex = layout.Lanes.size();
 						card.Image = &output;
 						card.ImageSize = FitBox(kResourceImageBox, aspect);
 
@@ -915,14 +914,17 @@ namespace Helios
 						card.Width = content_width;
 						card.Height = title_height + card.ImageSize.y + info_line_height + kImageSidePadding;
 
-						lane.ResourceIndices.push_back(nodes.size());
-						nodes.push_back(std::move(card));
+						lane.ResourceIndices.push_back(layout.Nodes.size());
+						layout.Nodes.push_back(std::move(card));
 					}
 				}
 
-				lanes.push_back(std::move(lane));
+				layout.Lanes.push_back(std::move(lane));
 			}
+		}
 
+		void AssignResourceColumns(GraphLayout& layout)
+		{
 			/* ---- 行布局（图空间）：资源列 —— 同名资源共享同一列（副本跨行严格对齐、虚线竖直）；
 			 * 其余名字每行从最左起排，取最左可用列 —— 不同名字可共用一列，只要各自出现的行区间
 			 * 不重叠（同行不叠卡；同名副本跨行的虚线也不会横穿别家的卡）。逐层展开的数组后排层
@@ -930,12 +932,12 @@ namespace Helios
 			 * 资源列从区域左内沿起排；背景区域统一宽度。 */
 			std::unordered_map<std::string, std::pair<size_t, size_t>> lane_span_of; /* 名字 → 出现行区间 */
 			std::vector<std::string> resource_names;                                 /* 首现顺序 */
-			for (const LaneView& lane : lanes)
+			for (const LaneView& lane : layout.Lanes)
 			{
 				for (const size_t index : lane.ResourceIndices)
 				{
-					const std::string& name = nodes[index].Name;
-					const size_t lane_index = nodes[index].LaneIndex;
+					const std::string& name = layout.Nodes[index].Name;
+					const size_t lane_index = layout.Nodes[index].LaneIndex;
 					const auto iter = lane_span_of.find(name);
 					if (iter == lane_span_of.end())
 					{
@@ -982,12 +984,12 @@ namespace Helios
 
 			std::vector<float> column_width(column_names.size(), 0.0f);
 			std::vector<float> column_center(column_names.size(), 0.0f);
-			for (const LaneView& lane : lanes)
+			for (const LaneView& lane : layout.Lanes)
 			{
 				for (const size_t index : lane.ResourceIndices)
 				{
-					const size_t column = column_of[nodes[index].Name];
-					column_width[column] = std::max(column_width[column], nodes[index].Width);
+					const size_t column = column_of[layout.Nodes[index].Name];
+					column_width[column] = std::max(column_width[column], layout.Nodes[index].Width);
 				}
 			}
 			{
@@ -1000,14 +1002,14 @@ namespace Helios
 				}
 			}
 
-			for (LaneView& lane : lanes)
+			for (LaneView& lane : layout.Lanes)
 			{
 				/* 卡片各自就位到自己的列（相同资源跨行对齐）；
 				 * 行宽 = max(标题带宽度, 该行最右资源卡右缘) */
-				float row_right = nodes[lane.HeaderIndex].Width;
+				float row_right = layout.Nodes[lane.HeaderIndex].Width;
 				for (const size_t index : lane.ResourceIndices)
 				{
-					NodeView& card = nodes[index];
+					NodeView& card = layout.Nodes[index];
 					const size_t column = column_of[card.Name];
 					card.X = column_center[column];
 					row_right = std::max(row_right, card.X + column_width[column] * 0.5f);
@@ -1015,59 +1017,63 @@ namespace Helios
 
 				lane.Width = row_right;
 			}
+		}
 
+		void StackLanes(GraphLayout& layout, float title_height)
+		{
 			/* ---- 同名资源副本链（被多个 Pass 写入的 RT）：相邻行的副本用虚线关联
 			 * —— 副本已列对齐，关联线就是一条竖直虚线；语义 = 同一张 RT 的先后写入
 			 * （与实线依赖箭头区分：无箭头、中性色、虚线 + 两端小圆点） */
-			auto& same_rt_links = layout.SameRtLinks;
 			{
 				std::unordered_map<std::string, size_t> previous_copy;
-				for (const LaneView& lane : lanes)
+				for (const LaneView& lane : layout.Lanes)
 				{
 					for (const size_t index : lane.ResourceIndices)
 					{
-						const std::string& name = nodes[index].Name;
+						const std::string& name = layout.Nodes[index].Name;
 						const auto iter = previous_copy.find(name);
 						if (iter != previous_copy.end())
-							same_rt_links.emplace_back(iter->second, index);
+							layout.SameRtLinks.emplace_back(iter->second, index);
 						previous_copy[name] = index;
 					}
 				}
 			}
 
-			float& max_lane_width = layout.MaxLaneWidth;
 			float y_cursor = 0.0f;
 			/* 行顶 → 资源内容行顶：标题带（行顶 5 + 标题行高）之下隔着 kTitleGap ——
 			 * 名字独占首行，资源卡从标题带下方的一行起排 */
 			const float content_top_offset = kLanePadding * 0.5f + title_height + kTitleGap;
-			for (LaneView& lane : lanes)
+			for (LaneView& lane : layout.Lanes)
 			{
 				/* 行高 = 标题带 + 资源内容行（卡高的最大者；没有资源的行留最小体量） */
 				float content_height = kPassContentMinHeight;
 				for (const size_t index : lane.ResourceIndices)
-					content_height = std::max(content_height, nodes[index].Height);
+					content_height = std::max(content_height, layout.Nodes[index].Height);
 
 				lane.Y = y_cursor;
 				lane.Height = content_top_offset + content_height + kLanePadding;
 				lane.ContentCenterY = y_cursor + content_top_offset + content_height * 0.5f;
-				nodes[lane.HeaderIndex].Height = lane.Height; /* Pass 卡 = 整行高 */
-				nodes[lane.HeaderIndex].Y = y_cursor + lane.Height * 0.5f;
+				layout.Nodes[lane.HeaderIndex].Height = lane.Height; /* Pass 卡 = 整行高 */
+				layout.Nodes[lane.HeaderIndex].Y = y_cursor + lane.Height * 0.5f;
 				for (const size_t index : lane.ResourceIndices)
-					nodes[index].Y = lane.ContentCenterY;
+					layout.Nodes[index].Y = lane.ContentCenterY;
 
-				max_lane_width = std::max(max_lane_width, lane.Width);
+				layout.MaxLaneWidth = std::max(layout.MaxLaneWidth, lane.Width);
 				y_cursor += lane.Height + kLaneGap;
 			}
 
 			/* Pass 节点 = 整行的背景区域（行头与背景合并的载体）：统一宽度
 			 * （含左右内边距，所有行对齐）、整行高；输出资源卡叠在区域内部 */
-			for (LaneView& lane : lanes)
+			for (LaneView& lane : layout.Lanes)
 			{
-				NodeView& region = nodes[lane.HeaderIndex];
-				region.X = max_lane_width * 0.5f;
-				region.Width = max_lane_width + kLanePadding * 2.0f;
+				NodeView& region = layout.Nodes[lane.HeaderIndex];
+				region.X = layout.MaxLaneWidth * 0.5f;
+				region.Width = layout.MaxLaneWidth + kLanePadding * 2.0f;
 			}
+		}
 
+		void PlanCrossEdges(GraphLayout& layout, std::vector<FrameGraphPanel::EdgeLink>& edge_links)
+		{
 			/* ---- 跨行连线规划：相邻直连 / 其余绕左侧总线 ----
 			 * 语义：资源（消费 Pass 读到的"目标行上方最后一次写入"的那份副本）→ 消费它的 Pass 区域。
 			 * 同一资源被多个 Pass 先后写入时（读改写链，如 Bloom mip：先降采样写、后升采样回叠再写），
@@ -1075,8 +1081,6 @@ namespace Helios
 			 * 如天空叠进光照结果 / 回叠进 mip）不画实线 —— 该关系已由同名副本虚线链表达，避免叠画。
 			 * 相邻直连 = 源卡底部竖直下行 → 目标区域顶边；其余绕总线（源卡底 → 总线列 → 目标区域入口）。
 			 * 总线在区域左缘之外、不穿卡片，多条边在空档 / 总线 / 入口三处分槽、互不重叠。 */
-			auto& cross_edges = layout.CrossEdges;
-			float& rails_min_x = layout.RailsMinX;
 			{
 				/* 资源（依赖图身份）→ 副本卡集合：常规副本（Name == GraphName）收集成版本序列；
 				 * 层卡（逐层展开，显示名各异、身份同为数组资源）取组首卡（Sequence 最小）作唯一
@@ -1085,11 +1089,11 @@ namespace Helios
 				std::unordered_map<std::string, size_t> layer_group_first;           /* GraphName → 层组首卡 */
 				std::unordered_map<std::string, std::vector<size_t>> writer_lanes_of; /* GraphName → 写它的行 */
 				std::vector<std::string> resource_order;
-				for (const LaneView& lane : lanes)
+				for (const LaneView& lane : layout.Lanes)
 				{
 					for (const size_t index : lane.ResourceIndices)
 					{
-						const NodeView& card = nodes[index];
+						const NodeView& card = layout.Nodes[index];
 						if (card.Image == nullptr)
 							continue;
 
@@ -1104,7 +1108,7 @@ namespace Helios
 						{
 							const auto iter = layer_group_first.find(card.GraphName);
 							if (iter == layer_group_first.end()
-								|| card.Image->Sequence < nodes[iter->second].Image->Sequence)
+								|| card.Image->Sequence < layout.Nodes[iter->second].Image->Sequence)
 								layer_group_first[card.GraphName] = index;
 							continue;
 						}
@@ -1114,14 +1118,14 @@ namespace Helios
 				}
 
 				std::unordered_map<std::string, size_t> lane_of_pass;
-				for (size_t l = 0; l < lanes.size(); ++l)
-					lane_of_pass[lanes[l].PassName] = l;
+				for (size_t l = 0; l < layout.Lanes.size(); ++l)
+					lane_of_pass[layout.Lanes[l].PassName] = l;
 
 				/* 逐资源、逐消费者选"读出源"：目标行上方、Sequence 最大的副本（层组用组首卡） */
 				for (const std::string& resource_name : resource_order)
 				{
-					const auto consumers_iter = consumers_of.find(resource_name);
-					if (consumers_iter == consumers_of.end())
+					const auto consumers_iter = layout.ConsumersOf.find(resource_name);
+					if (consumers_iter == layout.ConsumersOf.end())
 						continue;
 
 					for (const std::string& consumer : consumers_iter->second)
@@ -1142,7 +1146,7 @@ namespace Helios
 						{
 							for (const size_t index : copies_iter->second)
 							{
-								const NodeView& candidate = nodes[index];
+								const NodeView& candidate = layout.Nodes[index];
 								if (candidate.LaneIndex >= target_lane)
 									continue;
 								if (source == nullptr || candidate.Image->Sequence > source->Image->Sequence)
@@ -1152,7 +1156,7 @@ namespace Helios
 						const auto layer_iter = layer_group_first.find(resource_name);
 						if (layer_iter != layer_group_first.end())
 						{
-							const NodeView& candidate = nodes[layer_iter->second];
+							const NodeView& candidate = layout.Nodes[layer_iter->second];
 							if (candidate.LaneIndex < target_lane
 								&& (source == nullptr || candidate.Image->Sequence > source->Image->Sequence))
 								source = &candidate;
@@ -1161,19 +1165,19 @@ namespace Helios
 							continue; /* 目标行上方没有产出副本：不画（次序上读不到） */
 
 						CrossEdge edge;
-						edge.WriterIndex = static_cast<size_t>(source - nodes.data());
+						edge.WriterIndex = static_cast<size_t>(source - layout.Nodes.data());
 						edge.TargetLane = target_lane;
-						cross_edges.push_back(edge);
+						layout.CrossEdges.push_back(edge);
 
 						edge_links.push_back(FrameGraphPanel::EdgeLink{ source->Name, source->LaneName, consumer });
 					}
 				}
 
-				std::stable_sort(cross_edges.begin(), cross_edges.end(),
+				std::stable_sort(layout.CrossEdges.begin(), layout.CrossEdges.end(),
 					[&](const CrossEdge& a, const CrossEdge& b)
 					{
-						const NodeView& card_a = nodes[a.WriterIndex];
-						const NodeView& card_b = nodes[b.WriterIndex];
+						const NodeView& card_a = layout.Nodes[a.WriterIndex];
+						const NodeView& card_b = layout.Nodes[b.WriterIndex];
 						if (card_a.LaneIndex != card_b.LaneIndex)
 							return card_a.LaneIndex < card_b.LaneIndex;
 						if (a.TargetLane != b.TargetLane)
@@ -1185,11 +1189,11 @@ namespace Helios
 
 				/* 相邻行（目标 = 源的下一行）走直连：源卡底竖直下行、直接进
 				 * 目标区域顶边 —— 不参与下面的总线分槽（那条路只有弯线才需要） */
-				for (CrossEdge& edge : cross_edges)
-					edge.Direct = (edge.TargetLane == nodes[edge.WriterIndex].LaneIndex + 1);
+				for (CrossEdge& edge : layout.CrossEdges)
+					edge.Direct = (edge.TargetLane == layout.Nodes[edge.WriterIndex].LaneIndex + 1);
 
 				std::vector<CrossEdge*> rail_edges;
-				for (CrossEdge& edge : cross_edges)
+				for (CrossEdge& edge : layout.CrossEdges)
 				{
 					if (!edge.Direct)
 						rail_edges.push_back(&edge);
@@ -1199,12 +1203,12 @@ namespace Helios
 				for (size_t begin = 0; begin < rail_edges.size();)
 				{
 					size_t end = begin;
-					const size_t source_lane = nodes[rail_edges[begin]->WriterIndex].LaneIndex;
+					const size_t source_lane = layout.Nodes[rail_edges[begin]->WriterIndex].LaneIndex;
 					while (end < rail_edges.size()
-						&& nodes[rail_edges[end]->WriterIndex].LaneIndex == source_lane)
+						&& layout.Nodes[rail_edges[end]->WriterIndex].LaneIndex == source_lane)
 						++end;
 
-					const float gap_top = lanes[source_lane].Y + lanes[source_lane].Height;
+					const float gap_top = layout.Lanes[source_lane].Y + layout.Lanes[source_lane].Height;
 					const size_t count = end - begin;
 					for (size_t k = 0; k < count; ++k)
 					{
@@ -1221,7 +1225,7 @@ namespace Helios
 							++card_end;
 
 						const size_t card_count = card_end - card_begin;
-						const float center_x = nodes[writer].X;
+						const float center_x = layout.Nodes[writer].X;
 						for (size_t k = 0; k < card_count; ++k)
 						{
 							rail_edges[card_begin + k]->ExitX = center_x
@@ -1242,7 +1246,7 @@ namespace Helios
 
 					for (auto& [target_lane, targets] : edges_by_target)
 					{
-						const NodeView& card = nodes[lanes[target_lane].HeaderIndex];
+						const NodeView& card = layout.Nodes[layout.Lanes[target_lane].HeaderIndex];
 						const size_t count = targets.size();
 						const float available = std::max(card.Height - 24.0f, 12.0f);
 						const float step = std::min(22.0f, available / static_cast<float>(count + 1));
@@ -1292,12 +1296,26 @@ namespace Helios
 
 					if (!rails.empty())
 					{
-						rails_min_x = -(kLanePadding + kRailInset)
+						layout.RailsMinX = -(kLanePadding + kRailInset)
 							- static_cast<float>(rails.size() - 1) * kRailSpacing;
 					}
 				}
 			}
+		}
 
+		/* 依赖图的布局（图空间）：行、卡片、跨行连线与名字级邻接都在这里算好，绘制只读它。
+		 * 不碰画布与输入，布局规则见各段注释；edge_links 收集连线的自检记录。 */
+		GraphLayout BuildGraphLayout(FrameGraph& frame_graph, bool show_culled, float title_height,
+			float info_line_height, std::vector<FrameGraphPanel::EdgeLink>& edge_links)
+		{
+			const DependencyGraph& graph = frame_graph.GetDependencyGraph();
+			GraphLayout layout;
+			GraphNodeRefs node_refs = ResolveGraphLinks(graph, layout);
+			const auto visible_passes = CollectVisiblePasses(graph, node_refs, show_culled);
+			BuildLaneCards(layout, frame_graph.GetCapture(), visible_passes, title_height, info_line_height);
+			AssignResourceColumns(layout);
+			StackLanes(layout, title_height);
+			PlanCrossEdges(layout, edge_links);
 			return layout;
 		}
 	}
@@ -1353,22 +1371,11 @@ namespace Helios
 		const float info_line_height = ImGui::GetFontSize() + 2.0f;
 
 		GraphLayout layout = BuildGraphLayout(frame_graph, m_ShowCulled, title_height, info_line_height, m_LastEdgeLinks);
-		auto& nodes = layout.Nodes;
-		auto& lanes = layout.Lanes;
-		auto& cross_edges = layout.CrossEdges;
-		auto& same_rt_links = layout.SameRtLinks;
-		const float max_lane_width = layout.MaxLaneWidth;
-		const float rails_min_x = layout.RailsMinX;
-		const auto& producers_of = layout.ProducersOf;
-		const auto& consumers_of = layout.ConsumersOf;
-		const auto& inputs_of = layout.InputsOf;
-		const auto& outputs_of = layout.OutputsOf;
-		auto& name_is_pass = layout.NameIsPass;
 
 		/* ---- 视图变换：首次进入（或点 Fit / 换相机之后）自动适配；屏幕 = 画布中心 + 平移 + 图·缩放 ---- */
 		const auto compute_screen_rects = [&]()
 		{
-			for (NodeView& node : nodes)
+			for (NodeView& node : layout.Nodes)
 			{
 				node.ScreenMin = ImVec2(canvas_center.x + m_Pan.x + (node.X - node.Width * 0.5f) * m_Zoom,
 					canvas_center.y + m_Pan.y + (node.Y - node.Height * 0.5f) * m_Zoom);
@@ -1387,13 +1394,13 @@ namespace Helios
 		if (m_Zoom <= 0.0f)
 		{
 			/* Fit 的包围盒 = 行背景的整体范围（含内边距）+ 跨行连线占用的总线列 */
-			const float fit_min_x = cross_edges.empty()
-				? -kLanePadding : std::min(-kLanePadding, rails_min_x - 8.0f);
-			const ImVec2 bounds_min(fit_min_x, lanes.empty() ? 0.0f : lanes.front().Y);
-			const ImVec2 bounds_max(max_lane_width + kLanePadding,
-				lanes.empty() ? 0.0f : lanes.back().Y + lanes.back().Height);
+			const float fit_min_x = layout.CrossEdges.empty()
+				? -kLanePadding : std::min(-kLanePadding, layout.RailsMinX - 8.0f);
+			const ImVec2 bounds_min(fit_min_x, layout.Lanes.empty() ? 0.0f : layout.Lanes.front().Y);
+			const ImVec2 bounds_max(layout.MaxLaneWidth + kLanePadding,
+				layout.Lanes.empty() ? 0.0f : layout.Lanes.back().Y + layout.Lanes.back().Height);
 
-			if (!lanes.empty())
+			if (!layout.Lanes.empty())
 			{
 				const float fit_width = std::max(canvas_size.x - kCanvasPadding * 2.0f, 40.0f);
 				const float fit_height = std::max(canvas_size.y - kCanvasPadding * 2.0f, 40.0f);
@@ -1422,17 +1429,17 @@ namespace Helios
 		/* 命中测试：节点矩形不重叠，直接遍历（后加的在上） */
 		const auto hit_test = [&](const ImVec2& pos) -> int
 		{
-			for (int i = static_cast<int>(nodes.size()) - 1; i >= 0; --i)
+			for (int i = static_cast<int>(layout.Nodes.size()) - 1; i >= 0; --i)
 			{
-				if (pos.x >= nodes[i].ScreenMin.x && pos.x <= nodes[i].ScreenMax.x
-					&& pos.y >= nodes[i].ScreenMin.y && pos.y <= nodes[i].ScreenMax.y)
+				if (pos.x >= layout.Nodes[i].ScreenMin.x && pos.x <= layout.Nodes[i].ScreenMax.x
+					&& pos.y >= layout.Nodes[i].ScreenMin.y && pos.y <= layout.Nodes[i].ScreenMax.y)
 					return i;
 			}
 			return -1;
 		};
 
 		/* 滚轮缩放：以鼠标为锚点（锚点下的图空间点在缩放前后停在鼠标位置） */
-		if (surface_hovered && io.MouseWheel != 0.0f && !nodes.empty())
+		if (surface_hovered && io.MouseWheel != 0.0f && !layout.Nodes.empty())
 		{
 			const float new_zoom = std::clamp(m_Zoom * std::pow(1.15f, io.MouseWheel), kMinZoom, kMaxZoom);
 			if (new_zoom != m_Zoom)
@@ -1473,7 +1480,7 @@ namespace Helios
 				const int clicked = hit_test(io.MousePos);
 				if (clicked >= 0)
 				{
-					const NodeView& clicked_node = nodes[static_cast<size_t>(clicked)];
+					const NodeView& clicked_node = layout.Nodes[static_cast<size_t>(clicked)];
 					const bool same_card = m_Focus.Name == clicked_node.Name
 						&& m_Focus.LaneName == clicked_node.LaneName;
 					if (same_card)
@@ -1522,13 +1529,13 @@ namespace Helios
 				for (size_t cursor = 0; cursor < frontier.size(); ++cursor)
 				{
 					const std::string current = frontier[cursor];
-					const bool current_is_pass = name_is_pass.count(current) ? name_is_pass[current] : false;
+					const bool current_is_pass = layout.NameIsPass.count(current) ? layout.NameIsPass[current] : false;
 
 					const std::unordered_map<std::string, std::vector<std::string>>* table = nullptr;
 					if (current_is_pass)
-						table = upstream ? &inputs_of : &outputs_of;
+						table = upstream ? &layout.InputsOf : &layout.OutputsOf;
 					else
-						table = upstream ? &producers_of : &consumers_of;
+						table = upstream ? &layout.ProducersOf : &layout.ConsumersOf;
 
 					const auto neighbours_iter = table->find(current);
 					if (neighbours_iter == table->end())
@@ -1546,7 +1553,7 @@ namespace Helios
 			{
 				/* 搜索激活：只亮匹配的卡（层卡的显示名与所属数组资源名都可命中） */
 				highlight_active = true;
-				for (const NodeView& node : nodes)
+				for (const NodeView& node : layout.Nodes)
 				{
 					if (matches_filter(node.Name) || matches_filter(node.GraphName))
 						highlight_names.insert(node.Name);
@@ -1557,7 +1564,7 @@ namespace Helios
 				/* 聚焦：亮整条传递链（上游 + 下游 + 焦点自身）。链遍历走"依赖图身份"
 				 * —— 逐层展开的层卡显示名不在图里，按它所属的数组资源名查 */
 				std::string focus_graph_name = m_Focus.Name;
-				for (const NodeView& node : nodes)
+				for (const NodeView& node : layout.Nodes)
 				{
 					if (node.Name == m_Focus.Name)
 					{
@@ -1571,11 +1578,11 @@ namespace Helios
 				const std::unordered_set<std::string> downstream = collect_reachable(focus_graph_name, false);
 				highlight_names.insert(downstream.begin(), downstream.end());
 			}
-			else if (hovered_node >= 0 && static_cast<size_t>(hovered_node) < nodes.size())
+			else if (hovered_node >= 0 && static_cast<size_t>(hovered_node) < layout.Nodes.size())
 			{
 				/* 悬停预览（intent trace）：亮该卡的一跳上下游 */
 				highlight_active = true;
-				const std::string hovered_graph_name = nodes[static_cast<size_t>(hovered_node)].GraphName;
+				const std::string hovered_graph_name = layout.Nodes[static_cast<size_t>(hovered_node)].GraphName;
 				highlight_names.insert(hovered_graph_name);
 
 				const auto append_neighbours = [&](const std::unordered_map<std::string, std::vector<std::string>>& table)
@@ -1586,15 +1593,15 @@ namespace Helios
 					for (const std::string& neighbour : iter->second)
 						highlight_names.insert(neighbour);
 				};
-				if (nodes[static_cast<size_t>(hovered_node)].IsPass)
+				if (layout.Nodes[static_cast<size_t>(hovered_node)].IsPass)
 				{
-					append_neighbours(inputs_of);
-					append_neighbours(outputs_of);
+					append_neighbours(layout.InputsOf);
+					append_neighbours(layout.OutputsOf);
 				}
 				else
 				{
-					append_neighbours(producers_of);
-					append_neighbours(consumers_of);
+					append_neighbours(layout.ProducersOf);
+					append_neighbours(layout.ConsumersOf);
 				}
 			}
 		}
@@ -1603,8 +1610,8 @@ namespace Helios
 		 * 命中高亮集合 —— 一族层卡同属一个资源，联动亮暗） */
 		const auto node_dim_by_index = [&](size_t index) -> float
 		{
-			if (!highlight_active || highlight_names.count(nodes[index].Name)
-				|| highlight_names.count(nodes[index].GraphName))
+			if (!highlight_active || highlight_names.count(layout.Nodes[index].Name)
+				|| highlight_names.count(layout.Nodes[index].GraphName))
 				return 1.0f;
 			if (hovered_node >= 0 && static_cast<size_t>(hovered_node) == index)
 				return 1.0f;
@@ -1622,9 +1629,9 @@ namespace Helios
 		/* Pass 背景区域（行头与背景合并的载体）：整行、统一宽度的背景层 ——
 		 * 先于连线绘制，连线（资源卡底的下行段）才能从区域上方经过；
 		 * 区域 = 深色同相淡底 + 细描边，标题与输出资源卡叠在其上 */
-		for (const LaneView& lane : lanes)
+		for (const LaneView& lane : layout.Lanes)
 		{
-			const NodeView& region = nodes[lane.HeaderIndex];
+			const NodeView& region = layout.Nodes[lane.HeaderIndex];
 			const bool region_hovered = (hovered_node == static_cast<int>(lane.HeaderIndex));
 			const bool region_selected = !m_Focus.Name.empty()
 				&& region.Name == m_Focus.Name && region.LaneName == m_Focus.LaneName;
@@ -1665,16 +1672,16 @@ namespace Helios
 		/* ② 跨行连线：相邻行直连（源卡底竖直下行 → 目标区域顶边、箭头朝下）
 		 * 或 绕左侧总线（源卡底 → 空档左行 → 总线下行 → 目标区域左缘右进）；
 		 * 绕行段一笔画完、全直角转折（AddOrthogonalPath：纯直角 + 圆头连接） */
-		for (const CrossEdge& edge : cross_edges)
+		for (const CrossEdge& edge : layout.CrossEdges)
 		{
-			const NodeView& source = nodes[edge.WriterIndex];
-			const LaneView& target_lane = lanes[edge.TargetLane];
-			const NodeView& target = nodes[target_lane.HeaderIndex];
+			const NodeView& source = layout.Nodes[edge.WriterIndex];
+			const LaneView& target_lane = layout.Lanes[edge.TargetLane];
+			const NodeView& target = layout.Nodes[target_lane.HeaderIndex];
 
-			ImVec4 line_color = lanes[source.LaneIndex].Stage != nullptr
-				? EditorTheme::WithAlpha(lanes[source.LaneIndex].Stage->Stroke, 0.70f)
+			ImVec4 line_color = layout.Lanes[source.LaneIndex].Stage != nullptr
+				? EditorTheme::WithAlpha(layout.Lanes[source.LaneIndex].Stage->Stroke, 0.70f)
 				: EditorTheme::Token::Neutral7;
-			if (lanes[source.LaneIndex].IsCulled || target_lane.IsCulled)
+			if (layout.Lanes[source.LaneIndex].IsCulled || target_lane.IsCulled)
 				line_color = EditorTheme::WithAlpha(line_color, 0.45f);
 			const bool endpoint_hovered = hovered_node == static_cast<int>(edge.WriterIndex)
 				|| hovered_node == static_cast<int>(target_lane.HeaderIndex);
@@ -1726,9 +1733,9 @@ namespace Helios
 		const float font_size = ImGui::GetFontSize();
 		const float text_size = std::max(font_size * m_Zoom, 6.0f);
 
-		for (int i = 0; i < static_cast<int>(nodes.size()); ++i)
+		for (int i = 0; i < static_cast<int>(layout.Nodes.size()); ++i)
 		{
-			NodeView& node = nodes[i]; /* 绘制时填充缩略图屏幕矩形 */
+			NodeView& node = layout.Nodes[i]; /* 绘制时填充缩略图屏幕矩形 */
 			const bool hovered = (i == hovered_node);
 			const bool selected = !m_Focus.Name.empty()
 				&& node.Name == m_Focus.Name && node.LaneName == m_Focus.LaneName;
@@ -1880,10 +1887,10 @@ namespace Helios
 		/* ---- 同名资源关联线（画在卡片之上）：列对齐的副本之间一条竖直虚线
 		 * + 两端小圆点 —— "同一张 RT 被多个 Pass 先后写入"的专属标记（中性色、
 		 * 无箭头；与实线依赖箭头区分）。副本已列对齐，连线自然是纯竖直的 */
-		for (const auto& [upper_index, lower_index] : same_rt_links)
+		for (const auto& [upper_index, lower_index] : layout.SameRtLinks)
 		{
-			const NodeView& upper = nodes[upper_index];
-			const NodeView& lower = nodes[lower_index];
+			const NodeView& upper = layout.Nodes[upper_index];
+			const NodeView& lower = layout.Nodes[lower_index];
 			const float center_x = graph_to_screen(ImVec2(upper.X, 0.0f)).x;
 
 			ImVec4 link_color = EditorTheme::WithAlpha(EditorTheme::Token::TextDim, 0.90f);
@@ -1913,7 +1920,7 @@ namespace Helios
 			size_t present_count = 0;
 			for (const StageFill& stage : kStageFills)
 			{
-				for (const NodeView& node : nodes)
+				for (const NodeView& node : layout.Nodes)
 				{
 					if (FindStageFill(node.Name) == &stage)
 					{
@@ -1956,7 +1963,7 @@ namespace Helios
 			}
 		}
 
-		if (nodes.empty())
+		if (layout.Nodes.empty())
 		{
 			const char* hint = "No passes in the current render graph.";
 			const ImVec2 hint_size = ImGui::CalcTextSize(hint);
@@ -1970,7 +1977,7 @@ namespace Helios
 		 * （Pass 的多路输出在信息里平铺全部输出的图像网格） ---- */
 		if (hovered_node >= 0)
 		{
-			const NodeView& node = nodes[hovered_node];
+			const NodeView& node = layout.Nodes[hovered_node];
 
 			const bool image_hovered = node.Image != nullptr
 				&& io.MousePos.x >= node.ImageScreenMin.x && io.MousePos.x <= node.ImageScreenMax.x
@@ -2052,9 +2059,9 @@ namespace Helios
 
 		/* 自检 / 自动化验证用的节点与快照图布局（屏幕坐标） */
 		m_LastNodeRects.clear();
-		m_LastNodeRects.reserve(nodes.size());
+		m_LastNodeRects.reserve(layout.Nodes.size());
 		m_LastOutputRects.clear();
-		for (const NodeView& node : nodes)
+		for (const NodeView& node : layout.Nodes)
 		{
 			m_LastNodeRects.push_back(NodeRect{ node.Name, node.IsPass, node.ScreenMin, node.ScreenMax, node.InfoText });
 			if (node.Image != nullptr)
