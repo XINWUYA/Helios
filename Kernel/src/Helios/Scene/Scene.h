@@ -151,20 +151,25 @@ namespace Helios
 		const glm::mat4& FrameWorldTransform(entt::entity entity);
 		/* 本帧记过且还在 OnUpdate 到 Render 之间，渲染侧才能直接读 */
 		[[nodiscard]] bool HasFrameRecord(entt::entity entity) const;
-		std::vector<glm::mat4> m_FrameWorld;
-		std::vector<uint8_t> m_FrameVisible;
-		std::vector<entt::entity> m_FrameEntity; /* 记录时的完整句柄：下标被新实体复用时不认旧记录 */
-		/* 局部矩阵按位置 / 旋转 / 缩放的值缓存：没动过的实体不再重算三角函数 */
-		struct LocalTransformCache
+		/* 一帧内的世界变换快照。整条记录放一起（逐实体只碰一行缓存）：
+		 * 世界矩阵、生成它的父世界、局部 TRS 缓存与显隐。父世界没变时直接复用上次的世界矩阵，
+		 * 静止场景的整条链只做比较、不做矩阵乘 */
+		struct FrameRecord
 		{
-			glm::vec3 Position{ 0.0f };
-			glm::vec3 Rotation{ 0.0f };
-			glm::vec3 Scale{ 0.0f };
-			glm::mat4 Matrix{ 1.0f };
-			bool Valid{ false };
+			glm::mat4 World{ 1.0f };
+			glm::mat4 ParentWorld{ 1.0f };
+			glm::mat4 LocalMatrix{ 1.0f };
+			glm::vec3 LocalPosition{ 0.0f };
+			glm::vec3 LocalRotation{ 0.0f };
+			glm::vec3 LocalScale{ 0.0f };
+			entt::entity Entity{ entt::null }; /* 记录时的完整句柄：下标被新实体复用时不认旧记录 */
+			uint32_t Stamp{ 0 };
+			bool Visible{ true };
+			bool HasWorld{ false };
+			bool HasParentWorld{ false };
+			bool HasLocal{ false };
 		};
-		std::vector<LocalTransformCache> m_FrameLocal;
-		std::vector<uint32_t> m_FrameWorldStamp;
+		std::vector<FrameRecord> m_FrameRecords;
 		uint32_t m_FrameWorldStampNow{ 0 };
 		bool m_FrameRecordReadable{ false };
 

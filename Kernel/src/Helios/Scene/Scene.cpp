@@ -216,10 +216,10 @@ namespace Helios
 		while (current != entt::null && depth < kMaxHierarchyDepth && m_Registry.valid(current))
 		{
 			const size_t index = static_cast<size_t>(entt::to_entity(current));
-			if (index < m_FrameWorldStamp.size() && m_FrameWorldStamp[index] == m_FrameWorldStampNow)
+			if (index < m_FrameRecords.size() && m_FrameRecords[index].Stamp == m_FrameWorldStampNow)
 			{
-				world = m_FrameWorld[index];
-				visible = m_FrameVisible[index] != 0;
+				world = m_FrameRecords[index].World;
+				visible = m_FrameRecords[index].Visible;
 				reached_top = true;
 				break;
 			}
@@ -234,55 +234,71 @@ namespace Helios
 		{
 			const entt::entity node = chain[--depth];
 			const size_t index = static_cast<size_t>(entt::to_entity(node));
-			if (index >= m_FrameWorld.size())
-			{
-				m_FrameWorld.resize(index + 1);
-				m_FrameVisible.resize(index + 1, 0);
-				m_FrameEntity.resize(index + 1, entt::null);
-				m_FrameLocal.resize(index + 1);
-				m_FrameWorldStamp.resize(index + 1, 0);
-			}
+			if (index >= m_FrameRecords.size())
+				m_FrameRecords.resize(index + 1);
+
+			FrameRecord& record = m_FrameRecords[index];
+			record.Entity = node;
+			record.Stamp = m_FrameWorldStampNow;
 
 			if (const auto* transform_component = m_Registry.try_get<TransformComponent>(node))
 			{
-				LocalTransformCache& local = m_FrameLocal[index];
-				if (!local.Valid || local.Position != transform_component->m_Position
-					|| local.Rotation != transform_component->m_Rotation || local.Scale != transform_component->m_Scale)
+				/* 局部矩阵按位置 / 旋转 / 缩放的值缓存：没动过的实体不再重算三角函数 */
+				const bool local_changed = !record.HasLocal
+					|| record.LocalPosition != transform_component->m_Position
+					|| record.LocalRotation != transform_component->m_Rotation
+					|| record.LocalScale != transform_component->m_Scale;
+				if (local_changed)
 				{
-					local.Position = transform_component->m_Position;
-					local.Rotation = transform_component->m_Rotation;
-					local.Scale = transform_component->m_Scale;
-					local.Matrix = transform_component->GetTransform();
-					local.Valid = true;
+					record.LocalPosition = transform_component->m_Position;
+					record.LocalRotation = transform_component->m_Rotation;
+					record.LocalScale = transform_component->m_Scale;
+					record.LocalMatrix = transform_component->GetTransform();
+					record.HasLocal = true;
 				}
-				world *= local.Matrix;
+
+				/* 父世界与上次相同就不再做矩阵乘：静止场景整条链都走这条捷径 */
+				if (local_changed || !record.HasWorld || !record.HasParentWorld || record.ParentWorld != world)
+				{
+					record.World = world * record.LocalMatrix;
+					record.ParentWorld = world;
+					record.HasParentWorld = true;
+					record.HasWorld = true;
+				}
+				world = record.World;
+			}
+			else
+			{
+				/* 没有变换组件的节点：世界变换就是父世界（与全量现算的口径一致） */
+				record.World = world;
+				record.HasWorld = true;
 			}
 			if (const auto* visibility = m_Registry.try_get<VisibilityComponent>(node); visibility != nullptr && !visibility->m_Visible)
 				visible = false;
 
-			m_FrameWorld[index] = world;
-			m_FrameVisible[index] = visible ? 1 : 0;
-			m_FrameEntity[index] = node;
-			m_FrameWorldStamp[index] = m_FrameWorldStampNow;
+			record.Visible = visible;
 		}
 
 		const size_t index = static_cast<size_t>(entt::to_entity(entity));
 		static const glm::mat4 s_Identity{ 1.0f };
-		return (index < m_FrameWorldStamp.size() && m_FrameWorldStamp[index] == m_FrameWorldStampNow)
-			? m_FrameWorld[index] : s_Identity;
+		return (index < m_FrameRecords.size() && m_FrameRecords[index].Stamp == m_FrameWorldStampNow)
+			? m_FrameRecords[index].World : s_Identity;
 	}
 
 	bool Scene::HasFrameRecord(entt::entity entity) const
 	{
 		const size_t index = static_cast<size_t>(entt::to_entity(entity));
-		return m_FrameRecordReadable && m_Registry.valid(entity) && index < m_FrameWorldStamp.size()
-			&& m_FrameWorldStamp[index] == m_FrameWorldStampNow && m_FrameEntity[index] == entity;
+		if (!m_FrameRecordReadable || !m_Registry.valid(entity) || index >= m_FrameRecords.size())
+			return false;
+
+		const FrameRecord& record = m_FrameRecords[index];
+		return record.Stamp == m_FrameWorldStampNow && record.Entity == entity;
 	}
 
 	glm::mat4 Scene::GetRenderWorldTransform(entt::entity entity) const
 	{
 		if (HasFrameRecord(entity))
-			return m_FrameWorld[static_cast<size_t>(entt::to_entity(entity))];
+			return m_FrameRecords[static_cast<size_t>(entt::to_entity(entity))].World;
 		return GetWorldTransform(entity);
 	}
 
@@ -290,7 +306,7 @@ namespace Helios
 	{
 		if (!HasFrameRecord(entity))
 			return IsEntityInView(entity, culling_mask);
-		return m_FrameVisible[static_cast<size_t>(entt::to_entity(entity))] != 0
+		return m_FrameRecords[static_cast<size_t>(entt::to_entity(entity))].Visible
 			&& Layers::IsVisible(GetEntityLayerMask(entity), culling_mask);
 	}
 
@@ -349,6 +365,7 @@ namespace Helios
 		 * 但管理器仍可能持有引用，一并清空以保证不留上一份场景的残留。 */
 		m_Registry.clear();
 		m_MeshIndex.Clear();
+		m_FrameRecords.clear();
 
 		if (m_pReflectionProbeManager != nullptr)
 			m_pReflectionProbeManager->ClearProbes();
@@ -403,17 +420,22 @@ namespace Helios
 		m_FrameRecordReadable = false;
 		if (++m_FrameWorldStampNow == 0)
 		{
-			std::fill(m_FrameWorldStamp.begin(), m_FrameWorldStamp.end(), 0u);
+			for (FrameRecord& record : m_FrameRecords)
+				record.Stamp = 0;
 			m_FrameWorldStampNow = 1;
 		}
 
 		/* 先把本帧的世界变换全部算出来（局部矩阵按值缓存，没动过的实体只有一次查表），
 		 * 渲染侧读到的才是同一份快照。这一步不能省：只有 Transform 的节点也要入快照 */
-		for (const entt::entity entity : m_Registry.view<TransformComponent>())
-			FrameWorldTransform(entity);
+		{
+			PROFILE_SCOPE("场景世界变换");
+			for (const entt::entity entity : m_Registry.view<TransformComponent>())
+				FrameWorldTransform(entity);
+		}
 
 		/* 再按组件类型分开推送，不再对每个实体挨个 try_get 四种组件：
 		 * 模型最多，一个视图走完；光 / 相机 / 探针各自数量很少 */
+		PROFILE_SCOPE("场景变换推送");
 		m_MeshIndex.BeginSync();
 		m_SkyBoxEntities.clear();
 		for (auto [entity, model_component] : m_Registry.view<ModelComponent>().each())
@@ -421,7 +443,11 @@ namespace Helios
 			if (!model_component.m_Model)
 				continue;
 
-			const glm::mat4& world = FrameWorldTransform(entity);
+			/* 世界变换上面那一趟已经算好，这里直接读记录（只有模型没有 Transform 的畸形实体才现算） */
+			const size_t record_index = static_cast<size_t>(entt::to_entity(entity));
+			const FrameRecord& record = m_FrameRecords[record_index];
+			const glm::mat4& world = (record.Stamp == m_FrameWorldStampNow && record.Entity == entity)
+				? record.World : FrameWorldTransform(entity);
 			model_component.m_Model->SetTransform(world);
 
 			/* 天空盒铺满全屏、跟网格摆在哪无关：不进空间索引，单独记一份给视图补进列表 */
@@ -436,7 +462,7 @@ namespace Helios
 			}
 			if (is_sky)
 			{
-				if (m_FrameVisible[static_cast<size_t>(entt::to_entity(entity))] != 0)
+				if (record.Visible)
 					m_SkyBoxEntities.push_back(entity);
 				continue;
 			}
@@ -445,8 +471,7 @@ namespace Helios
 			 * 蒙皮网格的包围盒是绑定姿态，标成不可剔（进"恒参与"表） */
 			const bool skinned = model_component.m_EnableSkinning && !model_component.m_Model->IsStaticModel();
 			m_MeshIndex.Sync(entity, world, model_component.m_Model->GetLocalBounds(),
-				GetEntityLayerMask(entity), m_FrameVisible[static_cast<size_t>(entt::to_entity(entity))] != 0,
-				!skinned);
+				GetEntityLayerMask(entity), record.Visible, !skinned);
 		}
 		m_MeshIndex.EndSync();
 
@@ -470,8 +495,8 @@ namespace Helios
 			probe_component.m_ReflectionProbe->SetTransform(FrameWorldTransform(entity));
 			/* 可见性同源传播（与光源"隐藏 = 不照"一致）：隐藏的探针不烘焙、
 			 * 不参与 IBL 选择（注册保留，恢复可见即恢复参与） */
-			const size_t index = static_cast<size_t>(entt::to_entity(entity));
-			probe_component.m_ReflectionProbe->SetEnable(m_FrameVisible[index] != 0);
+			probe_component.m_ReflectionProbe->SetEnable(
+				m_FrameRecords[static_cast<size_t>(entt::to_entity(entity))].Visible);
 		}
 		m_FrameRecordReadable = true;
 
