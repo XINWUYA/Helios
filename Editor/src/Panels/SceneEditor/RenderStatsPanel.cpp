@@ -12,7 +12,7 @@
 #include "UI/EditorIcons.h"
 #include "UI/PanelChrome.h"
 #include "UI/PanelRegistry.h"
-#include "UI/PanelWindow.h"
+#include "Panels/PanelWindow.h"
 #include "Common/FileDialog.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Core/CPUTimerProfiler.h"

@@ -1,6 +1,6 @@
 ﻿#include "Pch.h"
 #include "EditorBuiltinCamera.h"
-#include "Panels/SceneEditor/SceneGizmos.h"
+#include "Viewport/SceneGizmos.h"
 #include <glm/gtx/quaternion.hpp>
 #include <cmath>
 

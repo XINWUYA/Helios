@@ -7,7 +7,7 @@
 #include "Common/EditorCommon.h"
 #include "UI/EditorIcons.h"
 #include "UI/PanelRegistry.h"
-#include "UI/PanelWindow.h"
+#include "Panels/PanelWindow.h"
 #include "Helios/Core/Logger.h"
 #include "UI/EditorTheme.h"
 

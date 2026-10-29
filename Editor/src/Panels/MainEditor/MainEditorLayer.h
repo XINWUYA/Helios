@@ -6,7 +6,7 @@
 #include "Common/EditorSettings.h"
 #include "Panels/ResourceBrowser/EditorResourceBrowser.h"
 #include "Panels/Log/LogPanel.h"
-#include "UI/PanelLayoutRestore.h"
+#include "Panels/PanelLayoutRestore.h"
 #include "App/ScriptModule.h"
 
 #include "Renderer/ShaderReloader.h"

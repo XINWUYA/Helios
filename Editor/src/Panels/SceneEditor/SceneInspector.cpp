@@ -9,7 +9,7 @@
 #include "Command/AssetFileOps.h"
 #include "UI/PanelChrome.h"
 #include "UI/PanelRegistry.h"
-#include "UI/PanelWindow.h"
+#include "Panels/PanelWindow.h"
 #include "UI/Svg.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Core/TextureSettings.h"

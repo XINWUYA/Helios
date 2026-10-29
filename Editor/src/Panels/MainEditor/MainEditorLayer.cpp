@@ -1,7 +1,7 @@
 ﻿#include "Pch.h"
 #include "MainEditorLayer.h"
 #include "UI/DebugViewMenu.h"
-#include "Panels/SceneEditor/SceneGizmos.h"
+#include "Viewport/SceneGizmos.h"
 #include "UI/EditorIcons.h"
 #include "UI/PanelChrome.h"
 #include "UI/PanelRegistry.h"

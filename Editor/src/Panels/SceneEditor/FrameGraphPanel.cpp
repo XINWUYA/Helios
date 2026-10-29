@@ -4,7 +4,7 @@
 #include "UI/EditorIcons.h"
 #include "UI/EditorTheme.h"
 #include "UI/PanelRegistry.h"
-#include "UI/PanelWindow.h"
+#include "Panels/PanelWindow.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include "Helios/Renderer/FrameGraph/RenderPassNode.h"

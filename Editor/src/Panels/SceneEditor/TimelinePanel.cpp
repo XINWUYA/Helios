@@ -6,7 +6,7 @@
 #include "UI/EditorIcons.h"
 #include "UI/PanelChrome.h"
 #include "UI/PanelRegistry.h"
-#include "UI/PanelWindow.h"
+#include "Panels/PanelWindow.h"
 #include "Command/CommandStack.h"
 #include "Helios/Common/PathUtils.h"
 #include "UI/EditorTheme.h"

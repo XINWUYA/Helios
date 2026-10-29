@@ -4,7 +4,7 @@
 #include "UI/EditorIcons.h"
 #include "UI/PanelChrome.h"
 #include "UI/PanelRegistry.h"
-#include "UI/PanelWindow.h"
+#include "Panels/PanelWindow.h"
 #include "Command/AssetFileOps.h"
 #include "Command/CreateAssetFileCommand.h"
 #include "Command/CreateAssetFolderCommand.h"

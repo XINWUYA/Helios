@@ -1,7 +1,7 @@
 ﻿#include "Pch.h"
 #include "SceneGizmos.h"
 #include "Viewport/EditorBuiltinCamera.h"
-#include "TransformGizmo.h"
+#include "Panels/SceneEditor/TransformGizmo.h"
 #include <glm/gtx/quaternion.hpp>
 #include <cmath>
 
