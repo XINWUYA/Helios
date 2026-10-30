@@ -1,9 +1,31 @@
 ﻿#pragma once
 #include <glad/glad.h>
 #include "Helios/Renderer/RenderCommon.h"
+#include "Helios/VirtualDevice/DeviceBuffer.h"
 
 namespace Helios
 {
+	/* 映射到OpenGL对应的顶点属性基础类型 */
+	constexpr GLenum TranslateToOpenGLBaseType(BufferDataType type)
+	{
+		switch (type)
+		{
+		case BufferDataType::Int:
+		case BufferDataType::Int2:
+		case BufferDataType::Int3:
+		case BufferDataType::Int4:     return GL_INT;
+		case BufferDataType::Bool:     return GL_BOOL;
+		case BufferDataType::Float:
+		case BufferDataType::Float2:
+		case BufferDataType::Float3:
+		case BufferDataType::Float4:
+		case BufferDataType::Mat3:
+		case BufferDataType::Mat4:     return GL_FLOAT;
+		case BufferDataType::UByte4:   return GL_UNSIGNED_BYTE;
+		default:                       return 0;
+		}
+	}
+
 	/* 映射到OpenGL对应的图元类型 */
 	constexpr GLenum TranslateToOpenGLPrimitiveType(PrimitiveType type)
 	{

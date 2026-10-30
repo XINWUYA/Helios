@@ -236,6 +236,66 @@ namespace Helios
 		glDrawArrays(TranslateToOpenGLPrimitiveType(type), 0, count);
 	}
 
+	void OpenGLRenderAPI::BindInstanceAttributes(const SharedPtr<DeviceVertexArray>& vertex_array,
+		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+		const VertexBufferLayout& instance_layout)
+	{
+		if (instance_buffer == nullptr || instance_layout.GetElements().empty())
+			return;
+
+		/* 属性指针存在 VAO 里：换批次时按新偏移重挂一遍，成本按批次摊 */
+		vertex_array->Bind();
+		instance_buffer->Bind();
+
+		const VertexBufferLayout& layout = instance_layout;
+		const uint32_t stride = layout.GetStride();
+		const auto base_offset = static_cast<size_t>(instance_offset_bytes);
+
+		uint32_t location = 5;
+		for (const BufferElement& element : layout.GetElements())
+		{
+			glEnableVertexAttribArray(location);
+			glVertexAttribPointer(location, static_cast<GLint>(element.GetComponentCount()),
+				TranslateToOpenGLBaseType(element.Type),
+				element.Normalized ? GL_TRUE : GL_FALSE, static_cast<GLsizei>(stride),
+				reinterpret_cast<const void*>(base_offset + element.Offset));
+			glVertexAttribDivisor(location, 1);
+			++location;
+		}
+	}
+
+	void OpenGLRenderAPI::DrawArraysInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+		uint32_t instance_count, const VertexBufferLayout& instance_layout)
+	{
+		PROFILE_FUNCTION();
+
+		BindInstanceAttributes(vertex_array, instance_buffer, instance_offset_bytes, instance_layout);
+		glDrawArraysInstanced(TranslateToOpenGLPrimitiveType(type), 0,
+			static_cast<GLsizei>(vertex_array->GetVertexCount()), static_cast<GLsizei>(instance_count));
+	}
+
+	void OpenGLRenderAPI::DrawIndexedInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+		uint32_t instance_count, const VertexBufferLayout& instance_layout,
+		uint32_t index_count, uint32_t index_offset)
+	{
+		PROFILE_FUNCTION();
+
+		BindInstanceAttributes(vertex_array, instance_buffer, instance_offset_bytes, instance_layout);
+
+		const auto index_buffer = vertex_array->GetIndexBuffer();
+		const uint32_t count = index_count > 0 ? index_count
+			: (index_buffer != nullptr ? index_buffer->GetCount() : 0);
+		const auto index_type = index_buffer != nullptr && index_buffer->GetIndexType() == IndexType::UInt16
+			? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
+		const auto index_size = index_type == GL_UNSIGNED_SHORT ? sizeof(uint16_t) : sizeof(uint32_t);
+
+		glDrawElementsInstanced(TranslateToOpenGLPrimitiveType(type), static_cast<GLsizei>(count), index_type,
+			reinterpret_cast<const void*>(static_cast<size_t>(index_offset) * index_size),
+			static_cast<GLsizei>(instance_count));
+	}
+
 	bool OpenGLRenderAPI::DispatchCompute(const SharedPtr<DeviceShader>& shader,
 		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
 		uint32_t param_binding, const void* param_data, uint32_t param_size,

@@ -77,8 +77,8 @@ namespace Helios
 		virtual void Bind() const = 0;
 		virtual void Unbind() const = 0;
 
-		/* 设置顶点数据 */
-		virtual void SetData(const void* data, uint32_t size) = 0;
+		/* 设置顶点数据：offset 是写入起点（字节），每帧的实例环形缓冲按段写 */
+		virtual void SetData(const void* data, uint32_t size, uint32_t offset = 0) = 0;
 		[[nodiscard]] virtual uint32_t GetDataSize() const = 0;
 
 		/* 设置顶点布局 */

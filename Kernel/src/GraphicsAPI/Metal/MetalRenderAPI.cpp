@@ -447,7 +447,6 @@ namespace Helios
     void MetalRenderAPI::BindVertexBuffers(const MetalVertexArray& vertex_array)
     {
         const auto& buffers = vertex_array.GetVertexBuffers();
-        const uint32_t generation = MetalRuntime::EncoderGeneration();
         const size_t count = std::min(buffers.size(), static_cast<size_t>(MetalBinding::MaxVertexBuffers));
 
         for (size_t i = 0; i < count; ++i)
@@ -457,19 +456,40 @@ namespace Helios
                 continue;
 
             /* 槽位从 VertexBufferBase 起算，与 VertexDescriptor 及 uniform 槽位错开 */
-            const uint32_t slot = MetalBinding::VertexBufferBase + static_cast<uint32_t>(i);
-            MTL::Buffer* buffer = metal_buffer->GetMetalBuffer();
-            CachedVertexBuffer& cached = m_AppliedVertexBuffers[slot];
-            if (cached.Generation == generation && cached.Buffer == buffer)
-                continue;
-
-            m_CurrentRenderEncoder->setVertexBuffer(buffer, 0, slot);
-            cached.Generation = generation;
-            cached.Buffer = buffer;
+            BindVertexSlot(MetalBinding::VertexBufferBase + static_cast<uint32_t>(i), metal_buffer->GetMetalBuffer(), 0);
         }
     }
 
-    void MetalRenderAPI::DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count, uint32_t index_offset)
+    void MetalRenderAPI::BindVertexSlot(uint32_t slot, MTL::Buffer* buffer, uint32_t offset)
+    {
+        const uint32_t generation = MetalRuntime::EncoderGeneration();
+        CachedVertexBuffer& cached = m_AppliedVertexBuffers[slot];
+        if (cached.Generation == generation && cached.Buffer == buffer)
+        {
+            if (cached.Offset != offset)
+            {
+                m_CurrentRenderEncoder->setVertexBufferOffset(offset, slot);
+                cached.Offset = offset;
+            }
+            return;
+        }
+
+        m_CurrentRenderEncoder->setVertexBuffer(buffer, offset, slot);
+        cached.Generation = generation;
+        cached.Buffer = buffer;
+        cached.Offset = offset;
+    }
+
+    void MetalRenderAPI::DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+        uint32_t index_count, uint32_t index_offset)
+    {
+        DrawIndexedInstanced(type, vertex_array, nullptr, 0, 1, VertexBufferLayout{}, index_count, index_offset);
+    }
+
+    void MetalRenderAPI::DrawIndexedInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+        const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+        uint32_t instance_count, const VertexBufferLayout& /*instance_layout*/,
+        uint32_t index_count, uint32_t index_offset)
     {
         PROFILE_FUNCTION();
 
@@ -510,9 +530,9 @@ namespace Helios
 
         /* 绑定顶点缓冲区（占用 MetalBinding::VertexBufferBase 起的槽位） */
         BindVertexBuffers(*metal_vertex_array);
-
-        /* 顶点布局决定顶点描述符，进而决定管线状态；无有效管线时不能提交 DrawCall */
-        if (!ApplyPipelineState(metal_vertex_array->GetVertexDescriptorHash()))
+        if (!ApplyPipelineState(m_BoundShader->GetActiveVertexLayoutHash()))
+            return;
+        if (!BindInstanceBuffer(*metal_vertex_array, instance_buffer, instance_offset_bytes))
             return;
 
         const uint32_t count = index_count > 0 ? index_count : index_buffer->GetCount();
@@ -527,11 +547,19 @@ namespace Helios
             count,
             index_type,
             metal_index_buffer->GetMetalBuffer(),
-            index_offset * index_size  /* 索引偏移（字节） */
+            index_offset * index_size,  /* 索引偏移（字节） */
+            NS::UInteger(std::max(instance_count, 1u))
         );
     }
 
     void MetalRenderAPI::DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array)
+    {
+        DrawArraysInstanced(type, vertex_array, nullptr, 0, 1, VertexBufferLayout{});
+    }
+
+    void MetalRenderAPI::DrawArraysInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+        const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+        uint32_t instance_count, const VertexBufferLayout& /*instance_layout*/)
     {
         PROFILE_FUNCTION();
 
@@ -556,7 +584,9 @@ namespace Helios
         }
 
         BindVertexBuffers(*metal_vertex_array);
-        if (!ApplyPipelineState(metal_vertex_array->GetVertexDescriptorHash()))
+        if (!ApplyPipelineState(m_BoundShader->GetActiveVertexLayoutHash()))
+            return;
+        if (!BindInstanceBuffer(*metal_vertex_array, instance_buffer, instance_offset_bytes))
             return;
 
         const uint32_t vertex_count = metal_vertex_array->GetVertexCount();
@@ -564,8 +594,29 @@ namespace Helios
         m_CurrentRenderEncoder->drawPrimitives(
             ToMetalPrimitiveType(type),
             NS::UInteger(0),
-            NS::UInteger(vertex_count)
+            NS::UInteger(vertex_count),
+            NS::UInteger(std::max(instance_count, 1u))
         );
+    }
+
+    bool MetalRenderAPI::BindInstanceBuffer(const MetalVertexArray& vertex_array,
+        const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes)
+    {
+        if (instance_buffer == nullptr)
+            return true;
+
+        auto* metal_buffer = static_cast<MetalVertexBuffer*>(instance_buffer.get());
+        if (metal_buffer == nullptr || metal_buffer->GetMetalBuffer() == nullptr)
+            return false;
+
+        /* 实例缓冲接在顶点缓冲后面占一个槽位，槽位满了就不画（描述符那边已报错） */
+        const uint32_t slot = MetalBinding::VertexBufferBase
+            + static_cast<uint32_t>(vertex_array.GetVertexBuffers().size());
+        if (slot >= MetalBinding::VertexBufferBase + MetalBinding::MaxVertexBuffers)
+            return false;
+
+        BindVertexSlot(slot, metal_buffer->GetMetalBuffer(), instance_offset_bytes);
+        return true;
     }
 
     void MetalRenderAPI::Flush()

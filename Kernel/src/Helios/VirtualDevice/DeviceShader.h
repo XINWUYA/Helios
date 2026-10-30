@@ -162,6 +162,13 @@ namespace Helios
 
 		/* 在绘制前向 Shader 关联顶点数据（Metal 等后端需在创建 PipelineState 前取得 VertexDescriptor） */
 		virtual void BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array) = 0;
+		/* 带实例布局的绑定：同一份网格也会被非实例化绘制用，所以实例属性不进顶点数组，
+		 * 由每次绑定决定（管线按它分桶）。不支持实例化的后端忽略这个重载 */
+		virtual void BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array,
+			const VertexBufferLayout& /*instance_layout*/)
+		{
+			BindVertexArray(vertex_array);
+		}
 
 		virtual int GetUniformLocation(const std::string& name) = 0;
 

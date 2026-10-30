@@ -84,6 +84,19 @@ namespace Helios
 		glm::vec4 PunctualLightParams{ 0.0f };
 	};
 
+	/* 每帧的实例缓冲：帧数和后端的在途帧数一致（MetalConfig::MaxFramesInFlight），
+	 * 轮到某一块时 GPU 早读完了，直接覆盖写 */
+	constexpr uint32_t kInstanceRingFrames = 3;
+	constexpr uint32_t kInstanceRingInitialBytes = 1u << 20;
+
+	struct InstanceRing
+	{
+		SharedPtr<DeviceVertexBuffer> Buffers[kInstanceRingFrames];
+		uint32_t Capacity[kInstanceRingFrames]{};
+		uint32_t Frame{ UINT32_MAX };
+		uint32_t Cursor{ 0 };
+	};
+
 	struct RenderData
 	{
 		/* 全局UniformBuffers */
@@ -91,6 +104,7 @@ namespace Helios
 		SharedPtr<DeviceUniformBuffer> pViewUniformBuffer;
 		SharedPtr<DeviceUniformBuffer> pObjectUniformBuffer;
 		SharedPtr<DeviceUniformBuffer> pLightUniformBuffer;
+		InstanceRing Instances;
 	};
 
 	static RenderData s_RenderData;
@@ -149,6 +163,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 		RenderQueryProfiler::Instance().Release();
+		s_RenderData.Instances = InstanceRing{};
 	}
 
 	void Renderer::SetViewport(uint32_t x_start, uint32_t y_start, uint32_t width, uint32_t height)
@@ -211,13 +226,76 @@ namespace Helios
 		return previous;
 	}
 
+	const VertexBufferLayout& Renderer::GetObjectInstanceLayout()
+	{
+		static const VertexBufferLayout layout = {
+			{ "a_InstanceMatrix0", BufferDataType::Float4 },
+			{ "a_InstanceMatrix1", BufferDataType::Float4 },
+			{ "a_InstanceMatrix2", BufferDataType::Float4 },
+			{ "a_InstanceMatrix3", BufferDataType::Float4 },
+			{ "a_InstanceParams", BufferDataType::Float4 },
+		};
+		return layout;
+	}
+
+	Renderer::InstanceRange Renderer::UploadObjectInstances(const ObjectInstanceData* instances, uint32_t count)
+	{
+		PROFILE_FUNCTION();
+
+		InstanceRing& ring = s_RenderData.Instances;
+		const uint32_t frame = s_RenderData.ViewUniformData.FrameCounter;
+		if (ring.Frame != frame)
+		{
+			ring.Frame = frame;
+			ring.Cursor = 0;
+		}
+
+		const uint32_t slot = frame % kInstanceRingFrames;
+		const uint32_t bytes = count * static_cast<uint32_t>(sizeof(ObjectInstanceData));
+		SharedPtr<DeviceVertexBuffer>& buffer = ring.Buffers[slot];
+		uint32_t& capacity = ring.Capacity[slot];
+
+		/* 装不下就换一块翻倍的，本帧已录的绘制还引用旧块，由命令缓冲或驱动持有到用完 */
+		if (buffer == nullptr || ring.Cursor + bytes > capacity)
+		{
+			capacity = std::max({ kInstanceRingInitialBytes, capacity * 2, bytes });
+			buffer = DeviceVertexBuffer::Create("ObjectInstances", capacity);
+			ring.Cursor = 0;
+		}
+
+		if (count > 0)
+			buffer->SetData(instances, bytes, ring.Cursor);
+
+		/* 每段都从实例步长的整数倍起，起点换算成实例下标后 SubmitInstanced 直接用 */
+		InstanceRange range{ buffer, ring.Cursor / static_cast<uint32_t>(sizeof(ObjectInstanceData)) };
+		ring.Cursor += bytes;
+		return range;
+	}
+
 	void Renderer::Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 	                      const DrawParams* per_draw, uint32_t index_count)
+	{
+		SubmitDraw(material, mesh_primitive, nullptr, 0, per_draw, index_count);
+	}
+
+	void Renderer::SubmitInstanced(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
+		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance, uint32_t instance_count,
+		const DrawParams* per_draw, uint32_t index_count)
+	{
+		SubmitDraw(material, mesh_primitive, instance_buffer, first_instance, per_draw, index_count, instance_count);
+	}
+
+	void Renderer::SubmitDraw(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
+		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance,
+		const DrawParams* per_draw, uint32_t index_count, uint32_t instance_count)
 	{
 		PROFILE_FUNCTION();
 
 		/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState */
-		material->GetShader()->BindVertexArray(mesh_primitive.VertexArray);
+		if (instance_buffer != nullptr)
+			material->GetShader()->BindVertexArray(mesh_primitive.VertexArray, GetObjectInstanceLayout());
+		else
+			material->GetShader()->BindVertexArray(mesh_primitive.VertexArray);
 
 		/* 绑定全局UniformBuffer（View/Object/Light），Metal后端需要显式绑定到RenderEncoder */
 		s_RenderData.pViewUniformBuffer->Bind();
@@ -288,7 +366,17 @@ namespace Helios
 
 		mesh_primitive.VertexArray->Bind();
 
-		if (mesh_primitive.VertexArray->GetIndexBuffer())
+		if (instance_buffer != nullptr)
+		{
+			const uint32_t offset = first_instance * GetObjectInstanceLayout().GetStride();
+			if (mesh_primitive.VertexArray->GetIndexBuffer())
+				m_pRenderAPI->DrawIndexedInstanced(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray,
+					instance_buffer, offset, instance_count, GetObjectInstanceLayout(), index_count);
+			else
+				m_pRenderAPI->DrawArraysInstanced(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray,
+					instance_buffer, offset, instance_count, GetObjectInstanceLayout());
+		}
+		else if (mesh_primitive.VertexArray->GetIndexBuffer())
 			m_pRenderAPI->DrawIndexed(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray, index_count);
 		else
 			m_pRenderAPI->DrawArrays(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray);

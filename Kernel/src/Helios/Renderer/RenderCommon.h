@@ -406,6 +406,13 @@ namespace Helios
 	};
 
 	/* 视口区域信息 */
+	/* 实例化绘制的每实例数据：世界矩阵 + 参数（x = ObjectId，y = 接受阴影） */
+	struct ObjectInstanceData
+	{
+		glm::mat4 Local2World{ 1.0f };
+		glm::vec4 Params{ 0.0f };
+	};
+
 	struct ViewportRegion
 	{
 		int32_t MinX;		/* 水平方向最小值 */

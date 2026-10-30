@@ -37,6 +37,15 @@ namespace Helios
             uint32_t index_count = 0, uint32_t index_offset = 0) override;
         void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) override;
 
+        /* 实例化绘制：实例数据绑在顶点缓冲之后的槽位，偏移按 first_instance 算 */
+        void DrawIndexedInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+            const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+            uint32_t instance_count, const VertexBufferLayout& instance_layout,
+            uint32_t index_count = 0, uint32_t index_offset = 0) override;
+        void DrawArraysInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+            const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+            uint32_t instance_count, const VertexBufferLayout& instance_layout) override;
+
         void Flush() override;
 
         /* 在当前帧的命令缓冲区上插入 blit 编码器生成 mipmap（见 RenderAPI 的说明） */
@@ -149,6 +158,11 @@ namespace Helios
 
         /* 绑定顶点缓冲：同一编码器内缓冲没换的槽位不再重复下发 */
         void BindVertexBuffers(const MetalVertexArray& vertex_array);
+        /* 实例缓冲绑到顶点缓冲之后的槽位；没有实例缓冲返回 true，槽位不够返回 false */
+        bool BindInstanceBuffer(const MetalVertexArray& vertex_array,
+            const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes);
+        /* 按槽位绑缓冲：同一编码器里缓冲和偏移都没变就跳过，只换偏移走 setVertexBufferOffset */
+        void BindVertexSlot(uint32_t slot, MTL::Buffer* buffer, uint32_t offset);
 
         /* 把当前清除色写入默认渲染目标的颜色附件。
          * 必须在 Pass 开始时而非 PrepareNextDrawable 时调用：SetClearColor 通常
@@ -221,6 +235,7 @@ namespace Helios
         {
             uint32_t Generation{ 0 };
             MTL::Buffer* Buffer{ nullptr };
+            uint32_t Offset{ 0 };
         };
 
         CachedVertexBuffer m_AppliedVertexBuffers[MetalBinding::MaxVertexBuffers]{};

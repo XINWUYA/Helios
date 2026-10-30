@@ -54,6 +54,30 @@ namespace Helios
 
 		static SharedPtr<DeviceVertexArray> GetFullScreenVertexArray();
 
+		/* 实例数据布局：属性名与着色器里的 a_InstanceMatrix0..3 / a_InstanceParams 对上 */
+		static const VertexBufferLayout& GetObjectInstanceLayout();
+
+		/* 一段实例数据在本帧实例缓冲里的位置 */
+		struct InstanceRange
+		{
+			SharedPtr<DeviceVertexBuffer> Buffer;
+			uint32_t FirstInstance{ 0 };
+		};
+		/* 把一批实例数据追加进本帧的实例缓冲，各 Pass 共用，不再每次新建缓冲 */
+		static InstanceRange UploadObjectInstances(const ObjectInstanceData* instances, uint32_t count);
+
+		/* 实例化提交：同材质同网格的一批对象合成一笔，实例数据从 first_instance 起连续 count 条 */
+		static void SubmitInstanced(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
+			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance, uint32_t instance_count,
+			const DrawParams* per_draw = nullptr, uint32_t index_count = 0);
+
+	private:
+		/* 提交的公共实现：实例缓冲为空就是普通绘制 */
+		static void SubmitDraw(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
+			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance,
+			const DrawParams* per_draw, uint32_t index_count, uint32_t instance_count = 1);
+	public:
+
 		/* 全屏 Pass 的材质：不测深度也不写；additive 打开 One/One 加法混合 */
 		static SharedPtr<Material> CreateFullScreenMaterial(const SharedPtr<DeviceShader>& shader, bool additive = false);
 

@@ -40,6 +40,11 @@ namespace Helios
         void Unbind() override;
 
         void BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array) override;
+        /* 带实例布局的绑定：实例属性进顶点描述符，管线键把实例布局也算进去 */
+        void BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array,
+            const VertexBufferLayout& instance_layout) override;
+        /* 最近一次绑定用的顶点布局键（含实例布局）：绘制时按它取管线 */
+        [[nodiscard]] uint64_t GetActiveVertexLayoutHash() const { return m_ActiveVertexLayoutHash; }
 
         int GetUniformLocation(const std::string& name) override;
         void SetInt(const std::string& name, int value) override;
@@ -129,7 +134,8 @@ namespace Helios
 
         /* 按着色器声明的属性位置把顶点布局映射成 Metal 描述符：布局里多出来的元素忽略，
          * 着色器要而布局里没有的报错并返回空。每种布局的结果缓存复用。 */
-        MTL::VertexDescriptor* BuildVertexDescriptor(const MetalVertexArray& vertex_array);
+        MTL::VertexDescriptor* BuildVertexDescriptor(const MetalVertexArray& vertex_array,
+            const VertexBufferLayout* instance_layout);
 
         /* 在全部材质块中查找成员，命中时输出所在块与偏移 */
         MaterialBlock* FindMaterialMember(const std::string& name, uint32_t& out_offset);
@@ -147,6 +153,7 @@ namespace Helios
         uint64_t m_VertexDescriptorHash{ 0 };
         /* 每个顶点布局一份描述符（键 = 布局哈希）：同一个着色器配不同布局互不干扰 */
         std::unordered_map<uint64_t, MTL::VertexDescriptor*> m_VertexDescriptors;
+        uint64_t m_ActiveVertexLayoutHash{ 0 };
 
         /* 材质参数块：顶点阶段与片元阶段各可能有一块 */
         std::vector<MaterialBlock> m_MaterialBlocks;

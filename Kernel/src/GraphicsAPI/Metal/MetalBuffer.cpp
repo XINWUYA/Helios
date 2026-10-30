@@ -56,9 +56,9 @@ namespace Helios
         /* Metal中无需解绑 */
     }
 
-    void MetalVertexBuffer::SetData(const void* data, uint32_t size)
+    void MetalVertexBuffer::SetData(const void* data, uint32_t size, uint32_t offset)
     {
-        if (!m_Buffer || size > m_Size)
+        if (!m_Buffer || offset + size > m_Size)
         {
             CORE_LOG_ERROR("Invalid buffer or size!");
             return;
@@ -67,7 +67,7 @@ namespace Helios
         void* buffer_data = m_Buffer->contents();
         if (buffer_data)
         {
-            memcpy(buffer_data, data, size);
+            memcpy(static_cast<uint8_t*>(buffer_data) + offset, data, size);
             /* 对于共享存储模式的缓冲区，不需要调用didModifyRange */
             /* 数据会自动同步到GPU */
             //m_Buffer->didModifyRange({ 0, size });

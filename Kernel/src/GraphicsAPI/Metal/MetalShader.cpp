@@ -669,15 +669,38 @@ namespace Helios
 
     void MetalShader::BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array)
     {
+        BindVertexArray(vertex_array, VertexBufferLayout{});
+    }
+
+    void MetalShader::BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array,
+        const VertexBufferLayout& instance_layout)
+    {
         auto* metal_vertex_array = static_cast<MetalVertexArray*>(vertex_array.get());
         if (!metal_vertex_array)
             return;
 
-        const uint64_t layout_hash = metal_vertex_array->GetVertexDescriptorHash();
+        const bool instanced = !instance_layout.GetElements().empty();
+
+        /* 顶点布局键：带实例属性的和不带的不是同一条管线 */
+        uint64_t layout_hash = metal_vertex_array->GetVertexDescriptorHash();
+        if (instanced)
+        {
+            MetalHashCombine(layout_hash, 0x1ULL);
+            MetalHashCombine(layout_hash, static_cast<uint64_t>(instance_layout.GetStride()));
+            for (const BufferElement& element : instance_layout.GetElements())
+            {
+                MetalHashCombine(layout_hash, static_cast<uint64_t>(element.Type));
+                MetalHashCombine(layout_hash, static_cast<uint64_t>(element.Offset));
+                MetalHashCombine(layout_hash, static_cast<uint64_t>(element.GetComponentCount()));
+            }
+        }
+        m_ActiveVertexLayoutHash = layout_hash;
+
         auto it = m_VertexDescriptors.find(layout_hash);
         if (it == m_VertexDescriptors.end())
         {
-            MTL::VertexDescriptor* descriptor = BuildVertexDescriptor(*metal_vertex_array);
+            MTL::VertexDescriptor* descriptor = BuildVertexDescriptor(*metal_vertex_array,
+                instanced ? &instance_layout : nullptr);
             if (descriptor == nullptr)
             {
                 /* 布局和着色器对不上：这条绘制不成立，错误在 BuildVertexDescriptor 里已写明 */
@@ -690,7 +713,8 @@ namespace Helios
         SetVertexDescriptor(it->second, layout_hash);
     }
 
-    MTL::VertexDescriptor* MetalShader::BuildVertexDescriptor(const MetalVertexArray& vertex_array)
+    MTL::VertexDescriptor* MetalShader::BuildVertexDescriptor(const MetalVertexArray& vertex_array,
+        const VertexBufferLayout* instance_layout)
     {
         MTL::VertexDescriptor* descriptor = MTL::VertexDescriptor::alloc()->init();
         if (descriptor == nullptr)
@@ -757,6 +781,47 @@ namespace Helios
                 descriptor->layouts()->object(static_cast<NS::UInteger>(buffer_index));
             layout_descriptor->setStride(layout->GetStride());
             layout_descriptor->setStepFunction(MTL::VertexStepFunctionPerVertex);
+        }
+
+        /* 实例属性：接在顶点缓冲区后面占一个槽位，按实例步进；属性名与着色器声明对齐 */
+        if (instance_layout != nullptr && !instance_layout->GetElements().empty())
+        {
+            const uint32_t instance_buffer_index = static_cast<uint32_t>(buffers.size());
+            const VertexBufferLayout& layout = *instance_layout;
+
+            /* 顶点缓冲已占满 16 个槽时再往后放就压到 uniform 槽上了 */
+            if (instance_buffer_index >= MetalBinding::MaxVertexBuffers)
+            {
+                CORE_LOG_ERROR("Shader '{}': mesh uses all {} vertex buffer slots, no room for instance data",
+                    m_DebugName, MetalBinding::MaxVertexBuffers);
+                descriptor->release();
+                return nullptr;
+            }
+
+            uint32_t used_count = 0;
+            for (const BufferElement& element : layout.GetElements())
+            {
+                const int reflected = named ? m_Reflection.FindVertexAttributeLocation(element.Name) : -1;
+                if (reflected < 0)
+                    continue;
+
+                MTL::VertexAttributeDescriptor* attribute =
+                    descriptor->attributes()->object(static_cast<NS::UInteger>(reflected));
+                attribute->setFormat(ToMetalVertexFormat(element.Type));
+                attribute->setBufferIndex(static_cast<NS::UInteger>(MetalBinding::VertexBufferBase + instance_buffer_index));
+                attribute->setOffset(element.Offset);
+                filled.emplace(static_cast<uint32_t>(reflected), element.Name);
+                ++used_count;
+            }
+
+            if (used_count > 0)
+            {
+                MTL::VertexBufferLayoutDescriptor* layout_descriptor =
+                    descriptor->layouts()->object(static_cast<NS::UInteger>(instance_buffer_index));
+                layout_descriptor->setStride(layout.GetStride());
+                layout_descriptor->setStepFunction(MTL::VertexStepFunctionPerInstance);
+                layout_descriptor->setStepRate(1);
+            }
         }
 
         /* 着色器声明了、布局给不出：管线建不出来，这里说清楚缺哪个 */

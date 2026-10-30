@@ -21,7 +21,7 @@ namespace Helios
 		void Unbind() const override;
 
 		/* 设置顶点数据 */
-		void SetData(const void* data, uint32_t size) override;
+		void SetData(const void* data, uint32_t size, uint32_t offset = 0) override;
 		[[nodiscard]] uint32_t GetDataSize() const override { return m_DataSize; }
 
 		/* 设置顶点布局 */

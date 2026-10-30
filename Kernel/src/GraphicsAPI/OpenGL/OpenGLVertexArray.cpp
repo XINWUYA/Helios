@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "OpenGLVertexArray.h"
+#include "OpenGLCommon.h"
 
 #include <glad/glad.h>
 
@@ -54,28 +55,6 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		glBindVertexArray(0);
-	}
-
-	static GLenum TranslateBufferDataTypeToOpenGLBaseType(BufferDataType type)
-	{
-		switch (type)
-		{
-		case BufferDataType::Int:      return GL_INT;
-		case BufferDataType::Int2:     return GL_INT;
-		case BufferDataType::Int3:     return GL_INT;
-		case BufferDataType::Int4:     return GL_INT;
-		case BufferDataType::Bool:     return GL_BOOL;
-		case BufferDataType::Float:    return GL_FLOAT;
-		case BufferDataType::Float2:   return GL_FLOAT;
-		case BufferDataType::Float3:   return GL_FLOAT;
-		case BufferDataType::Float4:   return GL_FLOAT;
-		case BufferDataType::Mat3:     return GL_FLOAT;
-		case BufferDataType::Mat4:     return GL_FLOAT;
-		case BufferDataType::UByte4:   return GL_UNSIGNED_BYTE;
-		default:
-			ASSERT(false, "Unknown BufferDataType!");
-			return 0;
-		}
 	}
 
 	void OpenGLVertexArray::AddVertexBuffer(const SharedPtr<DeviceVertexBuffer>& vertex_buffer)
@@ -185,7 +164,7 @@ namespace Helios
 
 				const auto count = element.GetComponentCount();
 				const auto stride = layout.GetStride();
-				const auto base_type = TranslateBufferDataTypeToOpenGLBaseType(element.Type);
+				const auto base_type = TranslateToOpenGLBaseType(element.Type);
 
 				switch (element.Type)
 				{

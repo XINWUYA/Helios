@@ -7,6 +7,13 @@ layout(location = 2) in vec4 a_Color;
 layout(location = 3) in vec3 a_TexCoord;
 layout(location = 4) in vec3 a_Tangent;
 
+/* 实例数据：每实例一条（世界矩阵四列 + 参数，x = ObjectId、y = 接受阴影） */
+layout(location = 5) in vec4 a_InstanceMatrix0;
+layout(location = 6) in vec4 a_InstanceMatrix1;
+layout(location = 7) in vec4 a_InstanceMatrix2;
+layout(location = 8) in vec4 a_InstanceMatrix3;
+layout(location = 9) in vec4 a_InstanceParams;
+
 #include "../Builtin/Uniforms.glsl"
 
 struct SVextex2Frag
@@ -16,20 +23,27 @@ struct SVextex2Frag
 	vec4 BaseColor;
 	vec2 TexCoord;
 	vec3 Tangent;
+	float ObjectId;
+	float ReceiveShadow;
 };
 
 out SVextex2Frag vert2frag;
 
 void main()
 {
-	gl_Position = u_ViewProjectionMat * u_Local2WorldMat * vec4(a_Position, 1.0f);
+	/* 物体世界矩阵来自实例数据：同材质同网格的一批对象共用一次绘制 */
+	mat4 local2world = mat4(a_InstanceMatrix0, a_InstanceMatrix1, a_InstanceMatrix2, a_InstanceMatrix3);
 
-	vert2frag.Position = vec3(u_Local2WorldMat * vec4(a_Position, 1.0f));
+	gl_Position = u_ViewProjectionMat * local2world * vec4(a_Position, 1.0f);
+
+	vert2frag.Position = vec3(local2world * vec4(a_Position, 1.0f));
 	vert2frag.BaseColor = a_Color;
 	vert2frag.TexCoord = a_TexCoord.xy;
+	vert2frag.ObjectId = a_InstanceParams.x;
+	vert2frag.ReceiveShadow = a_InstanceParams.y;
 
 	/* 法线矩阵：非等比缩放下法线 / 切线要按逆转置矩阵变换 */
-	mat3 normalMat = transpose(inverse(mat3(u_Local2WorldMat)));
+	mat3 normalMat = transpose(inverse(mat3(local2world)));
 	vert2frag.Normal = normalize(normalMat * a_Normal);
 	vert2frag.Tangent = normalize(normalMat * a_Tangent);
 }
@@ -58,6 +72,8 @@ struct SVextex2Frag
 	vec4 BaseColor;
 	vec2 TexCoord;
 	vec3 Tangent;
+	float ObjectId;
+	float ReceiveShadow;
 };
 
 in SVextex2Frag vert2frag;
@@ -76,7 +92,7 @@ void main()
 	GBufferTexture3 = vec4(mtl.Emission, mtl.IOR);
 	GBufferTexture4 = vec4(mtl.Ambient, mtl.Anisotropy);
 	/* a 通道 = 接受阴影标记：延迟光照阶段没有逐对象数据，只能随 G-Buffer 带过去 */
-	GBufferTexture5 = vec4(vert2frag.Position, u_ReceiveShadow);
+	GBufferTexture5 = vec4(vert2frag.Position, vert2frag.ReceiveShadow);
 
-	ObjectId = float(u_ObjectId);
+	ObjectId = vert2frag.ObjectId;
 }

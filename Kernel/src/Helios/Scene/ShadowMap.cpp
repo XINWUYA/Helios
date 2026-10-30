@@ -674,9 +674,25 @@ namespace Helios
 					const auto caster_list = RenderSorting::CollectShadowCasterList(
 						render_view->GetShadowCasterObjects(), shadow_material->GetRasterState(), caster_indices);
 
+					/* 组批：列表按剔除方式 + 顶点数组排过序，同一组的投射物合成一笔实例化绘制 */
+					struct CasterBatch
+					{
+						SharedPtr<DeviceVertexArray> VertexArray;
+						PrimitiveType Type{ PrimitiveType::Triangles };
+						RenderRasterState State{};
+						uint32_t First{ 0 };
+						uint32_t Count{ 0 };
+					};
+
+					std::vector<ObjectInstanceData> instances;
+					std::vector<CasterBatch> batches;
+					instances.reserve(caster_list.size());
+					batches.reserve(8);
+
 					for (const VisibleMeshObject* mesh_object : caster_list)
 					{
-						Renderer::FillObjectUniformBuffer(*mesh_object);
+						if (mesh_object->MeshSegment == nullptr)
+							continue;
 
 						/* 剔除方式跟物体材质走：单面材质只画正面，背面不用光栅化；
 						 * 双面材质（Cull_None）两面都写，和主视图看到的是同一侧表面 */
@@ -688,9 +704,38 @@ namespace Helios
 							caster_state.FrontFaceType = source_state.FrontFaceType;
 						}
 
-						DrawParams caster_draw;
-						caster_draw.RasterStateOverride = caster_state;
-						Renderer::Submit(shadow_material, mesh_object->MeshSegment->GetMeshPrimitive(), &caster_draw);
+						const MeshPrimitive& primitive = mesh_object->MeshSegment->GetMeshPrimitive();
+						if (batches.empty() || batches.back().VertexArray != primitive.VertexArray
+							|| batches.back().Type != primitive.PrimitiveType
+							|| batches.back().State.CullMode != caster_state.CullMode
+							|| batches.back().State.FrontFaceType != caster_state.FrontFaceType)
+						{
+							CasterBatch batch;
+							batch.VertexArray = primitive.VertexArray;
+							batch.Type = primitive.PrimitiveType;
+							batch.State = caster_state;
+							batch.First = static_cast<uint32_t>(instances.size());
+							batches.push_back(std::move(batch));
+						}
+
+						ObjectInstanceData instance;
+						instance.Local2World = mesh_object->Local2WorldMat;
+						instances.push_back(instance);
+						++batches.back().Count;
+					}
+
+					if (!instances.empty())
+					{
+						const auto range = Renderer::UploadObjectInstances(instances.data(),
+							static_cast<uint32_t>(instances.size()));
+
+						for (const CasterBatch& batch : batches)
+						{
+							DrawParams caster_draw;
+							caster_draw.RasterStateOverride = batch.State;
+							Renderer::SubmitInstanced(shadow_material, MeshPrimitive{ batch.VertexArray, batch.Type },
+								range.Buffer, range.FirstInstance + batch.First, batch.Count, &caster_draw);
+						}
 					}
 
 					render_pass_info->Unbind();

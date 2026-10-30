@@ -78,20 +78,22 @@ namespace Helios
 	}
 
 	/* 设置顶点数据 */
-	void OpenGLVertexBuffer::SetData(const void* data, uint32_t size)
+	void OpenGLVertexBuffer::SetData(const void* data, uint32_t size, uint32_t offset)
 	{
 		PROFILE_FUNCTION();
 
 #ifdef __APPLE__
 		// macOS: Use traditional functions
 		glBindBuffer(GL_ARRAY_BUFFER, m_VertexBufferId);
-		glBufferSubData(GL_ARRAY_BUFFER, 0, size, data);
+		glBufferSubData(GL_ARRAY_BUFFER, offset, size, data);
 #else
 		// Windows/Linux: Use modern DSA function
-		glNamedBufferSubData(m_VertexBufferId, 0, size, data);
+		glNamedBufferSubData(m_VertexBufferId, offset, size, data);
 #endif
 
-		m_DataSize = size;
+		/* 分段写入不改数据量，整块写才算新内容 */
+		if (offset == 0)
+			m_DataSize = size;
 	}
 
 	/* 获取顶点数量 */

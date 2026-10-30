@@ -19,7 +19,7 @@ namespace Helios
         void Bind() const override;
         void Unbind() const override;
 
-        void SetData(const void* data, uint32_t size) override;
+        void SetData(const void* data, uint32_t size, uint32_t offset = 0) override;
         uint32_t GetDataSize() const override { return m_Size; }
 
         void SetLayout(const VertexBufferLayout& layout) override;

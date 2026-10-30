@@ -22,6 +22,15 @@ namespace Helios
 		/* 绘制状态代号（见 GLState::StateSerial）：换帧缓冲或换程序后上一笔的绑定不再可信 */
 		[[nodiscard]] uint32_t GetStateSerial() const override;
 
+		/* 实例化绘制：实例属性绑到 5 号起的固定 location（与实例布局的元素顺序一致） */
+		void DrawArraysInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+			uint32_t instance_count, const VertexBufferLayout& instance_layout) override;
+		void DrawIndexedInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+			uint32_t instance_count, const VertexBufferLayout& instance_layout,
+			uint32_t index_count = 0, uint32_t index_offset = 0) override;
+
 		/* 绘制调用 */
 		void DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count = 0, uint32_t index_offset = 0) override;
 		void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) override;
@@ -68,6 +77,11 @@ namespace Helios
 	private:
 		/* 获取OpenGL支持的扩展 */
 		void InitOpenGLExtensions();
+
+		/* 把实例属性按当前批次的偏移挂到顶点数组上：location 从 5 起，步进按实例 */
+		void BindInstanceAttributes(const SharedPtr<DeviceVertexArray>& vertex_array,
+			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+			const VertexBufferLayout& instance_layout);
 
 		/* 拷贝 / 快照用的常驻 FBO（0 = 读、1 = 写） */
 		GLuint AcquireCopyFramebuffer(uint32_t index);

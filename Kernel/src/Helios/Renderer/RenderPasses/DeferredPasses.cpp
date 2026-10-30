@@ -1,4 +1,5 @@
 #include "Pch.h"
+#include <cstdio>
 #include "DeferredPasses.h"
 #include "DebugViewPasses.h"
 #include "ObjectSorting.h"
@@ -228,24 +229,68 @@ namespace Helios
 							DrawParams per_draw;
 							per_draw.FillMissing = MaterialFill::Values;
 
+							/* 组批：列表已经按材质 + 网格排过序，同材质同网格的连续对象合成一笔实例化绘制。
+							 * 物体的世界矩阵与 ObjectId 走实例数据，不再逐对象写 UBO */
+							/* 批次的键是材质 + 顶点数组：同一个内建网格在不同模型里各有自己的 MeshSegment，
+							 * 但顶点数组是共享的，按它合批才合得起来 */
+							struct GBufferBatch
+							{
+								SharedPtr<Material> Material;
+								SharedPtr<DeviceVertexArray> VertexArray;
+								PrimitiveType Type{ PrimitiveType::Triangles };
+								uint32_t First{ 0 };
+								uint32_t Count{ 0 };
+							};
+
 							const auto gbuffer_list = RenderSorting::CollectGBufferList(render_view.GetVisibleMeshObjects());
+							std::vector<ObjectInstanceData> instances;
+							std::vector<GBufferBatch> batches;
+							instances.reserve(gbuffer_list.size());
+							batches.reserve(16);
+
 							for (const VisibleMeshObject* gbuffer_object : gbuffer_list)
 							{
 								const VisibleMeshObject& mesh_object = *gbuffer_object;
 								const auto& material = mesh_object.Material;
-								if (material == nullptr)
+								if (material == nullptr || mesh_object.MeshSegment == nullptr)
 									continue;
 
-								Renderer::FillObjectUniformBuffer(mesh_object);
-
-								/* 光栅状态能被面板直接改、不走材质版本号，每次照源材质同步 */
+								/* 光栅状态能被面板直接改、不走材质版本号，每批照源材质同步一次 */
 								SharedPtr<Material> gbuffer_material = material->GetDerived(gbuffer_shader, &CreateGBufferMaterial);
 								if (gbuffer_material != nullptr)
 									gbuffer_material->SetRasterState(material->GetRasterState());
 								else
 									gbuffer_material = material;
 
-								Renderer::Submit(gbuffer_material, mesh_object.MeshSegment->GetMeshPrimitive(), &per_draw);
+								const MeshPrimitive& primitive = mesh_object.MeshSegment->GetMeshPrimitive();
+								if (batches.empty() || batches.back().Material != gbuffer_material
+									|| batches.back().VertexArray != primitive.VertexArray
+									|| batches.back().Type != primitive.PrimitiveType)
+								{
+									GBufferBatch batch;
+									batch.Material = gbuffer_material;
+									batch.VertexArray = primitive.VertexArray;
+									batch.Type = primitive.PrimitiveType;
+									batch.First = static_cast<uint32_t>(instances.size());
+									batches.push_back(std::move(batch));
+								}
+
+								ObjectInstanceData instance;
+								instance.Local2World = mesh_object.Local2WorldMat;
+								instance.Params = glm::vec4(static_cast<float>(mesh_object.ObjectId),
+									mesh_object.ReceiveShadow ? 1.0f : 0.0f, 0.0f, 0.0f);
+								instances.push_back(instance);
+								++batches.back().Count;
+							}
+
+							if (!instances.empty())
+							{
+								const auto range = Renderer::UploadObjectInstances(instances.data(),
+									static_cast<uint32_t>(instances.size()));
+
+								for (const GBufferBatch& batch : batches)
+									Renderer::SubmitInstanced(batch.Material, MeshPrimitive{ batch.VertexArray, batch.Type },
+										range.Buffer, range.FirstInstance + batch.First, batch.Count, &per_draw);
 							}
 						}
 						render_pass_info->Unbind();

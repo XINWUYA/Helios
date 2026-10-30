@@ -41,6 +41,22 @@ namespace Helios
 		/* 绘制调用 */
 		virtual void DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count = 0, uint32_t index_offset = 0) = 0;
 		virtual void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) = 0;
+
+		/* 实例化绘制：instance_buffer 里从 first_instance 起连续 instance_count 条实例数据。
+		 * 顶点数组要先设过 SetInstanceLayout；后端不支持时退回单实例绘制，画面不丢 */
+		virtual void DrawArraysInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+			const SharedPtr<DeviceVertexBuffer>& /*instance_buffer*/, uint32_t /*instance_offset_bytes*/,
+			uint32_t /*instance_count*/, const VertexBufferLayout& /*instance_layout*/)
+		{
+			DrawArrays(type, vertex_array);
+		}
+		virtual void DrawIndexedInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+			const SharedPtr<DeviceVertexBuffer>& /*instance_buffer*/, uint32_t /*instance_offset_bytes*/,
+			uint32_t /*instance_count*/, const VertexBufferLayout& /*instance_layout*/,
+			uint32_t index_count = 0, uint32_t index_offset = 0)
+		{
+			DrawIndexed(type, vertex_array, index_count, index_offset);
+		}
 		/* Flush */
 		virtual void Flush() = 0;
 
