@@ -123,6 +123,12 @@ namespace Helios
 		size_t      ValueSize{ 0 };          /* 值的字节数 */
 		float       DragSpeed{ 1.0f };       /* 数值拖拽速度：每像素单位数（对齐 ImGui 的 v_speed） */
 		float       ResetValue{ 0.0f };      /* 控件的重置值（如 Scale 用 1.0） */
+		/* 数值字段的取值范围：两者相等表示不限制。面板据此钳制拖拽与手输
+		 * （如时刻只允许 0..24、纬度 -90..90） */
+		float       MinValue{ 0.0f };
+		float       MaxValue{ 0.0f };
+		/* 控件形态：数值字段按滑块绘制。滑块要有量程，没声明 Range 的会退回拖拽 */
+		bool        AsSlider{ false };
 		/* 语义标记：表达「存储形式 ≠ 编辑形式」的字段。
 		 * 目前使用 "AngleDeg"：内部以弧度存储、Inspector 以角度显示与编辑。 */
 		const char* Semantics{ nullptr };
@@ -317,6 +323,13 @@ namespace Helios
 
 		/* 可见性条件：作用于最近添加的那个字段，须紧跟在一个 .Field(...) 之后 */
 		ComponentRegistrar& When(FieldCondition condition);
+
+		/* 取值范围：作用于最近添加的那个字段。min == max 表示不限制 */
+		ComponentRegistrar& Range(float min_value, float max_value);
+
+		/* 控件形态：最近添加的字段在属性面板里按滑块绘制（须配 .Range，
+		 * 滑块要量程，没有范围的会退回拖拽） */
+		ComponentRegistrar& Slider();
 
 		template <typename T>
 		ComponentRegistrar& WhenTrue(bool T::* member)

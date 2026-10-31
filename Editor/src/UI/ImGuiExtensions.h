@@ -33,10 +33,20 @@ namespace ImGuiExt
 	void DrawColorUI(const std::string& label, glm::vec4& color, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个资源引用的UI（图片选择 + 拖入 + 悬停预览） */
 	void DrawTextureUI(const std::string& label, SharedPtr<DeviceTexture>& texture, float label_width = EditorTheme::Token::PropertyLabelWidth);
-	/* 绘制一个可拖动的Int UI（speed = 每像素拖拽单位数，对齐 ImGui 的 v_speed） */
-	void DrawDragIntUI(const char* label, int& value, float speed = 1.0f, float label_width = EditorTheme::Token::PropertyLabelWidth);
-	/* 绘制一个可拖动的Float UI（speed = 每像素拖拽单位数，对齐 ImGui 的 v_speed） */
-	void DrawDragFloatUI(const std::string& label, float& value, float speed = 1.0f, float label_width = EditorTheme::Token::PropertyLabelWidth);
+	/* 绘制一个可拖动的Int UI（speed = 每像素拖拽单位数，对齐 ImGui 的 v_speed）。
+	 * min_value 与 max_value 相等表示不限制；给了范围时拖拽与手输都按范围钳制 */
+	void DrawDragIntUI(const char* label, int& value, float speed = 1.0f,
+		float min_value = 0.0f, float max_value = 0.0f,
+		float label_width = EditorTheme::Token::PropertyLabelWidth);
+	/* 绘制一个可拖动的Float UI（speed = 每像素拖拽单位数，对齐 ImGui 的 v_speed）。范围语义同上 */
+	void DrawDragFloatUI(const std::string& label, float& value, float speed = 1.0f,
+		float min_value = 0.0f, float max_value = 0.0f,
+		float label_width = EditorTheme::Token::PropertyLabelWidth);
+	/* 绘制一个滑块：量程必须给全，带填充条，拖拽与手输都按量程钳制 */
+	void DrawSliderIntUI(const char* label, int& value, int min_value, int max_value,
+		float label_width = EditorTheme::Token::PropertyLabelWidth);
+	void DrawSliderFloatUI(const std::string& label, float& value, float min_value, float max_value,
+		float label_width = EditorTheme::Token::PropertyLabelWidth, const char* format = "%.2f");
 	/* 绘制一个可拖动的Float2 UI */
 	void DrawDragFloat2UI(const char* label, glm::vec2& value, float label_width = EditorTheme::Token::PropertyLabelWidth);
 	/* 绘制一个可拖动的Float3 UI */

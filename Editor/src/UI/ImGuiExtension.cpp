@@ -624,28 +624,91 @@ namespace Helios::ImGuiExt
 		EndPropertyRow();
 	}
 
-	/* 绘制一个可拖动的Int UI */
-	void DrawDragIntUI(const char* label, int& value, float speed, float label_width)
+	/* 绘制一个可拖动的Int UI。有范围时手输也要钳制，所以补 AlwaysClamp
+	 * （ImGui 的 DragInt 默认只钳拖拽，CTRL 点击手输不受范围约束） */
+	void DrawDragIntUI(const char* label, int& value, float speed, float min_value, float max_value,
+		float label_width)
+	{
+		PROFILE_FUNCTION();
+
+		const float value_width = BeginPropertyRow(label, label_width);
+		const bool bounded = max_value > min_value;
+
+		ImGui::SetNextItemWidth(value_width);
+		ImGui::DragInt("##Int", &value, speed,
+			bounded ? static_cast<int>(min_value) : 0,
+			bounded ? static_cast<int>(max_value) : 0,
+			"%d", bounded ? ImGuiSliderFlags_AlwaysClamp : ImGuiSliderFlags_None);
+
+		EndPropertyRow();
+	}
+
+	/* 绘制一个可拖动的Float UI。范围语义同 DrawDragIntUI */
+	void DrawDragFloatUI(const std::string& label, float& value, float speed, float min_value,
+		float max_value, float label_width)
+	{
+		PROFILE_FUNCTION();
+
+		const float value_width = BeginPropertyRow(label.c_str(), label_width);
+		const bool bounded = max_value > min_value;
+
+		ImGui::SetNextItemWidth(value_width);
+		ImGui::DragFloat("##Float", &value, speed,
+			bounded ? min_value : 0.0f, bounded ? max_value : 0.0f,
+			"%.3f", bounded ? ImGuiSliderFlags_AlwaysClamp : ImGuiSliderFlags_None);
+
+		EndPropertyRow();
+	}
+
+	namespace
+	{
+		/* 滑块的量程填充：这一版 ImGui 的滑块只画把手，看不出"扫到哪儿了"。
+		 * 补一条贴底的横条 —— 数值文字在竖直中间，不受影响 */
+		void DrawSliderFill(float ratio)
+		{
+			if (!(ratio > 0.0f))
+				return;
+
+			const ImVec2 rect_min = ImGui::GetItemRectMin();
+			const ImVec2 rect_max = ImGui::GetItemRectMax();
+			const float track_right = rect_min.x + (rect_max.x - rect_min.x) * ImClamp(ratio, 0.0f, 1.0f);
+			const float bottom = rect_max.y - 1.0f;
+
+			ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(rect_min.x + 1.0f, bottom - 2.0f),
+				ImVec2(track_right, bottom), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 1.0f);
+		}
+	}
+
+	/* 绘制一个滑块：量程给全才画，手输同样按量程钳制 */
+	void DrawSliderIntUI(const char* label, int& value, int min_value, int max_value, float label_width)
 	{
 		PROFILE_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label, label_width);
 
 		ImGui::SetNextItemWidth(value_width);
-		ImGui::DragInt("##Int", &value, speed);
+		ImGui::SliderInt("##SliderInt", &value, min_value, max_value, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+		if (max_value > min_value)
+			DrawSliderFill(static_cast<float>(value - min_value) / static_cast<float>(max_value - min_value));
 
 		EndPropertyRow();
 	}
 
-	/* 绘制一个可拖动的Float UI */
-	void DrawDragFloatUI(const std::string& label, float& value, float speed, float label_width)
+	/* 绘制一个滑块（浮点）。format 决定刻度显示的精度 */
+	void DrawSliderFloatUI(const std::string& label, float& value, float min_value, float max_value,
+		float label_width, const char* format)
 	{
 		PROFILE_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
 		ImGui::SetNextItemWidth(value_width);
-		ImGui::DragFloat("##Float", &value, speed);
+		ImGui::SliderFloat("##SliderFloat", &value, min_value, max_value, format,
+			ImGuiSliderFlags_AlwaysClamp);
+
+		if (max_value > min_value)
+			DrawSliderFill((value - min_value) / (max_value - min_value));
 
 		EndPropertyRow();
 	}

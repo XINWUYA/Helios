@@ -1076,6 +1076,29 @@ namespace Helios
 			card.TextureName, data.Images[card.ImageIndex], card.Mip);
 	}
 
+	/* 数值字段：声明了滑块的按滑块画（量程来自 Range），其余照旧拖拽。
+	 * 滑块没有量程就没有意义，所以缺 Range 时退回拖拽 */
+	static void DrawNumericFieldControl(const FieldDesc& field, void* field_ptr)
+	{
+		const bool use_slider = field.AsSlider && field.MaxValue > field.MinValue;
+		if (field.Type == FieldType::Int)
+		{
+			int& value = *reinterpret_cast<int*>(field_ptr);
+			if (use_slider)
+				ImGuiExt::DrawSliderIntUI(field.Name, value, static_cast<int>(field.MinValue),
+					static_cast<int>(field.MaxValue));
+			else
+				ImGuiExt::DrawDragIntUI(field.Name, value, field.DragSpeed, field.MinValue, field.MaxValue);
+			return;
+		}
+
+		float& value = *reinterpret_cast<float*>(field_ptr);
+		if (use_slider)
+			ImGuiExt::DrawSliderFloatUI(field.Name, value, field.MinValue, field.MaxValue);
+		else
+			ImGuiExt::DrawDragFloatUI(field.Name, value, field.DragSpeed, field.MinValue, field.MaxValue);
+	}
+
 	/* 按字段类型绘制单个控件，field_ptr 指向可写的字段存储 */
 	static void DrawFieldControl(const FieldDesc& field, void* field_ptr)
 	{
@@ -1085,13 +1108,13 @@ namespace Helios
 			ImGuiExt::DrawCheckboxUI(field.Name, *reinterpret_cast<bool*>(field_ptr));
 			break;
 		case FieldType::Int:
-			ImGuiExt::DrawDragIntUI(field.Name, *reinterpret_cast<int*>(field_ptr), field.DragSpeed);
+			DrawNumericFieldControl(field, field_ptr);
 			break;
 		case FieldType::LayerMask:
 			ImGuiExt::DrawLayerMaskUI(field.Name, *reinterpret_cast<LayerMask*>(field_ptr));
 			break;
 		case FieldType::Float:
-			ImGuiExt::DrawDragFloatUI(field.Name, *reinterpret_cast<float*>(field_ptr), field.DragSpeed);
+			DrawNumericFieldControl(field, field_ptr);
 			break;
 		case FieldType::Vec2:
 			ImGuiExt::DrawDragFloat2UI(field.Name, *reinterpret_cast<glm::vec2*>(field_ptr));

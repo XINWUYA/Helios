@@ -140,6 +140,23 @@ namespace Helios
 		return *this;
 	}
 
+	ComponentRegistrar& ComponentRegistrar::Range(float min_value, float max_value)
+	{
+		if (!m_Desc.Fields.empty())
+		{
+			m_Desc.Fields.back().MinValue = min_value;
+			m_Desc.Fields.back().MaxValue = max_value;
+		}
+		return *this;
+	}
+
+	ComponentRegistrar& ComponentRegistrar::Slider()
+	{
+		if (!m_Desc.Fields.empty())
+			m_Desc.Fields.back().AsSlider = true;
+		return *this;
+	}
+
 	namespace
 	{
 		/* 按依赖字段的类型读取其数值（供比较类条件使用） */
