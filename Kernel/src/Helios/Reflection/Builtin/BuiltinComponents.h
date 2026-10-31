@@ -17,6 +17,7 @@ namespace Helios
 	void RegisterAnimatorComponent();
 	void RegisterScriptComponent();
 	void RegisterPostProcessComponents();    /* PostProcess / Bloom */
+	void RegisterSkyComponent();             /* Sky（天空与昼夜） */
 
 	/* 按清单顺序注册全部内置组件（由 ComponentRegistry 启动时调用一次） */
 	void RegisterBuiltinComponents();

@@ -53,6 +53,8 @@ namespace Helios
 		[[nodiscard]] const MeshInstanceIndex& GetMeshInstanceIndex() const { return m_MeshIndex; }
 		/* 天空盒实体：铺满全屏、与网格位置无关，不进空间索引，各视图自己补进列表 */
 		[[nodiscard]] const std::vector<entt::entity>& GetSkyBoxEntities() const { return m_SkyBoxEntities; }
+		/* 本帧有没有生效的天空组件（隐藏的不算）：没有天空网格时视图据此补一个内建天空 */
+		[[nodiscard]] bool HasActiveSky() const { return m_HasActiveSky; }
 
 		/* 父节点；没有父节点（或父节点已失效）时返回 entt::null */
 		[[nodiscard]] entt::entity GetParent(entt::entity entity) const;
@@ -177,6 +179,8 @@ namespace Helios
 		MeshInstanceIndex m_MeshIndex;
 		/* 本帧算出来的天空盒实体（不进索引，见 GetSkyBoxEntities） */
 		std::vector<entt::entity> m_SkyBoxEntities;
+		/* 本帧有没有生效的天空组件（见 HasActiveSky） */
+		bool m_HasActiveSky{ false };
 
 		/* 场景中的所有实体都将注册到这里 */
 		entt::registry m_Registry;

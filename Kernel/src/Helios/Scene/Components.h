@@ -365,6 +365,39 @@ namespace Helios
 		void OnAdded(const Scene& scene, Entity& entity) override { m_pOwnerScene = &scene; }
 	};
 
+	/* 天空与昼夜（Time of Day）：场景级配置，挂在哪个实体上无所谓（与后处理对象同层语义）。
+	 * 每帧由场景换算成 SkyState 推给各视图；场景里的方向光按实体顺序绑定 ——
+	 * 第一个当太阳、第二个当月亮，方向 / 颜色 / 强度都由这里驱动。 */
+	struct HELIOS_API SkyComponent : ComponentBase
+	{
+		/* 当地真太阳时（0-24 小时） */
+		float m_Hour{ 10.0f };
+		/* 自动推进：每帧按 DayLength 走，编辑器里直接看一整天 */
+		bool m_AutoAdvance{ false };
+		/* 走完 24 小时要的真实秒数（600 = 十分钟一天） */
+		float m_DayLengthSeconds{ 600.0f };
+
+		/* 观测点：纬度决定太阳轨迹的倾斜，正北朝向绕 Y 轴转整个天球 */
+		float m_Latitude{ 30.0f };
+		float m_NorthAngle{ 0.0f };
+		/* 一年中的第几天，决定太阳赤纬（春分 80、夏至 172、冬至 355） */
+		int m_DayOfYear{ 172 };
+		/* 月相：0 新月、0.25 上弦、0.5 满月、0.75 下弦 */
+		float m_MoonPhase{ 0.5f };
+
+		/* 日月星强度：太阳强度同时写进方向光，天空散射按同一份换算 */
+		float m_SunIntensity{ 5.0f };
+		float m_MoonIntensity{ 0.12f };
+		float m_StarIntensity{ 1.0f };
+		/* 雾霾（米氏散射强度缩放）与天空曝光 */
+		float m_Haze{ 1.0f };
+		float m_Exposure{ 1.5f };
+
+		SkyComponent() = default;
+		SkyComponent(const SkyComponent&) = default;
+		SkyComponent& operator=(const SkyComponent&) = default;
+	};
+
 	/* 场景中需要接入on_construct/on_destroy信号分发的全部组件类型 */
 	using SceneComponentList = std::tuple<
 		NameComponent,
@@ -376,6 +409,7 @@ namespace Helios
 		LightComponent,
 		ReflectionProbeComponent,
 		AnimatorComponent,
-		ScriptComponent
+		ScriptComponent,
+		SkyComponent
 	>;
 }

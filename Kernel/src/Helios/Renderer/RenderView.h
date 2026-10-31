@@ -6,6 +6,7 @@
 #include "FrameGraph/FrameGraphResourceHandle.h"
 #include "PostProcess/PostProcessEffectRegistry.h"
 #include "Helios/Scene/LayerMask.h"
+#include "Helios/Scene/Sky.h"
 
 namespace Helios
 {
@@ -121,6 +122,12 @@ namespace Helios
 		void SetPostProcessState(const PostProcess::PostProcessState& state) { m_PostProcessState = state; }
 		[[nodiscard]] const PostProcess::PostProcessState& GetPostProcessState() const { return m_PostProcessState; }
 
+		/* 本帧的天空状态：由 Scene 每帧解析（SkyComponent → 日月方向与大气参数）后写入；
+		 * 渲染器填充天空常量时只读这份快照。缺省是一份能用的白天天空 —— 场景里没有天空组件
+		 * 也能画出合理的天空，只是不会随时间变。 */
+		void SetSkyState(const Sky::SkyState& state) { m_SkyState = state; }
+		[[nodiscard]] const Sky::SkyState& GetSkyState() const { return m_SkyState; }
+
 		/* 设置视口区域 */
 		void SetViewportRegion(const ViewportRegion& region);
 		[[nodiscard]] const ViewportRegion& GetViewportRegion() const { return m_ViewportRegion; }
@@ -210,6 +217,8 @@ namespace Helios
 		LayerMask m_CullingMask{ Layers::All };
 		/* 后处理设置快照（每视图一份；Scene 解析写入，缺省空 = 全部效果关闭） */
 		PostProcess::PostProcessState m_PostProcessState{};
+		/* 天空状态快照（每视图一份；Scene 解析写入） */
+		Sky::SkyState m_SkyState{};
 		/* 相机 */
 		Camera* m_pOwnerCamera{ nullptr };
 		/* 所属的Scene */

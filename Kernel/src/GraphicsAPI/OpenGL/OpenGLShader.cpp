@@ -702,6 +702,11 @@ namespace Helios
 			block_index = glGetUniformBlockIndex(program, "UIUniformBuffer");
 			if (block_index != GL_INVALID_INDEX)
 				glUniformBlockBinding(program, block_index, 4);
+
+			/* 天空块：与 Metal 侧 binding 5 对齐 */
+			block_index = glGetUniformBlockIndex(program, "SkyUniformBuffer");
+			if (block_index != GL_INVALID_INDEX)
+				glUniformBlockBinding(program, block_index, 5);
 		}
 #endif
 

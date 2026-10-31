@@ -40,6 +40,8 @@ namespace Helios
 			ScriptComponent,
 			/* 渲染层组件卡：多层堆叠 + 勾选（表示层掩码） */
 			LayerMask,
+			/* 环境组件卡：天空 */
+			Sky,
 			/* 面板/分组：统计类面板用 */
 			Stats,
 			/* 面板/分组：渲染图可视化页（Frame Graph）用 */

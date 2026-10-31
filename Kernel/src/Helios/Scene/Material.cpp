@@ -65,9 +65,12 @@ namespace Helios
 			return;
 
 		/* 天空盒以着色器为单一来源（样例场景的约定同源）：资产里的天空就是
-		 * "网格 + SkyBox.glsl 材质"，由顶点着色器折叠成全屏天空 */
+		 * "网格 + SkyBox.glsl 材质"，由顶点着色器折叠成全屏天空。
+		 * 大气散射那套（Atmosphere.glsl）走同一个约定，顶点折叠与深度写法一致，
+		 * 只是片元改成现算 —— 所以两种都算天空材质。 */
 		static BuiltinAsset<DeviceShader> s_skybox_shader("Shaders/Sky/SkyBox.glsl");
-		m_IsSkyBox = m_pShader == s_skybox_shader.Get();
+		static BuiltinAsset<DeviceShader> s_atmosphere_shader("Shaders/Sky/Atmosphere.glsl");
+		m_IsSkyBox = m_pShader == s_skybox_shader.Get() || m_pShader == s_atmosphere_shader.Get();
 
 		/* IBL 判据 = 声明了 IBL 契约的辐照度采样器（只能按 sampler 反射查）：裸 uniform
 		 * u_UseIBL 在 Metal 反射里查不到，拿它门控会恒为假 */

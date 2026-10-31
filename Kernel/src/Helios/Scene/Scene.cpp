@@ -8,6 +8,7 @@
 #include "Components.h"
 #include "Entity.h"
 #include "Material.h"
+#include "Sky.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Common/Math.h"
 #include "Camera.h"
@@ -500,6 +501,81 @@ namespace Helios
 		}
 		m_FrameRecordReadable = true;
 
+		/* 天空与昼夜：先推进时刻，再把日月星与大气换算成一份状态。
+		 * 场景里的方向光按实体顺序绑定（第一个太阳、第二个月亮），方向 / 颜色 / 强度
+		 * 全部由这份状态写回 —— 时刻一动，光照跟着走，不用另配一套灯光动画。 */
+		Sky::SkyState sky_state;
+		{
+			SkyComponent* sky_component = nullptr;
+			entt::entity sky_owner = entt::null;
+			for (auto [entity, component] : m_Registry.view<SkyComponent>().each())
+			{
+				if (!IsEntityVisible(entity))
+					continue;
+				if (sky_owner == entt::null || entt::to_integral(entity) < entt::to_integral(sky_owner))
+				{
+					sky_owner = entity;
+					sky_component = &component;
+				}
+			}
+
+			/* 天空是场景级设置：只配了组件、没摆天空网格时，视图据此补一个内建天空 */
+			m_HasActiveSky = sky_component != nullptr;
+
+			if (sky_component != nullptr)
+			{
+				if (sky_component->m_AutoAdvance && sky_component->m_DayLengthSeconds > 0.0f)
+				{
+					sky_component->m_Hour += delta_time * 24.0f / sky_component->m_DayLengthSeconds;
+					if (sky_component->m_Hour >= 24.0f)
+						sky_component->m_Hour = std::fmod(sky_component->m_Hour, 24.0f);
+				}
+
+				sky_state = Sky::Resolve(*sky_component);
+
+				/* 取实体 ID 最小的两个方向光：不用额外绑定字段，场景结构本身就是配置 */
+				struct DirectionalCandidate
+				{
+					uint32_t Id{ UINT32_MAX };
+					DirectionalLight* Light{ nullptr };
+				};
+				DirectionalCandidate sun;
+				DirectionalCandidate moon;
+				for (auto [entity, light_component] : m_Registry.view<LightComponent>().each())
+				{
+					if (!light_component.m_Light || !IsEntityVisible(entity))
+						continue;
+					if (light_component.m_Light->GetLightType() != LightType::Directional)
+						continue;
+
+					const DirectionalCandidate candidate{ entt::to_integral(entity),
+						static_cast<DirectionalLight*>(light_component.m_Light.get()) };
+					if (candidate.Id < sun.Id)
+					{
+						moon = sun;
+						sun = candidate;
+					}
+					else if (candidate.Id < moon.Id)
+					{
+						moon = candidate;
+					}
+				}
+
+				if (sun.Light != nullptr)
+				{
+					sun.Light->SetDirection(-sky_state.SunDirection);
+					sun.Light->SetColor(glm::vec4(sky_state.SunColor, 1.0f));
+					sun.Light->SetIntensity(sky_state.SunIntensity);
+				}
+				if (moon.Light != nullptr)
+				{
+					moon.Light->SetDirection(-sky_state.MoonDirection);
+					moon.Light->SetColor(glm::vec4(sky_state.MoonColor, 1.0f));
+					moon.Light->SetIntensity(sky_state.MoonIntensity);
+				}
+			}
+		}
+
 		/* 收集RenderView，并在收集前更新 Camera 的视图/投影矩阵 */
 		m_RenderViews.clear();
 		const auto& camera_entities = m_Registry.view<CameraComponent>();
@@ -577,7 +653,10 @@ namespace Helios
 		for (RenderView* render_view : m_RenderViews)
 		{
 			if (render_view != nullptr)
+			{
 				render_view->SetPostProcessState(post_process_state);
+				render_view->SetSkyState(sky_state);
+			}
 		}
 
 		/* 脚本请求的销毁放到最后：脚本 tick 与各趟视图遍历都跑完，registry 稳定了再删 */

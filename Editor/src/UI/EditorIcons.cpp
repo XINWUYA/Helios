@@ -43,6 +43,8 @@ namespace Helios::Icons
 			/* 红色淡底：删除图标的桶身 */
 			PaleRed,
 			Gray,
+			/* 挖空底：浅色画布上是纯白，深色画布上压到面板底色，用来遮住下面的线 */
+			White,
 		};
 
 		struct SvgStyle
@@ -90,6 +92,7 @@ namespace Helios::Icons
 				case SvgInk::Red:         return IM_COL32(255, 132, 126, alpha);
 				case SvgInk::PaleRed:     return IM_COL32(71, 37, 35, alpha);
 				case SvgInk::Gray:        return IM_COL32(174, 187, 208, alpha);
+				case SvgInk::White:       return IM_COL32(29, 38, 49, alpha);
 				default:                  return IM_COL32(0, 0, 0, 0);
 				}
 			}
@@ -104,6 +107,7 @@ namespace Helios::Icons
 			case SvgInk::Red:         return IM_COL32(213, 92, 85, alpha);  /* #D55C55 */
 			case SvgInk::PaleRed:     return IM_COL32(252, 235, 238, alpha);/* #FCEBEE */
 			case SvgInk::Gray:        return IM_COL32(170, 178, 193, alpha);/* #AAB2C1 */
+			case SvgInk::White:       return IM_COL32(255, 255, 255, alpha);
 			default:                  return IM_COL32(0, 0, 0, 0);
 			}
 		}
@@ -130,6 +134,8 @@ namespace Helios::Icons
 				return SvgInk::PaleRed;
 			if (std::strcmp(value, "#aab2c1") == 0)
 				return SvgInk::Gray;
+			if (std::strcmp(value, "#fff") == 0 || std::strcmp(value, "#ffffff") == 0)
+				return SvgInk::White;
 			return fallback;
 		}
 

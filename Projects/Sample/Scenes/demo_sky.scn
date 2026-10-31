@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scene>
+    <Entities>
+        <Entity ID="9000000" Name="Ground">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="200.000000 1.000000 200.000000"/>
+            <Model ModelPath="BuiltinPlane" CastShadow="false" ReceiveShadow="true" EnableSkinning="false">
+                <MaterialOverride Slot="Default" Asset="Materials/Ground.mtl"/>
+            </Model>
+        </Entity>
+        <Entity ID="9000001" Name="Sun">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.610000 0.420000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="5" IsCastShadow="true" ShadowSize="2048" ShadowBias="0.0099999998" CascadeCount="2" ShadowFar="80"/>
+        </Entity>
+        <Entity ID="9000002" Name="Moon">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="-0.610000 0.420000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Light LightType="0" LightColor="0.720000 0.800000 1.000000 1.000000" LightIntensity="0" IsCastShadow="false"/>
+        </Entity>
+        <Entity ID="9000003" Name="Sphere Red">
+            <Transform Position="-3.000000 1.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Model ModelPath="BuiltinSphere" CastShadow="true" ReceiveShadow="true" EnableSkinning="false">
+                <MaterialOverride Slot="Default" Asset="Materials/Red.mtl"/>
+            </Model>
+        </Entity>
+        <Entity ID="9000004" Name="Sphere Solid">
+            <Transform Position="3.000000 1.000000 -2.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Model ModelPath="BuiltinSphere" CastShadow="true" ReceiveShadow="true" EnableSkinning="false">
+                <MaterialOverride Slot="Default" Asset="Materials/SolidColor.mtl"/>
+            </Model>
+        </Entity>
+        <Entity ID="9000005" Name="Cube">
+            <Transform Position="0.000000 0.500000 -6.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Model ModelPath="BuiltinCube" CastShadow="true" ReceiveShadow="true" EnableSkinning="false">
+                <MaterialOverride Slot="Default" Asset="Materials/SolidColor.mtl"/>
+            </Model>
+        </Entity>
+        <Entity ID="9000006" Name="Sky">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Model ModelPath="BuiltinSphere" CastShadow="false" ReceiveShadow="false" EnableSkinning="false">
+                <MaterialOverride Slot="Default" Asset="Materials/SkyAtmosphere.mtl"/>
+            </Model>
+            <Sky Hour="10.000000" AutoAdvance="false" Latitude="30.000000" NorthAngle="0.000000" DayOfYear="172" MoonPhase="0.500000" SunIntensity="5.000000" MoonIntensity="0.120000" StarIntensity="1.000000" Haze="1.000000" Exposure="1.500000"/>
+        </Entity>
+    </Entities>
+</Scene>

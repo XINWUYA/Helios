@@ -15,5 +15,6 @@ namespace Helios
 		RegisterAnimatorComponent();
 		RegisterScriptComponent();
 		RegisterPostProcessComponents();
+		RegisterSkyComponent();
 	}
 }

@@ -5,6 +5,8 @@
 #include <Helios/Scene/Scene.h>
 #include <Helios/Scene/Camera.h>
 #include <Helios/Scene/Material.h>
+#include <Helios/Scene/Model.h>
+#include <Helios/Core/AssetManager.h>
 #include <Helios/Scene/Components.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/ShadowMap.h>
@@ -343,6 +345,46 @@ namespace Helios
 		}
 	}
 
+	namespace
+	{
+		/* 内建天空：单位球 + Atmosphere.glsl 材质。顶点着色器不吃模型矩阵、
+		 * 把球面折成全屏方向（等价于相机永远在球心），所以整场共用一份网格与材质。
+		 * 对象编号留空 —— 天空不参与拾取 */
+		void AppendBuiltinSky(std::vector<VisibleMeshObject>& objects)
+		{
+			static const SharedPtr<Model> s_model = Model::Create(BuiltinModelType::Sphere);
+			static const SharedPtr<Material> s_material = []
+			{
+				static BuiltinAsset<DeviceShader> s_shader("Shaders/Sky/Atmosphere.glsl");
+				auto material = Material::Create(s_shader.Get());
+
+				/* 从球心往外看，可见的是内表面：要剔正面。深度恒在远平面 */
+				RenderRasterState raster_state;
+				raster_state.CullMode = CullMode::Cull_Front;
+				raster_state.DepthCompareFunc = CompareFunc::GreaterEqual;
+				material->SetRasterState(raster_state);
+				return material;
+			}();
+
+			if (s_model == nullptr || s_material == nullptr)
+				return;
+
+			for (const auto& mesh_segment : s_model->GetMeshSegments())
+				objects.emplace_back(-1, glm::mat4(1.0f), mesh_segment, s_material, false, false);
+		}
+
+		/* 已经摆过天空对象就别再补：作者选的材质优先（可以换成环境贴图） */
+		bool HasSkyObject(const std::vector<VisibleMeshObject>& objects)
+		{
+			for (const VisibleMeshObject& object : objects)
+			{
+				if (object.Material != nullptr && object.Material->IsSkyBox())
+					return true;
+			}
+			return false;
+		}
+	}
+
 	/* 视锥体剔除：空间索引按视锥查候选，再逐个组装成可绘制对象 */
 	void RenderView::PrepareVisibleObjects()
 	{
@@ -365,6 +407,8 @@ namespace Helios
 			if (!m_IsEnableCulling || camera == nullptr)
 			{
 				m_VisibleMeshObjects = m_SceneMeshObjects;
+				if (owner_scene->HasActiveSky() && !HasSkyObject(m_VisibleMeshObjects))
+					AppendBuiltinSky(m_VisibleMeshObjects);
 				return;
 			}
 
@@ -376,6 +420,8 @@ namespace Helios
 				if (is_sky || !frustum.IsOutside(object))
 					m_VisibleMeshObjects.push_back(object);
 			}
+			if (owner_scene->HasActiveSky() && !HasSkyObject(m_VisibleMeshObjects))
+				AppendBuiltinSky(m_VisibleMeshObjects);
 			return;
 		}
 
@@ -464,7 +510,15 @@ namespace Helios
 			if (Layers::IsVisible(owner_scene->GetEntityLayerMask(entity), m_CullingMask))
 				candidates.push_back(entity);
 		}
+		/* 这一趟只往列表里补天空对象：加进来几条，就是作者摆了几个 */
+		const size_t object_count_before_sky = m_VisibleMeshObjects.size();
 		BuildMeshObjects(*owner_scene, candidates, m_VisibleMeshObjects);
+
+		/* 场景只挂了天空组件、没摆天空网格时补一个内建天空（见 AppendBuiltinSky）。
+		 * 判据用「这一趟补进来几条」而不是回头扫可见列表（几万个对象的热路径），
+		 * 也不是「有没有别的网格」（那会让真实场景里一直缺天） */
+		if (owner_scene->HasActiveSky() && m_VisibleMeshObjects.size() == object_count_before_sky)
+			AppendBuiltinSky(m_VisibleMeshObjects);
 	}
 
 	namespace

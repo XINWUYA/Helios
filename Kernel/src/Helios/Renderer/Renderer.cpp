@@ -26,6 +26,8 @@ namespace Helios
 		constexpr uint8_t Object		= 1;
 		constexpr uint8_t Material		= 2;
 		constexpr uint8_t Light			= 3;
+		/* 天空：大气散射与日月星只在天空类着色器里用，参数按视图每帧填一份 */
+		constexpr uint8_t Sky			= 5;
 	}
 
 	/* Uniform data 跟着色器的 uniform block 逐字节对应（成员顺序、类型一致）。alignas(16) 是必须的：
@@ -48,6 +50,34 @@ namespace Helios
 		uint32_t ObjectId{ 0 };				/* 模型ID，用于Picking */
 		float ReceiveShadow{ 1.0f };		/* 是否接受阴影（来自 ModelComponent，着色阶段乘进阴影因子） */
 	};
+
+	/* 天空常量：大气散射、日月盘与星空都在片元里现算，这里只装一帧的参数。
+	 * 与 SkyUniforms.glsl 逐成员对应（顺序、类型、16 字节对齐一致）。 */
+	struct alignas(16) SkyUniformData
+	{
+		/* xyz 指向太阳，w 太阳角半径（弧度） */
+		glm::vec4 SunDirection{ 0.0f, 1.0f, 0.0f, 0.008f };
+		/* rgb 大气层外的阳光辐照度（已换算到引擎亮度量级），a 保留 */
+		glm::vec4 SunRadiance{ 1.0f };
+		/* xyz 指向月亮，w 月亮角半径 */
+		glm::vec4 MoonDirection{ 0.0f, -1.0f, 0.0f, 0.012f };
+		/* rgb 月亮色（按月相与高度衰减过），a 保留 */
+		glm::vec4 MoonRadiance{ 1.0f };
+		/* xyz 月亮看到的太阳方向（月面着色用），w 保留 */
+		glm::vec4 MoonLightDirection{ 0.0f, 1.0f, 0.0f, 0.0f };
+		/* xyz 瑞利散射系数（1/m），w 瑞利标高（m） */
+		glm::vec4 Rayleigh{ 5.8e-6f, 13.5e-6f, 33.1e-6f, 8000.0f };
+		/* x 米氏散射系数，y 米氏标高，z 各向异性 g，w 浑浊度缩放 */
+		glm::vec4 Mie{ 12.0e-6f, 1200.0f, 0.80f, 1.0f };
+		/* x 行星半径，y 大气半径，z 星空亮度，w 曝光 */
+		glm::vec4 Planet{ 6360.0e3f, 6420.0e3f, 1.0f, 1.5f };
+		/* xyz 天球极轴，w 星空旋转角（弧度） */
+		glm::vec4 Stars{ 0.0f, 0.0f, 1.0f, 0.0f };
+	};
+
+	/* 太阳与月亮的视半径：比真实值略大一点，低分辨率下盘面才有几像素 */
+	constexpr float kSunAngularRadius = 0.008f;
+	constexpr float kMoonAngularRadius = 0.012f;
 
 	/* Per light uniform data */
 	constexpr uint32_t MAX_LIGHT_VIEW_PROJ = 4; /* 与 Uniforms.glsl 中的数组长度保持一致 */
@@ -104,6 +134,7 @@ namespace Helios
 		SharedPtr<DeviceUniformBuffer> pViewUniformBuffer;
 		SharedPtr<DeviceUniformBuffer> pObjectUniformBuffer;
 		SharedPtr<DeviceUniformBuffer> pLightUniformBuffer;
+		SharedPtr<DeviceUniformBuffer> pSkyUniformBuffer;
 		InstanceRing Instances;
 	};
 
@@ -146,6 +177,7 @@ namespace Helios
 		s_RenderData.pViewUniformBuffer = DeviceUniformBuffer::Create(sizeof(ViewUniformData), UniformBufferBindingPoint::View);
 		s_RenderData.pObjectUniformBuffer = DeviceUniformBuffer::Create(sizeof(ObjectUniformData), UniformBufferBindingPoint::Object);
 		s_RenderData.pLightUniformBuffer = DeviceUniformBuffer::Create(sizeof(LightUniformData), UniformBufferBindingPoint::Light);
+		s_RenderData.pSkyUniformBuffer = DeviceUniformBuffer::Create(sizeof(SkyUniformData), UniformBufferBindingPoint::Sky);
 	}
 
 	void Renderer::Update()
@@ -199,6 +231,9 @@ namespace Helios
 		s_RenderData.ViewUniformData.ViewPos = view->GetCullingCamera()->GetPosition();
 		s_RenderData.pViewUniformBuffer->SetData(&s_RenderData.ViewUniformData, sizeof(ViewUniformData));
 
+		/* 天空常量：跟着视图走（每个视图一份快照，探针烘焙也用当前帧这一份） */
+		SetSkyUniforms(view->GetSkyState());
+
 		/* 每个相机一个 GPU 作用域：多视图（场景相机 + 编辑器相机等）的 Pass
 		 * 在统计树里按相机分组，而不是全部平铺在帧根下 */
 		const Camera* view_camera = view->GetCullingCamera();
@@ -206,6 +241,24 @@ namespace Helios
 		RenderQueryProfiler::Instance().BeginGPUScope(view_label.c_str());
 		view->Execute();
 		RenderQueryProfiler::Instance().EndGPUScope();
+	}
+
+	void Renderer::SetSkyUniforms(const Sky::SkyState& state)
+	{
+		SkyUniformData data;
+		data.SunDirection = glm::vec4(state.SunDirection, kSunAngularRadius);
+		/* 大气层外是白光，颜色差别全在散射里；强度按引擎亮度量级缩放，天空与光照共用一个太阳 */
+		data.SunRadiance = glm::vec4(state.SunColor * (state.SunIntensity * Sky::kSunIrradianceScale), 1.0f);
+		data.MoonDirection = glm::vec4(state.MoonDirection, kMoonAngularRadius);
+		data.MoonRadiance = glm::vec4(state.MoonColor * (state.MoonIntensity * Sky::kSunIrradianceScale), 1.0f);
+		data.MoonLightDirection = glm::vec4(state.MoonLightDirection, 0.0f);
+		data.Rayleigh = glm::vec4(state.Atmos.RayleighBeta, state.Atmos.RayleighScaleHeight);
+		data.Mie = glm::vec4(state.Atmos.MieBeta, state.Atmos.MieScaleHeight,
+			state.Atmos.MieAnisotropy, state.Haze);
+		data.Planet = glm::vec4(state.Atmos.PlanetRadius, state.Atmos.AtmosphereRadius,
+			state.StarIntensity, state.Exposure);
+		data.Stars = glm::vec4(state.PoleDirection, state.StarRotation);
+		s_RenderData.pSkyUniformBuffer->SetData(&data, sizeof(SkyUniformData));
 	}
 
 	void Renderer::SetViewUniforms(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& view_pos)
@@ -301,6 +354,7 @@ namespace Helios
 		s_RenderData.pViewUniformBuffer->Bind();
 		s_RenderData.pObjectUniformBuffer->Bind();
 		s_RenderData.pLightUniformBuffer->Bind();
+		s_RenderData.pSkyUniformBuffer->Bind();
 
 		/* 光栅状态先于材质绑定：着色器在第一次绑定时才 link（见 OpenGLShader::LazyLink），
 		 * 此时 cull face 等状态已设好，link 状态与首次绘制一致，不会被驱动重编译 */

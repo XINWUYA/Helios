@@ -115,6 +115,7 @@ namespace Helios
 			if (type == typeid(ReflectionProbeComponent)) return Icons::Id::ReflectionProbe;
 			if (type == typeid(PostProcessComponent))     return Icons::Id::PostProcess;
 			if (type == typeid(BloomComponent))           return Icons::Id::Bloom;
+			if (type == typeid(SkyComponent))             return Icons::Id::Sky;
 			if (type == typeid(AnimatorComponent))        return Icons::Id::Animation;
 			if (type == typeid(ScriptComponent))          return Icons::Id::ScriptComponent;
 
