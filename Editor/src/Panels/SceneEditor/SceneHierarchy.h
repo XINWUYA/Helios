@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <cstdint>
+#include <functional>
 #include <imgui.h>
 #include <map>
 #include <string>
@@ -49,9 +50,23 @@ namespace Helios
 		const Entity& GetSelectedEntity() const { return m_SelectedEntity; }
 		void SetSelectedEntity(const Entity& entity);
 
+		/* 双击行定位：把视口镜头带到这个实体上（跨面板能力，由所属 Layer 接线注入）。
+		 * 未注入时双击只是选中，面板不查 Layer。 */
+		using FocusEntityFunc = std::function<void(const Entity&)>;
+		void SetFocusEntityFunc(FocusEntityFunc func) { m_FocusEntityFunc = std::move(func); }
+
 		/* 属性面板：资源选中、跨面板入口、预览相机等只跟它有关的接口直接从这里取 */
 		SceneInspector& GetInspector() { return m_Inspector; }
 		const SceneInspector& GetInspector() const { return m_Inspector; }
+
+		/* 最近一帧每条实体行的矩形（自检 / 自动化验证用，业务代码别依赖） */
+		struct RowRect
+		{
+			Entity EntityHandle;
+			ImVec2 Min;
+			ImVec2 Max;
+		};
+		const std::vector<RowRect>& GetLastRowRects() const { return m_LastRowRects; }
 
 	private:
 		/* 父节点 -> 子节点。每帧由当前层级关系现算：父子关系只有 ParentComponent
@@ -175,6 +190,10 @@ namespace Helios
 		bool m_SceneDirty{ false };
 		/* 选中实体（层级树与属性面板共用这一份） */
 		Entity m_SelectedEntity;
+		/* 双击行定位（由所属 Layer 注入；未注入时双击无动作） */
+		FocusEntityFunc m_FocusEntityFunc;
+		/* 本帧画过的实体行矩形（见 GetLastRowRects） */
+		std::vector<RowRect> m_LastRowRects;
 		/* 属性面板 */
 		SceneInspector m_Inspector;
 		/* 本帧请求的挂接（拖拽） */

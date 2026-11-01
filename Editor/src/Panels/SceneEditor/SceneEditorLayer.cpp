@@ -84,6 +84,9 @@ namespace Helios
 		/* 属性面板的字段改动与撤销重做共用同一条历史 */
 		m_SceneHierarchy.SetCommandStack(&m_CommandStack);
 
+		/* 层级树双击 = 镜头定位到该实体（与 F 键同一套取景） */
+		m_SceneHierarchy.SetFocusEntityFunc([this](const Entity& entity) { FocusEntity(entity); });
+
 		/* 项目配了启动场景就打开：换 --project 打开另一个项目，第一屏就能看出区别 */
 		const ProjectConfig config = LoadProjectConfig();
 		if (!config.StartupScene.empty())
@@ -1393,22 +1396,28 @@ namespace Helios
 		}
 	}
 
-	/* F：把轨道中心聚焦到选中实体，并按包围球取景 */
+	/* F 键：把轨道中心聚焦到选中实体 */
 	void SceneEditorLayer::FocusSelectedEntity()
+	{
+		FocusEntity(m_SceneHierarchy.GetSelectedEntity());
+	}
+
+	/* 把轨道中心定位到实体，并按包围球取景（F 键与层级树双击共用） */
+	void SceneEditorLayer::FocusEntity(const Entity& entity)
 	{
 		PROFILE_FUNCTION();
 
-		Entity selected_entity = m_SceneHierarchy.GetSelectedEntity();
-		if (!selected_entity || m_pMainScene == nullptr || !selected_entity.HasComponent<TransformComponent>())
+		if (m_PlayMode != PlayMode::Edit || !entity || m_pMainScene == nullptr
+			|| !entity.HasComponent<TransformComponent>())
 			return;
 
-		const glm::mat4 world_transform = m_pMainScene->GetWorldTransform(selected_entity);
+		const glm::mat4 world_transform = m_pMainScene->GetWorldTransform(entity);
 		glm::vec3 focus_center = glm::vec3(world_transform[3]);
 		float focus_radius = 1.0f;
 
-		if (selected_entity.HasComponent<ModelComponent>())
+		if (entity.HasComponent<ModelComponent>())
 		{
-			const auto& model = selected_entity.GetComponent<ModelComponent>().m_Model;
+			const auto& model = entity.GetComponent<ModelComponent>().m_Model;
 			if (model != nullptr)
 			{
 				/* 模型局部 AABB → 世界：中心随变换走，半径按世界缩放折算（包围球近似） */

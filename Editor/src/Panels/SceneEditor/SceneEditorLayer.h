@@ -153,8 +153,10 @@ namespace Helios
 		/* 鼠标选中Entity时的响应 */
 		void CheckMouseSelectEntity();
 
-		/* F：把视角聚焦到选中实体（按模型包围球取景） */
+		/* F 键：把视角聚焦到选中实体 */
 		void FocusSelectedEntity();
+		/* 把视角聚焦到指定实体（按模型包围球取景）：F 键与层级树双击共用 */
+		void FocusEntity(const Entity& entity);
 
 		/* 编辑器相机 */
 		UniquePtr<EditorCamera> m_pEditorCamera{ nullptr };

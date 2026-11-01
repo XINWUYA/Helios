@@ -496,9 +496,10 @@ namespace Helios
 		/* 删除请求延后到遍历结束后执行：在 each 中销毁当前实体并不安全 */
 		Entity pending_delete{};
 
-		/* 展开状态的记账每帧重来：本帧画到的行就是底栏按钮能收起 / 展开的行 */
+		/* 逐帧记账从这里重来：本帧画到的行既决定底栏按钮能收起 / 展开什么，也是自检要量的行 */
 		m_TreeRows.clear();
 		m_HasOpenBranch = false;
+		m_LastRowRects.clear();
 
 		/* 一个面板 = 顶栏（搜索 + 类型筛选 + 新建）+ 实体树（子窗口，自己滚）+ 底栏（实体计数）。
 		 * 面板本身不带上下内边距：顶栏贴面板上边、底栏贴下边（栏高由栏自己说了算）；
@@ -1199,6 +1200,9 @@ namespace Helios
 		if (m_SelectedEntity == entity)
 			ImGui::PushStyleColor(ImGuiCol_HeaderHovered, EditorTheme::RowHoverSelected);
 
+		/* 行内容起点（缩进后的左沿）：折叠箭头就画在这一段，双击判定要按它让开 */
+		const float row_content_x = ImGui::GetCursorScreenPos().x;
+
 		/* 空标签：节点自带的名字文字不画，改为下面自绘"图标 + 名字"。
 		 * 必须传空字符串：格式化重载会显式传 label_end，而 ImGui 只在 label_end 为 NULL 时
 		 * 才隐藏 "##" 之后的内容。 */
@@ -1225,6 +1229,7 @@ namespace Helios
 		 * 此刻"上一项"还是树节点，行高从它身上取；右端按可视区算，不跟着横向滚动跑。 */
 		const ImVec2 row_min = ImGui::GetItemRectMin();
 		const ImVec2 row_max = ImGui::GetItemRectMax();
+		m_LastRowRects.push_back({ entity, row_min, row_max });
 		const float eye_side = ImMax(row_max.y - row_min.y, 1.0f);
 		const float row_right = TreeRowRight();
 		const ImVec2 eye_min(row_right - eye_side, row_min.y);
@@ -1233,10 +1238,17 @@ namespace Helios
 		/* 行的悬停（开关还没提交，HoveredId 不会被它抢走）：开关"悬停现形"要看它 */
 		const bool row_hovered = ImGui::IsItemHovered();
 
-		/* 点眼睛那一下不算选中这行（开关与选中是两件事）：开关方框里的按下留给开关自己 */
+		/* 点眼睛那一下不算选中这行（开关与选中是两件事）：开关方框里的按下留给开关自己。
+		 * 双击行（名字 / 图标那一段）= 让视口镜头定位过去；折叠箭头上那一下留给 ImGui 开合。 */
+		const float fold_arrow_right = row_content_x + ImGui::GetFontSize()
+			+ ImGui::GetStyle().FramePadding.x * 2.0f;
 		if (ImGui::IsItemClicked() && !ImGui::IsMouseHoveringRect(eye_min, eye_max))
 		{
 			SetSelectedEntity(entity);
+
+			if (m_FocusEntityFunc != nullptr && ImGui::GetMousePos().x >= fold_arrow_right
+				&& ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+				m_FocusEntityFunc(entity);
 		}
 
 		/* 拖拽源：把这个实体挂到别的节点下 */
