@@ -4,16 +4,19 @@
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Renderer.h"
+#include "RenderStatistics.h"
 #include "RenderView.h"
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/VirtualDevice/DeviceUniformBuffer.h>
 #include <Helios/Scene/Camera.h>
+#include <Helios/Scene/Scene.h>
 #include <Helios/Scene/Material.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/Light.h>
 #include <Helios/Scene/ShadowMap.h>
+#include <Helios/Renderer/PostProcess/PostProcessPasses.h>
 #include <cmath>
 
 namespace Helios
@@ -26,6 +29,8 @@ namespace Helios
 		constexpr uint8_t Object		= 1;
 		constexpr uint8_t Material		= 2;
 		constexpr uint8_t Light			= 3;
+		/* 草地范围：只有地面类材质声明这个块，用来在远处接管草色 */
+		constexpr uint8_t Grass			= 4;
 		/* 天空：大气散射与日月星只在天空类着色器里用，参数按视图每帧填一份 */
 		constexpr uint8_t Sky			= 5;
 	}
@@ -39,6 +44,9 @@ namespace Helios
 		glm::mat4 ViewMatrix{ 1 };
 		glm::mat4 ProjectionMatrix{ 1 };
 		glm::mat4 ViewProjectionMatrix{ 1 };
+		/* 运动矢量的基准：两帧都不带抖动，抖动位移不该被当成物体在动 */
+		glm::mat4 VelocityViewProjectionMatrix{ 1 };
+		glm::mat4 PrevVelocityViewProjectionMatrix{ 1 };
 		glm::vec3 ViewPos{ 0.0f };
 		uint32_t FrameCounter{ 0 }; /* 当前帧数计数 */
 	};
@@ -47,8 +55,17 @@ namespace Helios
 	struct alignas(16) ObjectUniformData
 	{
 		glm::mat4 LocalToWorldMat{ 1 };	/* 模型矩阵 */
+		glm::mat4 PrevLocalToWorldMat{ 1 };	/* 上一帧的模型矩阵：运动矢量用 */
 		uint32_t ObjectId{ 0 };				/* 模型ID，用于Picking */
 		float ReceiveShadow{ 1.0f };		/* 是否接受阴影（来自 ModelComponent，着色阶段乘进阴影因子） */
+	};
+
+	/* 草地范围：xy 是最小角的世界 xz，尺寸在 Size.xy。
+	 * 地面材质按「在不在这个矩形里」和「离相机多远」把自己的颜色换成草色。 */
+	struct alignas(16) GrassAreaData
+	{
+		glm::vec4 AreaMin{ 0.0f };    /* xy = 最小角 xz，zw 保留 */
+		glm::vec4 AreaSize{ 0.0f };   /* xy = 尺寸 xz（0 = 场景里没有草地） */
 	};
 
 	/* 天空常量：大气散射、日月盘与星空都在片元里现算，这里只装一帧的参数。
@@ -79,8 +96,7 @@ namespace Helios
 	constexpr float kSunAngularRadius = 0.008f;
 	constexpr float kMoonAngularRadius = 0.012f;
 
-	/* Per light uniform data */
-	constexpr uint32_t MAX_LIGHT_VIEW_PROJ = 4; /* 与 Uniforms.glsl 中的数组长度保持一致 */
+	/* Per light uniform data */	constexpr uint32_t MAX_LIGHT_VIEW_PROJ = 4; /* 与 Uniforms.glsl 中的数组长度保持一致 */
 	/* 点光立方体阴影的面数上限（与 Uniforms.glsl 中的数组长度保持一致） */
 	constexpr uint32_t MAX_PUNCTUAL_SHADOW_FACE = 6;
 	struct alignas(16) LightUniformData
@@ -134,6 +150,7 @@ namespace Helios
 		SharedPtr<DeviceUniformBuffer> pViewUniformBuffer;
 		SharedPtr<DeviceUniformBuffer> pObjectUniformBuffer;
 		SharedPtr<DeviceUniformBuffer> pLightUniformBuffer;
+		SharedPtr<DeviceUniformBuffer> pGrassAreaBuffer;
 		SharedPtr<DeviceUniformBuffer> pSkyUniformBuffer;
 		InstanceRing Instances;
 	};
@@ -177,6 +194,7 @@ namespace Helios
 		s_RenderData.pViewUniformBuffer = DeviceUniformBuffer::Create(sizeof(ViewUniformData), UniformBufferBindingPoint::View);
 		s_RenderData.pObjectUniformBuffer = DeviceUniformBuffer::Create(sizeof(ObjectUniformData), UniformBufferBindingPoint::Object);
 		s_RenderData.pLightUniformBuffer = DeviceUniformBuffer::Create(sizeof(LightUniformData), UniformBufferBindingPoint::Light);
+		s_RenderData.pGrassAreaBuffer = DeviceUniformBuffer::Create(sizeof(GrassAreaData), UniformBufferBindingPoint::Grass);
 		s_RenderData.pSkyUniformBuffer = DeviceUniformBuffer::Create(sizeof(SkyUniformData), UniformBufferBindingPoint::Sky);
 	}
 
@@ -187,6 +205,9 @@ namespace Helios
 		RenderQueryProfiler::Instance().EndFrame();
 		RenderQueryProfiler::Instance().PrepareQueryResult(m_GPUTimerRoot);
 
+		/* 上一帧的绘制已经全部提交：结算几何统计，与 GPU 计时器同一帧边界 */
+		RenderStatistics::Instance().EndFrame();
+
 		s_RenderData.ViewUniformData.FrameCounter++;
 		RenderQueryProfiler::Instance().BeginFrame(s_RenderData.ViewUniformData.FrameCounter);
 	}
@@ -195,6 +216,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 		RenderQueryProfiler::Instance().Release();
+		RenderStatistics::Instance().Reset();
 		s_RenderData.Instances = InstanceRing{};
 	}
 
@@ -224,15 +246,38 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 抖动只改动渲染用的投影矩阵；是否启用由后处理注册表回答，
+		 * 渲染器本身不认识具体效果 */
+		view->BeginTemporalFrame(PostProcess::UsesTemporalJitter(*view));
+
 		/* Fill view uniform buffer */
 		s_RenderData.ViewUniformData.ViewMatrix = view->GetCullingCamera()->GetViewMatrix();
-		s_RenderData.ViewUniformData.ProjectionMatrix = view->GetCullingCamera()->GetProjectionMatrix();
-		s_RenderData.ViewUniformData.ViewProjectionMatrix = view->GetCullingCamera()->GetViewProjectionMatrix();
+		s_RenderData.ViewUniformData.ProjectionMatrix = view->GetRenderProjectionMatrix();
+		s_RenderData.ViewUniformData.ViewProjectionMatrix = view->GetRenderViewProjectionMatrix();
+		s_RenderData.ViewUniformData.VelocityViewProjectionMatrix = view->GetVelocityViewProjectionMatrix();
+		s_RenderData.ViewUniformData.PrevVelocityViewProjectionMatrix = view->GetPrevVelocityViewProjectionMatrix();
 		s_RenderData.ViewUniformData.ViewPos = view->GetCullingCamera()->GetPosition();
 		s_RenderData.pViewUniformBuffer->SetData(&s_RenderData.ViewUniformData, sizeof(ViewUniformData));
 
 		/* 天空常量：跟着视图走（每个视图一份快照，探针烘焙也用当前帧这一份） */
 		SetSkyUniforms(view->GetSkyState());
+
+		/* 草地间接绘制：GPU 剔除要赶在这个视图开始画之前派发 */
+		if (const auto grass_scene = view->GetOwnerScene(); grass_scene != nullptr)
+			grass_scene->PrepareGrassIndirect(*view);
+
+		/* 草地的世界范围：地面材质靠它在远处接管草色 */
+		if (const auto grass_scene = view->GetOwnerScene(); grass_scene != nullptr)
+		{
+			glm::vec2 area_min(0.0f);
+			glm::vec2 area_size(0.0f);
+			grass_scene->GetPrimaryGrassArea(area_min, area_size);
+			SetGrassArea(area_min, area_size);
+		}
+		else
+		{
+			SetGrassArea(glm::vec2(0.0f), glm::vec2(0.0f));
+		}
 
 		/* 每个相机一个 GPU 作用域：多视图（场景相机 + 编辑器相机等）的 Pass
 		 * 在统计树里按相机分组，而不是全部平铺在帧根下 */
@@ -241,6 +286,14 @@ namespace Helios
 		RenderQueryProfiler::Instance().BeginGPUScope(view_label.c_str());
 		view->Execute();
 		RenderQueryProfiler::Instance().EndGPUScope();
+	}
+
+	void Renderer::SetGrassArea(const glm::vec2& area_min, const glm::vec2& area_size)
+	{
+		GrassAreaData data;
+		data.AreaMin = glm::vec4(area_min, 0.0f, 0.0f);
+		data.AreaSize = glm::vec4(area_size, 0.0f, 0.0f);
+		s_RenderData.pGrassAreaBuffer->SetData(&data, sizeof(GrassAreaData));
 	}
 
 	void Renderer::SetSkyUniforms(const Sky::SkyState& state)
@@ -261,13 +314,15 @@ namespace Helios
 		s_RenderData.pSkyUniformBuffer->SetData(&data, sizeof(SkyUniformData));
 	}
 
-	void Renderer::SetViewUniforms(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& view_pos)
-	{
+	void Renderer::SetViewUniforms(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& view_pos)	{
 		PROFILE_FUNCTION();
 
 		s_RenderData.ViewUniformData.ViewMatrix = view;
 		s_RenderData.ViewUniformData.ProjectionMatrix = projection;
 		s_RenderData.ViewUniformData.ViewProjectionMatrix = projection * view;
+		/* 这些调用方（探针烘焙）不做时域累积，前后两帧当成同一帧 */
+		s_RenderData.ViewUniformData.VelocityViewProjectionMatrix = projection * view;
+		s_RenderData.ViewUniformData.PrevVelocityViewProjectionMatrix = projection * view;
 		s_RenderData.ViewUniformData.ViewPos = view_pos;
 		s_RenderData.pViewUniformBuffer->SetData(&s_RenderData.ViewUniformData, sizeof(ViewUniformData));
 	}
@@ -280,6 +335,24 @@ namespace Helios
 	}
 
 	const VertexBufferLayout& Renderer::GetObjectInstanceLayout()
+	{
+		static const VertexBufferLayout layout = {
+			{ "a_InstanceMatrix0", BufferDataType::Float4 },
+			{ "a_InstanceMatrix1", BufferDataType::Float4 },
+			{ "a_InstanceMatrix2", BufferDataType::Float4 },
+			{ "a_InstanceMatrix3", BufferDataType::Float4 },
+			{ "a_InstanceParams", BufferDataType::Float4 },
+			/* 上一帧世界矩阵：运动矢量用，不参与着色 */
+			{ "a_InstancePrevMatrix0", BufferDataType::Float4 },
+			{ "a_InstancePrevMatrix1", BufferDataType::Float4 },
+			{ "a_InstancePrevMatrix2", BufferDataType::Float4 },
+			{ "a_InstancePrevMatrix3", BufferDataType::Float4 },
+		};
+		return layout;
+	}
+
+	/* 草的实例布局：草不需要上一帧矩阵（风在 GPU 上算），只保留前 5 个属性 */
+	const VertexBufferLayout& Renderer::GetGrassInstanceLayout()
 	{
 		static const VertexBufferLayout layout = {
 			{ "a_InstanceMatrix0", BufferDataType::Float4 },
@@ -333,20 +406,33 @@ namespace Helios
 
 	void Renderer::SubmitInstanced(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance, uint32_t instance_count,
-		const DrawParams* per_draw, uint32_t index_count)
+		const DrawParams* per_draw, uint32_t index_count, const VertexBufferLayout* instance_layout)
 	{
-		SubmitDraw(material, mesh_primitive, instance_buffer, first_instance, per_draw, index_count, instance_count);
+		SubmitDraw(material, mesh_primitive, instance_buffer, first_instance, per_draw, index_count, instance_count,
+			nullptr, instance_layout);
+	}
+
+	void Renderer::SubmitIndirect(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
+		const SharedPtr<DeviceVertexBuffer>& instance_buffer,
+		const SharedPtr<DeviceStorageBuffer>& args_buffer, const DrawParams* per_draw,
+		const VertexBufferLayout* instance_layout)
+	{
+		SubmitDraw(material, mesh_primitive, instance_buffer, 0, per_draw, 0, 0, args_buffer, instance_layout);
 	}
 
 	void Renderer::SubmitDraw(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance,
-		const DrawParams* per_draw, uint32_t index_count, uint32_t instance_count)
+		const DrawParams* per_draw, uint32_t index_count, uint32_t instance_count,
+		const SharedPtr<DeviceStorageBuffer>& indirect_args, const VertexBufferLayout* instance_layout)
 	{
 		PROFILE_FUNCTION();
 
+		const VertexBufferLayout& layout = (instance_layout != nullptr)
+			? *instance_layout : GetObjectInstanceLayout();
+
 		/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState */
 		if (instance_buffer != nullptr)
-			material->GetShader()->BindVertexArray(mesh_primitive.VertexArray, GetObjectInstanceLayout());
+			material->GetShader()->BindVertexArray(mesh_primitive.VertexArray, layout);
 		else
 			material->GetShader()->BindVertexArray(mesh_primitive.VertexArray);
 
@@ -354,6 +440,7 @@ namespace Helios
 		s_RenderData.pViewUniformBuffer->Bind();
 		s_RenderData.pObjectUniformBuffer->Bind();
 		s_RenderData.pLightUniformBuffer->Bind();
+		s_RenderData.pGrassAreaBuffer->Bind();
 		s_RenderData.pSkyUniformBuffer->Bind();
 
 		/* 光栅状态先于材质绑定：着色器在第一次绑定时才 link（见 OpenGLShader::LazyLink），
@@ -420,20 +507,43 @@ namespace Helios
 
 		mesh_primitive.VertexArray->Bind();
 
-		if (instance_buffer != nullptr)
+
+		if (indirect_args != nullptr && instance_buffer != nullptr)
 		{
-			const uint32_t offset = first_instance * GetObjectInstanceLayout().GetStride();
+			/* 索引数与实例数都在参数缓冲里：一笔画完，CPU 不知道这次画了多少 */
+			m_pRenderAPI->DrawIndexedIndirect(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray,
+				instance_buffer, 0, indirect_args, 0, layout);
+		}
+		else if (instance_buffer != nullptr)
+		{
+			const uint32_t offset = first_instance * layout.GetStride();
 			if (mesh_primitive.VertexArray->GetIndexBuffer())
 				m_pRenderAPI->DrawIndexedInstanced(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray,
-					instance_buffer, offset, instance_count, GetObjectInstanceLayout(), index_count);
+					instance_buffer, offset, instance_count, layout, index_count);
 			else
 				m_pRenderAPI->DrawArraysInstanced(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray,
-					instance_buffer, offset, instance_count, GetObjectInstanceLayout());
+					instance_buffer, offset, instance_count, layout);
 		}
 		else if (mesh_primitive.VertexArray->GetIndexBuffer())
 			m_pRenderAPI->DrawIndexed(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray, index_count);
 		else
 			m_pRenderAPI->DrawArrays(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray);
+
+		/* 渲染统计：元素数取索引数（索引绘制）或顶点数，实例化乘实例数；
+		 * 间接绘制的元素数在参数块里由 GPU 读，这里只记一笔调用 */
+		if (indirect_args != nullptr && instance_buffer != nullptr)
+		{
+			RenderStatistics::Instance().AddDrawCall(mesh_primitive.PrimitiveType, 0, 0, true);
+		}
+		else
+		{
+			const SharedPtr<IndexBuffer>& index_buffer = mesh_primitive.VertexArray->GetIndexBuffer();
+			const uint32_t element_count = index_buffer != nullptr
+				? (index_count > 0 ? index_count : index_buffer->GetCount())
+				: mesh_primitive.VertexArray->GetVertexCount();
+			RenderStatistics::Instance().AddDrawCall(mesh_primitive.PrimitiveType, element_count,
+				instance_buffer != nullptr ? instance_count : 0, false);
+		}
 
 		material->Unbind();
 		mesh_primitive.VertexArray->Unbind();
@@ -494,6 +604,70 @@ namespace Helios
 		BuiltinAsset<DeviceShader> s_SkinComputeShader("Shaders/Compute/GPUSkin.glsl");
 	}
 
+	namespace
+	{
+		/* 草地 GPU 放置：第一次用到时加载，之后复用 */
+		BuiltinAsset<DeviceShader> s_GrassPlacementShader("Shaders/Compute/GrassPlacement.glsl");
+	}
+
+	namespace
+	{
+		/* 草地间接绘制：重置参数 / 剔除压实，第一次用到时加载 */
+		BuiltinAsset<DeviceShader> s_GrassArgsResetShader("Shaders/Compute/GrassIndirectReset.glsl");
+		BuiltinAsset<DeviceShader> s_GrassCullShader("Shaders/Compute/GrassIndirectCull.glsl");
+	}
+
+	bool Renderer::DispatchGrassArgsReset(const SharedPtr<DeviceStorageBuffer>& args, uint32_t index_count)
+	{
+		if (m_pRenderAPI == nullptr || args == nullptr || !m_pRenderAPI->SupportsCompute())
+			return false;
+
+		const SharedPtr<DeviceShader> shader = s_GrassArgsResetShader.Get();
+		if (shader == nullptr || !shader->IsCompute())
+			return false;
+
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = { { 3, args } };
+		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, &index_count, sizeof(index_count), 1);
+	}
+
+	bool Renderer::DispatchGrassCull(const SharedPtr<DeviceStorageBuffer>& source,
+		const SharedPtr<DeviceStorageBuffer>& target, const SharedPtr<DeviceStorageBuffer>& args,
+		const void* param_data, uint32_t param_size, uint32_t instance_count)
+	{
+		if (m_pRenderAPI == nullptr || source == nullptr || target == nullptr || args == nullptr
+			|| instance_count == 0 || !m_pRenderAPI->SupportsCompute())
+			return false;
+
+		const SharedPtr<DeviceShader> shader = s_GrassCullShader.Get();
+		if (shader == nullptr || !shader->IsCompute())
+			return false;
+
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
+			{ 1, source }, { 2, target }, { 3, args },
+		};
+		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
+		const uint32_t group_count = (instance_count + group_size - 1) / group_size;
+		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);
+	}
+
+	bool Renderer::DispatchGrassPlacement(const SharedPtr<DeviceStorageBuffer>& instances,
+		const void* param_data, uint32_t param_size, uint32_t instance_count)
+	{
+		if (m_pRenderAPI == nullptr || instances == nullptr || instance_count == 0
+			|| !m_pRenderAPI->SupportsCompute())
+			return false;
+
+		const SharedPtr<DeviceShader> shader = s_GrassPlacementShader.Get();
+		if (shader == nullptr || !shader->IsCompute())
+			return false;
+
+		/* 绑定点跟 GrassPlacement.glsl 对齐：1 号是实例数据，参数块在 4 号 */
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = { { 1, instances } };
+		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
+		const uint32_t group_count = (instance_count + group_size - 1) / group_size;
+		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);
+	}
+
 	bool Renderer::DispatchSkin(const SharedPtr<DeviceStorageBuffer>& palette,
 		const SharedPtr<DeviceStorageBuffer>& bind_vertices,
 		const SharedPtr<DeviceStorageBuffer>& weights,
@@ -525,6 +699,7 @@ namespace Helios
 	{
 		static ObjectUniformData data;
 		data.LocalToWorldMat = mesh_object.Local2WorldMat;
+		data.PrevLocalToWorldMat = mesh_object.PrevLocal2WorldMat;
 		data.ObjectId = mesh_object.ObjectId;
 		data.ReceiveShadow = mesh_object.ReceiveShadow ? 1.0f : 0.0f;
 		s_RenderData.pObjectUniformBuffer->SetData(&data, sizeof(ObjectUniformData));

@@ -61,6 +61,10 @@ namespace Helios
 	struct FrameGraphTexture
 	{
 		SharedPtr<DeviceTexture> Texture;
+		/* 外部导入的纹理：由导入方持有与创建，Create 不取池、Destroy 不还池。
+		 * 跨帧的时域历史（TAA 的上一帧颜色）走这条 —— 池子按描述分池、同帧先到先得，
+		 * 历史纹理放进去会被别的 Pass 抢走。 */
+		bool Imported{ false };
 
 		/* 描述 */
 		struct Descriptor

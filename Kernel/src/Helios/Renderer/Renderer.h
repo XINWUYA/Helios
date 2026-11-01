@@ -32,11 +32,26 @@ namespace Helios
 		/* 绘制一个视图 */
 		static void RenderAView(RenderView* view);
 
+		/* 草地的世界范围（xz 最小角与尺寸）：地面材质据此在远处接管草色。
+		 * 尺寸为 0 表示场景里没有草地 */
+		static void SetGrassArea(const glm::vec2& area_min, const glm::vec2& area_size);
+
 		/* 指定ViewUniformBuffer */
 		static void SetViewUniforms(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& view_pos);
 
 		/* 填充天空常量：日月方向、大气系数与曝光，天空类着色器只读它 */
 		static void SetSkyUniforms(const Sky::SkyState& state);
+
+		/* 草地间接绘制：先把参数块重置成「N 个索引 / 0 实例」，再由剔除那一步累加实例数 */
+		static bool DispatchGrassArgsReset(const SharedPtr<class DeviceStorageBuffer>& args, uint32_t index_count);
+		/* 草地 GPU 剔除 + 实例压实：可见叶片抄进目标缓冲，实例数写进参数块 */
+		static bool DispatchGrassCull(const SharedPtr<class DeviceStorageBuffer>& source,
+			const SharedPtr<class DeviceStorageBuffer>& target, const SharedPtr<class DeviceStorageBuffer>& args,
+			const void* param_data, uint32_t param_size, uint32_t instance_count);
+
+		/* 草地 GPU 放置：一次派发把整片草地的叶片实例算出来。运行期不支持计算着色器时返回 false */
+		static bool DispatchGrassPlacement(const SharedPtr<class DeviceStorageBuffer>& instances,
+			const void* param_data, uint32_t param_size, uint32_t instance_count);
 
 		/* per_draw：单次绘制的覆盖参数（IBL 这类"每次绘制不同"的绑定）。
 	 * 只写当前绑定的 Shader 与纹理、不落材质对象 —— 共享材质因此保持只读。 */
@@ -58,8 +73,11 @@ namespace Helios
 
 		static SharedPtr<DeviceVertexArray> GetFullScreenVertexArray();
 
-		/* 实例数据布局：属性名与着色器里的 a_InstanceMatrix0..3 / a_InstanceParams 对上 */
+		/* 实例数据布局：属性名与着色器里的 a_InstanceMatrix0..3 / a_InstanceParams / a_InstancePrevMatrix0..3 对上 */
 		static const VertexBufferLayout& GetObjectInstanceLayout();
+		/* 草叶用的紧凑布局：只有 4 列基向量 + 参数（草不需要上一帧矩阵，
+		 * 每株省 64 字节，几十万株就差出十几兆） */
+		static const VertexBufferLayout& GetGrassInstanceLayout();
 
 		/* 一段实例数据在本帧实例缓冲里的位置 */
 		struct InstanceRange
@@ -70,16 +88,25 @@ namespace Helios
 		/* 把一批实例数据追加进本帧的实例缓冲，各 Pass 共用，不再每次新建缓冲 */
 		static InstanceRange UploadObjectInstances(const ObjectInstanceData* instances, uint32_t count);
 
+		/* 间接提交：实例数与索引数从 args 缓冲里读（GPU 剔除的产物），一笔画完 */
+		static void SubmitIndirect(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
+			const SharedPtr<DeviceVertexBuffer>& instance_buffer,
+			const SharedPtr<class DeviceStorageBuffer>& args_buffer, const DrawParams* per_draw = nullptr,
+			const VertexBufferLayout* instance_layout = nullptr);
+
 		/* 实例化提交：同材质同网格的一批对象合成一笔，实例数据从 first_instance 起连续 count 条 */
 		static void SubmitInstanced(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance, uint32_t instance_count,
-			const DrawParams* per_draw = nullptr, uint32_t index_count = 0);
+			const DrawParams* per_draw = nullptr, uint32_t index_count = 0,
+			const VertexBufferLayout* instance_layout = nullptr);
 
 	private:
 		/* 提交的公共实现：实例缓冲为空就是普通绘制 */
 		static void SubmitDraw(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance,
-			const DrawParams* per_draw, uint32_t index_count, uint32_t instance_count = 1);
+			const DrawParams* per_draw, uint32_t index_count, uint32_t instance_count = 1,
+			const SharedPtr<class DeviceStorageBuffer>& indirect_args = nullptr,
+			const VertexBufferLayout* instance_layout = nullptr);
 	public:
 
 		/* 全屏 Pass 的材质：不测深度也不写；additive 打开 One/One 加法混合 */

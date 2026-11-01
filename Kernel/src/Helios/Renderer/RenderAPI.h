@@ -57,6 +57,19 @@ namespace Helios
 		{
 			DrawIndexed(type, vertex_array, index_count, index_offset);
 		}
+		/* 间接绘制：参数从显存里读（count / instanceCount / firstIndex / baseVertex / baseInstance，
+		 * 5 个 uint32）。Metal 与 GL 的这套布局一致，GPU 侧写一次就能两边通用。
+		 * 索引数（第 0 个）与实例数（第 1 个）都由参数块给出，两个后端一致。
+		 * 后端不支持时退回单实例绘制，画面不丢。 */
+		virtual void DrawIndexedIndirect(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+			const SharedPtr<DeviceVertexBuffer>& /*instance_buffer*/, uint32_t /*instance_offset_bytes*/,
+			const SharedPtr<class DeviceStorageBuffer>& /*args_buffer*/, uint32_t /*args_offset_bytes*/,
+			const VertexBufferLayout& /*instance_layout*/)
+		{
+			/* 两个后端都从参数块里取索引数与实例数，这里退回单实例绘制 */
+			DrawIndexed(type, vertex_array);
+		}
+
 		/* Flush */
 		virtual void Flush() = 0;
 

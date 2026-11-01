@@ -1,6 +1,7 @@
 #include "Pch.h"
 #include "PostProcessPasses.h"
 #include "Effects/Bloom.h"
+#include "Effects/Taa.h"
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/RenderView.h>
@@ -24,6 +25,21 @@ namespace Helios
 			for (const EffectDesc& effect : PostProcessEffectRegistry::Instance().All())
 			{
 				if (effect.IsEnabled != nullptr && effect.IsEnabled(state))
+					return true;
+			}
+			return false;
+		}
+
+		bool UsesTemporalJitter(const RenderView& render_view)
+		{
+			/* 调试视图不跑后处理，也就不抖 */
+			if (render_view.GetDebugViewMode() != DebugViewMode::None)
+				return false;
+
+			const PostProcessState& state = render_view.GetPostProcessState();
+			for (const EffectDesc& effect : PostProcessEffectRegistry::Instance().All())
+			{
+				if (effect.UsesTemporalJitter != nullptr && effect.UsesTemporalJitter(state))
 					return true;
 			}
 			return false;
@@ -94,6 +110,9 @@ namespace Helios
 			{
 				BuiltinPostProcessRegistration()
 				{
+					/* TAA 排在 Bloom 之前（Phase::Temporal）：泛光吃的是降噪后的颜色，
+					 * 高光不会逐帧跳 */
+					RegisterTaaEffect();
 					RegisterBloomEffect();
 				}
 			};

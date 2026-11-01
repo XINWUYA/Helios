@@ -2,6 +2,7 @@
 #include "EditorSettings.h"
 #include "UI/EditorTheme.h"
 #include "Helios/Renderer/Renderer.h"
+#include "Helios/Scene/GrassField.h"
 #include "Helios/Scene/SkeletonModel.h"
 #include <cstdlib>
 #include <fstream>
@@ -22,6 +23,8 @@ namespace Helios::EditorSettings
 		State state;
 		state.MSAA = Renderer::IsMSAAEnabled();
 		state.GPUSkinning = SkeletonModel::IsGlobalGpuSkinningEnabled();
+		state.GpuGrassPlacement = GrassField::IsGlobalGpuPlacementEnabled();
+		state.GpuGrassIndirect = GrassField::IsGlobalIndirectDrawEnabled();
 
 		std::ifstream file(SettingsPath());
 		for (std::string line; std::getline(file, line); )
@@ -40,6 +43,10 @@ namespace Helios::EditorSettings
 				state.MSAA = value;
 			else if (key == "GPUSkinning")
 				state.GPUSkinning = value;
+			else if (key == "GpuGrassPlacement")
+				state.GpuGrassPlacement = value;
+			else if (key == "GpuGrassIndirect")
+				state.GpuGrassIndirect = value;
 			else if (key == "AutoReloadScripts")
 				state.AutoReloadScripts = value;
 			else if (key == "AutoCompileScripts")
@@ -54,8 +61,9 @@ namespace Helios::EditorSettings
 		if (state.Theme < 0 || state.Theme >= EditorTheme::ThemeCount())
 			state.Theme = 0;
 
-		EDITOR_LOG_INFO("Editor settings: MSAA {}, GPU skinning {}, theme {}",
-			state.MSAA ? "on" : "off", state.GPUSkinning ? "on" : "off", state.Theme);
+		EDITOR_LOG_INFO("Editor settings: MSAA {}, GPU skinning {}, GPU grass {}, theme {}",
+			state.MSAA ? "on" : "off", state.GPUSkinning ? "on" : "off",
+			state.GpuGrassPlacement ? "on" : "off", state.Theme);
 		return state;
 	}
 
@@ -70,6 +78,8 @@ namespace Helios::EditorSettings
 
 		file << "MSAA=" << (state.MSAA ? 1 : 0) << "\n";
 		file << "GPUSkinning=" << (state.GPUSkinning ? 1 : 0) << "\n";
+		file << "GpuGrassPlacement=" << (state.GpuGrassPlacement ? 1 : 0) << "\n";
+		file << "GpuGrassIndirect=" << (state.GpuGrassIndirect ? 1 : 0) << "\n";
 		file << "AutoReloadScripts=" << (state.AutoReloadScripts ? 1 : 0) << "\n";
 		file << "AutoCompileScripts=" << (state.AutoCompileScripts ? 1 : 0) << "\n";
 		file << "AutoReloadShaders=" << (state.AutoReloadShaders ? 1 : 0) << "\n";
@@ -80,6 +90,8 @@ namespace Helios::EditorSettings
 	{
 		Renderer::SetMSAAEnabled(state.MSAA);
 		SkeletonModel::SetGlobalGpuSkinningEnabled(state.GPUSkinning);
+		GrassField::SetGlobalGpuPlacementEnabled(state.GpuGrassPlacement);
+		GrassField::SetGlobalIndirectDrawEnabled(state.GpuGrassIndirect);
 		EditorTheme::SetTheme(state.Theme);
 	}
 }

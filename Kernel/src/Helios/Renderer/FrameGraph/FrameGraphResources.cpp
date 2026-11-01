@@ -51,6 +51,10 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 外部导入的纹理由导入方创建好了，渲染图不碰 */
+		if (Imported)
+			return;
+
 		const TextureDesc texture_desc{ desc.Width, desc.Height, desc.Depth, desc.MipLevels, desc.Samples,
 			desc.TextureFormat, desc.SamplerType, usage };
 
@@ -70,6 +74,10 @@ namespace Helios
 	void FrameGraphTexture::Destroy(const std::string& /*name*/, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache)
 	{
 		PROFILE_FUNCTION();
+
+		/* 导入的纹理不属于池子，也不该在这里放手（下一帧还要接着用） */
+		if (Imported)
+			return;
 
 		if (cache && Texture)
 		{

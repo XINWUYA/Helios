@@ -217,6 +217,16 @@ namespace Helios
 		return m_ResourceCache.AcquireFrameBuffer(pass_name + "_FrameBuffer", desc);
 	}
 
+	/* 导入外部纹理：资源本体直接指向调用方给的那张，并打上"别还池"的标记 */
+	FrameGraphResourceHandleTyped<FrameGraphTexture> FrameGraph::ImportTexture(const std::string& name,
+		const SharedPtr<DeviceTexture>& texture)
+	{
+		auto resource = CreateSharedPtr<Resource<FrameGraphTexture>>(name, FrameGraphTexture::Descriptor{});
+		resource->GetResourceMutable().Texture = texture;
+		resource->GetResourceMutable().Imported = true;
+		return FrameGraphResourceHandleTyped<FrameGraphTexture>(AddResourceInternal(resource));
+	}
+
 	/* 重置：黑板跟着清空，上一帧的句柄不能留到这一帧 */
 	void FrameGraph::Reset() noexcept
 	{

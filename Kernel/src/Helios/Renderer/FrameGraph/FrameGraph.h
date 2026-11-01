@@ -42,6 +42,11 @@ namespace Helios
 			return FrameGraphResourceHandleTyped<ResourceType>(AddResourceInternal(resource));
 		}
 
+		/* 导入外部纹理：Create 不取池、Destroy 不还池，生命周期与内容都归导入方。
+		 * 跨帧的时域历史只能这样进图 —— 池子按描述分池，历史纹理随时会被别的 Pass 抢走。 */
+		FrameGraphResourceHandleTyped<FrameGraphTexture> ImportTexture(const std::string& name,
+			const SharedPtr<class DeviceTexture>& texture);
+
 		/* 为RenderPass绑定输入资源 */
 		template<typename ResourceType>
 		void BindInputResource(const SharedPtr<RenderPassNode>& render_pass_node, FrameGraphResourceHandleTyped<ResourceType> handle, typename ResourceType::Usage usage = ResourceType::DefaultReadUsage)

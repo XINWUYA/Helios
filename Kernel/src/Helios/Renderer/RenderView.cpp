@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "RenderView.h"
 #include "FrameGraph/FrameGraph.h"
+#include <Helios/VirtualDevice/DeviceTexture.h>
 #include <Helios/Scene/MeshInstanceIndex.h>
 #include <Helios/Scene/Scene.h>
 #include <Helios/Scene/Camera.h>
@@ -213,6 +214,9 @@ namespace Helios
 		/* 收集当前RenderView可见的对象 */
 		PrepareVisibleObjects();
 
+		/* 补上一帧的世界矩阵：运动矢量靠它区分"相机在动"和"物体自己在动" */
+		PreparePreviousTransforms();
+
 		/* 收集光源信息并准备阴影（含纹理描述与VP矩阵） */
 		PrepareLights();
 
@@ -383,6 +387,17 @@ namespace Helios
 			}
 			return false;
 		}
+	}
+
+	/* 探针捕获的对象表：按层收集，天空按与主视图同一套口径补（内建球）。
+	 * 探针只看自己那几层，场景里的天空往往只是组件、没有网格，所以必须在这里补。 */
+	void RenderView::CollectProbeCaptureObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const
+	{
+		CollectVisibleMeshObjects(culling_mask, out);
+
+		const auto owner_scene = m_pOwnerScene.lock();
+		if (owner_scene && owner_scene->HasActiveSky() && !HasSkyObject(out))
+			AppendBuiltinSky(out);
 	}
 
 	/* 视锥体剔除：空间索引按视锥查候选，再逐个组装成可绘制对象 */
@@ -621,6 +636,50 @@ namespace Helios
 			|| !m_pShadowMapManager->GetPunctualShadowMaps().empty();
 	}
 
+	/* 给本帧可见对象补上一帧的世界矩阵：TAA 没开就都填当前值（速度 0），开了才维护跨帧表。
+	 * 一个模型的多个网格段共享同一个矩阵，按 ObjectId 存一份就够 */
+	void RenderView::PreparePreviousTransforms()
+	{
+		PROFILE_FUNCTION();
+
+		if (!m_IsTemporalEnabled)
+		{
+			for (VisibleMeshObject& object : m_VisibleMeshObjects)
+				object.PrevLocal2WorldMat = object.Local2WorldMat;
+			m_PrevWorldTransforms.clear();
+			m_CurrentWorldTransforms.clear();
+			m_PrevTransformFrame = 0;
+			return;
+		}
+
+		/* 换了新的一帧才把上一帧记下的那份翻上来当基准。同一帧被渲染第二次
+		 * （面板重绘、抓图）时不能翻，否则"上一帧"就成了本帧，速度全变 0 */
+		const auto owner_scene = m_pOwnerScene.lock();
+		const uint32_t frame_index = owner_scene != nullptr ? owner_scene->GetFrameIndex() : 0;
+		const bool new_frame = frame_index != m_PrevTransformFrame;
+		if (new_frame)
+		{
+			m_PrevWorldTransforms.swap(m_CurrentWorldTransforms);
+			m_PrevTransformFrame = frame_index;
+		}
+
+		for (VisibleMeshObject& object : m_VisibleMeshObjects)
+		{
+			const auto it = m_PrevWorldTransforms.find(object.ObjectId);
+			/* 新出现的对象没有上一帧，速度按 0 算（拿当前值当上一帧） */
+			object.PrevLocal2WorldMat = (it != m_PrevWorldTransforms.end())
+				? it->second : object.Local2WorldMat;
+		}
+
+		if (!new_frame)
+			return;
+
+		m_CurrentWorldTransforms.clear();
+		m_CurrentWorldTransforms.reserve(m_VisibleMeshObjects.size());
+		for (const VisibleMeshObject& object : m_VisibleMeshObjects)
+			m_CurrentWorldTransforms[object.ObjectId] = object.Local2WorldMat;
+	}
+
 	namespace
 	{
 		/* 场景级维护：推进探针烘焙状态机并挂接烘焙 Pass —— 与渲染管线选择无关，两种管线共用。
@@ -637,9 +696,124 @@ namespace Helios
 		}
 	}
 
-	/* 更新FrameGraph */
-	void RenderView::UpdateFrameGraph()
+	namespace
 	{
+		/* Halton(2,3) 前 16 项，减 0.5 落到 [-0.5, 0.5)，单位是像素。
+		 * 项数就是收敛时间：再多几项细节略好，残影也更久。 */
+		const glm::vec2 kJitterSequence[16] =
+		{
+			{  0.0000f, -0.1667f }, { -0.2500f,  0.1667f }, {  0.2500f, -0.3889f }, { -0.3750f, -0.0556f },
+			{  0.1250f,  0.2778f }, { -0.1250f, -0.2778f }, {  0.3750f,  0.0556f }, { -0.4375f,  0.3889f },
+			{  0.0625f, -0.4630f }, { -0.1875f, -0.1296f }, {  0.3125f,  0.2037f }, { -0.3125f, -0.3519f },
+			{  0.1875f, -0.0185f }, { -0.0625f,  0.3148f }, {  0.4375f, -0.2407f }, { -0.4688f,  0.0926f },
+		};
+	}
+
+	void RenderView::BeginTemporalFrame(bool jitter_enabled)
+	{
+		PROFILE_FUNCTION();
+
+		m_IsTemporalEnabled = jitter_enabled && m_pOwnerCamera != nullptr;
+
+		glm::vec2 jitter(0.0f);
+		if (jitter_enabled && m_pOwnerCamera != nullptr
+			&& m_ViewportRegion.Width > 0 && m_ViewportRegion.Height > 0)
+		{
+			jitter = kJitterSequence[m_JitterIndex % 16];
+			m_JitterIndex = (m_JitterIndex + 1) % 16;
+		}
+		else
+		{
+			/* 关掉时相位归零、历史作废：下次打开的第一帧必须吃当前帧 */
+			m_JitterIndex = 0;
+			m_IsHistoryValid = false;
+		}
+		m_JitterPixels = jitter;
+
+		if (m_pOwnerCamera == nullptr)
+		{
+			m_RenderProjection = glm::mat4(1.0f);
+			m_RenderViewProjection = glm::mat4(1.0f);
+			m_VelocityViewProjection = glm::mat4(1.0f);
+			m_PrevVelocityViewProjection = glm::mat4(1.0f);
+			return;
+		}
+
+		/* 上一帧的渲染矩阵先留下来：本帧的抖动与相机都变了，算完再取就没有"上一帧"了。
+		 * 第 1 帧这里是单位矩阵，速度会很大，但历史本来就无效，当帧输出不受影响 */
+		const glm::mat4 previous_view_projection = m_RenderViewProjection;
+		const glm::mat4 previous_velocity_view_projection = m_VelocityViewProjection;
+
+		/* 亚像素偏移加在投影矩阵的 [2][0] / [2][1]：透视下 NDC 偏移 = -m[2][0]，
+		 * 所以取负号才是"右移几像素" */
+		m_RenderProjection = m_pOwnerCamera->GetProjectionMatrix();
+		if (jitter != glm::vec2(0.0f))
+		{
+			m_RenderProjection[2][0] = -2.0f * jitter.x / static_cast<float>(m_ViewportRegion.Width);
+			m_RenderProjection[2][1] = -2.0f * jitter.y / static_cast<float>(m_ViewportRegion.Height);
+		}
+		m_RenderViewProjection = m_RenderProjection * m_pOwnerCamera->GetViewMatrix();
+		/* 运动矢量的基准不带抖动：抖动是同一表面点换了个像素，算进位移里会让
+		 * 每个像素每帧都"在动"，历史被采到邻像素，反倒更抖 */
+		m_VelocityViewProjection = m_pOwnerCamera->GetViewProjectionMatrix();
+
+		/* 相机瞬移判定：上一帧远平面的四个角，用本帧矩阵投回去，屏幕位移超过两屏就当成不连续。
+		 * 正常飞行时这四个角基本不动，只有真正的跳变才会触发 */
+		if (m_IsHistoryValid && jitter_enabled)
+		{
+			const glm::mat4 inverse_prev = glm::inverse(previous_view_projection);
+			float max_shift = 0.0f;
+			for (int corner_y = -1; corner_y <= 1 && max_shift <= 2.0f; corner_y += 2)
+			{
+				for (int corner_x = -1; corner_x <= 1 && max_shift <= 2.0f; corner_x += 2)
+				{
+					const glm::vec4 world = inverse_prev * glm::vec4(
+						static_cast<float>(corner_x), static_cast<float>(corner_y), 0.0f, 1.0f);
+					const glm::vec4 clip = m_RenderViewProjection * (world / world.w);
+					if (clip.w <= 1.0e-6f)
+					{
+						max_shift = 1.0e9f;
+						break;
+					}
+					const glm::vec2 ndc = glm::vec2(clip) / clip.w;
+					max_shift = std::max(max_shift,
+						glm::length(ndc - glm::vec2(static_cast<float>(corner_x), static_cast<float>(corner_y))));
+				}
+			}
+			if (max_shift > 2.0f)
+				m_IsHistoryValid = false;
+		}
+
+		/* 本帧运动矢量用的上一帧基准 */
+		m_PrevVelocityViewProjection = previous_velocity_view_projection;
+	}
+
+	SharedPtr<DeviceTexture> RenderView::AcquireHistory(const std::string& key, uint32_t width, uint32_t height,
+		TextureFormat format)
+	{
+		PROFILE_FUNCTION();
+
+		HistoryTexture& entry = m_HistoryTextures[key];
+		if (entry.Texture != nullptr && entry.Width == width && entry.Height == height && entry.Format == format)
+			return entry.Texture;
+
+		TextureDesc desc;
+		desc.Width = width;
+		desc.Height = height;
+		desc.Format = format;
+		desc.Usage = TextureUsage::ColorAttachment | TextureUsage::Sampleable;
+		entry.Texture = DeviceTexture::Create("History_" + key, desc);
+		entry.Width = width;
+		entry.Height = height;
+		entry.Format = format;
+
+		/* 尺寸或格式变了，旧内容对不上新画面 */
+		m_IsHistoryValid = false;
+		return entry.Texture;
+	}
+
+	/* 更新FrameGraph */
+	void RenderView::UpdateFrameGraph()	{
 		PROFILE_FUNCTION();
 
 		/* 重置FrameGraph */

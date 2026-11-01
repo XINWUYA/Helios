@@ -221,7 +221,6 @@ namespace Helios
 		void DrawDebugViewMenuItems(EditorContext& context)
 		{
 			DebugViewMenu::DrawItems(context.GetDebugViewMode(),
-				context.GetRenderPipeline() == RenderPipeline::Deferred,
 				[&context](DebugViewMode mode) { context.SetDebugViewMode(mode); });
 		}
 
@@ -591,7 +590,7 @@ namespace Helios
 						EditorSettings::Save(m_Settings);
 					}
 					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("开：场景通道 4x 多重采样，物体边缘更平滑；关：退回单采样");
+						ImGui::SetTooltip("开：场景通道 4x 多重采样，物体边缘更平滑；关：退回单采样。\n场景里开了 TAA 时，几何通道恒为单采样（TAA 的深度要能采样）");
 
 					ImGui::Separator();
 
@@ -604,6 +603,28 @@ namespace Helios
 					}
 					if (ImGui::IsItemHovered())
 						ImGui::SetTooltip("开：顶点由计算着色器算；关：退回 CPU 蒙皮");
+
+					ImGui::Separator();
+
+					bool gpu_grass = m_Settings.GpuGrassPlacement;
+					if (ImGui::MenuItem("GPU Grass Placement", nullptr, &gpu_grass))
+					{
+						m_Settings.GpuGrassPlacement = gpu_grass;
+						EditorSettings::Apply(m_Settings);
+						EditorSettings::Save(m_Settings);
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("开：草叶位置由计算着色器生成；关：退回 CPU 逐株生成。要计算着色器支持");
+
+					bool gpu_grass_indirect = m_Settings.GpuGrassIndirect;
+					if (ImGui::MenuItem("GPU Grass Indirect Draw", nullptr, &gpu_grass_indirect))
+					{
+						m_Settings.GpuGrassIndirect = gpu_grass_indirect;
+						EditorSettings::Apply(m_Settings);
+						EditorSettings::Save(m_Settings);
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("开：草地做 GPU 剔除后一笔间接绘制；关：逐块提交。要计算着色器支持");
 
 					ImGui::EndMenu();
 				}

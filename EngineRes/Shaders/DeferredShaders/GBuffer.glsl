@@ -13,6 +13,11 @@ layout(location = 6) in vec4 a_InstanceMatrix1;
 layout(location = 7) in vec4 a_InstanceMatrix2;
 layout(location = 8) in vec4 a_InstanceMatrix3;
 layout(location = 9) in vec4 a_InstanceParams;
+/* 上一帧的世界矩阵：只给运动矢量用 */
+layout(location = 10) in vec4 a_InstancePrevMatrix0;
+layout(location = 11) in vec4 a_InstancePrevMatrix1;
+layout(location = 12) in vec4 a_InstancePrevMatrix2;
+layout(location = 13) in vec4 a_InstancePrevMatrix3;
 
 #include "../Builtin/Uniforms.glsl"
 
@@ -25,6 +30,9 @@ struct SVextex2Frag
 	vec3 Tangent;
 	float ObjectId;
 	float ReceiveShadow;
+	/* 当前帧与上一帧的裁剪空间位置：片元里相除才算得出屏幕位移 */
+	vec4 CurClip;
+	vec4 PrevClip;
 };
 
 out SVextex2Frag vert2frag;
@@ -33,10 +41,17 @@ void main()
 {
 	/* 物体世界矩阵来自实例数据：同材质同网格的一批对象共用一次绘制 */
 	mat4 local2world = mat4(a_InstanceMatrix0, a_InstanceMatrix1, a_InstanceMatrix2, a_InstanceMatrix3);
+	mat4 prev_local2world = mat4(a_InstancePrevMatrix0, a_InstancePrevMatrix1,
+		a_InstancePrevMatrix2, a_InstancePrevMatrix3);
 
-	gl_Position = u_ViewProjectionMat * local2world * vec4(a_Position, 1.0f);
+	const vec4 local_position = vec4(a_Position, 1.0f);
+	/* 光栅化用带抖动的矩阵；两帧的裁剪坐标用不带抖动的，位移里才只有真实运动 */
+	vert2frag.CurClip = u_VelocityViewProjectionMat * (local2world * local_position);
+	vert2frag.PrevClip = u_PrevVelocityViewProjectionMat * (prev_local2world * local_position);
 
-	vert2frag.Position = vec3(local2world * vec4(a_Position, 1.0f));
+	gl_Position = u_ViewProjectionMat * (local2world * local_position);
+
+	vert2frag.Position = vec3(local2world * local_position);
 	vert2frag.BaseColor = a_Color;
 	vert2frag.TexCoord = a_TexCoord.xy;
 	vert2frag.ObjectId = a_InstanceParams.x;
@@ -56,6 +71,7 @@ void main()
 #include "../Builtin/Uniforms.glsl"
 #include "../Builtin/MaterialInput.glsl"
 #include "../Builtin/MaterialLit.glsl"
+#include "../Builtin/Velocity.glsl"
 
 layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: Roughness */
 layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal; a: Metallic */
@@ -64,6 +80,7 @@ layout(location = 3) out vec4 GBufferTexture3; /* rgb: Emission; a: IOR */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
 layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition; a: 接受阴影(0/1) */
 layout(location = 6) out float ObjectId;
+layout(location = 7) out vec2 Velocity;        /* 屏幕空间运动矢量（UV 单位） */
 
 struct SVextex2Frag
 {
@@ -74,6 +91,8 @@ struct SVextex2Frag
 	vec3 Tangent;
 	float ObjectId;
 	float ReceiveShadow;
+	vec4 CurClip;
+	vec4 PrevClip;
 };
 
 in SVextex2Frag vert2frag;
@@ -95,4 +114,5 @@ void main()
 	GBufferTexture5 = vec4(vert2frag.Position, vert2frag.ReceiveShadow);
 
 	ObjectId = vert2frag.ObjectId;
+	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);
 }

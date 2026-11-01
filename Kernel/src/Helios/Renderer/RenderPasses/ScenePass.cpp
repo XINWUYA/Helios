@@ -1,12 +1,15 @@
 #include "Pch.h"
 #include "ScenePass.h"
 #include "DebugViewPasses.h"
+#include "GrassDrawParams.h"
 #include "ObjectSorting.h"
+#include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/PostProcess/PostProcessPasses.h>
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Scene/Camera.h>
+#include <Helios/Scene/Components.h>
 #include <Helios/Scene/Light.h>
 #include <Helios/Scene/Mesh.h>
 #include <Helios/Scene/Material.h>
@@ -38,16 +41,19 @@ namespace Helios
 			 * Equal 比较，只输出该光源的直接光。天空盒和 Unlit 单笔原样提交；
 			 * 调用方自己负责绑目标、视口和阴影纹理。 */
 			void SubmitForwardObjects(RenderView& render_view, Scene& scene, bool transparent,
-				SubmitBatch batch = SubmitBatch::All)
+				const SubmitParams& params)
 			{
-				const auto probe_manager = scene.GetReflectionProbeManager();
+				const auto probe_manager = params.IgnoreProbes ? nullptr : scene.GetReflectionProbeManager();
 				const auto& lights = render_view.GetValidLights();
 				const ShadowMapManager* shadow_maps = render_view.GetShadowMapManager().get();
-				const glm::vec3 view_position = (render_view.GetCullingCamera() != nullptr)
-					? render_view.GetCullingCamera()->GetPosition() : glm::vec3(0.0f);
+				const glm::vec3 view_position = (params.SortOrigin != nullptr)
+					? *params.SortOrigin
+					: ((render_view.GetCullingCamera() != nullptr)
+						? render_view.GetCullingCamera()->GetPosition() : glm::vec3(0.0f));
 
-				const auto& visible_objects = render_view.GetVisibleMeshObjects();
-				const auto draw_list = (batch == SubmitBatch::All)
+				const auto& visible_objects = (params.Objects != nullptr)
+					? *params.Objects : render_view.GetVisibleMeshObjects();
+				const auto draw_list = (params.Batch == SubmitBatch::All)
 					? RenderSorting::CollectDrawList(visible_objects, transparent, view_position)
 					: RenderSorting::CollectDrawList(visible_objects, transparent, view_position,
 						[](const VisibleMeshObject& object) { return RenderSorting::IsForwardOnlyOpaque(object); });
@@ -64,10 +70,32 @@ namespace Helios
 				per_draw.FillMissing = MaterialFill::Values | MaterialFill::Textures;
 				per_draw.Overrides.reserve(8);
 
+				/* 调试档位：Surface 档只出一次读数，不走逐光源；接不上调试分流的材质按源材质换调试材质。
+				 * Probe 档的颜色序号按延迟同一张表取（离相机最近的三个探针），两条管线颜色对得上 */
+				const DebugViewMode debug_view = params.DebugView;
+				const bool debug = debug_view != DebugViewMode::None;
+				const bool debug_single_pass = debug_view >= DebugViewMode::Albedo && debug_view <= DebugViewMode::Ambient;
+				std::unordered_map<const Material*, SharedPtr<Material>> fallback_materials;
+				std::vector<SharedPtr<ReflectionProbe>> debug_probes;
+				if (debug_view == DebugViewMode::Probe && probe_manager != nullptr)
+					debug_probes = probe_manager->CollectClosestBakedProbes(view_position, 3, render_view.GetCullingMask());
+
 				for (const VisibleMeshObject* mesh_object : draw_list)
 				{
 					Renderer::FillObjectUniformBuffer(*mesh_object);
 					const auto& material = mesh_object->Material;
+
+					if (debug && material->IsSkyBox() && debug_view == DebugViewMode::Shadow)
+						continue;
+					if (debug && !material->IsSkyBox() && !material->SupportsDebugView())
+					{
+						auto [it, inserted] = fallback_materials.try_emplace(material.get());
+						if (inserted)
+							it->second = DebugView::CreateFallbackMaterial(material, debug_view);
+						Renderer::Submit(it->second, mesh_object->MeshSegment->GetMeshPrimitive());
+						continue;
+					}
+
 					const RenderRasterState base_state = transparent
 						? RenderSorting::MakeTransparentRasterState(material->GetRasterState())
 						: material->GetRasterState();
@@ -92,7 +120,18 @@ namespace Helios
 							chosen != nullptr ? chosen->GetIrradianceMap() : nullptr,
 							chosen != nullptr ? chosen->GetPrefilterMap() : nullptr,
 							brdf_lut);
+
+						if (debug_view == DebugViewMode::Probe)
+						{
+							const auto found = std::find(debug_probes.begin(), debug_probes.end(), chosen);
+							const int index = found != debug_probes.end()
+								? static_cast<int>(found - debug_probes.begin()) : -1;
+							per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugProbeIndex", index);
+						}
 					}
+
+					if (debug && material->SupportsDebugView())
+						per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView", static_cast<int>(debug_view));
 
 					const auto& mesh_primitive = mesh_object->MeshSegment->GetMeshPrimitive();
 
@@ -116,6 +155,13 @@ namespace Helios
 						continue;
 					}
 
+					if (debug_single_pass)
+					{
+						Renderer::FillLightUniformBuffer(lights[std::min(ambient_light_index, lights.size() - 1)], shadow_maps);
+						Renderer::Submit(material, mesh_primitive, &per_draw);
+						continue;
+					}
+
 					for (size_t light_index = 0; light_index < lights.size(); ++light_index)
 					{
 						Renderer::FillLightUniformBuffer(lights[light_index], shadow_maps);
@@ -129,6 +175,100 @@ namespace Helios
 					}
 				}
 			}
+
+			/* 草的密度系数：LodDistance 以内满密度，往外按平方衰减到 MinDensityScale，
+			 * CullDistance 处归零。块内叶片顺序是随机的，按系数取前缀就是均匀抽稀。 */
+			float GrassDensityScale(float distance, const GrassComponent& grass)
+			{
+				if (distance <= grass.m_LodDistance)
+					return 1.0f;
+
+				const float span = std::max(grass.m_CullDistance - grass.m_LodDistance, 1e-3f);
+				const float t = std::clamp((distance - grass.m_LodDistance) / span, 0.0f, 1.0f);
+				return glm::mix(1.0f, std::max(0.0f, grass.m_MinDensityScale), t * t);
+			}
+
+			/* 逐片草地的绘制：块底面先、叶片后（抽稀 / 剔除 / 间接），材质与逐绘制参数
+			 * 由调用方准备 —— 可见着色与调试重绘共用这一套提交。 */
+			template <typename GetMaterial, typename PrepareDraw>
+			void SubmitGrassDraws(RenderView& render_view, Scene& scene,
+				GetMaterial&& get_material, PrepareDraw&& prepare_draw)
+			{
+				const Camera* camera = render_view.GetCullingCamera();
+				if (camera == nullptr)
+					return;
+
+				const Frustum frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
+				const bool cull = render_view.IsEnableFrustumCulling();
+				const glm::vec3 view_position = camera->GetPosition();
+				const MeshPrimitive& blade = GrassField::GetBladePrimitive();
+
+				for (auto [entity, grass] : scene.GetRegistry().view<GrassComponent>().each())
+				{
+					if (grass.GetMaterial() == nullptr || grass.m_Field == nullptr || grass.m_Field->IsEmpty())
+						continue;
+					if (!scene.IsEntityInRenderView(entity, render_view.GetCullingMask()))
+						continue;
+
+					const auto& instance_buffer = grass.m_Field->GetInstanceBuffer();
+					if (instance_buffer == nullptr)
+						continue;
+
+					const SharedPtr<Material> material = get_material(grass);
+					if (material == nullptr)
+						continue;
+
+					/* 风场、脚印走 per-draw 覆盖（跟阴影投影共用同一份参数），
+					 * 之后再把「叶片 / 块底面」这组开关接上 */
+					DrawParams per_draw = GrassDraw::MakeDrawParams(grass, scene.GetGrassWindTime());
+					/* 叶片与块底面共用一个材质，靠这个开关分开画。
+					 * 调用方后面还会追加覆盖，所以这里记下标，不能用 back() */
+					const size_t flat_pad_index = per_draw.Overrides.size();
+					per_draw.Overrides.emplace_back(ParamType::Int, "u_FlatPad", 0);
+					/* 叶片停画之后草色再撑一段，交接不至于突然断掉 */
+					per_draw.Overrides.emplace_back(ParamType::Float, "u_PadCullDistance",
+						grass.m_CullDistance * 2.0f);
+
+					prepare_draw(grass, per_draw);
+
+					/* 底面先画：远距离抽稀、块边缘这些叶片稀疏的地方颜色不断档，
+					 * 也不会从叶缝里看到裸地。每块一张四边形，代价可以忽略 */
+					const auto& chunks = grass.m_Field->GetChunks();
+					const auto& pad_buffer = grass.m_Field->GetPadBuffer();
+					if (pad_buffer != nullptr && !chunks.empty())
+					{
+						per_draw.Overrides[flat_pad_index].Value = 1;
+						Renderer::SubmitInstanced(material, GrassField::GetPadPrimitive(), pad_buffer,
+							0, static_cast<uint32_t>(chunks.size()), &per_draw, 0,
+							&Renderer::GetGrassInstanceLayout());
+						per_draw.Overrides[flat_pad_index].Value = 0;
+					}
+
+					/* 间接路径：GPU 已经剔除并压实好，整片草地一笔画完 */
+					if (grass.m_Field->CanDrawIndirect())
+					{
+						Renderer::SubmitIndirect(material, blade, grass.m_Field->GetIndirectDrawBuffer(),
+							grass.m_Field->GetIndirectArgs(), &per_draw, &Renderer::GetGrassInstanceLayout());
+						continue;
+					}
+
+					for (const GrassField::Chunk& chunk : chunks)
+					{
+						if (cull && frustum.IsOutside(chunk.Center, chunk.Extent))
+							continue;
+
+						const float distance = glm::distance(view_position, chunk.Center);
+						if (distance >= grass.m_CullDistance)
+							continue;
+
+						const float scale = GrassDensityScale(distance, grass);
+						const uint32_t count = static_cast<uint32_t>(
+							std::max(1.0f, std::round(static_cast<float>(chunk.Count) * scale)));
+						Renderer::SubmitInstanced(material, blade, instance_buffer, chunk.First, count, &per_draw,
+							0, &Renderer::GetGrassInstanceLayout());
+					}
+				}
+			}
 		}
 
 		struct ScenePassData
@@ -136,9 +276,255 @@ namespace Helios
 			FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle; /* 阴影贴图 */
 		};
 
-		void SubmitSceneObjects(RenderView& render_view, Scene& scene, bool transparent, SubmitBatch batch)
+		void SubmitSceneObjects(RenderView& render_view, Scene& scene, bool transparent, SubmitBatch batch,
+			DebugViewMode debug_view)
 		{
-			SubmitForwardObjects(render_view, scene, transparent, batch);
+			SubmitParams params;
+			params.Batch = batch;
+			params.DebugView = debug_view;
+			SubmitForwardObjects(render_view, scene, transparent, params);
+		}
+
+		void SubmitSceneObjects(RenderView& render_view, Scene& scene, bool transparent, const SubmitParams& params)
+		{
+			SubmitForwardObjects(render_view, scene, transparent, params);
+		}
+
+		void FillGrassLightUniform(RenderView& render_view)
+		{
+			/* 草只吃主方向光：光照 UBO 一次只装一个光源，逐光源重画会让顶点量翻好几倍。
+			 * 主阴影光源优先，没有阴影就取第一盏。 */
+			const auto& lights = render_view.GetValidLights();
+			if (lights.empty())
+			{
+				Renderer::FillEmptyLightUniformBuffer();
+				return;
+			}
+
+			const ShadowMapManager* shadow_maps = render_view.GetShadowMapManager().get();
+			const size_t primary = (shadow_maps != nullptr)
+				? shadow_maps->FindPrimaryShadowLightIndex(lights) : 0;
+			Renderer::FillLightUniformBuffer(lights[std::min(primary, lights.size() - 1)], shadow_maps);
+		}
+
+		void SubmitGrassFields(RenderView& render_view, Scene& scene, DebugViewMode debug_view)
+		{
+			PROFILE_FUNCTION();
+
+			FillGrassLightUniform(render_view);
+
+			const auto probe_manager = scene.GetReflectionProbeManager();
+			SubmitGrassDraws(render_view, scene,
+				[](const GrassComponent& grass) { return grass.GetMaterial(); },
+				[probe_manager, &render_view, debug_view](const GrassComponent& grass, DrawParams& per_draw)
+				{
+					if (debug_view != DebugViewMode::None && grass.GetMaterial()->SupportsDebugView())
+						per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView", static_cast<int>(debug_view));
+
+					if (!grass.GetMaterial()->SupportsIBL())
+						return;
+
+					const auto& field_chunks = grass.m_Field->GetChunks();
+					const glm::vec3 center = field_chunks.empty() ? glm::vec3(0.0f) : field_chunks.front().Center;
+					const auto chosen = (probe_manager != nullptr && probe_manager->HasProbe())
+						? probe_manager->GetClostedReflectionProbe(center, render_view.GetCullingMask())
+						: nullptr;
+					Material::MakeIBLParamOverrides(per_draw.Overrides,
+						chosen != nullptr ? chosen->GetIrradianceMap() : nullptr,
+						chosen != nullptr ? chosen->GetPrefilterMap() : nullptr,
+						probe_manager != nullptr ? probe_manager->GetBRDFLutMap() : nullptr);
+				});
+		}
+
+		void SubmitGrassDebug(RenderView& render_view, Scene& scene, const SharedPtr<Material>& material)
+		{
+			PROFILE_FUNCTION();
+
+			SubmitGrassDraws(render_view, scene,
+				[&material](const GrassComponent&) { return material; },
+				[](const GrassComponent& grass, DrawParams& per_draw)
+				{
+					/* 外观参数跟着源材质走：一件调试材质服务整场草。
+					 * 风场 / 脚印已经按 per-draw 写好了，材质里同名的值不能盖掉它 */
+					for (const auto& [key, info] : grass.GetMaterial()->GetAllParameters())
+					{
+						(void)key;
+						if (info.Type == ParamType::Texture)
+							continue;
+						const bool overridden = std::any_of(per_draw.Overrides.begin(), per_draw.Overrides.end(),
+							[&info](const MaterialParamInfo& existing) { return existing.Name == info.Name; });
+						if (!overridden)
+							per_draw.Overrides.push_back(info);
+					}
+				});
+		}
+
+		bool HasVisibleGrassFields(const Scene& scene, LayerMask culling_mask)
+		{
+			for (auto [entity, grass] : scene.GetRegistry().view<GrassComponent>().each())
+			{
+				if (grass.GetMaterial() == nullptr || grass.m_Field == nullptr || grass.m_Field->IsEmpty())
+					continue;
+				if (scene.IsEntityInRenderView(entity, culling_mask))
+					return true;
+			}
+			return false;
+		}
+
+		namespace
+		{
+			/* 运动矢量材质的底色：深度只测不写，深度是场景写好的那张 */
+			SharedPtr<Material> MakeVelocityMaterial(const SharedPtr<DeviceShader>& shader)
+			{
+				auto material = CreateSharedPtr<Material>();
+				material->SetShader(shader);
+				auto& state = material->GetRasterState();
+				state.EnableDepthTest = true;
+				state.EnableDepthWrite = false;
+				state.DepthCompareFunc = CompareFunc::GreaterEqual;
+				return material;
+			}
+
+			/* 剔除方式跟源材质一致（草是双面），深度写一律关掉 */
+			RenderRasterState MakeVelocityRasterState(const RenderRasterState& source)
+			{
+				RenderRasterState state = source;
+				state.EnableDepthTest = true;
+				state.EnableDepthWrite = false;
+				state.DepthCompareFunc = CompareFunc::GreaterEqual;
+				return state;
+			}
+		}
+
+		void AddVelocityPass(RenderView* render_view, SubmitBatch batch,
+			FrameGraphResourceHandleTyped<FrameGraphTexture> target)
+		{
+			PROFILE_FUNCTION();
+
+			if (render_view == nullptr) return;
+			auto& frame_graph = render_view->GetFrameGraph();
+			auto scene = render_view->GetOwnerScene();
+			if (scene == nullptr) return;
+
+			const auto& viewport_region = render_view->GetViewportRegion();
+			if (viewport_region.Width == 0 || viewport_region.Height == 0) return;
+
+			/* 深度按管线取：前向是场景 Pass 写的那张，延迟是 G-Buffer 的 */
+			auto depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassDepth");
+			if (!depth)
+				depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
+			if (!depth) return;
+
+			/* 没有现成速度图就自己建一张（前向管线）；有的话只往上叠（延迟管线补草） */
+			const bool owns_target = !target;
+
+			static BuiltinAsset<DeviceShader> s_caster_shader("Shaders/Builtin/VelocityCaster.glsl");
+			static BuiltinAsset<DeviceShader> s_grass_shader("Shaders/Grass/GrassVelocity.glsl");
+			static BuiltinAsset<DeviceShader> s_clear_shader("Shaders/Builtin/VelocityClear.glsl");
+
+			/* 材质一次建好反复用：逐绘制的差异全走 per-draw 覆盖，材质本身保持只读 */
+			static SharedPtr<Material> s_caster_material;
+			static SharedPtr<Material> s_grass_material;
+			static SharedPtr<Material> s_clear_material;
+			if (s_caster_material == nullptr || s_caster_material->GetShader() != s_caster_shader.Get())
+				s_caster_material = MakeVelocityMaterial(s_caster_shader.Get());
+			if (s_grass_material == nullptr || s_grass_material->GetShader() != s_grass_shader.Get())
+				s_grass_material = MakeVelocityMaterial(s_grass_shader.Get());
+			if (s_clear_material == nullptr || s_clear_material->GetShader() != s_clear_shader.Get())
+				s_clear_material = Renderer::CreateFullScreenMaterial(s_clear_shader.Get());
+
+			struct VelocityPassData
+			{
+				FrameGraphResourceHandleTyped<FrameGraphTexture> Depth;
+				FrameGraphResourceHandleTyped<FrameGraphTexture> Velocity;
+			};
+
+			auto velocity_pass = frame_graph->AddPass<VelocityPassData>("VelocityPass",
+				[&](FrameGraphBuilder& builder, VelocityPassData& data)
+				{
+					FrameGraphTexture::Descriptor velocity_desc;
+					velocity_desc.Width = viewport_region.Width;
+					velocity_desc.Height = viewport_region.Height;
+					velocity_desc.TextureFormat = TextureFormat::RG16F;
+
+					data.Depth = depth;
+					data.Velocity = owns_target ? builder.CreateTexture("Velocity", velocity_desc) : target;
+					builder.BindInputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
+					if (owns_target)
+					{
+						builder.BindOutputResource(data.Velocity,
+							FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
+					}
+					else
+					{
+						/* 叠到 G-Buffer 已经写好的那张上：产物是"写进已有资源"（同 Bloom 升采样） */
+						builder.BindInputResource(data.Velocity, FrameGraphTexture::Usage::ColorAttachment);
+					}
+
+					FrameGraphPassInfo::Descriptor pass_desc;
+					pass_desc.Attachments.ColorAttachments(0) = data.Velocity;
+					pass_desc.Attachments.DepthAttachment() = data.Depth;
+					pass_desc.ViewportRegion = viewport_region;
+					/* 深度是场景写好的，必须保留；颜色的初值靠一笔全屏 0 铺出来 */
+					pass_desc.PreserveContent = true;
+					builder.CreateRenderPass("VelocityPassRenderTarget", pass_desc);
+					builder.AsSideEffect();
+				},
+				[render_view, scene, batch, owns_target, caster = s_caster_material,
+					grass_material = s_grass_material, clear = s_clear_material]
+				(const FrameGraphResources& resources, const VelocityPassData& data)
+				{
+					const auto render_pass_info = resources.GetPassRenderTarget();
+					render_view->EmplacePassFrameBuffer("VelocityPass", render_pass_info);
+
+					render_pass_info->Bind();
+					{
+						/* 自己建的图先铺一遍 0：没被几何盖到的像素（天空 / 透明）当成不动。
+						 * 叠到别人图上的时候不能铺，会把 G-Buffer 写好的速度抹掉 */
+						if (owns_target)
+							Renderer::Submit(clear, Renderer::GetFullScreenVertexArray());
+
+						const auto& visible_objects = render_view->GetVisibleMeshObjects();
+						const glm::vec3 view_position = (render_view->GetCullingCamera() != nullptr)
+							? render_view->GetCullingCamera()->GetPosition() : glm::vec3(0.0f);
+						const auto draw_list = (batch == SubmitBatch::All)
+							? RenderSorting::CollectDrawList(visible_objects, false, view_position)
+							: RenderSorting::CollectDrawList(visible_objects, false, view_position,
+								[](const VisibleMeshObject& object)
+								{
+									return RenderSorting::IsForwardOnlyOpaque(object);
+								});
+
+						DrawParams per_draw;
+						per_draw.FillMissing = MaterialFill::Values;
+						for (const VisibleMeshObject* mesh_object : draw_list)
+						{
+							if (mesh_object->MeshSegment == nullptr || mesh_object->Material == nullptr)
+								continue;
+
+							Renderer::FillObjectUniformBuffer(*mesh_object);
+							per_draw.RasterStateOverride = MakeVelocityRasterState(mesh_object->Material->GetRasterState());
+							Renderer::Submit(caster, mesh_object->MeshSegment->GetMeshPrimitive(), &per_draw);
+						}
+
+						/* 草：叶形在顶点里展开，得用上一帧的风时间才能算出上一帧在哪 */
+						const float prev_wind_time = scene->GetPrevGrassWindTime();
+						SubmitGrassDraws(*render_view, *scene,
+							[grass_material](const GrassComponent&) { return grass_material; },
+							[prev_wind_time](const GrassComponent& grass, DrawParams& per_draw_grass)
+							{
+								per_draw_grass.Overrides.emplace_back(ParamType::Float, "u_PrevWindTime", prev_wind_time);
+								per_draw_grass.RasterStateOverride =
+									MakeVelocityRasterState(grass.GetMaterial()->GetRasterState());
+							});
+					}
+					render_pass_info->Unbind();
+					Renderer::GetRenderAPI()->Flush();
+				});
+
+			/* 自己建的那张写进黑板：时域抗锯齿从这里取速度图 */
+			if (owns_target)
+				frame_graph->GetBlackboard()["Velocity"] = velocity_pass->GetData().Velocity;
 		}
 
 		struct ScenePassTextureData
@@ -151,6 +537,20 @@ namespace Helios
 
 		namespace
 		{
+			/* 场景 Pass 的提交体：不透明先画（写深度），透明最后（从远到近、只测不写）。
+			 * 调试档位下材质着色器直接出读数，透明批不画（与延迟 G-Buffer 不收透明同口径） */
+			void SubmitScenePassContent(RenderView& render_view, Scene& scene)
+			{
+				const DebugViewMode view_mode = render_view.GetDebugViewMode();
+				const DebugViewMode debug_view = DebugView::GetForwardMaterialMode(view_mode);
+				SubmitParams params;
+				params.DebugView = debug_view;
+				SubmitForwardObjects(render_view, scene, false, params);
+				SubmitGrassFields(render_view, scene, debug_view);
+				if (debug_view == DebugViewMode::None && view_mode != DebugViewMode::Shadow)
+					SubmitForwardObjects(render_view, scene, true, SubmitParams{});
+			}
+
 			/* 场景 → 视图纹理的公共体（颜色 + ObjectId + 深度三附件；颜色 / 深度落 Blackboard）：
 			 * 编辑器视口的前向纹理路径与"默认目标 + 后处理"的旁路共用；调用方负责空指针守卫。 */
 			FrameGraphResourceHandleTyped<FrameGraphTexture> AddScenePassToTextureCore(RenderView* render_view)
@@ -160,10 +560,15 @@ namespace Helios
 
 				const auto& viewport_region = render_view->GetViewportRegion();
 
+				/* 时域抗锯齿要读深度、要在 8bit 以上的缓冲里累积：这时场景色改 16F、
+				 * 深度补 Sampleable、几何通道降到单采样（多采样深度采不了）。
+				 * 关掉 TAA 时这三项原样不动，像素基线不受影响。 */
+				const bool temporal = PostProcess::UsesTemporalJitter(*render_view);
+
 				FrameGraphTexture::Descriptor color_desc;
 				color_desc.Width = viewport_region.Width;
 				color_desc.Height = viewport_region.Height;
-				color_desc.TextureFormat = TextureFormat::RGBA8;
+				color_desc.TextureFormat = temporal ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
 
 				FrameGraphTexture::Descriptor object_id_desc;
 				object_id_desc.Width = viewport_region.Width;
@@ -188,7 +593,9 @@ namespace Helios
 						builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
 						builder.BindOutputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
 						builder.BindOutputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
-						builder.BindOutputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
+						builder.BindOutputResource(data.Depth, temporal
+							? (FrameGraphTexture::Usage::DepthAttachment | FrameGraphTexture::Usage::Sampleable)
+							: FrameGraphTexture::Usage::DepthAttachment);
 
 						FrameGraphPassInfo::Descriptor pass_desc;
 						pass_desc.Attachments.ColorAttachments(0) = data.Output;
@@ -199,8 +606,9 @@ namespace Helios
 						pass_desc.ColorClearValues[1] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
 						pass_desc.ViewportRegion = viewport_region;
 						/* 场景几何开多重采样：物体边缘的锯齿靠它抹平。输出纹理本身仍是
-						 * 单采样，通道结束由后端解析过去，叠加层与拾取照常读取 */
-						pass_desc.Multisample = true;
+						 * 单采样，通道结束由后端解析过去，叠加层与拾取照常读取。
+						 * 开了时域抗锯齿就关掉：多采样深度不可采样，抖动也轮不到 MSAA 出力 */
+						pass_desc.Multisample = !temporal;
 						builder.CreateRenderPass("ScenePassRenderTarget", pass_desc);
 
 						/* 输出纹理留给视图显示与拾取回读：不能被图裁剪剔除 */
@@ -216,9 +624,7 @@ namespace Helios
 							ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
 							Renderer::GetRenderAPI()->Clear();
 
-							/* 不透明先画（写深度），透明最后（从远到近、只测不写） */
-							SubmitForwardObjects(*render_view, *scene, false);
-							SubmitForwardObjects(*render_view, *scene, true);
+							SubmitScenePassContent(*render_view, *scene);
 						}
 						render_pass_info->Unbind();
 						Renderer::GetRenderAPI()->Flush();
@@ -229,6 +635,10 @@ namespace Helios
 				frame_graph->GetBlackboard()["ScenePassDepth"] = scene_pass->GetData().Depth;
 				/* 实体 id 附件留给叠加层（选中描边）与拾取共用 */
 				frame_graph->GetBlackboard()["ScenePassObjectId"] = scene_pass->GetData().ObjectId;
+
+				/* 运动矢量：时域抗锯齿按像素重投影，没有它动态物体就拖一条尾巴 */
+				if (temporal)
+					AddVelocityPass(render_view);
 
 				return scene_pass->GetData().Output;
 			}
@@ -272,9 +682,7 @@ namespace Helios
 						render_api->SetViewport(0, 0, viewport_region.Width, viewport_region.Height);
 						render_api->SetScissor(0, 0, viewport_region.Width, viewport_region.Height);
 
-						/* 不透明先画（写深度），透明最后（从远到近、只测不写） */
-						SubmitForwardObjects(*render_view, *scene, false);
-						SubmitForwardObjects(*render_view, *scene, true);
+						SubmitScenePassContent(*render_view, *scene);
 					}
 				}
 			);

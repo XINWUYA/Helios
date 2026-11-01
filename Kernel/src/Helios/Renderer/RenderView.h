@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include <entt/entt.hpp>
+#include <string>
+#include <unordered_map>
 #include "RenderCommon.h"
 #include <glm/glm.hpp>
 
@@ -25,6 +27,8 @@ namespace Helios
 	{
 		int ObjectId{ -1 };
 		glm::mat4 Local2WorldMat;
+		/* 上一帧的世界矩阵（运动矢量用）：新出现的对象等于当前值，速度 0 */
+		glm::mat4 PrevLocal2WorldMat{ 1.0f };
 		SharedPtr<MeshSegment> MeshSegment;
 		/* 收集时按解析链定下的最终材质（实体绑定 ?: 模型默认 ?: 内置白模） */
 		SharedPtr<Material> Material;
@@ -137,7 +141,11 @@ namespace Helios
 		{
 			/* 换了场景要重新注册阴影光源：上一份注册结果指向旧场景的光源 */
 			if (m_pOwnerScene.lock() != scene)
+			{
 				m_ShadowLightSignatures.clear();
+				/* 历史里是另一个场景的画面，不能拿来混合 */
+				m_IsHistoryValid = false;
+			}
 			m_pOwnerScene = scene;
 		}
         SharedPtr<Scene> GetOwnerScene() const { return m_pOwnerScene.lock(); }
@@ -152,6 +160,30 @@ namespace Helios
 
 		/* 获取FrameGraph */
 		[[nodiscard]] const SharedPtr<FrameGraph>& GetFrameGraph() const { return m_pFrameGraph; }
+
+		/* ---- 时域效果的视图状态 ----
+		 * 抖动只进渲染用的投影矩阵：剔除 / 阴影 / 拾取 / 探针烘焙一律用相机原矩阵，
+		 * 否则阴影边缘和 gizmo 会跟着抖。每帧填充视图常量之前调一次。 */
+		void BeginTemporalFrame(bool jitter_enabled);
+		[[nodiscard]] const glm::mat4& GetRenderProjectionMatrix() const { return m_RenderProjection; }
+		[[nodiscard]] const glm::mat4& GetRenderViewProjectionMatrix() const { return m_RenderViewProjection; }
+		/* 运动矢量专用的两帧视图投影：不含抖动。抖动是"同一点换像素"，算进位移里
+		 * 会把每帧的亚像素扰动当成物体在动，重投影反而更抖 */
+		[[nodiscard]] const glm::mat4& GetVelocityViewProjectionMatrix() const { return m_VelocityViewProjection; }
+		[[nodiscard]] const glm::mat4& GetPrevVelocityViewProjectionMatrix() const { return m_PrevVelocityViewProjection; }
+		[[nodiscard]] const glm::vec2& GetJitterPixels() const { return m_JitterPixels; }
+		/* 本帧的相位序号：时域效果用它做双缓冲的 ping-pong（相邻帧奇偶不同） */
+		[[nodiscard]] uint32_t GetJitterIndex() const { return m_JitterIndex; }
+
+		/* 历史还能不能用：首帧、尺寸变化、换场景、相机瞬移、刚开关时都是 false */
+		[[nodiscard]] bool IsHistoryValid() const { return m_IsHistoryValid; }
+		void InvalidateHistory() { m_IsHistoryValid = false; }
+		/* 本帧已经写过历史（resolve 执行完之后调），下一帧才能接着用 */
+		void MarkHistoryValid() { m_IsHistoryValid = true; }
+
+		/* 跨帧纹理：按 key 取，尺寸或格式变了就重建并作废历史（时域效果的 ping-pong 用） */
+		SharedPtr<DeviceTexture> AcquireHistory(const std::string& key, uint32_t width, uint32_t height,
+			TextureFormat format);
 
 		/* 获取阴影管理器 */
 		[[nodiscard]] SharedPtr<ShadowMapManager>& GetShadowMapManager() { return m_pShadowMapManager; }
@@ -181,6 +213,10 @@ namespace Helios
 		 * 视图每帧用自身 CullingMask 收集；反射探针烘焙按探针的 CullingMask 调同一份逻辑。 */
 		void CollectVisibleMeshObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const;
 
+		/* 探针捕获用：按探针的层收集，场景只挂了天空组件时补一个内建天空 ——
+		 * 与相机渲染同一份收集口径，否则烘焙出来的环境里没有天。 */
+		void CollectProbeCaptureObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const;
+
 		/* 获取光源 */
 		[[nodiscard]] const std::vector<SharedPtr<Light>>& GetValidLights() const { return m_ValidLights; }
 
@@ -195,6 +231,8 @@ namespace Helios
 			std::vector<VisibleMeshObject>& out) const;
 		/* 准备光源信息 */
 		void PrepareLights();
+		/* 给可见对象补上一帧的世界矩阵（运动矢量用） */
+		void PreparePreviousTransforms();
 		/* 更新FrameGraph */
 		void UpdateFrameGraph();
 
@@ -250,5 +288,35 @@ namespace Helios
 		bool m_IsHasShadowCast{ false };
 		/* 阴影管理 */
 		SharedPtr<ShadowMapManager> m_pShadowMapManager{ nullptr };
+
+		/* 抖动相位：Halton(2,3) 16 帧循环，单位是像素 */
+		uint32_t m_JitterIndex{ 0 };
+		glm::vec2 m_JitterPixels{ 0.0f };
+		/* 渲染用矩阵（投影含抖动）与上一帧的值（重投影基准） */
+		glm::mat4 m_RenderProjection{ 1.0f };
+		glm::mat4 m_RenderViewProjection{ 1.0f };
+		/* 运动矢量的基准：两帧都不带抖动 */
+		glm::mat4 m_VelocityViewProjection{ 1.0f };
+		glm::mat4 m_PrevVelocityViewProjection{ 1.0f };
+		bool m_IsHistoryValid{ false };
+
+		/* 跨帧纹理：key → 纹理与其描述（尺寸 / 格式变了就重建） */
+		struct HistoryTexture
+		{
+			SharedPtr<DeviceTexture> Texture;
+			uint32_t Width{ 0 };
+			uint32_t Height{ 0 };
+			TextureFormat Format{ TextureFormat::RGBA8 };
+		};
+		std::unordered_map<std::string, HistoryTexture> m_HistoryTextures;
+
+		/* 本帧是否走时域累积（抖动 + 运动矢量），由 BeginTemporalFrame 写入 */
+		bool m_IsTemporalEnabled{ false };
+		/* 上一帧的对象世界矩阵（ObjectId → 矩阵）与这一帧的暂存：
+		 * 只在时域累积开启时维护，关掉就清空，不做无谓的哈希 */
+		std::unordered_map<int32_t, glm::mat4> m_PrevWorldTransforms;
+		std::unordered_map<int32_t, glm::mat4> m_CurrentWorldTransforms;
+		/* 表已经推进到哪一帧：同一帧重复渲染时不能推第二次，否则上一帧就成了这一帧 */
+		uint32_t m_PrevTransformFrame{ 0 };
 	};
 }

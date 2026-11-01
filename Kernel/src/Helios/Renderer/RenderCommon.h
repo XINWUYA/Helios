@@ -406,10 +406,20 @@ namespace Helios
 	};
 
 	/* 视口区域信息 */
-	/* 实例化绘制的每实例数据：世界矩阵 + 参数（x = ObjectId，y = 接受阴影） */
+	/* 实例化绘制的每实例数据：世界矩阵 + 参数（x = ObjectId，y = 接受阴影）+ 上一帧世界矩阵。
+	 * 顺序与 Renderer::GetObjectInstanceLayout 一致；上一帧矩阵只有运动矢量用。 */
 	struct ObjectInstanceData
 	{
 		glm::mat4 Local2World{ 1.0f };
+		glm::vec4 Params{ 0.0f };
+		glm::mat4 PrevLocal2World{ 1.0f };
+	};
+
+	/* 草的每实例数据：4 列基向量（右 / 上 / 面朝向 / 原点）+ 参数，与 Grass.glsl 的属性语义一致。
+	 * 草不需要上一帧矩阵，单独一个结构，别跟着 ObjectInstanceData 一起变大。 */
+	struct GrassInstanceData
+	{
+		glm::mat4 Basis{ 1.0f };
 		glm::vec4 Params{ 0.0f };
 	};
 

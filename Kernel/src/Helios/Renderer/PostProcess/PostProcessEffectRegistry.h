@@ -20,9 +20,10 @@ namespace Helios
 		/* 效果链上的相位：先按 Phase、同相位按注册序（入口遍历顺序即链序） */
 		enum class Phase : uint8_t
 		{
-			Scene = 0,       /* 场景色修饰（Bloom 等）：天空之后、其它后处理之前 */
-			ToneMapping = 1, /* 色调映射（HDR 二期） */
-			Overlay = 2,     /* LDR 叠加（Vignette / 颗粒等） */
+			Temporal = 0,    /* 时域累积（TAA）：场景色一出来就做，后面的效果吃到的是降噪后的颜色 */
+			Scene = 1,       /* 场景色修饰（Bloom 等）：天空之后、其它后处理之前 */
+			ToneMapping = 2, /* 色调映射（HDR 二期） */
+			Overlay = 3,     /* LDR 叠加（Vignette / 颗粒等） */
 		};
 
 		/* 每帧解析出的设置快照：按设置类型存取（type-erased，沿用 ComponentSnapshot 的模式）。
@@ -56,6 +57,9 @@ namespace Helios
 			/* 该效果在快照里是否会真的生效（默认目标路径据此决定"旁路到纹理"与否；
 			 * 未提供视为不生效 —— 新效果请一并给出，否则默认目标路径上不会被触发） */
 			bool (*IsEnabled)(const PostProcessState& state){ nullptr };
+			/* 该效果需要时间累积：入口据此推进投影抖动。
+			 * 只在效果真的生效时返回 true，否则画面会平白抖起来 */
+			bool (*UsesTemporalJitter)(const PostProcessState& state){ nullptr };
 			/* 链的一步：把本效果的 Pass 加进渲染图；未启用原样返回 input */
 			FrameGraphResourceHandleTyped<FrameGraphTexture> (*Build)(
 				RenderView& view, FrameGraphResourceHandleTyped<FrameGraphTexture> input){ nullptr };

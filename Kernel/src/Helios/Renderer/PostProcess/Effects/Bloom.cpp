@@ -309,7 +309,7 @@ namespace Helios
 		void RegisterBloomEffect()
 		{
 			PostProcessEffectRegistry::Instance().Add(EffectDesc{
-				"Bloom", Phase::Scene, &CaptureBloom, &IsBloomEnabled, &BuildBloom });
+				"Bloom", Phase::Scene, &CaptureBloom, &IsBloomEnabled, nullptr, &BuildBloom });
 		}
 	}
 }

@@ -161,6 +161,12 @@ namespace Helios
 				 * 整数附件在开启 MSAA 时解析结果不可靠 */
 				object_id_desc.TextureFormat = TextureFormat::R32F;
 
+				/* 运动矢量：rg 是屏幕空间位移（UV 单位），时域抗锯齿靠它重投影 */
+				FrameGraphTexture::Descriptor velocity_desc;
+				velocity_desc.Width = viewport_region.Width;
+				velocity_desc.Height = viewport_region.Height;
+				velocity_desc.TextureFormat = TextureFormat::RG16F;
+
 				/* GBuffer Pass 使用 GBuffer.glsl；普通材质在提交前转换为该 shader 对应的临时材质。 */
 				static BuiltinAsset<DeviceShader> s_gbuffer_shader("Shaders/DeferredShaders/GBuffer.glsl");
 				const auto gbuffer_shader = s_gbuffer_shader.Get();
@@ -175,6 +181,7 @@ namespace Helios
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture5;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> ObjectId;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> Depth;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> Velocity;
 				};
 
 				auto gbuffer_pass = frame_graph->AddPass<GBufferPassData>("GBufferPass",
@@ -186,8 +193,9 @@ namespace Helios
 						data.GBufferTexture3 = builder.CreateTexture("GBufferTexture3", color_target_desc);
 						data.GBufferTexture4 = builder.CreateTexture("GBufferTexture4", color_target_desc);
 						data.GBufferTexture5 = builder.CreateTexture("GBufferTexture5", world_pos_target_desc);
-						data.ObjectId = builder.CreateTexture("ObjectId", object_id_desc);
+						data.ObjectId = builder.CreateTexture("GBufferObjectId", object_id_desc);
 						data.Depth = builder.CreateTexture("GBufferDepth", depth_target_desc);
+						data.Velocity = builder.CreateTexture("GBufferVelocity", velocity_desc);
 
 						builder.BindOutputResource(data.GBufferTexture0, FrameGraphTexture::Usage::ColorAttachment);
 						builder.BindOutputResource(data.GBufferTexture1, FrameGraphTexture::Usage::ColorAttachment);
@@ -196,7 +204,9 @@ namespace Helios
 						builder.BindOutputResource(data.GBufferTexture4, FrameGraphTexture::Usage::ColorAttachment);
 						builder.BindOutputResource(data.GBufferTexture5, FrameGraphTexture::Usage::ColorAttachment);
 						builder.BindOutputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
-						builder.BindOutputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment);
+						/* 深度给时域抗锯齿采样：补一个 Sampleable，延迟本来就是单采样 */
+						builder.BindOutputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment | FrameGraphTexture::Usage::Sampleable);
+						builder.BindOutputResource(data.Velocity, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
 
 						FrameGraphPassInfo::Descriptor pass_desc;
 						pass_desc.Attachments.ColorAttachments(0) = data.GBufferTexture0;
@@ -206,8 +216,9 @@ namespace Helios
 						pass_desc.Attachments.ColorAttachments(4) = data.GBufferTexture4;
 						pass_desc.Attachments.ColorAttachments(5) = data.GBufferTexture5;
 						pass_desc.Attachments.ColorAttachments(6) = data.ObjectId;
+						pass_desc.Attachments.ColorAttachments(7) = data.Velocity;
 						pass_desc.Attachments.DepthAttachment() = data.Depth;
-						pass_desc.ColorClearValues.resize(7);
+						pass_desc.ColorClearValues.resize(8);
 						pass_desc.ColorClearValues[6] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
 						pass_desc.ViewportRegion = viewport_region;
 						/* G-Buffer 不开多重采样：轮廓像素会把空采样（清零的法线 / 世界坐标）
@@ -277,6 +288,7 @@ namespace Helios
 
 								ObjectInstanceData instance;
 								instance.Local2World = mesh_object.Local2WorldMat;
+								instance.PrevLocal2World = mesh_object.PrevLocal2WorldMat;
 								instance.Params = glm::vec4(static_cast<float>(mesh_object.ObjectId),
 									mesh_object.ReceiveShadow ? 1.0f : 0.0f, 0.0f, 0.0f);
 								instances.push_back(instance);
@@ -306,6 +318,9 @@ namespace Helios
 				frame_graph->GetBlackboard()["GBufferTexture5"] = gbuffer_pass->GetData().GBufferTexture5;
 				frame_graph->GetBlackboard()["GBufferObjectId"] = gbuffer_pass->GetData().ObjectId;
 				frame_graph->GetBlackboard()["GBufferDepth"] = gbuffer_pass->GetData().Depth;
+				frame_graph->GetBlackboard()["GBufferVelocity"] = gbuffer_pass->GetData().Velocity;
+				/* 两条管线统一从 "Velocity" 取速度图（前向在它自己的 Pass 里写这个键） */
+				frame_graph->GetBlackboard()["Velocity"] = gbuffer_pass->GetData().Velocity;
 			}
 
 			/* Lighting Pass：全屏逐光源加法合成，输出即视图最终颜色（天空与叠加层都写进它本身）。
@@ -320,7 +335,10 @@ namespace Helios
 				FrameGraphTexture::Descriptor color_target_desc;
 				color_target_desc.Width = viewport_region.Width;
 				color_target_desc.Height = viewport_region.Height;
-				color_target_desc.TextureFormat = TextureFormat::RGBA8;
+				/* 时域抗锯齿要在 8bit 以上的缓冲里累积：光照结果升 16F，
+				 * 关掉 TAA 时仍是 RGBA8，像素基线不动 */
+				color_target_desc.TextureFormat = PostProcess::UsesTemporalJitter(render_view)
+					? TextureFormat::RGBA16F : TextureFormat::RGBA8;
 
 				struct LightingPassData
 				{
@@ -537,6 +555,9 @@ namespace Helios
 							ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
 							Forward::SubmitSceneObjects(render_view, *scene, false,
 								Forward::SubmitBatch::UnsupportedGBuffer);
+							/* 草不装进 G-Buffer（要双面与透射），跟自定义着色器同一趟前向直画。
+							 * 它自己填主方向光，不进 SubmitSceneObjects 的逐光源循环 */
+							Forward::SubmitGrassFields(render_view, *scene);
 						}
 						render_pass_info->Unbind();
 					}
@@ -686,8 +707,11 @@ namespace Helios
 			/* 调试视图（合成 / Overdraw / 几何重绘档位）：光照之后、天空之前 ——
 			 * 先落笔、天空最后负责背景像素（线框档除外，见下）；Lighting 类档位在光照阶段内分流，此处空操作 */
 			DebugView::AddDebugViewPasses(*render_view, { lighting_output, true });
-			/* 线框档要的是纯结构视图：背景停在调试 Pass 的清空色，不画天空 */
-			if (render_view->GetDebugViewMode() != DebugViewMode::Wireframe)
+			/* 分析类档位（线框 / Mipmap / Overdraw）是纯结构视图，背景停在调试 Pass 的输出上不画天空，
+			 * 与前向一致；否则不进 G-Buffer 深度的前向直画物体和草会被天空整片盖掉 */
+			const DebugViewMode debug_view = render_view->GetDebugViewMode();
+			if (debug_view != DebugViewMode::Wireframe && debug_view != DebugViewMode::Mipmap
+				&& debug_view != DebugViewMode::Overdraw)
 				AddSkyPass(*render_view);
 
 			/* 自定义着色器的物体走前向直画，透明物体最后画（天空之后）：调试档位下由调试 Pass
@@ -695,8 +719,22 @@ namespace Helios
 			if (render_view->GetDebugViewMode() == DebugViewMode::None)
 			{
 				const auto& visible_objects = render_view->GetVisibleMeshObjects();
-				if (RenderSorting::HasForwardOnlyOpaqueObjects(visible_objects))
+				const auto scene = render_view->GetOwnerScene();
+				const bool has_grass = scene != nullptr
+					&& Forward::HasVisibleGrassFields(*scene, render_view->GetCullingMask());
+				if (has_grass || RenderSorting::HasForwardOnlyOpaqueObjects(visible_objects))
+				{
 					AddForwardOpaquePass(*render_view);
+
+					/* 运动矢量：G-Buffer 只覆盖装得进 G-Buffer 的材质，
+					 * 草与前向直画的那批在这里补一笔，写到同一张速度图上 */
+					if (PostProcess::UsesTemporalJitter(*render_view))
+					{
+						const auto velocity = render_view->GetFrameGraph()->GetBlackboard()
+							.GetResourceHandle<FrameGraphTexture>("Velocity");
+						Forward::AddVelocityPass(render_view, Forward::SubmitBatch::UnsupportedGBuffer, velocity);
+					}
+				}
 				if (RenderSorting::HasTransparentObjects(visible_objects))
 					AddForwardTransparentPass(*render_view);
 			}

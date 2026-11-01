@@ -94,6 +94,8 @@ namespace Helios
 
 		/* 获取资源本体 */
 		const ResourceType& GetResource() const { return m_Resource; }
+		/* 获取可变本体：导入外部资源时由 FrameGraph 填 Texture 与 Imported 标记 */
+		ResourceType& GetResourceMutable() { return m_Resource; }
 
 		/* 设置资源描述 */
 		void SetDescriptor(const ResourceDescriptor& descriptor) { m_Descriptor = descriptor; }

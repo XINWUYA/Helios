@@ -11,6 +11,10 @@ namespace Helios::EditorSettings
 	{
 		bool MSAA{ true };
 		bool GPUSkinning{ true };
+		/* 草叶位置由计算着色器生成（关掉退回 CPU 逐株生成） */
+		bool GpuGrassPlacement{ false };
+		/* 草地走 GPU 剔除 + 间接绘制（关掉退回逐块提交） */
+		bool GpuGrassIndirect{ false };
 		/* 脚本：产物变了自动重载 / 打开项目时没产物自动编一次 */
 		bool AutoReloadScripts{ true };
 		bool AutoCompileScripts{ true };
