@@ -11,17 +11,20 @@ layout(location = 4) in vec3 a_Tangent;
 
 #include "../Builtin/Uniforms.glsl"
 
-out vec3 v_Direction;
+/* 屏幕坐标（NDC）按屏幕线性插值，逐像素解析反解视线方向。
+ * 不拿插值后的顶点位置当方向：天空球是低模，三角形之间的方向只是一阶连续，
+ * 银河这种大尺度平滑噪声会把那一丁点折角放大成一条条直线接缝 */
+noperspective out vec2 v_Ndc;
 
 void main()
 {
 	/* 与 SkyBox.glsl 同一套折叠：只吃视图旋转（天空不跟相机平移），
-	 * 网格位置当方向用，深度恒为远平面（Reversed-Z 下是 0），天空始终在最远处 */
+	 * 深度恒为远平面（Reversed-Z 下是 0），天空始终在最远处 */
 	mat4 view_rotation = mat4(mat3(u_ViewMat));
 	vec4 position = u_ProjectionMat * view_rotation * vec4(a_Position, 1.0f);
 	gl_Position = vec4(position.xy, 0.0f, position.w);
 
-	v_Direction = a_Position;
+	v_Ndc = position.xy / position.w;
 }
 
 
@@ -34,7 +37,22 @@ void main()
 
 layout(location = 0) out vec4 OutFragColor;
 
-in vec3 v_Direction;
+noperspective in vec2 v_Ndc;
+
+/* 由 NDC 反解世界空间的视线方向：透视投影的 00 / 11 项就是
+ * 1 / (纵横比 * tan(半视场)) 与 1 / tan(半视场)，除回去回到视空间斜率，
+ * 再乘视图旋转的转置回到世界空间。
+ * 正交投影下所有视线平行，这个式子退化成随像素发散的假射线，
+ * 直接用正前方（正交视口里天空本来也没有什么可看的细节） */
+vec3 ViewDirection(vec2 ndc)
+{
+	const bool orthographic = u_ProjectionMat[3][3] > 0.5f;
+	if (orthographic)
+		return normalize(transpose(mat3(u_ViewMat)) * vec3(0.0f, 0.0f, -1.0f));
+
+	const vec3 view_ray = vec3(ndc.x / u_ProjectionMat[0][0], ndc.y / u_ProjectionMat[1][1], -1.0f);
+	return normalize(transpose(mat3(u_ViewMat)) * view_ray);
+}
 
 /* 逐像素积分段数：视线 16 段 × 视线采样点的太阳方向 8 段。
  * 段数决定地平线附近的色带精度，不动整体亮度量级；被几何挡住的像素在深度测试就被丢掉了，
@@ -42,9 +60,10 @@ in vec3 v_Direction;
 const int kViewSamples = 16;
 const int kSunSamples = 8;
 
-/* 太阳 / 月亮盘亮度增益：天上最亮的一小块，压到色调映射的白点上 */
+/* 太阳 / 月亮盘亮度增益：天上最亮的一小块，压到色调映射的白点上。
+ * 月亮低一档：整个盘面顶到饱和就看不出月海与明暗界线，宁可少亮一点也不当白饼 */
 const float kSunDiskGain = 6.0f;
-const float kMoonDiskGain = 3.0f;
+const float kMoonDiskGain = 1.5f;
 
 /* 夜间气辉：多次散射与星光加在一起的底噪，没有它夜空是纯黑 */
 const vec3 kNightAirglow = vec3(0.020f, 0.030f, 0.060f);
@@ -183,70 +202,269 @@ float Hash21(vec2 p)
 	return fract(p.x * p.y);
 }
 
-/* 一层星点：格点里每格至多一颗，位置 / 尺寸 / 亮度都由格点哈希决定。
- * min_size 是"一像素折算成多少格"：星点比像素还小时按像素兜底并等比压暗，
- * 否则低分辨率下整片星空会被采样漏掉（一闪一闪地消失） */
-float StarLayer(vec2 uv, float seed, float density, float min_size)
+float Hash31(vec3 p)
 {
-	vec2 cell = floor(uv);
-	vec2 offset = uv - cell;
-	if (Hash21(cell + seed) > density)
-		return 0.0f;
-
-	vec2 star = vec2(Hash21(cell + seed + 7.1f), Hash21(cell + seed + 13.7f));
-	float size = mix(0.05f, 0.14f, Hash21(cell + seed + 21.3f));
-	float brightness = pow(Hash21(cell + seed + 31.9f), 2.0f);
-
-	float actual_size = max(size, min_size);
-	float energy = (size * size) / (actual_size * actual_size);
-	return smoothstep(actual_size, 0.0f, length(offset - star)) * brightness * energy;
+	p = fract(p * vec3(0.1031f, 0.1030f, 0.0973f));
+	p += dot(p, p.yzx + 33.33f);
+	return fract((p.x + p.y) * p.z);
 }
 
-/* 星空：把视线反向转回星空静止的坐标里取样，于是整片星空绕极轴转 */
+/* 三维值噪声：银河的云块与尘埃暗带用它铺。只在银道带附近才真正跑起来
+ * （带外调用方提前返回），所以大部分天空像素不付这份代价 */
+float ValueNoise(vec3 p)
+{
+	const vec3 cell = floor(p);
+	vec3 t = fract(p);
+	t = t * t * (3.0f - 2.0f * t);
+
+	const float n000 = Hash31(cell);
+	const float n100 = Hash31(cell + vec3(1.0f, 0.0f, 0.0f));
+	const float n010 = Hash31(cell + vec3(0.0f, 1.0f, 0.0f));
+	const float n110 = Hash31(cell + vec3(1.0f, 1.0f, 0.0f));
+	const float n001 = Hash31(cell + vec3(0.0f, 0.0f, 1.0f));
+	const float n101 = Hash31(cell + vec3(1.0f, 0.0f, 1.0f));
+	const float n011 = Hash31(cell + vec3(0.0f, 1.0f, 1.0f));
+	const float n111 = Hash31(cell + vec3(1.0f, 1.0f, 1.0f));
+
+	const float front = mix(mix(n000, n100, t.x), mix(n010, n110, t.x), t.y);
+	const float back = mix(mix(n001, n101, t.x), mix(n011, n111, t.x), t.y);
+	return mix(front, back, t.z);
+}
+
+float Fbm(vec3 p, int octaves)
+{
+	float sum = 0.0f;
+	float amplitude = 0.5f;
+	for (int i = 0; i < octaves; ++i)
+	{
+		sum += ValueNoise(p) * amplitude;
+		p = p * 2.03f + vec3(17.3f, 5.1f, 9.7f);
+		amplitude *= 0.5f;
+	}
+	return sum;
+}
+
+/* 方向在哪个立方体面上，以及面内坐标（弧度，到面中心的角度，最大 π/4）。
+ * 星空按立方体的面切格点而不是按经纬度：经纬度把整个极点压成一条线，
+ * 极区整片格点被拉成细条，星点会变成放射状的短线；六个面的大小一致，也没有退化点 */
+int DirectionToFace(vec3 d, out vec2 arc)
+{
+	vec3 a = abs(d);
+	vec2 st;
+	int face;
+	if (a.x >= a.y && a.x >= a.z)
+	{
+		st = vec2(d.z, d.y) / a.x;
+		face = d.x >= 0.0f ? 0 : 1;
+	}
+	else if (a.y >= a.z)
+	{
+		st = vec2(d.x, d.z) / a.y;
+		face = d.y >= 0.0f ? 2 : 3;
+	}
+	else
+	{
+		st = vec2(d.x, d.y) / a.z;
+		face = d.z >= 0.0f ? 4 : 5;
+	}
+
+	/* 面内等距重排：按到面中心的角度铺开，格的面积在整面内几乎不变
+	 * （直接拿 tan 投影的坐标切格，靠角上的格子会又小又密） */
+	const float radius = length(st);
+	const float angle = atan(radius);
+	arc = radius > 1.0e-6f ? st * (angle / radius) : st;
+	return face;
+}
+
+/* 面内坐标反解回方向：与 DirectionToFace 同一套约定 */
+vec3 FaceToDirection(int face, vec2 arc)
+{
+	const float radius = length(arc);
+	const float scale = radius > 1.0e-6f ? tan(radius) / radius : 1.0f;
+	const vec2 st = arc * scale;
+
+	vec3 dir;
+	if (face == 0) dir = vec3(1.0f, st.y, st.x);
+	else if (face == 1) dir = vec3(-1.0f, st.y, st.x);
+	else if (face == 2) dir = vec3(st.x, 1.0f, st.y);
+	else if (face == 3) dir = vec3(st.x, -1.0f, st.y);
+	else if (face == 4) dir = vec3(st.x, st.y, 1.0f);
+	else dir = vec3(st.x, st.y, -1.0f);
+	return normalize(dir);
+}
+
+/* 星等换成相对流量：每暗一个星等流量降到 1 / 2.512。1 等星记作 1.0，
+ * 天狼星（-1.46 等）约 9.6，肉眼极限（6.5 等）约 0.0025。
+ * 这一步是"假"与"真"的分界：等亮度撒点看着像噪点，按星等铺开才像星空 */
+float MagnitudeToFlux(float magnitude)
+{
+	return pow(10.0f, -0.4f * (magnitude - 1.0f));
+}
+
+/* 恒星色温：真实夜空里亮星的颜色差别很明显（参宿四橙红、织女蓝白），
+ * 全画成白色是另一个"假"的来源。0 冷红 → 1 蓝白 */
+vec3 StarTint(float temperature)
+{
+	const vec3 orange = vec3(1.00f, 0.58f, 0.32f);
+	const vec3 amber = vec3(1.00f, 0.76f, 0.55f);
+	const vec3 yellow = vec3(1.00f, 0.91f, 0.76f);
+	const vec3 white = vec3(1.00f, 0.98f, 0.97f);
+	const vec3 blue = vec3(0.72f, 0.82f, 1.00f);
+
+	if (temperature < 0.35f)
+		return mix(orange, amber, temperature / 0.35f);
+	if (temperature < 0.62f)
+		return mix(amber, yellow, (temperature - 0.35f) / 0.27f);
+	if (temperature < 0.84f)
+		return mix(yellow, white, (temperature - 0.62f) / 0.22f);
+	return mix(white, blue, (temperature - 0.84f) / 0.16f);
+}
+
+/* 星点的点扩散：一个核加一圈很淡的光晕。宽度固定按像素算 —— 恒星是点光源，
+ * 成像尺寸由光学决定、与亮度无关；亮星看着更大是因为外围光晕越过了可见阈值。
+ * 核半径不随分辨率变，低分辨率下也不会被采样漏掉（整片星空一闪一闪地消失） */
+float StarProfile(float angular_distance, float pixel_angle)
+{
+	/* 单位向量的差就是两方向夹角的弦长，小角下与角度同量级，省一次 acos */
+	const float radius = angular_distance / max(pixel_angle, 1.0e-9f);
+	const float sigma = 0.62f;
+	const float core = exp(-0.5f * radius * radius / (sigma * sigma));
+	const float halo = 0.05f * exp(-radius / (sigma * 3.0f));
+	return core + halo;
+}
+
+/* 一层星点：格点里每格至多一颗，位置 / 星等 / 色温都由格点哈希决定 */
+vec3 StarLayer(vec3 d, int face, vec2 arc, float cells, float seed, float density,
+	float magnitude_min, float magnitude_max, float pixel_angle)
+{
+	const vec2 uv = arc * cells;
+	const vec2 cell = floor(uv);
+	const float face_seed = seed + float(face) * 37.0f;
+
+	const float presence = Hash21(cell + face_seed);
+	if (presence > density)
+		return vec3(0.0f);
+
+	const vec2 jitter = vec2(Hash21(cell + face_seed + 7.1f), Hash21(cell + face_seed + 13.7f));
+	const vec3 star_direction = FaceToDirection(face, (cell + jitter) / cells);
+
+	/* 星等取幂次分布：暗星远多于亮星，肉眼看到的天空绝大多数星点都挤在极限星等附近 */
+	const float rank = Hash21(cell + face_seed + 3.7f);
+	const float magnitude = mix(magnitude_min, magnitude_max, pow(rank, 0.35f));
+
+	/* 色温同样偏冷：M 型星占多数，蓝白星稀少 */
+	const float temperature = pow(Hash21(cell + face_seed + 21.3f), 1.5f);
+
+	const float flux = MagnitudeToFlux(magnitude);
+	const vec3 offset = d - star_direction;
+	return StarTint(temperature) * (flux * StarProfile(length(offset), pixel_angle));
+}
+
+/* 银河：一条环绕整片天球的亮带。银极与天极的夹角固定 62.87°、方位取一个固定约定，
+ * 于是整条带跟着星空一起转（转角已经算进 d 里）。带内是成千上万颗分辨不出的恒星
+ * 叠出来的漫射光，所以星点密度也一起提上去，银河才"看得出颗粒"。
+ * band 是到银道面的权重，留给星点层做密度调制 */
+vec3 MilkyWay(vec3 d, out float band)
+{
+	const vec3 celestial_pole = u_SkyStars.xyz;
+	const vec3 reference = abs(celestial_pole.y) < 0.99f ? vec3(0.0f, 1.0f, 0.0f)
+		: vec3(1.0f, 0.0f, 0.0f);
+	const vec3 axis = normalize(cross(reference, celestial_pole));
+	const float tilt = 1.0973f; /* 62.87° */
+	const vec3 galactic_pole = normalize(celestial_pole * cos(tilt) + axis * sin(tilt));
+
+	/* 银纬的正弦，以及沿着带绕一圈的位置：银心那一侧更亮更宽，
+	 * 整条带才不会是一条等宽等亮的几何带子 */
+	const float latitude = dot(d, galactic_pole);
+	const vec3 in_plane_a = normalize(cross(galactic_pole, reference));
+	const vec3 in_plane_b = cross(galactic_pole, in_plane_a);
+	const float along = atan(dot(d, in_plane_b), dot(d, in_plane_a));
+	const float bulge = 0.55f + 0.45f * cos(along);
+	const float width = 0.11f + 0.05f * bulge;
+
+	band = exp(-latitude * latitude / (width * width));
+	if (band < 0.02f)
+		return vec3(0.0f);
+
+	/* 云块与尘埃：大尺度亮暗不均，横在中间的暗缝就是"银河裂缝" */
+	const float clouds = Fbm(d * 5.4f, 3);
+	const float rift = smoothstep(0.42f, 0.72f, Fbm(d * 9.0f + vec3(4.7f, 1.3f, 8.9f), 2));
+	const float shape = band * (0.55f + 0.90f * clouds) * (1.0f - 0.65f * rift) * (0.65f + 0.45f * bulge);
+
+	/* 偏暖的乳白色，比气辉亮一档：亮度要压得住，它是背景不是主体，
+	 * 太亮就成了一片糊在天上的云 */
+	return vec3(0.95f, 0.92f, 0.86f) * (shape * 0.07f);
+}
+
+/* 星空：把视线反向转回星空静止的坐标里取样，于是整片星空绕极轴转。
+ * 三层格点对应三档亮度：极密的暗星铺底、主序层、数量很少的亮星层。
+ * cells 是每弧度的格数（104 → 0.55° 一格） */
 vec3 Stars(vec3 direction, float night)
 {
 	vec3 d = RotateAroundAxis(direction, u_SkyStars.xyz, u_SkyStars.w);
 
-	float azimuth = atan(d.z, d.x);
-	float elevation = asin(clamp(d.y, -1.0f, 1.0f));
-	vec2 uv = vec2(azimuth * INV_2PI, elevation * INV_PI);
+	vec2 arc;
+	const int face = DirectionToFace(d, arc);
 
-	vec2 uv_dense = uv * vec2(420.0f, 210.0f);
-	vec2 uv_sparse = uv * vec2(190.0f, 95.0f);
-	float stars = StarLayer(uv_dense, 3.0f, 0.035f, fwidth(uv_dense.x) + fwidth(uv_dense.y))
-		+ StarLayer(uv_sparse, 17.0f, 0.05f, fwidth(uv_sparse.x) + fwidth(uv_sparse.y)) * 1.8f;
+	/* 一像素折算成多少弧度。取两条边的较大值：星点尺寸按像素给，
+	 * 换分辨率时星点看着一样大，不会在高分辨率下缩成一个亚像素点 */
+	const float pixel_angle = max(length(dFdx(d)), length(dFdy(d)));
 
-	/* 贴地平线的星点被大气吃掉，别让它们糊在雾里 */
-	float horizon_fade = smoothstep(-0.05f, 0.25f, d.y);
-	return vec3(stars) * u_SkyPlanet.z * night * horizon_fade;
+	float band = 0.0f;
+	const vec3 milky_way = MilkyWay(d, band);
+	const float density_scale = 1.0f + 4.0f * band;
+
+	vec3 stars = StarLayer(d, face, arc, 104.0f, 3.0f, 0.16f * density_scale,
+		4.2f, 6.8f, pixel_angle);
+	stars += StarLayer(d, face, arc, 34.0f, 17.0f, 0.05f * density_scale,
+		2.0f, 5.2f, pixel_angle);
+	stars += StarLayer(d, face, arc, 11.0f, 29.0f, 0.10f * density_scale,
+		-1.4f, 2.4f, pixel_angle);
+
+	return (stars * 1.5f + milky_way) * (u_SkyPlanet.z * night);
 }
 
 /* 月亮：盘内逐像素重建球面法线，再按太阳方向着色 —— 月相、明暗界线朝向都是算出来的，
- * 不用摆一张贴图也不用按月相切换材质 */
-vec3 Moon(vec3 view_dir)
+ * 不用摆一张贴图也不用按月相切换材质。
+ * 月面本身并不均匀：暗色的月海集中在朝向地球这一面的几片，缺了它月亮就是一块
+ * 打了光的高光斑，只有形状没有质感 */
+vec3 Moon(vec3 view_dir, float pixel_angle)
 {
-	vec3 moon_dir = u_SkyMoonDirection.xyz;
-	float angular_radius = u_SkyMoonDirection.w;
-	float cos_angle = dot(view_dir, moon_dir);
+	const vec3 moon_dir = u_SkyMoonDirection.xyz;
+	const float angular_radius = max(u_SkyMoonDirection.w, 1.0e-5f);
+	const float cos_angle = dot(view_dir, moon_dir);
 	if (cos_angle < cos(angular_radius * 1.3f))
 		return vec3(0.0f);
 
-	vec3 tangent_offset = view_dir - moon_dir * cos_angle;
-	vec3 reference = abs(moon_dir.y) < 0.98f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
-	vec3 tangent = normalize(cross(reference, moon_dir));
-	vec3 bitangent = cross(moon_dir, tangent);
+	const vec3 tangent_offset = view_dir - moon_dir * cos_angle;
+	const vec3 reference = abs(moon_dir.y) < 0.98f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+	const vec3 tangent = normalize(cross(reference, moon_dir));
+	const vec3 bitangent = cross(moon_dir, tangent);
 
-	vec2 local = vec2(dot(tangent_offset, tangent), dot(tangent_offset, bitangent)) / angular_radius;
-	float radius = length(local);
-	if (radius > 1.0f)
+	const vec2 local = vec2(dot(tangent_offset, tangent), dot(tangent_offset, bitangent))
+		/ angular_radius;
+	const float radius = length(local);
+
+	/* 边缘按像素宽度收：月面轮廓是硬边，按盘面比例做淡出会随分辨率越糊。
+	 * 上限 0.22：盘面只有几像素时按 1.5 像素折算会把整个边缘都吃掉 */
+	const float edge_width = clamp(1.5f * pixel_angle / angular_radius, 0.02f, 0.22f);
+	const float edge = 1.0f - smoothstep(1.0f - edge_width, 1.0f, radius);
+	if (edge <= 0.0f)
 		return vec3(0.0f);
 
 	/* 朝地球这一面的法线：沿 -moon_dir 抬起来再叠切平面偏移 */
-	vec3 normal = normalize(-moon_dir * sqrt(max(1.0f - radius * radius, 0.0f))
+	const vec3 normal = normalize(-moon_dir * sqrt(max(1.0f - radius * radius, 0.0f))
 		+ tangent * local.x + bitangent * local.y);
-	float lit = smoothstep(-0.05f, 0.12f, dot(normal, u_SkyMoonLightDirection.xyz));
-	float edge = 1.0f - smoothstep(0.85f, 1.0f, radius);
-	return u_SkyMoonRadiance.rgb * kMoonDiskGain * lit * edge;
+	const float lit = smoothstep(-0.05f, 0.12f, dot(normal, u_SkyMoonLightDirection.xyz));
+
+	/* 月海：几片低反射率的大块（尺度取盘面的三分之一左右，太小就成了麻点），
+	 * 叠几层噪声当环形山造成的明暗 */
+	const float maria = smoothstep(0.38f, 0.62f, Fbm(vec3(local * 1.55f, 1.7f), 3));
+	const float albedo = (0.52f + 0.48f * maria) * (1.0f - 0.06f * radius);
+
+	/* 地照：背光面被地球反射的日光微微照亮，新月前后能看到整个圆面 */
+	const float earthshine = 0.03f * (1.0f - lit);
+	return u_SkyMoonRadiance.rgb * (kMoonDiskGain * edge * (lit * albedo + earthshine));
 }
 
 /* 曝光 + 电影级色调映射：天空是唯一一档直接进 8bit 目标的自发光，
@@ -263,7 +481,7 @@ vec3 ToneMap(vec3 color)
 
 void main()
 {
-	vec3 view_dir = normalize(v_Direction);
+	vec3 view_dir = ViewDirection(v_Ndc);
 	vec3 origin = vec3(0.0f, u_SkyPlanet.x, 0.0f);
 	bool hits_ground = RaySphereNear(origin, view_dir, u_SkyPlanet.x) > 0.0f;
 
@@ -273,15 +491,27 @@ void main()
 	float sun_elevation = u_SkySunDirection.xyz.y;
 	float night = 1.0f - smoothstep(-0.08f, 0.12f, sun_elevation);
 
+	/* 一像素折算成多少弧度：日面边缘、月面边缘都按像素宽度给，
+	 * 换分辨率时它们的锐利程度才不会跟着变 */
+	const float pixel_angle = max(length(dFdx(view_dir)), length(dFdy(view_dir)));
+
 	if (!hits_ground)
 	{
 		/* 盘面按角度比较：cos 空间里做 smoothstep 会把边缘放大成几十度的光斑 */
-		float sun_angle = acos(clamp(dot(view_dir, u_SkySunDirection.xyz), -1.0f, 1.0f));
-		float disk = 1.0f - smoothstep(u_SkySunDirection.w * 0.85f, u_SkySunDirection.w, sun_angle);
-		radiance += u_SkySunRadiance.rgb * transmittance * disk * kSunDiskGain;
+		const float sun_radius = max(u_SkySunDirection.w, 1.0e-5f);
+		const float sun_angle = acos(clamp(dot(view_dir, u_SkySunDirection.xyz), -1.0f, 1.0f));
+		const float sun_ratio = sun_angle / sun_radius;
+		const float disk = 1.0f - smoothstep(0.90f, 1.0f, sun_ratio);
+		/* 边缘变暗：视线在日面边缘穿过的光球层更浅，看得到的高度更低、温度更低，
+		 * 所以边缘比中心暗一档 —— 日面不是一块均匀的白斑 */
+		const float limb = 1.0f - 0.55f * (1.0f - sqrt(max(1.0f - sun_ratio * sun_ratio, 0.0f)));
+		/* 盘外的晕：眼球与光学系统在强光周围的那圈散射，日面才不会像贴上去的一个圆片 */
+		const float glow = 0.08f * exp(-max(sun_ratio - 1.0f, 0.0f) * 2.2f);
+		radiance += u_SkySunRadiance.rgb * transmittance * (disk * limb * kSunDiskGain + glow);
 
-		radiance += Moon(view_dir) * transmittance;
-		radiance += Stars(view_dir, night);
+		radiance += Moon(view_dir, pixel_angle) * transmittance;
+		/* 星星同样走大气透过率：贴近地平线时被吃掉一大半并偏红，与日月同一套消光 */
+		radiance += Stars(view_dir, night) * transmittance;
 		radiance += kNightAirglow * night;
 	}
 	else

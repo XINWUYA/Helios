@@ -26,12 +26,16 @@ float SampleShadowPCF(sampler2DArray shadowMap, vec2 shadow_uv, float layer, flo
 	return shadow / 9.0f;
 }
 
-/* 该级联单个纹素对应的世界尺寸：正交投影下 light_vp 的 x 缩放 = 2 / 正交宽度，
- * 故单纹素世界尺寸 = 2 / (m00 * 阴影图边长)。 */
+/* 该级联单个纹素对应的世界尺寸：正交投影下单个纹素 = 正交宽度 / 阴影图边长。
+ * 级联矩阵是 P * V，第 0 行 = P00 乘视图右轴（P 的 01 / 02 项为 0），右轴是单位向量，
+ * 所以这一行的长度就是 P00 本身。不能直接取 [0][0]：那只是 P00 乘上右轴在 X 上的分量，
+ * 太阳转到正东 / 正西时右轴与 X 垂直，这个分量接近 0，算出来的纹素尺寸会涨到几十上百米，
+ * 法线偏移把采样点抬到遮挡物之上，整片阴影会消失（15 点前后太阳过正西时就能看到）。 */
 float CascadeTexelWorldSize(int cascade_id, int shadow_size)
 {
-	const float m00 = abs(u_LightViewProjectionMat[cascade_id][0][0]);
-	return 2.0f / max(m00 * float(shadow_size), 1e-6f);
+	const mat4 light_vp = u_LightViewProjectionMat[cascade_id];
+	const float scale_x = length(vec3(light_vp[0][0], light_vp[1][0], light_vp[2][0]));
+	return 2.0f / max(scale_x * float(shadow_size), 1e-6f);
 }
 
 /* 单层级联采样：返回遮挡比例（0 受光，1 全遮挡）；inside 表示该点是否落在该级联的正交盒内。

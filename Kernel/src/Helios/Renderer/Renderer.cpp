@@ -646,6 +646,11 @@ namespace Helios
 				cascade_depth_spans.reserve(cascade_maps.size());
 				for (const auto& cascade_map : cascade_maps)
 				{
+					/* 只收本光源的层：容器里还可能挂着别的方向光的级联（它们没有拟合，
+					 * 矩阵是单位阵），混进来会让级联数虚高，远处直接落到单位阵上 */
+					if (cascade_map->GetLight().get() != light.get())
+						break;
+
 					light_vp_mats.push_back(cascade_map->GetLightViewProjectionMat());
 					cascade_depth_spans.push_back(cascade_map->GetDepthRange());
 				}

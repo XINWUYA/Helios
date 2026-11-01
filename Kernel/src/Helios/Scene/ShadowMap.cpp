@@ -764,8 +764,14 @@ namespace Helios
 					Renderer::FillLightUniformBuffer(m_CascadeShadowMaps[0]->m_pLight, light_vp_mats, m_CascadeSplits,
 						cascade_depth_spans.empty() ? nullptr : &cascade_depth_spans);
 
+					/* 只画宿主方向光的级联：容器里可能还挂着别的方向光的层（级联只有一套，
+					 * 它们没被拟合，矩阵是单位阵），画了也只会写进没人采样的层 */
+					const Light* host_light = m_CascadeShadowMaps[0]->m_pLight.get();
 					for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
 					{
+						if (cascade_shadow_map->m_pLight.get() != host_light)
+							continue;
+
 						const uint8_t cascade_id = cascade_shadow_map->GetLayer();
 						render_api->PushDebugGroup(layer_names[cascade_id].c_str());
 

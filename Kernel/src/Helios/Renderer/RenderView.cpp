@@ -558,6 +558,16 @@ namespace Helios
 
 		std::vector<SharedPtr<Light>> shadow_lights;
 
+		/* 方向光的"实际贡献"：颜色里已经带了天空算出的透过率（太阳落下地平线就是 0），
+		 * 再乘强度就是它这一刻能不能照到东西 */
+		const auto direction_contribution = [](const Light& light)
+		{
+			if (light.GetLightType() != LightType::Directional)
+				return 0.0f;
+			const glm::vec4& color = light.GetColor();
+			return (0.299f * color.r + 0.587f * color.g + 0.114f * color.b) * light.GetIntensity();
+		};
+
 		const auto light_entity_view = owner_scene->GetRegistry().view<TransformComponent, LightComponent>();
 		for (auto& entity : light_entity_view)
 		{
@@ -571,10 +581,26 @@ namespace Helios
 			{
 				m_ValidLights.emplace_back(light_component.m_Light);
 
-				if (light_component.m_Light->IsCastShadow())
-					shadow_lights.emplace_back(light_component.m_Light);
+				if (!light_component.m_Light->IsCastShadow())
+					continue;
+
+				/* 照不到东西的方向光不占级联层：太阳落到地平线以下、月亮还没升起来的那一段，
+				 * 它俩的颜色 / 强度都是 0，再按它的方向拟合阴影只会在画面里留下错误的投影 */
+				if (direction_contribution(*light_component.m_Light) <= 0.0f
+					&& light_component.m_Light->GetLightType() == LightType::Directional)
+					continue;
+
+				shadow_lights.emplace_back(light_component.m_Light);
 			}
 		}
+
+		/* 级联阴影只有一套，管理器按注册顺序认第一盏方向光当宿主，所以要把真正在照明的那盏
+		 * 排在前面：太阳落下、月亮接班时顺序会翻，阴影才不会挂在一盏照不到东西的光上 */
+		std::stable_sort(shadow_lights.begin(), shadow_lights.end(),
+			[&direction_contribution](const SharedPtr<Light>& left, const SharedPtr<Light>& right)
+			{
+				return direction_contribution(*left) > direction_contribution(*right);
+			});
 
 		/* 投影光源是同一批就沿用上一帧的注册结果（级联矩阵的脏检测另有方向 / 相机比较） */
 		std::vector<uint64_t> signatures;
