@@ -52,6 +52,308 @@ namespace Helios
         /* 结构体名 -> 成员（类型, 数组长度） */
         using StructTable = std::unordered_map<std::string, std::vector<std::pair<std::string, uint32_t>>>;
 
+        /* ---- 逐行声明扫描 ----
+         * 原来这里两条大正则每行各跑一次 regex_match，libc++ 每次都要重建状态机，
+         * 一个大着色器几千行就是几百毫秒。下面改成手写扫描，判定规则与原来等价。 */
+        [[nodiscard]] bool IsDeclSpace(char c)
+        {
+            return c == ' ' || c == '\t' || c == '\r' || c == '\v' || c == '\f';
+        }
+
+        [[nodiscard]] bool IsIdentStart(char c)
+        {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+        }
+
+        [[nodiscard]] bool IsIdentChar(char c)
+        {
+            return IsIdentStart(c) || (c >= '0' && c <= '9');
+        }
+
+        [[nodiscard]] size_t SkipDeclSpace(const std::string& line, size_t pos)
+        {
+            while (pos < line.size() && IsDeclSpace(line[pos]))
+                ++pos;
+            return pos;
+        }
+
+        /* 读一个标识符，返回结束位置；不是标识符返回 npos */
+        [[nodiscard]] size_t ReadIdent(const std::string& line, size_t pos, std::string* out)
+        {
+            if (pos >= line.size() || !IsIdentStart(line[pos]))
+                return std::string::npos;
+
+            const size_t begin = pos;
+            while (pos < line.size() && IsIdentChar(line[pos]))
+                ++pos;
+
+            if (out != nullptr)
+                out->assign(line, begin, pos - begin);
+            return pos;
+        }
+
+        /* 该位置是不是独立的关键字（后面不能再接标识符字符） */
+        [[nodiscard]] bool IsKeywordAt(const std::string& line, size_t pos, const char* keyword)
+        {
+            const size_t length = std::strlen(keyword);
+            if (line.compare(pos, length, keyword) != 0)
+                return false;
+
+            const size_t next = pos + length;
+            return next >= line.size() || !IsIdentChar(line[next]);
+        }
+
+        /* 声明前缀：缩进 + 可选的 layout(...)，返回正文起点 */
+        struct DeclPrefix
+        {
+            std::string Indent;
+            std::string Qualifiers;
+            size_t BodyBegin = 0;
+        };
+
+        [[nodiscard]] bool ParseDeclPrefix(const std::string& line, DeclPrefix& prefix)
+        {
+            const size_t indent_end = SkipDeclSpace(line, 0);
+            prefix.Indent.assign(line, 0, indent_end);
+
+            size_t pos = indent_end;
+            if (!IsKeywordAt(line, pos, "layout"))
+            {
+                prefix.BodyBegin = pos;
+                return true;
+            }
+
+            pos += std::strlen("layout");
+            while (pos < line.size() && IsDeclSpace(line[pos]))
+                ++pos;
+            if (pos >= line.size() || line[pos] != '(')
+                return false;
+
+            const size_t open = pos + 1;
+            const size_t close = line.find(')', open);
+            if (close == std::string::npos)
+                return false;
+
+            prefix.Qualifiers.assign(line, open, close - open);
+            prefix.BodyBegin = SkipDeclSpace(line, close + 1);
+            return true;
+        }
+
+        /* `uniform <precision>? <type> <name> [<size>]?` 后面必须紧跟 = ; 或 , */
+        [[nodiscard]] bool ParseUniformDecl(const std::string& line, size_t pos, SlotDecl& decl,
+            std::string& array_text, bool& has_array, char& tail_first)
+        {
+            if (!IsKeywordAt(line, pos, "uniform"))
+                return false;
+
+            pos += std::strlen("uniform");
+            size_t next = SkipDeclSpace(line, pos);
+            if (next == pos)
+                return false; /* uniform 后面必须有空白 */
+            pos = next;
+
+            if (IsKeywordAt(line, pos, "highp") || IsKeywordAt(line, pos, "mediump")
+                || IsKeywordAt(line, pos, "lowp"))
+            {
+                if (IsKeywordAt(line, pos, "highp"))
+                    pos += std::strlen("highp");
+                else if (IsKeywordAt(line, pos, "mediump"))
+                    pos += std::strlen("mediump");
+                else
+                    pos += std::strlen("lowp");
+
+                next = SkipDeclSpace(line, pos);
+                if (next == pos)
+                    return false;
+                pos = next;
+            }
+
+            pos = ReadIdent(line, pos, &decl.Type);
+            if (pos == std::string::npos)
+                return false;
+
+            next = SkipDeclSpace(line, pos);
+            if (next == pos)
+                return false; /* 类型与名字之间必须有空白 */
+            pos = ReadIdent(line, next, &decl.Name);
+            if (pos == std::string::npos)
+                return false;
+
+            pos = SkipDeclSpace(line, pos);
+            has_array = false;
+            array_text.clear();
+
+            if (pos < line.size() && line[pos] == '[')
+            {
+                const size_t close = line.find(']', pos + 1);
+                if (close == std::string::npos)
+                    return false;
+
+                array_text = line.substr(pos + 1, close - pos - 1);
+                const size_t first = array_text.find_first_not_of(" \t\r\v\f");
+                const size_t last = array_text.find_last_not_of(" \t\r\v\f");
+                array_text = (first == std::string::npos)
+                    ? std::string{}
+                    : array_text.substr(first, last - first + 1);
+                has_array = true;
+                pos = SkipDeclSpace(line, close + 1);
+            }
+
+            if (pos >= line.size())
+                return false;
+
+            tail_first = line[pos];
+            return tail_first == '=' || tail_first == ';' || tail_first == ',';
+        }
+
+        /* `<插值限定符>* in|out <限定符>* <type> <name> [<size>]? ;` */
+        [[nodiscard]] bool ParseVaryingDecl(const std::string& line, size_t pos, SlotDecl& decl,
+            std::string& array_text, bool& has_array)
+        {
+            static const char* const kPrefixQualifiers[] = {
+                "flat", "noperspective", "smooth", "centroid", "sample", "invariant" };
+            static const char* const kAfterQualifiers[] = {
+                "flat", "noperspective", "smooth", "centroid", "sample", "highp", "mediump", "lowp" };
+
+            const auto consume_qualifier = [&line, &pos](const char* const* names, size_t count)
+            {
+                for (size_t index = 0; index < count; ++index)
+                {
+                    if (!IsKeywordAt(line, pos, names[index]))
+                        continue;
+
+                    /* 限定符后面必须跟空白，否则这一项不算（位置不前进） */
+                    const size_t after = pos + std::strlen(names[index]);
+                    const size_t next = SkipDeclSpace(line, after);
+                    if (next == after)
+                        return false;
+
+                    pos = next;
+                    return true;
+                }
+                return false;
+            };
+
+            while (consume_qualifier(kPrefixQualifiers, std::size(kPrefixQualifiers)))
+            {
+            }
+
+            if (IsKeywordAt(line, pos, "in"))
+            {
+                decl.Kind = SlotKind::Input;
+                pos += 2;
+            }
+            else if (IsKeywordAt(line, pos, "out"))
+            {
+                decl.Kind = SlotKind::Output;
+                pos += 3;
+            }
+            else
+            {
+                return false;
+            }
+
+            size_t next = SkipDeclSpace(line, pos);
+            if (next == pos)
+                return false;
+            pos = next;
+
+            while (consume_qualifier(kAfterQualifiers, std::size(kAfterQualifiers)))
+            {
+            }
+
+            pos = ReadIdent(line, pos, &decl.Type);
+            if (pos == std::string::npos)
+                return false;
+
+            next = SkipDeclSpace(line, pos);
+            if (next == pos)
+                return false;
+            pos = ReadIdent(line, next, &decl.Name);
+            if (pos == std::string::npos)
+                return false;
+
+            pos = SkipDeclSpace(line, pos);
+            has_array = false;
+            array_text.clear();
+
+            if (pos < line.size() && line[pos] == '[')
+            {
+                const size_t close = line.find(']', pos + 1);
+                if (close == std::string::npos)
+                    return false;
+
+                array_text = line.substr(pos + 1, close - pos - 1);
+                const size_t first = array_text.find_first_not_of(" \t\r\v\f");
+                const size_t last = array_text.find_last_not_of(" \t\r\v\f");
+                array_text = (first == std::string::npos)
+                    ? std::string{}
+                    : array_text.substr(first, last - first + 1);
+                has_array = true;
+                pos = SkipDeclSpace(line, close + 1);
+            }
+
+            return pos < line.size() && line[pos] == ';';
+        }
+
+        [[nodiscard]] bool IsBasicGlslType(const std::string& type)
+        {
+            if (type == "bool" || type == "int" || type == "uint" || type == "float" || type == "double")
+                return true;
+
+            if (type.size() == 4 && type[3] >= '2' && type[3] <= '4')
+            {
+                const std::string head = type.substr(0, 3);
+                if (head == "vec" || head == "ivec" || head == "uvec" || head == "bvec")
+                    return true;
+            }
+
+            /* matN / dmatN，可带 xM 后缀 */
+            size_t pos = (!type.empty() && type[0] == 'd') ? 1 : 0;
+            if (type.compare(pos, 3, "mat") != 0)
+                return false;
+
+            pos += 3;
+            if (pos >= type.size() || type[pos] < '2' || type[pos] > '4')
+                return false;
+            ++pos;
+
+            if (pos == type.size())
+                return true;
+
+            return type[pos] == 'x' && pos + 2 == type.size()
+                && type[pos + 1] >= '2' && type[pos + 1] <= '4';
+        }
+
+        [[nodiscard]] bool IsAllDigits(const std::string& text)
+        {
+            if (text.empty())
+                return false;
+
+            for (const char c : text)
+            {
+                if (c < '0' || c > '9')
+                    return false;
+            }
+            return true;
+        }
+
+        /* 限定符项是不是 location / binding 赋值（这两项由分配器重写，其余原样保留） */
+        [[nodiscard]] bool IsSlotQualifier(const std::string& item)
+        {
+            size_t pos = 0;
+            if (item.compare(0, 8, "location") == 0)
+                pos = 8;
+            else if (item.compare(0, 7, "binding") == 0)
+                pos = 7;
+            else
+                return false;
+
+            while (pos < item.size() && IsDeclSpace(item[pos]))
+                ++pos;
+            return pos < item.size() && item[pos] == '=';
+        }
+
         bool IsSamplerType(const std::string& type)
         {
             return type.rfind("sampler", 0) == 0 || type.rfind("isampler", 0) == 0 || type.rfind("usampler", 0) == 0;
@@ -203,14 +505,6 @@ namespace Helios
             const std::function<std::optional<std::string>(const SlotDecl&)>& on_decl,
             std::string& output, std::string& error_msg)
         {
-            static const std::regex uniform_regex(
-                R"(^(\s*)(?:layout\s*\(([^)]*)\)\s*)?(uniform\s+(?:(?:highp|mediump|lowp)\s+)?([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*(?:\[\s*([^\]]*?)\s*\])?\s*([=;,].*))$)");
-            static const std::regex varying_regex(
-                R"(^(\s*)(?:layout\s*\(([^)]*)\)\s*)?((?:(?:flat|noperspective|smooth|centroid|sample|invariant)\s+)*(in|out)\s+(?:(?:flat|noperspective|smooth|centroid|sample|highp|mediump|lowp)\s+)*([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*(?:\[\s*([^\]]*?)\s*\])?\s*(;.*))$)");
-            static const std::regex basic_type_regex(R"((?:bool|int|uint|float|double|[biud]?vec[234]|d?mat[234](x[234])?))");
-            static const std::regex slot_regex(R"(^\s*(location|binding)\s*=)");
-            static const std::regex digits_regex(R"(\d+)");
-
             output.clear();
             output.reserve(source.size());
 
@@ -229,58 +523,54 @@ namespace Helios
                 const bool has_cr = !line.empty() && line.back() == '\r';
                 const std::string body = has_cr ? line.substr(0, line.size() - 1) : line;
 
-                std::smatch match;
                 SlotDecl decl;
                 bool found = false;
                 std::string qualifiers;
                 std::string array_text;
                 bool has_array = false;
-                if (!commented && body.find("uniform") != std::string::npos && std::regex_match(body, match, uniform_regex))
+                DeclPrefix prefix;
+                if (!commented && body.find("uniform") != std::string::npos && ParseDeclPrefix(body, prefix))
                 {
-                    const std::string type = match.str(4);
-                    if (IsSamplerType(type))
+                    char tail_first = '\0';
+                    if (ParseUniformDecl(body, prefix.BodyBegin, decl, array_text, has_array, tail_first))
                     {
-                        decl.Kind = SlotKind::Sampler;
-                        found = true;
-                    }
-                    else if (!IsOpaqueUniformType(type))
-                    {
-                        if (match.str(7)[0] == ',')
+                        const std::string& type = decl.Type;
+                        if (IsSamplerType(type))
                         {
-                            error_msg = "uniform '" + match.str(5) + "': declare one uniform per line";
-                            return false;
+                            decl.Kind = SlotKind::Sampler;
+                            found = true;
                         }
-                        if (!std::regex_match(type, basic_type_regex))
+                        else if (!IsOpaqueUniformType(type))
                         {
-                            error_msg = "uniform '" + match.str(5) + "': type '" + type +
-                                "' is not a basic type, use a uniform block for structs";
-                            return false;
+                            if (tail_first == ',')
+                            {
+                                error_msg = "uniform '" + decl.Name + "': declare one uniform per line";
+                                return false;
+                            }
+                            if (!IsBasicGlslType(type))
+                            {
+                                error_msg = "uniform '" + decl.Name + "': type '" + type +
+                                    "' is not a basic type, use a uniform block for structs";
+                                return false;
+                            }
+                            decl.Kind = SlotKind::LooseUniform;
+                            found = true;
                         }
-                        decl.Kind = SlotKind::LooseUniform;
-                        found = true;
-                    }
 
-                    if (found)
-                    {
-                        decl.Indent = match.str(1);
-                        qualifiers = match.str(2);
-                        decl.Declaration = match.str(3);
-                        decl.Type = type;
-                        decl.Name = match.str(5);
-                        has_array = match[6].matched;
-                        array_text = match.str(6);
+                        if (found)
+                        {
+                            decl.Indent = prefix.Indent;
+                            qualifiers = prefix.Qualifiers;
+                            decl.Declaration = body.substr(prefix.BodyBegin);
+                        }
                     }
                 }
-                else if (!commented && std::regex_match(body, match, varying_regex))
+                else if (!commented && ParseDeclPrefix(body, prefix)
+                    && ParseVaryingDecl(body, prefix.BodyBegin, decl, array_text, has_array))
                 {
-                    decl.Kind = match.str(4) == "in" ? SlotKind::Input : SlotKind::Output;
-                    decl.Indent = match.str(1);
-                    qualifiers = match.str(2);
-                    decl.Declaration = match.str(3);
-                    decl.Type = match.str(5);
-                    decl.Name = match.str(6);
-                    has_array = match[7].matched;
-                    array_text = match.str(7);
+                    decl.Indent = prefix.Indent;
+                    qualifiers = prefix.Qualifiers;
+                    decl.Declaration = body.substr(prefix.BodyBegin);
                     found = true;
                 }
 
@@ -288,7 +578,7 @@ namespace Helios
                 {
                     if (has_array)
                     {
-                        if (!std::regex_match(array_text, digits_regex))
+                        if (!IsAllDigits(array_text))
                         {
                             error_msg = "'" + decl.Name + "': array size must be a number literal";
                             return false;
@@ -303,7 +593,7 @@ namespace Helios
                     {
                         item.erase(0, item.find_first_not_of(" \t"));
                         item.erase(item.find_last_not_of(" \t") + 1);
-                        if (item.empty() || std::regex_search(item, slot_regex))
+                        if (item.empty() || IsSlotQualifier(item))
                             continue;
                         decl.Qualifiers += (decl.Qualifiers.empty() ? "" : ", ") + item;
                     }
@@ -394,10 +684,47 @@ namespace Helios
             return mutex;
         }
 
+        /* `#include "x"` 或 `#include <x>` 的路径；不是 include 行返回 false。
+         * 原来每行跑两次 regex_search，改手写前缀匹配（规则一致：只认空格、路径非空）。 */
+        [[nodiscard]] bool ParseIncludeLine(const std::string& line, std::string& out_path)
+        {
+            size_t pos = 0;
+            while (pos < line.size() && line[pos] == ' ')
+                ++pos;
+
+            if (pos >= line.size() || line[pos] != '#')
+                return false;
+            ++pos;
+            while (pos < line.size() && line[pos] == ' ')
+                ++pos;
+
+            if (line.compare(pos, 7, "include") != 0)
+                return false;
+            pos += 7;
+
+            if (pos >= line.size() || line[pos] != ' ')
+                return false; /* #include 后面至少要一个空格 */
+            while (pos < line.size() && line[pos] == ' ')
+                ++pos;
+
+            if (pos >= line.size())
+                return false;
+
+            const char open = line[pos];
+            if (open != '"' && open != '<')
+                return false;
+
+            const size_t end = line.find(open == '"' ? '"' : '>', pos + 1);
+            if (end == std::string::npos || end == pos + 1)
+                return false;
+
+            out_path.assign(line, pos + 1, end - pos - 1);
+            return true;
+        }
+
         /* 收集依赖：只去重，不影响展开 */
         void AddDependency(std::vector<std::string>* dependencies, const std::string& path)
-        {
-            if (dependencies == nullptr)
+        {            if (dependencies == nullptr)
                 return;
 
             for (const std::string& existing : *dependencies)
@@ -455,37 +782,15 @@ namespace Helios
         context.Stack.push_back(key);
 
         std::string result;
-        static const std::regex regex_quote("^[ ]*#[ ]*include[ ]+\"([^\"]+)\".*");
-        static const std::regex regex_angle("^[ ]*#[ ]*include[ ]+<([^>]+)>.*");
-        std::smatch matches;
         std::string line_str;
         std::istringstream lines(raw);
         while (std::getline(lines, line_str))
         {
-            if (line_str.find("#include") != line_str.npos)
+            std::string include_file;
+            if (line_str.find("#include") != line_str.npos && ParseIncludeLine(line_str, include_file))
             {
-                std::string include_file;
-                bool matched = false;
-                if (std::regex_search(line_str, matches, regex_quote))
-                {
-                    include_file = matches.str(1);
-                    matched = true;
-                }
-                else if (std::regex_search(line_str, matches, regex_angle))
-                {
-                    include_file = matches.str(1);
-                    matched = true;
-                }
-
-                if (matched)
-                {
-                    std::string base_dir = ExtractFileBaseDir(filepath);
-                    result += ReadFile(base_dir + include_file, context) + '\n';
-                }
-                else
-                {
-                    result += line_str + '\n';
-                }
+                std::string base_dir = ExtractFileBaseDir(filepath);
+                result += ReadFile(base_dir + include_file, context) + '\n';
             }
             else
             {

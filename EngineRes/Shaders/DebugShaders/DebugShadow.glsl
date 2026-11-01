@@ -26,6 +26,7 @@ void main()
 #include "../Builtin/ShadowUtils.glsl"
 #include "../Builtin/LightCompose.glsl"
 #include "../Builtin/DirectLight.glsl"
+#include "DebugViewCommon.glsl"
 
 struct SVextex2Frag
 {
@@ -34,8 +35,7 @@ struct SVextex2Frag
 
 in SVextex2Frag vert2frag;
 
-/* rg：可见度 × 权重、权重。逐光源加法累加，合成端相除得到平均可见度
- * （见 DebugShaders/DebugView.glsl 的 Shadow 档） */
+/* 累加编码见 DebugViewCommon.glsl 的 DebugShadowSample，合成端相除得到平均可见度 */
 layout(location = 0) out vec4 OutFragColor;
 
 void main()
@@ -50,10 +50,5 @@ void main()
 	EvaluateDirectLight(u_ShadowMap, gbuffer.WorldPosition, n, l, attenuation, shadow);
 	shadow *= gbuffer.ReceiveShadow;
 
-	/* 权重只看这盏灯照不照得到：颜色亮度 × 强度 × 衰减。不乘 N·L —— 法线贴图的沟槽
-	 * 会把 N·L 压到 0，这些像素被踢出平均后合成端回退成白，就成了阴影里的白点 */
-	const float luma = dot(u_ColorIntensity.rgb, vec3(0.2126f, 0.7152f, 0.0722f));
-	const float weight = luma * u_ColorIntensity.a * attenuation;
-
-	OutFragColor = vec4(weight * (1.0f - shadow), weight, 0.0f, 0.0f);
+	OutFragColor = DebugShadowSample(u_ColorIntensity, attenuation, shadow);
 }

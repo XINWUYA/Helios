@@ -43,6 +43,7 @@ void main()
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
 #include "../ReflectionProbe/IBLCommon.glsl"
+#include "../DebugShaders/DebugForward.glsl"
 
 struct SVextex2Frag
 {
@@ -87,6 +88,17 @@ void main()
 	/* 模型关闭「接受阴影」时阴影因子归零 */
 	shadow *= u_ReceiveShadow;
 
+	ObjectId = float(u_ObjectId);
+
+	/* 调试视图：简化档只有 Albedo 与固定的粗糙度 / 金属度，环境输入按 1 算 */
+	if (u_DebugView != 0)
+	{
+		const SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, roughness, metallic);
+		OutFragColor = DebugForwardOutput(mtl, DebugStandardLighting(mtl, N, V, L, attenuation, shadow),
+			attenuation, shadow);
+		return;
+	}
+
 	/* 间接光：u_UseIBL = 1 时逐绘制绑定反射探针环境贴图，否则退回简单环境项；
 	 * 只在合成的那一笔（第 0 笔）里累加 —— 其余笔只叠直接光 */
 	vec3 color = ComposeDirectLight(L, V, N, metallic, roughness, albedo, attenuation, shadow);
@@ -102,5 +114,4 @@ void main()
 	}
 
 	OutFragColor = vec4(color, albedo_sample.a * u_Opacity);
-	ObjectId = float(u_ObjectId);
 }

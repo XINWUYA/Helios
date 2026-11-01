@@ -1,8 +1,8 @@
 #type vertex
 #version 410 core
 
-/* 调试材质（几何重绘）：Mipmap 档（两管线）+ 前向的 Surface 档。
- * 顶点属性按引擎统一契约（location 0..4 = 位置 / 法线 / 颜色 / UV / 切线） */
+/* 调试材质（几何重绘）：Mipmap 与 Overdraw 档（两管线），以及前向里没接调试分流的自定义
+ * 着色器的兜底。顶点属性按引擎统一契约（location 0..4 = 位置 / 法线 / 颜色 / UV / 切线） */
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
 layout(location = 2) in vec4 a_Color;
@@ -39,6 +39,7 @@ void main()
 #version 410 core
 
 #include "../Builtin/Math.glsl"
+#include "DebugViewCommon.glsl"
 
 struct SVextex2Frag
 {
@@ -56,20 +57,7 @@ layout(location = 0) out vec4 OutFragColor;
 uniform sampler2D u_MainTexture;
 uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f);
 
-/* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
- * 本 shader 处理 Mipmap（两条管线）与前向的 Surface 档；延迟的 Surface 档走 G-Buffer
- * 直读（DebugView.glsl） */
 uniform int u_DebugMode = 0;
-
-const int kDebugAlbedo = 1;
-const int kDebugNormal = 2;
-const int kDebugRoughness = 3;
-const int kDebugMetallic = 4;
-const int kDebugSpecularColor = 5;
-const int kDebugAmbientOcclusion = 6;
-const int kDebugEmission = 7;
-const int kDebugAmbient = 8;
-const int kDebugMipmap = 15;
 
 /* Mip 层级热力色：mip 0（最清晰）红 → 黄 → 绿 → 蓝（最糊）；t = 采样层级 / 最大层级 */
 vec3 MipLevelHeat(float t)
@@ -84,6 +72,20 @@ vec3 MipLevelHeat(float t)
 
 void main()
 {
+	/* 重叠计数：加法混合下每个片元累加一份步进，显示层交给 DebugView.glsl 的热力图 */
+	if (u_DebugMode == kDebugOverdraw)
+	{
+		OutFragColor = vec4(kOverdrawStep);
+		return;
+	}
+
+	/* 阴影累加的兜底：权重 0 读作全受光，覆盖标记照写（背景才会被保留） */
+	if (u_DebugMode == kDebugShadow)
+	{
+		OutFragColor = vec4(0.0f, 0.0f, 2.0f, 0.0f);
+		return;
+	}
+
 	vec2 base_uv = vert2frag.TexCoord * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
 
 	/* Mipmap 档：按屏幕空间采样足迹求 mip 层级（与硬件采样同口径），
@@ -98,34 +100,24 @@ void main()
 		return;
 	}
 
-	if (u_DebugMode == kDebugAlbedo)
+	/* 光照分量：自定义着色器的光照算法引擎不知道，给不出读数就画黑 */
+	if (!IsDebugSurfaceMode(u_DebugMode))
 	{
-		/* 与 PBRStandard 的 Albedo 输入同口径（线性化 × 顶点色） */
-		OutFragColor = vec4(SrgbToLinear(texture(u_MainTexture, base_uv).rgb) * vert2frag.BaseColor.rgb, 1.0f);
-		return;
-	}
-	if (u_DebugMode == kDebugNormal)
-	{
-		vec3 T = normalize(vert2frag.WorldTangent);
-		vec3 N = normalize(vert2frag.WorldNormal);
-		T = normalize(T - dot(T, N) * N);
-		mat3 TBN = mat3(T, cross(T, N), N);
-		const vec3 normal = texture(u_MainTexture, base_uv).xyz * 2.0f - 1.0f;
-		OutFragColor = vec4(normalize(TBN * normal) * 0.5f + 0.5f, 1.0f);
-		return;
-	}
-	if (u_DebugMode == kDebugRoughness || u_DebugMode == kDebugMetallic)
-	{
-		OutFragColor = vec4(vec3(texture(u_MainTexture, base_uv).r), 1.0f);
-		return;
-	}
-	if (u_DebugMode == kDebugAmbientOcclusion)
-	{
-		/* 材质体系里 AO 恒为 1（与 GBuffer 的写入约定一致） */
-		OutFragColor = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+		OutFragColor = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		return;
 	}
 
-	/* SpecularColor / Emission / Ambient：直接取对应贴图的 RGB */
-	OutFragColor = vec4(texture(u_MainTexture, base_uv).rgb, 1.0f);
+	/* Surface 档：只看 CPU 选定的那一张贴图，其余通道按贴图约定的缺省值 */
+	const vec4 main_sample = texture(u_MainTexture, base_uv);
+	vec3 T = normalize(vert2frag.WorldTangent);
+	vec3 N = normalize(vert2frag.WorldNormal);
+	T = normalize(T - dot(T, N) * N);
+	const mat3 TBN = mat3(T, cross(T, N), N);
+
+	SMaterialInput mtl = MakeDebugMaterialInput(SrgbToLinear(main_sample.rgb) * vert2frag.BaseColor.rgb,
+		normalize(TBN * (main_sample.xyz * 2.0f - 1.0f)), main_sample.r, main_sample.r);
+	mtl.Specular = main_sample.rgb;
+	mtl.Emission = main_sample.rgb;
+	mtl.Ambient = main_sample.rgb;
+	OutFragColor = vec4(DebugSurfaceChannel(u_DebugMode, mtl), 1.0f);
 }

@@ -12,8 +12,10 @@ uniform sampler2D   u_BRDFLut;
 uniform int u_UseIBL = 0;
 
 /* 间接光：辐照度图（半球卷积）+ 粗糙度预滤波镜面（mip m 对应 roughness = m/(层数-1)），
- * 采样层级 = roughness × 最大 mip 序号；合成走公共库（与延迟侧同一份），怎么与直接光叠加由调用方决定 */
-vec3 EvaluateIBL(vec3 N, vec3 V, float roughness, float metallic, vec3 albedo)
+ * 采样层级 = roughness × 最大 mip 序号；合成走公共库（与延迟侧同一份），怎么与直接光叠加由调用方决定。
+ * 正常着色取两个分量之和，调试视图按分量分别看 */
+void EvaluateIBLComponents(vec3 N, vec3 V, float roughness, float metallic, vec3 albedo,
+	out vec3 diffuse, out vec3 specular)
 {
 	roughness = clamp(roughness, 0.0f, 1.0f);
 	const float ndv = max(dot(N, V), 0.0f);
@@ -23,7 +25,16 @@ vec3 EvaluateIBL(vec3 N, vec3 V, float roughness, float metallic, vec3 albedo)
 	vec3 prefiltered = textureLod(u_PrefilterMap, reflect(-V, N), roughness * max_lod).rgb;
 	vec2 brdf = texture(u_BRDFLut, vec2(ndv, roughness)).rg;
 
-	return ComposeIBL(N, V, metallic, albedo, irradiance, prefiltered, brdf);
+	diffuse = ComposeIBLDiffuse(N, V, metallic, albedo, irradiance);
+	specular = ComposeIBLSpecular(N, V, metallic, albedo, prefiltered, brdf);
+}
+
+vec3 EvaluateIBL(vec3 N, vec3 V, float roughness, float metallic, vec3 albedo)
+{
+	vec3 diffuse;
+	vec3 specular;
+	EvaluateIBLComponents(N, V, roughness, metallic, albedo, diffuse, specular);
+	return diffuse + specular;
 }
 
 #endif // IBL_COMMON_GLSL

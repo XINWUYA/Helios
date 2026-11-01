@@ -108,6 +108,7 @@ float CalculateShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 view_pos, v
 	return factor;
 }
 
+
 /* 点光 / 聚光阴影的 z 空间深度偏移：ShadowBias 是世界单位，但比较发生在投影后的 z 空间，
  * 直接加数量级对不上 —— 换算成 z 斜率（世界偏移项 + 防掠射 acne 的自适应项）。 */
 float PunctualShadowZOffset(sampler2DArray shadowMap, vec3 light_to_frag, vec3 n)

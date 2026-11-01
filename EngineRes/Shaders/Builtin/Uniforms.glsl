@@ -14,6 +14,10 @@ layout(std140, binding = 0) uniform ViewUniformBuffer
 	mat4 u_ViewMat;
 	mat4 u_ProjectionMat;
 	mat4 u_ViewProjectionMat;
+	/* 运动矢量专用：两帧都不带抖动。抖动是同一表面点换像素，
+	 * 算进位移里会让整屏每帧都在动，重投影反而更抖 */
+	mat4 u_VelocityViewProjectionMat;
+	mat4 u_PrevVelocityViewProjectionMat;
 	vec3 u_ViewPos;
 	uint u_FrameCounter;
 };
@@ -21,6 +25,8 @@ layout(std140, binding = 0) uniform ViewUniformBuffer
 layout(std140, binding = 1) uniform ObjectUniformBuffer
 {
 	mat4 u_Local2WorldMat;
+	/* 上一帧的模型矩阵：运动矢量的顶点阶段用它算上一帧的世界位置 */
+	mat4 u_PrevLocalToWorldMat;
 	int  u_ObjectId;
 	/* 是否接受阴影（0/1）：乘进阴影因子；延迟管线里由 G-Buffer 带给光照阶段 */
 	float u_ReceiveShadow;

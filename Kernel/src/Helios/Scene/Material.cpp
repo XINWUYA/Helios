@@ -61,6 +61,7 @@ namespace Helios
 		m_SupportsIBL = false;
 		m_SupportsDirectLighting = false;
 		m_SupportsGBuffer = false;
+		m_SupportsDebugView = false;
 		if (m_pShader == nullptr)
 			return;
 
@@ -85,6 +86,11 @@ namespace Helios
 
 		/* G-Buffer 判据 = 声明了标准材质契约的主采样器：自定义着色器的裸 uniform 转不过去 */
 		m_SupportsGBuffer = m_pShader->GetUniformBinding("u_AlbedoTexture") >= 0;
+
+		/* 调试分流判据 = 声明了 u_DebugView；拿不到裸 uniform 声明时按光照契约近似 */
+		m_SupportsDebugView = !reflection.MaterialParams.empty()
+			? reflection.FindMaterialParam("u_DebugView") != nullptr
+			: m_SupportsDirectLighting;
 	}
 
 	bool Material::IsSkyBox() const
@@ -113,6 +119,13 @@ namespace Helios
 		if (!ShaderFlagsReady())
 			RefreshShaderFlags();
 		return m_SupportsGBuffer;
+	}
+
+	bool Material::SupportsDebugView() const
+	{
+		if (!ShaderFlagsReady())
+			RefreshShaderFlags();
+		return m_SupportsDebugView;
 	}
 
 	void Material::SetParameters(ParamType type, const std::string& name, const std::any& param)

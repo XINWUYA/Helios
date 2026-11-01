@@ -40,7 +40,9 @@ void main()
 	float env_size = exp2(u_EnvironmentMapMaxMip);
 	float sa_texel = 4.0f * PI / (6.0f * env_size * env_size);
 
-	const float k_SampleDelta = 0.025f;
+	/* 采样步长：输出面只有 32 像素，0.1 弧度已经是每像素约 1000 个样本，
+	 * 再密只是把同一条低频结果算更多遍（0.025 是约 1.6 万次，实时烘焙扛不住） */
+	const float k_SampleDelta = 0.1f;
 	float sample_count = 0.0f;
 	for (float phi = 0.0f; phi < 2.0f * PI; phi += k_SampleDelta)
 	{

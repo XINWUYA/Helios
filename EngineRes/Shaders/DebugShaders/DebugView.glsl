@@ -23,6 +23,7 @@ void main()
 #version 410 core
 
 #include "../DeferredShaders/GBufferCommon.glsl"
+#include "DebugViewCommon.glsl"
 
 struct SVextex2Frag
 {
@@ -32,31 +33,18 @@ struct SVextex2Frag
 in SVextex2Frag vert2frag;
 layout(location = 0) out vec4 OutFragColor;
 
-/* Overdraw 计数纹理（DebugOverdraw.glsl 的加法累加结果）：只在 Overdraw 档有效，
- * 其余档位由 CPU 补黑 —— 声明的采样器每次绘制都必须有绑定 */
+/* Overdraw 计数纹理与阴影累加纹理：只在对应档位有效，其余档位由 CPU 补黑
+ * （声明的采样器每次绘制都必须有绑定） */
 uniform sampler2D u_OverdrawTexture;
-
-/* 阴影累加纹理（DebugShadow.glsl 的加法累加结果，rg = 可见度 × 权重、权重）：
- * 只在 Shadow 档有效，其余档位由 CPU 补黑 */
 uniform sampler2D u_ShadowAccumTexture;
 
-/* 调试档位：与 C++ DebugViewMode 序号一致（见 Kernel/src/Helios/Renderer/RenderCommon.h）。
- * 本 shader 处理 Surface 档（延迟：G-Buffer 直读）、Shadow 档（多光源平均可见度）
- * 与 Overdraw 热力图 */
+/* 调试档位：本 shader 处理 Surface 档（G-Buffer 直读）、Shadow 档（多光源平均可见度）与 Overdraw 热力图 */
 uniform int u_DebugMode = 0;
 
-const int kDebugAlbedo = 1;
-const int kDebugNormal = 2;
-const int kDebugRoughness = 3;
-const int kDebugMetallic = 4;
-const int kDebugSpecularColor = 5;
-const int kDebugAmbientOcclusion = 6;
-const int kDebugEmission = 7;
-const int kDebugAmbient = 8;
-const int kDebugShadow = 11;
-const int kDebugOverdraw = 14;
+/* 1 = 没有几何的像素原样保留（前向的天空已经画在底下），0 = 整屏覆写（延迟由天空 Pass 收背景） */
+uniform int u_PreserveBackground = 0;
 
-/* Overdraw 热力色：0（背景）近黑 → 绿 → 红（高重叠）；计数步进 0.1 → 10 层饱和到红 */
+/* Overdraw 热力色：0（背景）近黑 → 绿 → 红（高重叠） */
 vec3 OverdrawHeat(float t)
 {
 	t = clamp(t, 0.0f, 1.0f);
@@ -68,37 +56,32 @@ vec3 OverdrawHeat(float t)
 
 void main()
 {
-	SGBufferData gbuffer;
-	CalculateGBuffer(gbuffer, vert2frag.TexCoord);
-
 	vec3 debug_color;
-	if (u_DebugMode == kDebugAlbedo)
-		debug_color = gbuffer.Albedo;
-	else if (u_DebugMode == kDebugNormal)
-		debug_color = normalize(gbuffer.WorldNormal) * 0.5f + 0.5f; /* 可视化重映射 */
-	else if (u_DebugMode == kDebugRoughness)
-		debug_color = vec3(gbuffer.Roughness);
-	else if (u_DebugMode == kDebugMetallic)
-		debug_color = vec3(gbuffer.Metallic);
-	else if (u_DebugMode == kDebugSpecularColor)
-		debug_color = gbuffer.Specular;
-	else if (u_DebugMode == kDebugAmbientOcclusion)
-		debug_color = vec3(gbuffer.AO);
-	else if (u_DebugMode == kDebugEmission)
-		debug_color = gbuffer.Emission;
-	else if (u_DebugMode == kDebugAmbient)
-		debug_color = gbuffer.Ambient;
-	else if (u_DebugMode == kDebugShadow)
+	if (u_DebugMode == kDebugShadow)
 	{
-		/* 多光源叠加：rg 是逐光源累加的"可见度 × 权重"和"权重"，相除得到平均可见度。
-		 * 没有灯够得着时（权重和为 0）读作全受光 */
-		const vec2 accum = texture(u_ShadowAccumTexture, vert2frag.TexCoord).rg;
+		/* 逐光源累加的可见度乘权重与权重相除得平均可见度，没有灯够得着时读作全受光 */
+		const vec4 accum = texture(u_ShadowAccumTexture, vert2frag.TexCoord);
+		if (u_PreserveBackground != 0 && accum.b < 1.0f)
+			discard;
 		debug_color = vec3(accum.g > 1e-5f ? accum.r / accum.g : 1.0f);
 	}
-	else
-		/* kDebugOverdraw（其余档位不会发到这里）：覆盖全部像素，背景计 0、
-		 * 由天空（延迟）或清屏色（前向）在后收尾 */
+	else if (u_DebugMode == kDebugOverdraw)
+	{
 		debug_color = OverdrawHeat(texture(u_OverdrawTexture, vert2frag.TexCoord).r);
+	}
+	else
+	{
+		SGBufferData gbuffer;
+		CalculateGBuffer(gbuffer, vert2frag.TexCoord);
+
+		SMaterialInput mtl = MakeDebugMaterialInput(gbuffer.Albedo, gbuffer.WorldNormal,
+			gbuffer.Roughness, gbuffer.Metallic);
+		mtl.Specular = gbuffer.Specular;
+		mtl.AO = gbuffer.AO;
+		mtl.Emission = gbuffer.Emission;
+		mtl.Ambient = gbuffer.Ambient;
+		debug_color = DebugSurfaceChannel(u_DebugMode, mtl);
+	}
 
 	OutFragColor = vec4(debug_color, 1.0f);
 }

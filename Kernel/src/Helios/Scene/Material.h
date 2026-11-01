@@ -82,6 +82,9 @@ namespace Helios
 		 * 见 Builtin/MaterialLit.glsl）。声明不了的自定义着色器（纯色 / Unlit）
 		 * 在延迟管线下用自身着色器前向直画，否则参数会被转换丢弃、外观退化。 */
 		[[nodiscard]] bool SupportsGBuffer() const;
+		/* 能否自己输出调试读数：着色器接了前向调试分流（声明了 u_DebugView，
+		 * 见 DebugShaders/DebugForward.glsl）。接不上的在前向调试档位下由调试材质兜底重画。 */
+		[[nodiscard]] bool SupportsDebugView() const;
 		/* 渲染队列：小于 2500 不透明（先画、写深度），大于等于 2500 透明
 		 * （后画、从远到近、只测不写深度）。见 RenderCommon 的队列常量。 */
 		void SetRenderQueue(int32_t render_queue) { m_RenderQueue = render_queue; }
@@ -232,6 +235,7 @@ namespace Helios
 		mutable bool m_SupportsIBL{ false };
 		mutable bool m_SupportsDirectLighting{ false };
 		mutable bool m_SupportsGBuffer{ false };
+		mutable bool m_SupportsDebugView{ false };
 		/* 材质所需的各种参数<ToID(Name), MaterialParamInfo> */
 		ParameterMap m_Parameters{};
 		/* 光栅化状态配置 */

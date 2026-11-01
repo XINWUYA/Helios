@@ -40,7 +40,14 @@ void main()
 	vec3 n = GetCubeFaceDirection(u_FaceId, WorldPosition.xy);
 	vec3 v = n;
 
-	const uint k_SampleCount = 1024u;
+	/* 镜面层（粗糙度 0）只需沿法线取一次；其余层按粗糙度给样本，
+	 * 粗层本来就要多些才能收敛，细层给多了纯浪费（原本一律 1024） */
+	uint sample_count = 256u;
+	if (u_Roughness <= 0.0f)
+		sample_count = 1u;
+	else if (u_Roughness < 0.25f)
+		sample_count = 64u;
+
 	float total_weight = 0.0f;
 
 	/* 源立方图单个 texel 的立体角（6 个面共 6*size^2 个 texel） */
@@ -48,9 +55,9 @@ void main()
 	float sa_texel = 4.0f * PI / (6.0f * env_size * env_size);
 
 	vec3 prefiltered_color = vec3(0.0f);
-	for (uint i = 0u; i < k_SampleCount; ++i)
+	for (uint i = 0u; i < sample_count; ++i)
 	{
-		vec2 xi = Hammersley(i, k_SampleCount);
+		vec2 xi = Hammersley(i, sample_count);
 		vec3 h  = ImportanceSampleGGX(xi, n, u_Roughness);
 		float v_dot_h = max(dot(v, h), 0.0f);
 		vec3 l  = normalize(2.0f * v_dot_h * h - v);
@@ -62,7 +69,7 @@ void main()
 			/* 按采样立体角选择源 mip（Karis 的 split-sum 做法）：固定读 mip0 会让
 			 * 太阳这类极亮 texel 主导结果，表现为孤立的白色方块（走样） */
 			float pdf = DistributionGGX(n_dot_h, u_Roughness) * n_dot_h / (4.0f * v_dot_h) + 0.0001f;
-			float sa_sample = 1.0f / (float(k_SampleCount) * pdf + 0.0001f);
+			float sa_sample = 1.0f / (float(sample_count) * pdf + 0.0001f);
 			float source_mip = (u_Roughness == 0.0f) ? 0.0f : 0.5f * log2(max(sa_sample / sa_texel, 1.0f));
 
 			prefiltered_color += textureLod(u_EnvironmentMap, l, source_mip).rgb * n_dot_l;

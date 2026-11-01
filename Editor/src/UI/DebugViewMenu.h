@@ -64,29 +64,28 @@ namespace Helios::DebugViewMenu
 		return PanelChrome::MenuItemSelectWithIcon(item.Icon, item.Label, current == item.Mode, enabled);
 	}
 
-	/* 一个分区：段头 + 若干行；enabled = false 时整段置灰（如前向管线下的光照分量） */
+	/* 一个分区：段头 + 若干行 */
 	inline void DrawCategory(const char* title, DebugViewMode current, const Item* items, size_t count,
-		bool enabled, const std::function<void(DebugViewMode)>& on_select)
+		const std::function<void(DebugViewMode)>& on_select)
 	{
 		PanelChrome::MenuSectionHeader(title);
 		for (size_t index = 0; index < count; ++index)
 		{
-			if (DrawItemRow(current, items[index], enabled))
+			if (DrawItemRow(current, items[index]))
 				on_select(items[index].Mode);
 		}
 	}
 
-	/* 全部档位行：Shaded 复位行 + Surface / Lighting / Analysis / Animation 四段 */
-	inline void DrawItems(DebugViewMode current, bool lighting_enabled,
-		const std::function<void(DebugViewMode)>& on_select)
+	/* 全部档位行：Shaded 复位行 + Surface / Lighting / Analysis / Animation 四段，前向与延迟都可用 */
+	inline void DrawItems(DebugViewMode current, const std::function<void(DebugViewMode)>& on_select)
 	{
 		if (DrawResetRow(current))
 			on_select(DebugViewMode::None);
 
-		DrawCategory("SURFACE", current, kSurfaceItems, IM_ARRAYSIZE(kSurfaceItems), true, on_select);
-		DrawCategory("LIGHTING", current, kLightingItems, IM_ARRAYSIZE(kLightingItems), lighting_enabled, on_select);
-		DrawCategory("ANALYSIS", current, kAnalysisItems, IM_ARRAYSIZE(kAnalysisItems), true, on_select);
-		DrawCategory("ANIMATION", current, kAnimationItems, IM_ARRAYSIZE(kAnimationItems), true, on_select);
+		DrawCategory("SURFACE", current, kSurfaceItems, IM_ARRAYSIZE(kSurfaceItems), on_select);
+		DrawCategory("LIGHTING", current, kLightingItems, IM_ARRAYSIZE(kLightingItems), on_select);
+		DrawCategory("ANALYSIS", current, kAnalysisItems, IM_ARRAYSIZE(kAnalysisItems), on_select);
+		DrawCategory("ANIMATION", current, kAnimationItems, IM_ARRAYSIZE(kAnimationItems), on_select);
 	}
 
 	/* 档位显示名（Shaded / 未知档返回空） */
