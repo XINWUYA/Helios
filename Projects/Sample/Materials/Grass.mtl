@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Material ShaderPath="Shaders/MaterialShaders/Grass.glsl">
+  <Parameters>
+    <ParamInfo Type="4" Name="u_BaseColor" Value="0.070000 0.180000 0.040000" />
+    <ParamInfo Type="4" Name="u_TipColor" Value="0.420000 0.620000 0.160000" />
+    <ParamInfo Type="4" Name="u_TransmissionColor" Value="0.560000 0.760000 0.240000" />
+    <ParamInfo Type="2" Name="u_Transmission" Value="0.650000" />
+    <ParamInfo Type="2" Name="u_Roughness" Value="0.750000" />
+    <ParamInfo Type="2" Name="u_BladeCurl" Value="0.550000" />
+  </Parameters>
+  <RasterState CullMode="0" FrontFaceType="1" EnableBlend="false" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthTest="true" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true" />
+</Material>

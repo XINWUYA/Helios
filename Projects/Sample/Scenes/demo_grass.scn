@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scene>
+    <Entities>
+        <Entity ID="7000000" Name="Ground">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="120.000000 1.000000 120.000000"/>
+            <Model ModelPath="BuiltinPlane" CastShadow="false" ReceiveShadow="true" EnableSkinning="false">
+                <MaterialOverride Slot="Default" Asset="Materials/GroundGrass.mtl"/>
+            </Model>
+        </Entity>
+        <Entity ID="7000001" Name="Sun">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.610000 0.420000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="3" IsCastShadow="true" ShadowSize="2048" ShadowBias="0.0099999998" CascadeCount="4" ShadowFar="80"/>
+        </Entity>
+        <Entity ID="7000002" Name="Grass Field">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Grass Material="Materials/Grass.mtl" Extent="30.000000 30.000000" Density="55" Height="0.500000" Width="0.045000" LodDistance="22.000000" CullDistance="80.000000" MinDensityScale="0.100000" WindDirection="1.000000 0.350000" WindStrength="0.120000" WindSpeed="1.600000" WindSpatialScale="0.250000" ReceiveShadow="true" Seed="7"/>
+        </Entity>
+        <Entity ID="7000003" Name="Grass Patch North">
+            <Transform Position="0.000000 0.000000 -34.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Grass Material="Materials/Grass.mtl" Extent="10.000000 10.000000" Density="45" Height="0.700000" Width="0.050000" LodDistance="18.000000" CullDistance="70.000000" MinDensityScale="0.100000" WindDirection="-0.400000 1.000000" WindStrength="0.180000" WindSpeed="1.300000" WindSpatialScale="0.200000" ReceiveShadow="true" Seed="21"/>
+        </Entity>
+        <Entity ID="7000005" Name="Boulder">
+            <Transform Position="2.400000 0.800000 -1.200000" Rotation="0.000000 0.000000 0.000000" Scale="1.200000 0.900000 1.200000"/>
+            <Model ModelPath="BuiltinSphere" CastShadow="true" ReceiveShadow="true" EnableSkinning="false">
+                <MaterialOverride Slot="Default" Asset="Materials/Red.mtl"/>
+            </Model>
+            <GrassBend Radius="1.800000" Enabled="true"/>
+        </Entity>
+        <Entity ID="7000004" Name="Sky">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Model ModelPath="BuiltinSphere" CastShadow="false" ReceiveShadow="false" EnableSkinning="false">
+                <MaterialOverride Slot="Default" Asset="Materials/Sky.mtl"/>
+            </Model>
+        </Entity>
+    </Entities>
+</Scene>

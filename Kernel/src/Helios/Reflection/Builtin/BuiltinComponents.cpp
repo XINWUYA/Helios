@@ -14,6 +14,8 @@ namespace Helios
 		RegisterReflectionProbeComponent();
 		RegisterAnimatorComponent();
 		RegisterScriptComponent();
+		RegisterGrassComponent();
+		RegisterGrassBendComponent();
 		RegisterPostProcessComponents();
 		RegisterSkyComponent();
 	}

@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Material ShaderPath="Shaders/MaterialShaders/GrassGround.glsl">
+  <Parameters>
+    <ParamInfo Type="5" Name="u_GroundTiling" Value="60.000000 60.000000 0.000000 0.000000" />
+    <ParamInfo Type="0" Name="u_GroundTexture" Value="Textures/Grass.png"/>
+    <ParamInfo Type="4" Name="u_GrassColor" Value="0.220000 0.340000 0.100000" />
+    <ParamInfo Type="5" Name="u_GrassTakeover" Value="18.000000 70.000000 12.000000 1.000000" />
+  </Parameters>
+  <RasterState CullMode="2" FrontFaceType="1" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true" />
+</Material>

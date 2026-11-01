@@ -16,6 +16,8 @@ namespace Helios
 	void RegisterReflectionProbeComponent();
 	void RegisterAnimatorComponent();
 	void RegisterScriptComponent();
+	void RegisterGrassComponent();
+	void RegisterGrassBendComponent();   /* GrassBend */
 	void RegisterPostProcessComponents();    /* PostProcess / Bloom */
 	void RegisterSkyComponent();             /* Sky（天空与昼夜） */
 
