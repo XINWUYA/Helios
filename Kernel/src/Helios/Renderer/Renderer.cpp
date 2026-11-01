@@ -74,11 +74,11 @@ namespace Helios
 	{
 		/* xyz 指向太阳，w 太阳角半径（弧度） */
 		glm::vec4 SunDirection{ 0.0f, 1.0f, 0.0f, 0.008f };
-		/* rgb 大气层外的阳光辐照度（已换算到引擎亮度量级），a 保留 */
+		/* rgb 大气层外的阳光辐照度（已换算到引擎亮度量级），a 盘面竖直压扁因子 */
 		glm::vec4 SunRadiance{ 1.0f };
 		/* xyz 指向月亮，w 月亮角半径 */
 		glm::vec4 MoonDirection{ 0.0f, -1.0f, 0.0f, 0.012f };
-		/* rgb 月亮色（按月相与高度衰减过），a 保留 */
+		/* rgb 月亮色（按月相与高度衰减过），a 盘面竖直压扁因子 */
 		glm::vec4 MoonRadiance{ 1.0f };
 		/* xyz 月亮看到的太阳方向（月面着色用），w 保留 */
 		glm::vec4 MoonLightDirection{ 0.0f, 1.0f, 0.0f, 0.0f };
@@ -91,10 +91,6 @@ namespace Helios
 		/* xyz 天球极轴，w 星空旋转角（弧度） */
 		glm::vec4 Stars{ 0.0f, 0.0f, 1.0f, 0.0f };
 	};
-
-	/* 太阳与月亮的视半径：比真实值略大一点，低分辨率下盘面才有几像素 */
-	constexpr float kSunAngularRadius = 0.008f;
-	constexpr float kMoonAngularRadius = 0.012f;
 
 	/* Per light uniform data */	constexpr uint32_t MAX_LIGHT_VIEW_PROJ = 4; /* 与 Uniforms.glsl 中的数组长度保持一致 */
 	/* 点光立方体阴影的面数上限（与 Uniforms.glsl 中的数组长度保持一致） */
@@ -299,11 +295,14 @@ namespace Helios
 	void Renderer::SetSkyUniforms(const Sky::SkyState& state)
 	{
 		SkyUniformData data;
-		data.SunDirection = glm::vec4(state.SunDirection, kSunAngularRadius);
-		/* 大气层外是白光，颜色差别全在散射里；强度按引擎亮度量级缩放，天空与光照共用一个太阳 */
-		data.SunRadiance = glm::vec4(state.SunColor * (state.SunIntensity * Sky::kSunIrradianceScale), 1.0f);
-		data.MoonDirection = glm::vec4(state.MoonDirection, kMoonAngularRadius);
-		data.MoonRadiance = glm::vec4(state.MoonColor * (state.MoonIntensity * Sky::kSunIrradianceScale), 1.0f);
+		data.SunDirection = glm::vec4(state.SunDirection, state.SunAngularRadius);
+		/* 大气层外是白光，颜色差别全在散射里；强度按引擎亮度量级缩放，天空与光照共用一个太阳。
+		 * a 装盘面的竖直压扁因子（大气折射，贴地平线时日面是扁的） */
+		data.SunRadiance = glm::vec4(state.SunColor * (state.SunIntensity * Sky::kSunIrradianceScale),
+			state.SunFlattening);
+		data.MoonDirection = glm::vec4(state.MoonDirection, state.MoonAngularRadius);
+		data.MoonRadiance = glm::vec4(state.MoonColor * (state.MoonIntensity * Sky::kSunIrradianceScale),
+			state.MoonFlattening);
 		data.MoonLightDirection = glm::vec4(state.MoonLightDirection, 0.0f);
 		data.Rayleigh = glm::vec4(state.Atmos.RayleighBeta, state.Atmos.RayleighScaleHeight);
 		data.Mie = glm::vec4(state.Atmos.MieBeta, state.Atmos.MieScaleHeight,

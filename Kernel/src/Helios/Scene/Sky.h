@@ -25,6 +25,11 @@ namespace Helios
 			float AtmosphereRadius{ 6420.0e3f };                  /* m */
 		};
 
+		/* 日月视半径的基准值（弧度）：比真实值略大一点，低分辨率下盘面才有几像素。
+		 * 这是 1 AU 与平均月地距离下的值，真实角径按距离换算 */
+		inline constexpr float kSunAngularRadius = 0.008f;
+		inline constexpr float kMoonAngularRadius = 0.012f;
+
 		/* 一帧的天空状态（每视图一份） */
 		struct SkyState
 		{
@@ -44,12 +49,21 @@ namespace Helios
 			float MoonPhase{ 0.5f };    /* 0 新月 / 0.5 满月 */
 			float Exposure{ 1.5f };
 			float Haze{ 1.0f }; /* 米氏散射强度缩放，越大越浑浊 */
+			/* 日月视半径（弧度）：按到地球的距离换算（视直径与距离成反比），
+			 * 再乘地平线放大 —— 贴近地平线时盘面看着更大，见 ComputeHorizonMagnification */
+			float SunAngularRadius{ kSunAngularRadius };
+			float MoonAngularRadius{ kMoonAngularRadius };
+			/* 竖直方向的压扁因子（1 = 不压扁）：大气折射把天体抬高，盘的上下边缘
+			 * 被抬得不一样多，贴地平线时盘面成了扁的椭圆 */
+			float SunFlattening{ 1.0f };
+			float MoonFlattening{ 1.0f };
 			Atmosphere Atmos;
 		};
 
 		/* 太阳方向：hour 为当地真太阳时（0-24，12 点为正午），latitude / north_angle 单位为度，
 		 * day_of_year 是一年中的第几天（决定赤纬：春分约 80、夏至约 172）。
-		 * 返回世界空间单位向量：Y 朝上、+Z 朝北、+X 朝东（再按正北朝向绕 Y 旋转）。 */
+		 * 返回世界空间单位向量：Y 朝上、+X 朝东、+Z 朝南（再按正北朝向绕 Y 旋转）。
+		 * 东天顶南是右手系 —— 朝北（-Z）看时右手边正是东 */
 		glm::vec3 ComputeSunDirection(float hour, float latitude_deg, int day_of_year, float north_angle_deg);
 
 		/* 天球极轴：高度角等于纬度、方位朝北。星空与月亮都绕它转 */
@@ -71,6 +85,27 @@ namespace Helios
 
 		/* 太阳辐照度相对光源强度的缩放：天空散射与方向光共用一个太阳，靠它换算到同一亮度量级 */
 		inline constexpr float kSunIrradianceScale = 8.0f;
+
+		/* 太阳视半径：日地距离一年里按 ±1.67% 变化（近日点在 1 月初），视直径与距离成反比。
+		 * 一天里几乎不动，变化落在季节尺度上 */
+		float ComputeSunAngularRadius(int day_of_year);
+
+		/* 月亮视半径：月地距离按 27.55 天的近点月周期变化 ±5.5%，
+		 * 近地点时盘面比远地点大约一成（超级月亮那一档） */
+		float ComputeMoonAngularRadius(int day_of_year);
+
+		/* 大气折射对盘面的竖直压扁因子：抬升量 R(h) 随高度角变化，
+		 * 盘的下边缘比上边缘抬得多，盘面就扁了。贴地平线约 0.86，十度以上基本是圆 */
+		float ComputeRefractionFlattening(float elevation);
+
+		/* 地平线附近的盘面放大因子（观感补偿，不是物理）。
+		 * 日出日落时日月看着比高挂时大，是大脑拿地面景物当尺子量出来的错觉（月亮错觉），
+		 * 真实角径反而因为折射与更远的地日距离略微更小。屏幕上的日月没有景深与地面参照，
+		 * 照真实角径画反而显得日出日落时更小 —— 这里按高度角补回来，入参是高度角（弧度） */
+		float ComputeHorizonMagnification(float elevation);
+
+		/* 地平线放大的上限：1.3 表示贴地平线时盘面比天顶大 30%，到二十度左右回落到 1 */
+		inline constexpr float kHorizonMagnification = 0.3f;
 
 		/* 组件 → 一帧状态（纯函数，不改组件） */
 		SkyState Resolve(const SkyComponent& sky);

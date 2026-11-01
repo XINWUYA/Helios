@@ -19,6 +19,23 @@ namespace Helios
 			 * （地平线附近的光学厚度是垂直方向的几十倍，段数少了会把日出日落算亮） */
 			constexpr int kTransmittanceSamples = 128;
 
+			/* 日地距离：偏心率 0.0167，近日点在 1 月 3 日前后 */
+			constexpr float kEarthOrbitEccentricity = 0.0167f;
+			constexpr float kDaysPerYear = 365.24f;
+			/* 月地距离：偏心率 0.0549，近点月 27.55 天。近地点落在哪天无所谓，
+			 * 取第 8 天当参考点，只决定大小变化的相位 */
+			constexpr float kMoonOrbitEccentricity = 0.0549f;
+			constexpr float kAnomalisticMonth = 27.55f;
+			constexpr float kPerigeeDay = 8.0f;
+
+			/* Bennett 公式：大气折射把天体抬高的量（角分），入参是视高度角（度）。
+			 * 地平线上约 0.48 度，10 度时只剩 0.09 度 */
+			float RefractionLift(float elevation_deg)
+			{
+				const float shifted = elevation_deg + 10.3f / (elevation_deg + 5.11f);
+				return 1.02f / std::tan(glm::radians(shifted));
+			}
+
 			/* 罗德里格旋转：绕任意轴转一个角度 */
 			glm::vec3 RotateAroundAxis(const glm::vec3& v, const glm::vec3& axis, float angle)
 			{
@@ -57,13 +74,14 @@ namespace Helios
 			/* 时角：正午为 0，每小时 15°，下午为正（偏西） */
 			const float hour_angle = glm::radians((WrapHour(hour) - 12.0f) * 15.0f);
 
-			/* 地平坐标系：x 朝东、y 天顶、z 朝北 */
+			/* 地平坐标系：x 朝东、y 天顶、z 朝南。东天顶南才是右手系，
+			 * 朝北（-Z）看时右手边正是东；写成 z 朝北会把整片天镜像过去 */
 			glm::vec3 local;
 			local.x = -std::cos(declination) * std::sin(hour_angle);
 			local.y = std::sin(latitude) * std::sin(declination)
 				+ std::cos(latitude) * std::cos(declination) * std::cos(hour_angle);
-			local.z = std::sin(declination) * std::cos(latitude)
-				- std::cos(declination) * std::sin(latitude) * std::cos(hour_angle);
+			local.z = std::cos(declination) * std::sin(latitude) * std::cos(hour_angle)
+				- std::sin(declination) * std::cos(latitude);
 
 			return glm::normalize(RotateAroundAxis(local, glm::vec3(0.0f, 1.0f, 0.0f),
 				glm::radians(north_angle_deg)));
@@ -72,7 +90,8 @@ namespace Helios
 		glm::vec3 ComputePoleDirection(float latitude_deg, float north_angle_deg)
 		{
 			const float latitude = glm::radians(latitude_deg);
-			const glm::vec3 local(0.0f, std::sin(latitude), std::cos(latitude));
+			/* 与太阳同一个地平坐标系：极轴朝北天顶方向，即 -Z 一侧抬起来 */
+			const glm::vec3 local(0.0f, std::sin(latitude), -std::cos(latitude));
 			return glm::normalize(RotateAroundAxis(local, glm::vec3(0.0f, 1.0f, 0.0f),
 				glm::radians(north_angle_deg)));
 		}
@@ -114,6 +133,45 @@ namespace Helios
 		{
 			/* 新月照不到朝向地球的那面，满月正好照满 */
 			return std::clamp((1.0f - std::cos(WrapHour(phase) * kTwoPi)) * 0.5f, 0.0f, 1.0f);
+		}
+
+		float ComputeSunAngularRadius(int day_of_year)
+		{
+			/* 视直径与距离成反比：近日点（1 月初）大 3.4%，远日点小 3.4% */
+			const float anomaly = kTwoPi * (static_cast<float>(day_of_year) - 3.0f) / kDaysPerYear;
+			const float distance = 1.0f - kEarthOrbitEccentricity * std::cos(anomaly);
+			return kSunAngularRadius / distance;
+		}
+
+		float ComputeMoonAngularRadius(int day_of_year)
+		{
+			/* 近地点盘面最大、远地点最小，比值 (1+e)/(1-e) 约 1.12 —— 超级月亮那一档 */
+			const float anomaly = kTwoPi * (static_cast<float>(day_of_year) - kPerigeeDay)
+				/ kAnomalisticMonth;
+			const float distance = 1.0f - kMoonOrbitEccentricity * std::cos(anomaly);
+			return kMoonAngularRadius / distance;
+		}
+
+		float ComputeRefractionFlattening(float elevation)
+		{
+			/* 抬升量对高度角的导数就是竖直方向的放大率：取当前高度角处的差分。
+			 * 抬升量单位是角分，除以 60 换到度，步长也按度算 */
+			constexpr float kStepDegrees = 0.25f;
+			const float height = glm::degrees(std::max(elevation, 0.0f));
+			const float lift = RefractionLift(height);
+			const float lift_above = RefractionLift(height + kStepDegrees);
+			const float derivative = (lift_above - lift) / 60.0f / kStepDegrees;
+
+			/* 下限 0.55：折射公式在贴地平线处发散，不能让它把盘压成一条线 */
+			return std::clamp(1.0f + derivative, 0.55f, 1.0f);
+		}
+
+		float ComputeHorizonMagnification(float elevation)
+		{
+			/* 二十度以上不再放大。落到地平线以下的盘看不见，保持满额即可，
+			 * 免得半个日面被地平线切掉时尺寸往回缩 */
+			const float height = glm::degrees(std::max(elevation, 0.0f));
+			return 1.0f + kHorizonMagnification * (1.0f - glm::smoothstep(0.0f, 20.0f, height));
 		}
 
 		glm::vec3 ComputeMoonLightDirection(const glm::vec3& moon_direction, const glm::vec3& sun_direction,
@@ -166,6 +224,16 @@ namespace Helios
 
 			/* 星空按恒星时转：一天一圈，方向与太阳一致（东升西落） */
 			state.StarRotation = state.Hour / kHoursPerDay * kTwoPi;
+
+			/* 视半径按距离换算；压扁与放大都按盘心高度角算 */
+			const float sun_elevation = std::asin(std::clamp(state.SunDirection.y, -1.0f, 1.0f));
+			const float moon_elevation = std::asin(std::clamp(state.MoonDirection.y, -1.0f, 1.0f));
+			state.SunAngularRadius = ComputeSunAngularRadius(sky.m_DayOfYear)
+				* ComputeHorizonMagnification(sun_elevation);
+			state.MoonAngularRadius = ComputeMoonAngularRadius(sky.m_DayOfYear)
+				* ComputeHorizonMagnification(moon_elevation);
+			state.SunFlattening = ComputeRefractionFlattening(sun_elevation);
+			state.MoonFlattening = ComputeRefractionFlattening(moon_elevation);
 			return state;
 		}
 	}

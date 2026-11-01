@@ -54,11 +54,10 @@ vec3 ViewDirection(vec2 ndc)
 	return normalize(transpose(mat3(u_ViewMat)) * view_ray);
 }
 
-/* 逐像素积分段数：视线 16 段 × 视线采样点的太阳方向 8 段。
- * 段数决定地平线附近的色带精度，不动整体亮度量级；被几何挡住的像素在深度测试就被丢掉了，
- * 真正跑这段积分的只有背景像素。 */
+/* 逐像素积分段数：视线 16 段 × 光源方向 8 段，档位决定地平线附近的色带精度。
+ * 日月各跑一遍，白天只有太阳这遍跑（夜里才补月亮），被几何挡住的像素在深度测试就丢了 */
 const int kViewSamples = 16;
-const int kSunSamples = 8;
+const int kLightSamples = 8;
 
 /* 太阳 / 月亮盘亮度增益：天上最亮的一小块，压到色调映射的白点上。
  * 月亮低一档：整个盘面顶到饱和就看不出月海与明暗界线，宁可少亮一点也不当白饼 */
@@ -120,23 +119,24 @@ vec3 RotateAroundAxis(vec3 v, vec3 axis, float angle)
 	return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0f - c);
 }
 
-/* 某点沿太阳方向到大气顶的光学厚度，瑞利与米氏分开放（色散只体现在瑞利上）。
- * 太阳被行星挡住时给一个极大值，散射项自然归零 —— 这就是昼夜的分界 */
-vec2 SunOpticalDepth(vec3 position, vec3 sun_dir)
+/* 某点沿光源方向到大气顶的光学厚度，瑞利与米氏分开放。
+ * 光源被地球挡住时给个极大值，散射自然归零 —— 昼夜分界就靠这条。
+ * 太阳和月亮共用：月亮反射的也是阳光，只是弱得多 */
+vec2 LightOpticalDepth(vec3 position, vec3 light_dir)
 {
-	if (RaySphereNear(position, sun_dir, u_SkyPlanet.x) > 0.0f)
+	if (RaySphereNear(position, light_dir, u_SkyPlanet.x) > 0.0f)
 		return vec2(1.0e9f);
 
-	float distance = RaySphereFar(position, sun_dir, u_SkyPlanet.y);
+	float distance = RaySphereFar(position, light_dir, u_SkyPlanet.y);
 	if (distance <= 0.0f)
 		return vec2(0.0f);
 
-	float step = distance / float(kSunSamples);
+	float step = distance / float(kLightSamples);
 	float depth_rayleigh = 0.0f;
 	float depth_mie = 0.0f;
-	for (int i = 0; i < kSunSamples; ++i)
+	for (int i = 0; i < kLightSamples; ++i)
 	{
-		vec3 sample_position = position + sun_dir * (step * (float(i) + 0.5f));
+		vec3 sample_position = position + light_dir * (step * (float(i) + 0.5f));
 		float height = max(length(sample_position) - u_SkyPlanet.x, 0.0f);
 		depth_rayleigh += exp(-height / u_SkyRayleigh.w) * step;
 		depth_mie += exp(-height / u_SkyMie.y) * step;
@@ -144,9 +144,10 @@ vec2 SunOpticalDepth(vec3 position, vec3 sun_dir)
 	return vec2(depth_rayleigh, depth_mie);
 }
 
-/* 单次散射：沿视线积分瑞利 + 米氏，返回散射辐亮度，同时给出视线方向的大气透过率
- * （太阳盘、月亮、星星都乘这一份，才有日出日落时压低变红的效果） */
-vec3 Scatter(vec3 view_dir, out vec3 view_transmittance)
+/* 单个光源的单次散射：沿视线积分瑞利 + 米氏，返回散射辐亮度。
+ * 视线透过率只跟视线有关，日月算出来是同一个值，取第一遍的就行 */
+vec3 ScatterFromLight(vec3 view_dir, vec3 light_dir, vec3 light_radiance,
+	out vec3 view_transmittance)
 {
 	/* 相机按海平面处理：几百米的机位高度对整层大气的透过率影响很小 */
 	vec3 origin = vec3(0.0f, u_SkyPlanet.x, 0.0f);
@@ -175,23 +176,23 @@ vec3 Scatter(vec3 view_dir, out vec3 view_transmittance)
 		depth_rayleigh += density_rayleigh * step;
 		depth_mie += density_mie * step;
 
-		/* 到太阳的光学厚度要加上已经走过的这段，日光一路衰减进来 */
-		vec2 sun_depth = SunOpticalDepth(position, u_SkySunDirection.xyz);
-		vec3 tau = beta_rayleigh * (depth_rayleigh + sun_depth.x)
-			+ vec3(beta_mie) * (depth_mie + sun_depth.y);
+		/* 到光源的光学厚度要加上已经走过的这段，日光一路衰减进来 */
+		vec2 light_depth = LightOpticalDepth(position, light_dir);
+		vec3 tau = beta_rayleigh * (depth_rayleigh + light_depth.x)
+			+ vec3(beta_mie) * (depth_mie + light_depth.y);
 		vec3 attenuation = exp(-tau);
 
 		sum_rayleigh += density_rayleigh * attenuation * step;
 		sum_mie += density_mie * attenuation * step;
 	}
 
-	float mu = dot(view_dir, u_SkySunDirection.xyz);
+	float mu = dot(view_dir, light_dir);
 	float phase_rayleigh = 3.0f / (16.0f * PI) * (1.0f + mu * mu);
 	float phase_mie = 3.0f / (8.0f * PI) * ((1.0f - g * g) * (1.0f + mu * mu))
 		/ ((2.0f + g * g) * pow(1.0f + g * g - 2.0f * g * mu, 1.5f));
 
 	view_transmittance = exp(-(beta_rayleigh * depth_rayleigh + vec3(beta_mie) * depth_mie));
-	return u_SkySunRadiance.rgb * (beta_rayleigh * phase_rayleigh * sum_rayleigh
+	return light_radiance * (beta_rayleigh * phase_rayleigh * sum_rayleigh
 		+ vec3(beta_mie * phase_mie) * sum_mie);
 }
 
@@ -294,7 +295,7 @@ vec3 FaceToDirection(int face, vec2 arc)
 }
 
 /* 星等换成相对流量：每暗一个星等流量降到 1 / 2.512。1 等星记作 1.0，
- * 天狼星（-1.46 等）约 9.6，肉眼极限（6.5 等）约 0.0025。
+ * 天狼星（-1.46 等）约 9.6，肉眼极限（6.5 等）约 0.0063。
  * 这一步是"假"与"真"的分界：等亮度撒点看着像噪点，按星等铺开才像星空 */
 float MagnitudeToFlux(float magnitude)
 {
@@ -424,11 +425,31 @@ vec3 Stars(vec3 direction, float night)
 	return (stars * 1.5f + milky_way) * (u_SkyPlanet.z * night);
 }
 
+/* 盘面基底：tangent 水平、bitangent 竖直。贴近天顶时「竖直」没有定义
+ * （极轴与视线重合），随便取一个水平参考即可 —— 那个高度角的压扁因子本来就是 1 */
+void DiscBasis(vec3 disc_dir, out vec3 tangent, out vec3 bitangent)
+{
+	const vec3 reference = abs(disc_dir.y) < 0.98f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
+	tangent = normalize(cross(reference, disc_dir));
+	bitangent = cross(disc_dir, tangent);
+}
+
+/* 盘面局部坐标：x 水平、y 竖直，单位是盘半径。
+ * 竖直方向除以压扁因子 —— 大气折射把盘的上下边缘抬得不一样多，贴地平线时
+ * 日面月亮都是扁的椭圆，高度角十度以上才近似圆 */
+vec2 DiscLocal(vec3 view_dir, vec3 disc_dir, vec3 tangent, vec3 bitangent,
+	float angular_radius, float flattening)
+{
+	const vec3 offset = view_dir - disc_dir * dot(view_dir, disc_dir);
+	return vec2(dot(offset, tangent), dot(offset, bitangent) / max(flattening, 1.0e-3f))
+		/ angular_radius;
+}
+
 /* 月亮：盘内逐像素重建球面法线，再按太阳方向着色 —— 月相、明暗界线朝向都是算出来的，
  * 不用摆一张贴图也不用按月相切换材质。
  * 月面本身并不均匀：暗色的月海集中在朝向地球这一面的几片，缺了它月亮就是一块
  * 打了光的高光斑，只有形状没有质感 */
-vec3 Moon(vec3 view_dir, float pixel_angle)
+vec3 Moon(vec3 view_dir, float pixel_angle, float flattening)
 {
 	const vec3 moon_dir = u_SkyMoonDirection.xyz;
 	const float angular_radius = max(u_SkyMoonDirection.w, 1.0e-5f);
@@ -436,13 +457,11 @@ vec3 Moon(vec3 view_dir, float pixel_angle)
 	if (cos_angle < cos(angular_radius * 1.3f))
 		return vec3(0.0f);
 
-	const vec3 tangent_offset = view_dir - moon_dir * cos_angle;
-	const vec3 reference = abs(moon_dir.y) < 0.98f ? vec3(0.0f, 1.0f, 0.0f) : vec3(1.0f, 0.0f, 0.0f);
-	const vec3 tangent = normalize(cross(reference, moon_dir));
-	const vec3 bitangent = cross(moon_dir, tangent);
+	vec3 tangent;
+	vec3 bitangent;
+	DiscBasis(moon_dir, tangent, bitangent);
 
-	const vec2 local = vec2(dot(tangent_offset, tangent), dot(tangent_offset, bitangent))
-		/ angular_radius;
+	const vec2 local = DiscLocal(view_dir, moon_dir, tangent, bitangent, angular_radius, flattening);
 	const float radius = length(local);
 
 	/* 边缘按像素宽度收：月面轮廓是硬边，按盘面比例做淡出会随分辨率越糊。
@@ -486,10 +505,20 @@ void main()
 	bool hits_ground = RaySphereNear(origin, view_dir, u_SkyPlanet.x) > 0.0f;
 
 	vec3 transmittance;
-	vec3 radiance = Scatter(view_dir, transmittance);
+	vec3 radiance = ScatterFromLight(view_dir, u_SkySunDirection.xyz, u_SkySunRadiance.rgb,
+		transmittance);
 
 	float sun_elevation = u_SkySunDirection.xyz.y;
 	float night = 1.0f - smoothstep(-0.08f, 0.12f, sun_elevation);
+
+	/* 月亮同样在散射。满月只有太阳的几十分之一，但夜空本来就暗，
+	 * 月亮附近会浮出一圈辉光；白天这遍跳过，省一半积分 */
+	if (night > 0.0f)
+	{
+		vec3 moon_transmittance;
+		radiance += ScatterFromLight(view_dir, u_SkyMoonDirection.xyz, u_SkyMoonRadiance.rgb,
+			moon_transmittance) * night;
+	}
 
 	/* 一像素折算成多少弧度：日面边缘、月面边缘都按像素宽度给，
 	 * 换分辨率时它们的锐利程度才不会跟着变 */
@@ -497,10 +526,14 @@ void main()
 
 	if (!hits_ground)
 	{
-		/* 盘面按角度比较：cos 空间里做 smoothstep 会把边缘放大成几十度的光斑 */
+		/* 盘面按角度比较：cos 空间里做 smoothstep 会把边缘放大成几十度的光斑。
+		 * 竖直方向按折射压扁，贴地平线时日面是扁的椭圆 */
 		const float sun_radius = max(u_SkySunDirection.w, 1.0e-5f);
-		const float sun_angle = acos(clamp(dot(view_dir, u_SkySunDirection.xyz), -1.0f, 1.0f));
-		const float sun_ratio = sun_angle / sun_radius;
+		vec3 sun_tangent;
+		vec3 sun_bitangent;
+		DiscBasis(u_SkySunDirection.xyz, sun_tangent, sun_bitangent);
+		const float sun_ratio = length(DiscLocal(view_dir, u_SkySunDirection.xyz, sun_tangent,
+			sun_bitangent, sun_radius, u_SkySunRadiance.w));
 		const float disk = 1.0f - smoothstep(0.90f, 1.0f, sun_ratio);
 		/* 边缘变暗：视线在日面边缘穿过的光球层更浅，看得到的高度更低、温度更低，
 		 * 所以边缘比中心暗一档 —— 日面不是一块均匀的白斑 */
@@ -509,7 +542,20 @@ void main()
 		const float glow = 0.08f * exp(-max(sun_ratio - 1.0f, 0.0f) * 2.2f);
 		radiance += u_SkySunRadiance.rgb * transmittance * (disk * limb * kSunDiskGain + glow);
 
-		radiance += Moon(view_dir, pixel_angle) * transmittance;
+		/* 盘外那圈月辉：月光被气溶胶小角度前向散射，再加上眼球与镜头里的散射，
+		 * 尺度比日面那圈大得多（日面太亮，晕只在零点几度里看得出来）。
+		 * 单次散射补不出这段：米氏前向瓣在两三度的范围里几乎是平的，
+		 * 少了这一项满月就是一块白盘贴在黑底上 */
+		const float moon_radius = max(u_SkyMoonDirection.w, 1.0e-5f);
+		const float moon_angle = acos(clamp(dot(view_dir, u_SkyMoonDirection.xyz), -1.0f, 1.0f));
+		const float moon_ratio = moon_angle / moon_radius;
+		/* 从盘缘起才起量：盘面本身已经顶到自己的亮度，再垫一层会把它压灰、
+		 * 月海的反差也一起塌掉 */
+		const float moon_glow = 0.12f * exp(-max(moon_ratio - 1.0f, 0.0f) * 0.21f)
+			* smoothstep(0.90f, 1.10f, moon_ratio);
+
+		radiance += Moon(view_dir, pixel_angle, u_SkyMoonRadiance.w) * transmittance;
+		radiance += u_SkyMoonRadiance.rgb * transmittance * moon_glow;
 		/* 星星同样走大气透过率：贴近地平线时被吃掉一大半并偏红，与日月同一套消光 */
 		radiance += Stars(view_dir, night) * transmittance;
 		radiance += kNightAirglow * night;
