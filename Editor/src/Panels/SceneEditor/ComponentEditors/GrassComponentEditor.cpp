@@ -24,14 +24,14 @@ namespace Helios
 			MaterialSlotRow::State state;
 			state.Label = "Material";
 			state.Path = material_path;
-			state.EmptyText = "内置默认";
+			state.EmptyText = "Built-in default";
 			state.HoverPath = material_path.empty() ? std::string() : RELATIVE_PATH(material_path);
 			state.IsInstance = slot.IsInstance;
 			/* 已经落在内建默认上就没有可清的东西 */
 			state.CanClear = !material_path.empty();
-			state.EmptyHint = "把 .mtl 拖到这里";
-			state.ClearHint = "清掉来源，回到内建默认外观";
-			state.ResetHint = "从来源 .mtl 重新克隆";
+			state.EmptyHint = "Drop a .mtl here";
+			state.ClearHint = "Clear the source and fall back to the built-in default look";
+			state.ResetHint = "Clone again from the source .mtl";
 
 			const MaterialSlotRow::Result row = MaterialSlotRow::Draw(state);
 			switch (row.Act)

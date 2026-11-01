@@ -465,14 +465,14 @@ namespace Helios
 		/* 先把本帧的世界变换全部算出来（局部矩阵按值缓存，没动过的实体只有一次查表），
 		 * 渲染侧读到的才是同一份快照。这一步不能省：只有 Transform 的节点也要入快照 */
 		{
-			PROFILE_SCOPE("场景世界变换");
+			PROFILE_SCOPE("Scene World Transforms");
 			for (const entt::entity entity : m_Registry.view<TransformComponent>())
 				FrameWorldTransform(entity);
 		}
 
 		/* 再按组件类型分开推送，不再对每个实体挨个 try_get 四种组件：
 		 * 模型最多，一个视图走完；光 / 相机 / 探针各自数量很少 */
-		PROFILE_SCOPE("场景变换推送");
+		PROFILE_SCOPE("Push Scene Transforms");
 		m_MeshIndex.BeginSync();
 		m_SkyBoxEntities.clear();
 		for (auto [entity, model_component] : m_Registry.view<ModelComponent>().each())

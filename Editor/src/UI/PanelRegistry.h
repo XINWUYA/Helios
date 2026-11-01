@@ -67,7 +67,7 @@ namespace Helios
 			{ kLog,             DockSlot::CenterBottom, Menu::View,    "Log",            true },
 			{ kTimeline,        DockSlot::CenterBottom, Menu::View,    "Timeline",       true },
 			{ kScriptOrder,     DockSlot::Floating,     Menu::Scripts, "Script Order",   false,
-				"脚本的全局执行顺序，按 Order 升序" },
+				"Global script execution order, sorted by Order" },
 		};
 
 		/* 窗口开关的唯一存放处：PanelWindow、菜单和各层读写的都是这一份。

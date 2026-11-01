@@ -415,7 +415,7 @@ void main()
 			const std::string name = ScriptClassName(stem);
 
 			std::string content;
-			content += "/* " + name + "：脚本模板。OnUpdate 每帧跑一次，Runtime 模式下生效。 */\n";
+			content += "/* " + name + ": script template. OnUpdate runs once per frame in Runtime mode. */\n";
 			content += "#include \"Helios/Script/ScriptRegistry.h\"\n";
 			content += "#include \"Helios/Scene/Components.h\"\n";
 			content += "\n";
