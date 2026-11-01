@@ -51,6 +51,13 @@ namespace Helios
 		{
 			return static_cast<const ReflectionProbeComponent*>(component)->m_ReflectionProbe != nullptr;
 		}
+
+		/* 从天空贴图烘焙时不捕获场景：只跟场景捕获有关的字段（每帧重烤 / 层掩码）跟着隐藏 */
+		bool CapturesScene(const void* component)
+		{
+			const auto& probe = static_cast<const ReflectionProbeComponent*>(component)->m_ReflectionProbe;
+			return probe != nullptr && !probe->GetBakeConfig().BakeFromSkyTexture;
+		}
 	}
 
 	void RegisterReflectionProbeComponent()
@@ -59,9 +66,15 @@ namespace Helios
 		MakeRegistrar<ReflectionProbeComponent>("ReflectionProbe")
 			.SaveExtra(&SaveProbeExtra)
 			.LoadExtra(&LoadProbeExtra)
+			/* 烘焙来源放最前：它决定后面哪些字段有意义（贴图烘焙 vs 捕获场景） */
+			.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+					&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
+					&ReflectionProbe::BakeConfig::BakeFromSkyTexture>(),
+				"BakeFromSkyTexture", FieldType::Bool)
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::IsRealtime, &ReflectionProbe::SetRealtime>(),
 				"Realtime", FieldType::Bool)
+			.When(MakePredicateCondition(&CapturesScene))
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBoxSize, &ReflectionProbe::SetBoxSize>(),
 				"BoxSize", FieldType::Vec3, 0.1f, 10.0f)
@@ -72,6 +85,7 @@ namespace Helios
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetCullingMask, &ReflectionProbe::SetCullingMask>(),
 				"CullingMask", FieldType::LayerMask)
+			.When(MakePredicateCondition(&CapturesScene))
 			.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
 					&ReflectionProbe::BakeConfig::EnvSize>(),
@@ -88,10 +102,6 @@ namespace Helios
 					&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
 					&ReflectionProbe::BakeConfig::PrefilterMipLevels>(),
 				"PrefilterMipLevels", FieldType::Int)
-			.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
-					&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
-					&ReflectionProbe::BakeConfig::BakeSkyBoxOnly>(),
-				"BakeSkyBoxOnly", FieldType::Bool)
 			.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
 					&ReflectionProbe::BakeConfig::BakeDiffuse>(),

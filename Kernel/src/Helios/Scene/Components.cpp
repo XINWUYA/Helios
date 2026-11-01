@@ -2,6 +2,9 @@
 #include "Components.h"
 #include "Entity.h"
 #include "Scene.h"
+#include "SceneCommon.h"	/* ABSOLUTE_PATH */
+#include <Helios/Core/AssetManager.h>
+#include <Helios/VirtualDevice/DeviceShader.h>
 
 namespace Helios
 {
@@ -27,5 +30,27 @@ namespace Helios
 		if (auto* manager = scene.GetReflectionProbeManager().get())
 			if (m_ReflectionProbe)
 				manager->UnregisterProbe(m_ReflectionProbe);
+	}
+
+	/* 内建草地材质：参数就是着色器里的默认值。没有可改的入口，整场共享一份 */
+	SharedPtr<Material> GrassComponent::GetDefaultMaterial()
+	{
+		static const SharedPtr<Material> s_Default = []()
+		{
+			const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+				ABSOLUTE_PATH("Shaders/MaterialShaders/Grass.glsl"));
+			return shader != nullptr ? Material::Create(shader) : nullptr;
+		}();
+		return s_Default;
+	}
+
+	void GrassComponent::OnAdded(const Scene& scene, Entity& entity)
+	{
+		(void)scene;
+		(void)entity;
+
+		/* 面板加进来的组件没有材质来源，先给内建外观，不然这片草地等于不存在 */
+		if (m_MaterialSlot.pMaterial == nullptr)
+			m_MaterialSlot.pMaterial = GetDefaultMaterial();
 	}
 }

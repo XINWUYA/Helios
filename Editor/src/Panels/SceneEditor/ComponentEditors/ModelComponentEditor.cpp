@@ -4,6 +4,7 @@
 #include "Helios/Core/AssetManager.h"
 #include "UI/EditorTheme.h"
 #include "UI/ImGuiExtensions.h"
+#include "UI/MaterialSlotRow.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/SceneCommon.h"
@@ -31,21 +32,19 @@ namespace Helios
 			ImGui::InputTextWithHint(id, hint, buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
 		}
 
-		/* 槽行：槽名 | 有效材质（.mtl，只读展示 + 拖拽挂载）+ 清除 / 重置。
-		 * 有效材质 = 实体绑定 ?: 模型清单默认 ?: 内置白模；都没有时留空、hint 提示可拖入。 */
+		/* 槽行：槽名 | 有效材质（.mtl）+ 清除 / 重置。版式与草地卡共用 MaterialSlotRow，
+		 * 这里只管模型槽的语义：绑定落在 m_SlotOverrides，Reset 回模型默认或来源资产。 */
 		bool DrawMaterialSlotRow(ModelComponent& component, const Model& model, int slot_index)
 		{
 			const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
 			if (slot == nullptr)
 				return false;
 
-			bool changed = false;
-
 			const auto iter = component.m_SlotOverrides.find(slot->Name);
 			const bool has_override = (iter != component.m_SlotOverrides.end() && iter->second.pMaterial != nullptr);
 			const bool is_instance = has_override && iter->second.IsInstance;
 
-			/* 有效材质来自哪份 .mtl（覆盖优先；模型清单默认次之） */
+			/* 有效材质来自哪份 .mtl：覆盖优先（实例回来源），否则模型清单默认 */
 			std::string material_path;
 			if (has_override)
 			{
@@ -58,116 +57,56 @@ namespace Helios
 				material_path = slot->SourcePath;
 			}
 
-			const std::string display = material_path.empty()
-				? std::string()
-				: PathToUtf8(PathFromUtf8(material_path).filename());
+			MaterialSlotRow::State state;
+			state.Label = slot->Name.c_str();
+			state.Path = material_path;
+			state.HoverPath = material_path.empty() ? std::string() : RELATIVE_PATH(material_path);
+			state.IsInstance = is_instance;
+			state.CanClear = has_override;
+			state.EmptyHint = "Drop .mtl here";
+			state.ClearHint = "Clear the binding, fall back to the model default";
+			state.ResetHint = "Re-clone from the model default or source asset";
 
-			const float gap = ImGui::GetStyle().ItemInnerSpacing.x;
+			const MaterialSlotRow::Result row = MaterialSlotRow::Draw(state);
+			if (row.Act == MaterialSlotRow::Action::None)
+				return false;
 
-			const float value_width = ImGuiExt::BeginPropertyRow(slot->Name.c_str());
-
-			/* 行内自算尺寸（X / Reset 按钮高）必须在 Begin 之后取：行高由
-			 * BeginPropertyRow 统一压成"字体高"，这里要跟行内实际控件一致 */
-			const float frame_height = ImGui::GetFrameHeight();
-
-			/* 右端按钮区：清除（X）+ 有来源时的重置 */
-			const bool can_reset = is_instance && !iter->second.SourceAssetPath.empty();
-			const float reset_width = can_reset
-				? ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0f
-				: 0.0f;
-			float button_zone = has_override ? (frame_height + gap) : 0.0f;
-			if (can_reset)
-				button_zone += reset_width + gap;
-
-			/* 实例标记放值列开头：多槽时一眼分出哪几行是改出来的副本，占的宽度从文件名里扣 */
-			float chip_width = 0.0f;
-			if (is_instance)
+			auto& overrides = component.m_SlotOverrides;
+			switch (row.Act)
 			{
-				chip_width = ImGuiExt::DrawTagChip("Instance", frame_height) + gap;
-				ImGui::SameLine(0.0f, gap);
-			}
-
-			const float target_width = std::max(1.0f, value_width - button_zone - chip_width);
-
-			DrawRefInputBox("##MaterialRef", display, target_width, "Drop .mtl here");
-
-			if (ImGui::IsItemHovered())
+			case MaterialSlotRow::Action::Assign:
 			{
-				/* 槽位上挂的是改过的副本：本行只显示来源 .mtl，改的值不在那份文件里 */
-				std::string tooltip = material_path.empty()
-					? std::string("Drag a .mtl material asset here")
-					: RELATIVE_PATH(material_path) + "\n\nDrag a .mtl material asset here";
-				if (is_instance)
-					tooltip += "\n\nSlot instance — edits stay on this entity, Reset re-clones the asset";
-				ImGui::SetTooltip("%s", tooltip.c_str());
+				MaterialSlotOverride slot_override;
+				slot_override.pMaterial = row.Picked;
+				slot_override.SourceAssetPath = row.SourcePath;
+				overrides[slot->Name] = std::move(slot_override);
+				return true;
 			}
-
-			if (ImGui::BeginDragDropTarget())
+			case MaterialSlotRow::Action::Clear:
+				overrides.erase(slot->Name);
+				return true;
+			case MaterialSlotRow::Action::Reset:
 			{
-				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
-				{
-					std::filesystem::path relative_path;
-					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
-						payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
-					{
-						const std::string extension = LowercaseExtension(relative_path);
+				/* 来源是模型默认（含清单里的参数覆盖）就克隆模型默认；否则回来源资产 */
+				const bool from_model_default = has_override && iter->second.SourceAssetPath == slot->SourcePath;
+				SharedPtr<Material> source = (from_model_default && slot->pDefault != nullptr)
+					? slot->pDefault
+					: AssetManager::Instance().GetOrLoad<Material>(
+						has_override && !iter->second.SourceAssetPath.empty()
+							? iter->second.SourceAssetPath : slot->SourcePath);
+				if (source == nullptr)
+					return false;
 
-						if (extension == ".mtl")
-						{
-							const std::string absolute_path = PathToUtf8(ResolveAssetPath(relative_path));
-							auto material = AssetManager::Instance().GetOrLoad<Material>(absolute_path);
-							if (material != nullptr)
-							{
-								MaterialSlotOverride slot_override;
-								slot_override.pMaterial = std::move(material);
-								slot_override.SourceAssetPath = absolute_path;
-								component.m_SlotOverrides[slot->Name] = std::move(slot_override);
-								changed = true;
-							}
-						}
-					}
-				}
-				ImGui::EndDragDropTarget();
+				auto& slot_override = overrides[slot->Name];
+				slot_override.pMaterial = source->Clone();
+				slot_override.IsInstance = true;
+				if (slot_override.SourceAssetPath.empty())
+					slot_override.SourceAssetPath = from_model_default ? slot->SourcePath : source->GetPath();
+				return true;
 			}
-
-			if (can_reset)
-			{
-				ImGui::SameLine(0.0f, gap);
-				if (ImGui::Button("Reset", ImVec2(reset_width, frame_height)))
-				{
-					/* 来源是模型默认（含清单里的参数覆盖）就克隆模型默认；否则回来源资产 */
-					const bool from_model_default = iter->second.SourceAssetPath == slot->SourcePath;
-					SharedPtr<Material> source = (from_model_default && slot->pDefault != nullptr)
-						? slot->pDefault
-						: AssetManager::Instance().GetOrLoad<Material>(iter->second.SourceAssetPath);
-					if (source != nullptr)
-					{
-						auto& slot_override = component.m_SlotOverrides[slot->Name];
-						slot_override.pMaterial = source->Clone();
-						slot_override.IsInstance = true;
-						changed = true;
-					}
-				}
-
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Re-clone from the model default or source asset");
+			default:
+				return false;
 			}
-
-			if (has_override)
-			{
-				ImGui::SameLine(0.0f, gap);
-				if (ImGui::Button("X", ImVec2(frame_height, frame_height)))
-				{
-					component.m_SlotOverrides.erase(slot->Name);
-					changed = true;
-				}
-
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Clear the binding, fall back to the model default");
-			}
-
-			ImGuiExt::EndPropertyRow();
-			return changed;
 		}
 
 		/* 材质槽区块入口：标题 + 统计 + 每槽一行引用（详情在 SceneHierarchy 的材质卡里） */

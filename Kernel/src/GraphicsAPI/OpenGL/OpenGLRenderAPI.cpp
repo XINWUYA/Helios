@@ -275,6 +275,31 @@ namespace Helios
 			static_cast<GLsizei>(vertex_array->GetVertexCount()), static_cast<GLsizei>(instance_count));
 	}
 
+#ifndef __APPLE__
+	/* macOS 的 GL 停在 4.1，既没有 SSBO 也没有计算着色器，这条路不编进来 */
+	void OpenGLRenderAPI::DrawIndexedIndirect(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+		const SharedPtr<DeviceStorageBuffer>& args_buffer, uint32_t args_offset_bytes,
+		const VertexBufferLayout& instance_layout)
+	{
+		PROFILE_FUNCTION();
+
+		auto* storage = dynamic_cast<OpenGLStorageBuffer*>(args_buffer.get());
+		if (storage == nullptr || storage->GetBufferID() == 0)
+		{
+			CORE_LOG_ERROR("DrawIndexedIndirect: args buffer missing!");
+			return;
+		}
+
+		BindInstanceAttributes(vertex_array, instance_buffer, instance_offset_bytes, instance_layout);
+		/* 间接参数用的是 GL_DRAW_INDIRECT_BUFFER 这个独立绑定点，不参与 GLState 的跟踪 */
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, storage->GetBufferID());
+		glDrawElementsIndirect(TranslateToOpenGLPrimitiveType(type), GL_UNSIGNED_INT,
+			reinterpret_cast<const void*>(static_cast<uintptr_t>(args_offset_bytes)));
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+	}
+#endif
+
 	void OpenGLRenderAPI::DrawIndexedInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
 		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
 		uint32_t instance_count, const VertexBufferLayout& instance_layout,

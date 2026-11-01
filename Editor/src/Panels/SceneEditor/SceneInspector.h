@@ -11,6 +11,7 @@
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Entity.h"
+#include "Helios/Scene/Material.h"
 
 namespace Helios
 {
@@ -79,10 +80,19 @@ namespace Helios
 		/* Model 的材质卡：每槽一张，排在 Model 组件卡之后（卡片背景走绘制通道、通道不可嵌套，
 		 * "卡中卡"画不出来 —— 所以材质详情不能画在组件卡里，只能同级平铺）。 */
 		void DrawModelMaterialCards(Entity entity, ModelComponent& component);
+		/* 草地的材质卡：草地只有一个槽，同样平铺在 Grass 组件卡之后 */
+		void DrawGrassMaterialCard(Entity entity, GrassComponent& component);
 		/* Model 编辑器的入口按钮：模型是文件资产时才有（内建模型没有资产文件，不出现）。
 		 * 画在当前卡片里 —— 实体侧在 Model 组件卡尾部，资源侧在详情卡尾部。 */
 		void DrawOpenInModelEditorButton(const std::string& absolute_path);
-		/* 材质卡主体：当前材质的属性行（Shader + 参数，可就地编辑 → 自动实例化） */
+		/* 材质卡主体：当前材质的属性行（Shader + 参数）。材质怎么改由三个回调决定 ——
+		 * 模型槽写回实体覆盖（首次改动自动克隆），草地直接写自己的槽 */
+		using MaterialParamWriter = std::function<void(ParamType, const std::string&, const std::any&)>;
+		bool DrawMaterialCardBody(const SharedPtr<Material>& current,
+			const std::function<SharedPtr<Material>()>& resolve_live,
+			const MaterialParamWriter& write_param,
+			const std::function<void(int32_t)>& write_queue,
+			const std::function<void(const RenderRasterState&)>& write_raster);
 		bool DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index);
 		/* Camera 的预览卡：显示被选中场景相机自己渲染出的画面 ——
 		 * 与材质卡同一路数，平铺在组件卡之后（卡片不可嵌套）。 */

@@ -167,6 +167,11 @@ namespace Helios
 			return entity.HasComponent<SkyComponent>();
 		}
 
+		bool HasGrassComponent(const Entity& entity)
+		{
+			return entity.HasComponent<GrassComponent>();
+		}
+
 		/* 光源按类型再分：方向光 / 点光 / 聚光在树里要能一眼区分。
 		 * 默认构造的 LightComponent 没有 Light 对象，这时退化看 m_Type。 */
 		bool IsLightOfType(const Entity& entity, LightType type)
@@ -204,8 +209,9 @@ namespace Helios
 			{ Icons::Id::Plane,            &IsBuiltinPlane },
 			{ Icons::Id::Model,            &HasModelComponent },
 			{ Icons::Id::Sprite,           &HasSpriteComponent },
-			/* 天空排在模型之后：挂了模型的实体保留模型造型 */
+			/* 天空与草地排在模型之后：挂了模型的实体保留模型造型 */
 			{ Icons::Id::Sky,              &HasSkyComponent },
+			{ Icons::Id::Grass,            &HasGrassComponent },
 			/* 后处理对象排在表尾：挂了模型的实体保留模型造型（追加组件不改既有图标） */
 			{ Icons::Id::PostProcess,      &HasPostProcessComponent },
 		};

@@ -5,6 +5,7 @@
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderCommon.h>
+#include <Helios/Renderer/RenderPasses/ScenePass.h>
 #include <Helios/Common/Math.h>
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Scene/Camera.h>
@@ -86,8 +87,8 @@ namespace Helios
             m_BakeResult.EnvColorCubemap = DeviceTexture::Create(GetDebugName() + "_EnvColorCubemap", env_desc);
         }
 
-        /* 仅烘焙天空盒 */
-        if (m_BakeConfig.BakeSkyBoxOnly && m_pSkyBoxTexture)
+        /* 直接用作者的天空贴图生成环境（贴图为空时退到下面的场景捕获） */
+        if (m_BakeConfig.BakeFromSkyTexture && m_pSkyBoxTexture)
         {
             /* 走资产缓存而不是直建实例：同一路径拿到同一实例，热重载才覆盖得到 */
             auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
@@ -130,9 +131,17 @@ namespace Helios
         const glm::vec3 capture_position = GetPosition();
 
         /* 本探针只捕获自己关心的层：按 CullingMask 重新收集一遍，
-         * 不受触发烘焙的那个相机看了哪些层的限制 */
+         * 不受触发烘焙的那个相机看了哪些层的限制。收集口径与相机渲染同源，天空也在里面。 */
         std::vector<VisibleMeshObject> visible_objects;
-        render_view->CollectVisibleMeshObjects(GetCullingMask(), visible_objects);
+        render_view->CollectProbeCaptureObjects(GetCullingMask(), visible_objects);
+
+        /* 几何走管线自己的提交：排序、逐光源合成、透明批都跟相机渲染一致。
+         * 捕获阶段关掉探针 IBL —— 否则会把上一次的烘焙结果烘进新结果里。 */
+        const auto scene = render_view->GetOwnerScene();
+        Forward::SubmitParams submit_params;
+        submit_params.Objects = &visible_objects;
+        submit_params.SortOrigin = &capture_position;
+        submit_params.IgnoreProbes = true;
 
         auto capture_fb = MakeSceneCaptureFrameBuffer(m_BakeResult.EnvColorCubemap, m_BakeResult.EnvDepthCubemap, size);
         for (uint32_t face = 0; face < 6; ++face)
@@ -148,20 +157,10 @@ namespace Helios
                 view * glm::translate(glm::mat4(1.0f), -capture_position),
                 capture_projection, capture_position);
 
-            for (const auto& mesh_object : visible_objects)
+            if (scene != nullptr)
             {
-                Renderer::FillObjectUniformBuffer(mesh_object);
-                const auto& material = mesh_object.Material;
-                if (material == nullptr || material->GetShader() == nullptr)
-                    continue;
-
-                /* 捕获阶段关闭 IBL：走 per-draw 覆盖、不写共享材质；只对支持 IBL 的 Shader 发，覆盖里同时
-                 * 带中性兜底 —— 只把 u_UseIBL 置零会留下没绑定的采样器，而绘制时声明过的采样器必须全部有绑定。 */
-                DrawParams per_draw;
-                if (material->SupportsIBL())
-                    Material::MakeIBLParamOverrides(per_draw.Overrides, nullptr, nullptr, nullptr);
-                Renderer::Submit(material, mesh_object.MeshSegment->GetMeshPrimitive(),
-                    per_draw.Overrides.empty() ? nullptr : &per_draw);
+                Forward::SubmitSceneObjects(*render_view, *scene, false, submit_params);
+                Forward::SubmitSceneObjects(*render_view, *scene, true, submit_params);
             }
         }
         capture_fb->Unbind();
@@ -181,7 +180,7 @@ namespace Helios
         Renderer::GetRenderAPI()->PopDebugGroup();
     }
 
-    void ReflectionProbe::BakeIrradianceMap()
+    void ReflectionProbe::BakeIrradianceMapFace(uint32_t face)
     {
         PROFILE_FUNCTION();
 
@@ -215,19 +214,16 @@ namespace Helios
             static_cast<float>(env_mip_levels > 0 ? env_mip_levels - 1u : 0u));
 
         auto fb = MakeSceneCaptureFrameBuffer(m_BakeResult.IrradianceMap, nullptr, size);
-        for (int face = 0; face < 6; ++face)
-        {
-            fb->Bind(FrameBufferBindInfo::ToColorLayer(0, face, 0));
-            Renderer::Clear();
-            material->SetParameters(ParamType::Int, "u_FaceId", face);
-            Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
-        }
+        fb->Bind(FrameBufferBindInfo::ToColorLayer(0, face, 0));
+        Renderer::Clear();
+        material->SetParameters(ParamType::Int, "u_FaceId", static_cast<int>(face));
+        Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
         fb->Unbind();
 
         Renderer::GetRenderAPI()->PopDebugGroup();
     }
 
-    void ReflectionProbe::BakePrefilterMap()
+    void ReflectionProbe::BakePrefilterMapFace(uint32_t face)
     {
         PROFILE_FUNCTION();
 
@@ -271,15 +267,12 @@ namespace Helios
             const float roughness = static_cast<float>(mip) / static_cast<float>(mip_levels - 1);
             material->SetParameters(ParamType::Float, "u_Roughness", roughness);
 
-            for (int face = 0; face < 6; ++face)
-            {
-                fb->Bind(FrameBufferBindInfo::ToColorLayer(0, face, mip));
-                Renderer::SetViewport(0, 0, mip_size, mip_size);
-                Renderer::Clear();
+            fb->Bind(FrameBufferBindInfo::ToColorLayer(0, face, mip));
+            Renderer::SetViewport(0, 0, mip_size, mip_size);
+            Renderer::Clear();
 
-                material->SetParameters(ParamType::Int, "u_FaceId", face);
-                Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
-            }
+            material->SetParameters(ParamType::Int, "u_FaceId", static_cast<int>(face));
+            Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
         }
         fb->Unbind();
 

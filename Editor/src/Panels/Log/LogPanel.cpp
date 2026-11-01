@@ -1,4 +1,4 @@
-#include "Pch.h"
+﻿#include "Pch.h"
 #include "LogPanel.h"
 #include <cctype>
 #include <cstdio>

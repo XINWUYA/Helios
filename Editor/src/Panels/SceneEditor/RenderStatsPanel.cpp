@@ -22,6 +22,7 @@
 #include "Common/EditorCommon.h"
 #include "UI/ImGuiExtensions.h"
 #include "Helios/Renderer/RenderQuery.h"
+#include "Helios/Renderer/RenderStatistics.h"
 #include "Helios/Renderer/Renderer.h"
 
 namespace Helios
@@ -592,6 +593,56 @@ namespace Helios
 		}
 	}
 
+	/* 大数字缩写（12.3k / 4.56M）：值列只有一两百像素，全位数既放不下也没人会去数 */
+	const char* RenderStatsPanel::FormatCount(uint64_t value, char* out, size_t out_size)
+	{
+		if (value >= 1000000000ull)
+			std::snprintf(out, out_size, "%.2fG", static_cast<double>(value) / 1000000000.0);
+		else if (value >= 1000000ull)
+			std::snprintf(out, out_size, "%.2fM", static_cast<double>(value) / 1000000.0);
+		else if (value >= 10000ull)
+			std::snprintf(out, out_size, "%.1fk", static_cast<double>(value) / 1000.0);
+		else
+			std::snprintf(out, out_size, "%llu", static_cast<unsigned long long>(value));
+		return out;
+	}
+
+	/* 几何统计卡的行内容（纯函数）：未结算 = 四行占位；间接绘制并进 Draw Calls 行 ——
+	 * 它的元素数与实例数在 GPU 参数块里，混进顶点 / 三角形会让这两行的口径失真 */
+	void RenderStatsPanel::BuildGeometryRows(const RenderStatisticsSnapshot& stats,
+		std::vector<GeometryRow>& out_rows)
+	{
+		out_rows.clear();
+
+		if (!stats.Valid)
+		{
+			out_rows.push_back({ "Draw Calls", kNoDataText });
+			out_rows.push_back({ "Triangles", kNoDataText });
+			out_rows.push_back({ "Vertices", kNoDataText });
+			out_rows.push_back({ "Instances", kNoDataText });
+			return;
+		}
+
+		char count_text[24];
+		FormatCount(stats.DrawCalls, count_text, sizeof(count_text));
+		if (stats.IndirectDrawCalls > 0)
+		{
+			char draw_calls_text[48];
+			std::snprintf(draw_calls_text, sizeof(draw_calls_text), "%s (%llu indirect)", count_text,
+				static_cast<unsigned long long>(stats.IndirectDrawCalls));
+			out_rows.push_back({ "Draw Calls", draw_calls_text });
+		}
+		else
+		{
+			out_rows.push_back({ "Draw Calls", count_text });
+		}
+
+		char value_text[24];
+		out_rows.push_back({ "Triangles", FormatCount(stats.Triangles, value_text, sizeof(value_text)) });
+		out_rows.push_back({ "Vertices", FormatCount(stats.Vertices, value_text, sizeof(value_text)) });
+		out_rows.push_back({ "Instances", FormatCount(stats.Instances, value_text, sizeof(value_text)) });
+	}
+
 	void RenderStatsPanel::OnImGuiRender()
 	{
 		PROFILE_FUNCTION();
@@ -605,6 +656,7 @@ namespace Helios
 			ShowFrameStatsCard();
 			ShowCPUTimingsCard();
 			ShowGPUTimingsCard();
+			ShowGeometryStatsCard();
 		}
 
 		/* 图表放大窗口：独立顶层窗口，必须画在面板窗口之外 */
@@ -646,6 +698,26 @@ namespace Helios
 			if (snapshot.GpuValid)
 				snprintf(buffer, sizeof(buffer), "%.2f ms", snapshot.GpuMs);
 			ImGuiExt::DrawCommonTextUI("GPU", snapshot.GpuValid ? buffer : kNoDataText);
+		}
+
+		PanelChrome::EndCard(card);
+	}
+
+	/* 几何统计卡：本帧提交了多少笔、多少几何。数据源 = RenderStatistics —— 累加在
+	 * Renderer::SubmitDraw，帧边界与 GPU 计时器一致（Renderer::Update 结算上一帧）。
+	 * 间接绘制（草地）的元素数与实例数在参数块里由 GPU 读，只计入 Draw Calls。 */
+	void RenderStatsPanel::ShowGeometryStatsCard()
+	{
+		PROFILE_FUNCTION();
+
+		const PanelChrome::Card card = PanelChrome::BeginCard("Geometry", Icons::Id::Cube);
+
+		if (card.Open)
+		{
+			std::vector<GeometryRow> rows;
+			BuildGeometryRows(RenderStatistics::Instance().GetSnapshot(), rows);
+			for (const GeometryRow& row : rows)
+				ImGuiExt::DrawCommonTextUI(row.Label, row.Value);
 		}
 
 		PanelChrome::EndCard(card);

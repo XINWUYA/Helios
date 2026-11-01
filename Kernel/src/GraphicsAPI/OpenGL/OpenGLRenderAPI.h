@@ -31,6 +31,13 @@ namespace Helios
 			uint32_t instance_count, const VertexBufferLayout& instance_layout,
 			uint32_t index_count = 0, uint32_t index_offset = 0) override;
 
+#ifndef __APPLE__
+		void DrawIndexedIndirect(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+			const SharedPtr<DeviceStorageBuffer>& args_buffer, uint32_t args_offset_bytes,
+			const VertexBufferLayout& instance_layout) override;
+#endif
+
 		/* 绘制调用 */
 		void DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count = 0, uint32_t index_offset = 0) override;
 		void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) override;

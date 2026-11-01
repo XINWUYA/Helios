@@ -531,9 +531,7 @@ namespace Helios
 			ImVec2(FLT_MAX, FLT_MAX));
 		if (ImGui::BeginPopup("##ModelDebugViewMenu"))
 		{
-			/* 编辑器的预览相机缺省走延迟管线；前向时光照分量置灰（与场景视口同规则） */
 			DebugViewMenu::DrawItems(debug_view,
-				m_pEditorCamera->GetRenderPipeline() == RenderPipeline::Deferred,
 				[this](DebugViewMode mode) { m_pEditorCamera->SetDebugViewMode(mode); });
 			ImGui::EndPopup();
 		}

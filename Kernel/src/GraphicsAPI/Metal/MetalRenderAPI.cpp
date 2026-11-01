@@ -493,6 +493,7 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
+
         if (!m_CurrentRenderEncoder || m_EncoderSuspended)
         {
             CORE_LOG_ERROR("No active render encoder!");
@@ -550,6 +551,52 @@ namespace Helios
             index_offset * index_size,  /* 索引偏移（字节） */
             NS::UInteger(std::max(instance_count, 1u))
         );
+    }
+
+    void MetalRenderAPI::DrawIndexedIndirect(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+        const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+        const SharedPtr<DeviceStorageBuffer>& args_buffer, uint32_t args_offset_bytes,
+        const VertexBufferLayout& /*instance_layout*/)
+    {
+        PROFILE_FUNCTION();
+
+        if (!m_CurrentRenderEncoder || m_EncoderSuspended)
+        {
+            CORE_LOG_ERROR("No active render encoder!");
+            return;
+        }
+
+        auto* metal_vertex_array = static_cast<MetalVertexArray*>(vertex_array.get());
+        if (!metal_vertex_array || !m_BoundShader)
+        {
+            CORE_LOG_ERROR("DrawIndexedIndirect: vertex array or shader missing!");
+            return;
+        }
+
+        auto index_buffer = metal_vertex_array->GetIndexBuffer();
+        auto* metal_index_buffer = index_buffer != nullptr
+            ? static_cast<MetalIndexBuffer*>(index_buffer.get()) : nullptr;
+        auto storage = std::dynamic_pointer_cast<MetalStorageBuffer>(args_buffer);
+        if (metal_index_buffer == nullptr || storage == nullptr || storage->GetMetalBuffer() == nullptr)
+        {
+            CORE_LOG_ERROR("DrawIndexedIndirect: index buffer or args buffer missing!");
+            return;
+        }
+
+        BindVertexBuffers(*metal_vertex_array);
+        if (!ApplyPipelineState(m_BoundShader->GetActiveVertexLayoutHash()))
+            return;
+        if (!BindInstanceBuffer(*metal_vertex_array, instance_buffer, instance_offset_bytes))
+            return;
+
+        /* 索引数与实例数都在参数块里：count / instanceCount / indexStart / baseVertex / baseInstance */
+        m_CurrentRenderEncoder->drawIndexedPrimitives(
+            ToMetalPrimitiveType(type),
+            ToMetalIndexType(metal_index_buffer->GetIndexType()),
+            metal_index_buffer->GetMetalBuffer(),
+            0,
+            storage->GetMetalBuffer(),
+            args_offset_bytes);
     }
 
     void MetalRenderAPI::DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array)

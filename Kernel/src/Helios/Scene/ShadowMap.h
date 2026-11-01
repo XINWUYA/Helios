@@ -176,6 +176,8 @@ namespace Helios
 		/* 阴影纹理数组 */
 		SharedPtr<DeviceTexture> m_ShadowMapTexture{ nullptr };
 		SharedPtr<DeviceShader> m_ShadowCasterShader{ nullptr };
+		/* 草的投影着色器：顶点展开跟可见着色共用一份，只有位置输出 */
+		SharedPtr<DeviceShader> m_GrassShadowShader{ nullptr };
 
 		/* 各级联在视图空间的分割距离（远边界），由 PrepareAllShadowMaps 计算，供 AddShadowPass 填充 UBO */
 		glm::vec4 m_CascadeSplits{ 0.0f };

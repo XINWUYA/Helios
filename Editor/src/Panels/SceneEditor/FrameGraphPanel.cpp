@@ -1,4 +1,4 @@
-#include "Pch.h"
+﻿#include "Pch.h"
 #include "FrameGraphPanel.h"
 #include "Common/TextMatch.h"
 #include "UI/EditorIcons.h"
@@ -60,8 +60,9 @@ namespace Helios
 		}
 
 		/* ---- 渲染阶段标识色（按节点名关键字匹配）----
-		 * 同一阶段的 Pass 和资源共用色相（Skin / Shadow / GBuffer / Lighting / Sky / PostProcess / Axis / Debug）：深色同相底 +
-		 * 饱和彩色描边（描边才是类别的主要载体）；Pass 亮一档 / 资源暗一档。一个阶段最多两个关键字（后处理的名字分 Bloom 和 PostProcess 两类）。 */
+		 * 同一阶段的 Pass 和资源共用色相（Skin / Shadow / GBuffer / Lighting / Forward / Sky /
+		 * PostProcess / Selection / Axis / Probe / Debug）：深色同相底 + 饱和彩色描边（描边才是类别的主要载体）。
+		 * Pass 亮一档 / 资源暗一档；一个阶段最多两个关键字（前向分 Forward 与 ScenePass，后处理分 Bloom 与 PostProcess）。 */
 		struct StageFill
 		{
 			const char* Keywords[2]; /* 节点名包含任一即命中（按注册顺序，先到先得） */
@@ -81,12 +82,21 @@ namespace Helios
 			                                             ImVec4(30.0f / 255.0f, 54.0f / 255.0f, 58.0f / 255.0f, 1.0f) }, /* 青 */
 			{ { "Lighting" },             "Lighting",    ImVec4(224.0f / 255.0f, 160.0f / 255.0f, 74.0f / 255.0f, 1.0f),
 			                                             ImVec4(58.0f / 255.0f, 46.0f / 255.0f, 38.0f / 255.0f, 1.0f) }, /* 琥珀 */
+			/* 前向几何：前向管线的整场景 Pass，以及延迟管线里的草与透明批 */
+			{ { "Forward", "ScenePass" }, "Forward",     ImVec4(167.0f / 255.0f, 211.0f / 255.0f, 105.0f / 255.0f, 1.0f),
+			                                             ImVec4(48.0f / 255.0f, 56.0f / 255.0f, 30.0f / 255.0f, 1.0f) }, /* 黄绿 */
 			{ { "Sky" },                  "Sky",         ImVec4(91.0f / 255.0f, 141.0f / 255.0f, 239.0f / 255.0f, 1.0f),
 			                                             ImVec4(30.0f / 255.0f, 44.0f / 255.0f, 72.0f / 255.0f, 1.0f) }, /* 蓝 */
 			{ { "Bloom", "PostProcess" }, "PostProcess", ImVec4(232.0f / 255.0f, 120.0f / 255.0f, 168.0f / 255.0f, 1.0f),
 			                                             ImVec4(58.0f / 255.0f, 36.0f / 255.0f, 48.0f / 255.0f, 1.0f) }, /* 玫红 */
+			/* 编辑器叠加层：选中描边在场景 gizmo 之前 */
+			{ { "Selection" },            "Selection",   ImVec4(191.0f / 255.0f, 105.0f / 255.0f, 220.0f / 255.0f, 1.0f),
+			                                             ImVec4(56.0f / 255.0f, 30.0f / 255.0f, 64.0f / 255.0f, 1.0f) }, /* 紫罗兰 */
 			{ { "Axis" },                 "Axis",        ImVec4(111.0f / 255.0f, 191.0f / 255.0f, 95.0f / 255.0f, 1.0f),
 			                                             ImVec4(37.0f / 255.0f, 57.0f / 255.0f, 47.0f / 255.0f, 1.0f) }, /* 绿 */
+			/* 反射探针的场景捕获烘焙：排在管线之后、与视图渲染无关 */
+			{ { "Probe" },                "Probe",       ImVec4(105.0f / 255.0f, 211.0f / 255.0f, 158.0f / 255.0f, 1.0f),
+			                                             ImVec4(30.0f / 255.0f, 56.0f / 255.0f, 42.0f / 255.0f, 1.0f) }, /* 薄荷 */
 			{ { "Debug" },                "Debug",       ImVec4(138.0f / 255.0f, 148.0f / 255.0f, 166.0f / 255.0f, 1.0f),
 			                                             ImVec4(52.0f / 255.0f, 49.0f / 255.0f, 54.0f / 255.0f, 1.0f) }, /* 中灰 */
 		};

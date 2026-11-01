@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <type_traits>
@@ -28,20 +29,29 @@ namespace Helios::Jobs
 	[[nodiscard]] HELIOS_API bool IsMainThread();
 	[[nodiscard]] HELIOS_API bool IsWorkerThread();
 
+	/* 每个 ParallelFor 调用点一份：记每个元素的耗时，估出来太小就直接串行 */
+	struct ParallelForSite
+	{
+		std::atomic<float> NsPerItem{ 0.0f };
+		std::atomic<uint32_t> Calls{ 0 };
+	};
+
 	/* 分片并行的非模板入口，返回时全部分片完成 */
 	HELIOS_API void ParallelForImpl(uint32_t count, uint32_t grain, const void* ctx,
-		void (*invoke)(const void*, uint32_t begin, uint32_t end));
+		void (*invoke)(const void*, uint32_t begin, uint32_t end), ParallelForSite* site);
 
 	/* 用法：Jobs::ParallelFor(n, 256, [&](uint32_t begin, uint32_t end) { ... });
-	 * 每片只写自己的区间；分片会被多个线程同时调用，单片要短，主线程也会来帮忙。 */
+	 * 每片只写自己的区间；分片会被多个线程同时调用，单片要短，主线程也会来帮忙。
+	 * 首次调用照常并行并测耗时，之后估计总量不到 50us 的直接在调用线程串行。 */
 	template <typename Fn>
 	void ParallelFor(uint32_t count, uint32_t grain, Fn&& fn)
 	{
 		using Body = std::remove_reference_t<Fn>;
+		static ParallelForSite s_Site;
 		ParallelForImpl(count, grain, &fn, [](const void* ctx, uint32_t begin, uint32_t end)
 		{
 			(*static_cast<const Body*>(ctx))(begin, end);
-		});
+		}, &s_Site);
 	}
 
 	/* 主线程空闲时偷帧内小任务，最多占用 budget_us 微秒 */

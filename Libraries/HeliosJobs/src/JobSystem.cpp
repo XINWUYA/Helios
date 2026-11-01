@@ -262,6 +262,25 @@ namespace HeliosJobs
 		m_WorkerCondition.notify_one();
 	}
 
+	bool JobSystem::WakeFrameWorker(uint32_t max_in_flight) noexcept
+	{
+		/* 投递方只叫一个，醒来的 worker 再接力，在路上的唤醒数不超过上限 */
+		if (m_SleepingWorkers.load(std::memory_order_seq_cst) == 0)
+			return false;
+		uint32_t in_flight = m_WakesInFlight.load(std::memory_order_seq_cst);
+		do
+		{
+			if (in_flight >= max_in_flight)
+				return false;
+		} while (!m_WakesInFlight.compare_exchange_weak(in_flight, in_flight + 1, std::memory_order_seq_cst));
+
+		{
+			std::lock_guard lock(m_WaitLock);
+		}
+		m_WorkerCondition.notify_one();
+		return true;
+	}
+
 	void JobSystem::WakeWaiters() noexcept
 	{
 		{
@@ -275,7 +294,7 @@ namespace HeliosJobs
 		const size_t index = static_cast<size_t>(job - m_Jobs.get());
 		state.Queue.Push(static_cast<uint16_t>(index + 1));
 		m_ActiveJobs.fetch_add(1, std::memory_order_seq_cst);
-		WakeWorker();
+		WakeFrameWorker(1);
 	}
 
 	void JobSystem::PutBackground(Job* job, Priority priority) noexcept
@@ -436,17 +455,25 @@ namespace HeliosJobs
 
 	bool JobSystem::ExecuteFrame(ThreadState& state) noexcept
 	{
-		if (Job* job = PopFrame(state))
+		bool stolen = false;
+		Job* job = PopFrame(state);
+		if (job == nullptr)
 		{
-			ExecuteJob(state, job, false);
-			return true;
+			job = StealFrame(state);
+			stolen = true;
 		}
-		if (Job* job = StealFrame(state))
+		if (job == nullptr)
+			return false;
+
+		/* worker 拿到活后再叫两个，成倍铺开且不超过剩下的活；主线程不接力，唤醒成本不落在关键路径上 */
+		if (state.IsWorker)
 		{
-			ExecuteJob(state, job, true);
-			return true;
+			const int32_t remaining = m_ActiveJobs.load(std::memory_order_seq_cst);
+			if (remaining > 0 && WakeFrameWorker(static_cast<uint32_t>(remaining)))
+				WakeFrameWorker(static_cast<uint32_t>(remaining));
 		}
-		return false;
+		ExecuteJob(state, job, stolen);
+		return true;
 	}
 
 	bool JobSystem::ExecuteBackgroundHelp(ThreadState& state) noexcept
@@ -520,8 +547,16 @@ namespace HeliosJobs
 
 			std::unique_lock lock(m_WaitLock);
 			m_SleepingWorkers.fetch_add(1, std::memory_order_seq_cst);
+			/* 睡前清零、每次醒来减一：通知可能落空，醒来没抢到活又会睡回去，计数留着会挡住后面的唤醒 */
+			m_WakesInFlight.store(0, std::memory_order_seq_cst);
 			while (!m_ExitRequested.load(std::memory_order_relaxed) && !HasFrameWork() && !HasBackgroundWork(false))
+			{
 				m_WorkerCondition.wait(lock);
+				uint32_t in_flight = m_WakesInFlight.load(std::memory_order_seq_cst);
+				while (in_flight > 0 && !m_WakesInFlight.compare_exchange_weak(in_flight, in_flight - 1, std::memory_order_seq_cst))
+				{
+				}
+			}
 			m_SleepingWorkers.fetch_sub(1, std::memory_order_seq_cst);
 		}
 

@@ -20,25 +20,51 @@ namespace Helios
             uint32_t IrradianceSize = 32;
             uint32_t PrefilterSize = 128;
             uint32_t PrefilterMipLevels = 0;/* 0-表示根据PrefilterSize自动推导 */
-            bool BakeSkyBoxOnly = true;     /* 仅烘焙天空盒 */
+            /* 用指定的天空贴图生成环境，不去捕获场景几何（贴图为空时仍走场景捕获） */
+            bool BakeFromSkyTexture = false;
             bool BakeDiffuse = true;        /* 是否需要烘焙漫反射(irradiance) */
             bool BakeSpecular = true;       /* 是否需要烘焙镜面反射(prefilter) */
+
+            friend bool operator==(const BakeConfig& lhs, const BakeConfig& rhs)
+            {
+                return lhs.EnvSize == rhs.EnvSize && lhs.IrradianceSize == rhs.IrradianceSize
+                    && lhs.PrefilterSize == rhs.PrefilterSize && lhs.PrefilterMipLevels == rhs.PrefilterMipLevels
+                    && lhs.BakeFromSkyTexture == rhs.BakeFromSkyTexture
+                    && lhs.BakeDiffuse == rhs.BakeDiffuse && lhs.BakeSpecular == rhs.BakeSpecular;
+            }
         };
 
         ReflectionProbe();
         ~ReflectionProbe() = default;
 
-        /* 设置用于烘焙的等距柱状(equirectangular)源纹理（通常是天空盒贴图） */
-        void SetSkyBoxTexture(SharedPtr<DeviceTexture> skybox_tex) { m_pSkyBoxTexture = skybox_tex; }
+        /* 设置用于烘焙的等距柱状(equirectangular)源纹理（通常是天空盒贴图）。
+         * 换图等于换环境，旧结果作废；加载场景时缓存随后载入，会把这次请求取消掉。 */
+        void SetSkyBoxTexture(SharedPtr<DeviceTexture> skybox_tex)
+        {
+            if (m_pSkyBoxTexture == skybox_tex)
+                return;
+
+            m_pSkyBoxTexture = std::move(skybox_tex);
+            RequestRebake();
+        }
         SharedPtr<DeviceTexture> GetSkyBoxTexture() const { return m_pSkyBoxTexture; }
 
-        /* 设置烘焙配置参数 */
-        void SetBakeConfig(const BakeConfig& config) { m_BakeConfig = config; }
+        /* 设置烘焙配置参数：规格变了旧结果就不成立，下一帧重建 */
+        void SetBakeConfig(const BakeConfig& config)
+        {
+            if (m_BakeConfig == config)
+                return;
+
+            m_BakeConfig = config;
+            RequestRebake();
+        }
         const BakeConfig& GetBakeConfig() const { return m_BakeConfig; }
 
         /* 设置每帧烘焙 */
         void SetRealtime(bool realtime) { m_IsRealtime = realtime; }
         bool IsRealtime() const { return m_IsRealtime; }
+        /* 每帧重烤只对场景捕获有意义：贴图烘焙的输入是静态图，换图走重烤请求 */
+        [[nodiscard]] bool NeedsRealtimeBake() const { return m_IsRealtime && !m_BakeConfig.BakeFromSkyTexture; }
 
         /* ---- 影响盒体与混合（IBL 应用：像素级选择 / top2 混合用） ----
          * 盒体描述探针"管哪片区域"（中心 = 探针位置，全尺寸）；像素在盒内、深入盒面超过
@@ -169,13 +195,12 @@ namespace Helios
 
     private:
         SharedPtr<DeviceFrameBuffer> MakeSceneCaptureFrameBuffer(const SharedPtr<DeviceTexture>& color_target, const SharedPtr<DeviceTexture>& depth_target, uint32_t size);
-        /* 生成环境立方体贴图：BakeSkyBoxOnly 时用 EquirectToCube 生成；否则在探针位置用 6 个朝向的
+        /* 生成环境立方体贴图：BakeFromSkyTexture 时用 EquirectToCube 从源图生成；否则在探针位置用 6 个朝向的
          * 相机实时捕获场景几何。返回的立方图供后续烘焙 IrradianceMap 和 PrefilterMap。 */
         void BakeEnvCubemap(RenderView* render_view);
-        /* 烘焙IrradianceMap */
-        void BakeIrradianceMap();
-        /* 烘焙PrefilterMap */
-        void BakePrefilterMap();
+        /* 卷积的单面版本：实时烘焙每帧只算一面（六帧转一圈），一次性烘焙时由整轮版本循环调用 */
+        void BakeIrradianceMapFace(uint32_t face);
+        void BakePrefilterMapFace(uint32_t face);
 
         /* 生成预览图：把三张烘焙立方图回读、色调映射、拼成十字展开、上传为 2D 纹理。
          * 需要 GPU 已完成烘焙绘制（调用方先 WaitForGPU）。 */
@@ -195,6 +220,8 @@ namespace Helios
         BakeResult m_BakeResult{};
         bool m_IsRealtime{ false };
         bool m_BakeCompleted{ false };
+        /* 实时烘焙的卷积进度：只算这一面，算完 6 面转一圈（环境图仍每帧更新） */
+        uint32_t m_BakeConvolveFace{ 0 };
 
         /* IBL 应用参数（见上方 getter / setter 的说明） */
         glm::vec3 m_BoxSize{ 10.0f };

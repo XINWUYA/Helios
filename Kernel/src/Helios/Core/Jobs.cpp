@@ -145,8 +145,12 @@ namespace Helios::Jobs
 		return s_System != nullptr && s_System->IsWorkerThread();
 	}
 
+	/* 低于这个量并行反而更慢（M3 Pro 冷启动实测盈亏点约 50us），每 64 次按当前模式重测一次 */
+	constexpr float kSerialBelowNs = 50000.0f;
+	constexpr uint32_t kResampleInterval = 64;
+
 	void ParallelForImpl(uint32_t count, uint32_t grain, const void* ctx,
-		void (*invoke)(const void*, uint32_t, uint32_t))
+		void (*invoke)(const void*, uint32_t, uint32_t), ParallelForSite* site)
 	{
 		if (invoke == nullptr || count == 0)
 			return;
@@ -159,7 +163,33 @@ namespace Helios::Jobs
 			return;
 		}
 
-		JobSystem::Job* root = system->CreateParallelFor(nullptr, 0, count, grain,
+		const float ns_per_item = site != nullptr ? site->NsPerItem.load(std::memory_order_relaxed) : 0.0f;
+		const bool resample = site != nullptr && (ns_per_item <= 0.0f || site->Calls.fetch_add(1, std::memory_order_relaxed) % kResampleInterval == 0);
+		const bool serial = ns_per_item > 0.0f && ns_per_item * static_cast<float>(count) < kSerialBelowNs;
+
+		if (serial)
+		{
+			const auto start = resample ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+			invoke(ctx, 0, count);
+			if (resample)
+			{
+				const auto ns = std::chrono::duration<float, std::nano>(std::chrono::steady_clock::now() - start).count();
+				site->NsPerItem.store(std::max(ns, 1.0f) / static_cast<float>(count), std::memory_order_relaxed);
+			}
+			return;
+		}
+
+		/* 并行时按块累计耗时，得到的是折算成单线程的总量 */
+		std::atomic<uint64_t> work_ns{ 0 };
+		JobSystem::Job* root = resample
+			? system->CreateParallelFor(nullptr, 0, count, grain, [ctx, invoke, total = &work_ns](uint32_t start, uint32_t length)
+			{
+				const auto begin = std::chrono::steady_clock::now();
+				invoke(ctx, start, start + length);
+				const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - begin).count();
+				total->fetch_add(static_cast<uint64_t>(ns), std::memory_order_relaxed);
+			})
+			: system->CreateParallelFor(nullptr, 0, count, grain,
 			[ctx, invoke](uint32_t start, uint32_t length) { invoke(ctx, start, start + length); });
 		if (root == nullptr)
 		{
@@ -167,6 +197,9 @@ namespace Helios::Jobs
 			return;
 		}
 		system->RunAndWait(root);
+
+		if (resample)
+			site->NsPerItem.store(std::max(static_cast<float>(work_ns.load(std::memory_order_relaxed)), 1.0f) / static_cast<float>(count), std::memory_order_relaxed);
 	}
 
 	uint32_t HelpWhileIdle(uint32_t budget_us)

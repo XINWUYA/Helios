@@ -6,6 +6,7 @@
 #include "Common/EditorCommon.h"
 #include "Helios/Core/CPUTimerProfiler.h"
 #include "Helios/Renderer/RenderQuery.h"
+#include "Helios/Renderer/RenderStatistics.h"
 
 namespace Helios
 {
@@ -37,6 +38,22 @@ namespace Helios
 		/* 导出落盘的路径收尾：系统保存框不保证补后缀（macOS 面板不会自动加）——名称未以
 		 * ".csv"（大小写不敏感）结尾时补上，已有则不重复；空路径（取消）原样返回。 */
 		static std::string EnsureRecordingExtension(const std::string& path);
+
+		/* 几何统计的数字显示（纯函数，headless 可断言）：万以下原样、再往上 12.3k、
+		 * 百万以上 4.56M —— 值列只有一两百像素，全位数既放不下也没人会去数 */
+		static const char* FormatCount(uint64_t value, char* out, size_t out_size);
+
+		/* 几何统计卡的一行（纯数据；headless 断言显示语义用） */
+		struct GeometryRow
+		{
+			std::string Label;
+			std::string Value;
+		};
+
+		/* 几何统计卡的行内容（纯函数，headless 可断言）：未结算时四行都是占位；
+		 * 有间接绘制时并进 Draw Calls 行显示，不额外占一行 */
+		static void BuildGeometryRows(const RenderStatisticsSnapshot& stats,
+			std::vector<GeometryRow>& out_rows);
 
 		/* Treemap 布局块（纯数据；headless 检查断言用） */
 		struct TreemapBlock
@@ -145,6 +162,9 @@ namespace Helios
 		void ShowFrameStatsCard();
 		void ShowCPUTimingsCard();
 		void ShowGPUTimingsCard();
+		/* 几何统计卡：本帧的提交次数与几何吞吐（Draw Call / 三角形 / 顶点 / 实例）。
+		 * 数据源 = RenderStatistics，帧边界与 GPU 计时器一致 */
+		void ShowGeometryStatsCard();
 		/* 帧耗时曲线：三线（Frame / CPU / GPU）+ 悬停读值；需要至少两帧历史才画线 */
 		void ShowFrameTimeGraph(float height);
 		/* 录制工具栏：录制 / 停止、上一帧 / 下一帧、峰值 / 谷值、清空、导出 CSV ——

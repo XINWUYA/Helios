@@ -19,12 +19,12 @@
         <Entity ID="3" Name="Reflection Probe">
             <Transform Position="1.737903 0.647669 3.682614" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Visibility Visible="false"/>
-            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe.probe" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967295" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
+            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe.probe" BakeFromSkyTexture="false" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967295" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
         <Entity ID="4" Name="Reflection Probe">
             <Transform Position="-3.600211 0.503899 0.365885" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Visibility Visible="false"/>
-            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_2.probe" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967295" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
+            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_2.probe" BakeFromSkyTexture="false" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967295" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
         <Entity ID="5" Name="Cottage">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="0.500000 0.500000 0.500000"/>
@@ -60,11 +60,11 @@
         <Entity ID="9" Name="Reflection Probe">
             <Transform Position="3.824024 1.004549 0.876802" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Visibility Visible="false"/>
-            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_3.probe" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967295" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="false" BakeDiffuse="true" BakeSpecular="true"/>
+            <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe_3.probe" BakeFromSkyTexture="false" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967295" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
         <Entity ID="10" Name="Reflection Probe">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <ReflectionProbe SkyBoxPath="Textures/drakensberg_solitary_mountain_4k.hdr" BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe.probe" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967295" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeSkyBoxOnly="true" BakeDiffuse="true" BakeSpecular="true"/>
+            <ReflectionProbe SkyBoxPath="Textures/drakensberg_solitary_mountain_4k.hdr" BakeCachePath="BakedReflectionProbes/Scenes/test-ser/Reflection_Probe.probe" BakeFromSkyTexture="true" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967295" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
         <Entity ID="11" Name="Post Process">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>

@@ -33,7 +33,9 @@ namespace Helios
     {
         PROFILE_FUNCTION();
 
-        const bool need_bake = m_IsRealtime || !m_BakeCompleted && (m_BakeConfig.BakeDiffuse || m_BakeConfig.BakeSpecular);
+        const bool realtime = NeedsRealtimeBake();
+        const bool need_bake = realtime
+            || !m_BakeCompleted && (m_BakeConfig.BakeDiffuse || m_BakeConfig.BakeSpecular);
         if (!need_bake)
             return;
 
@@ -47,19 +49,41 @@ namespace Helios
          * GenerateMipmap 独立提交命令缓冲区会先执行、mip 全是 0。 */
         Renderer::GetRenderAPI()->GenerateMipmap(m_BakeResult.EnvColorCubemap);
 
-        if (m_BakeConfig.BakeDiffuse)
-            BakeIrradianceMap();
+        /* 实时探针的卷积按面分帧：每帧只算一面，六帧转一圈。环境图仍然每帧更新，
+         * 落后的是低频的辐照度 / 预滤波，肉眼看不出；一次性烘焙照旧一轮做完。 */
+        if (realtime)
+        {
+            if (m_BakeConfig.BakeDiffuse)
+                BakeIrradianceMapFace(m_BakeConvolveFace);
 
-        if (m_BakeConfig.BakeSpecular)
-            BakePrefilterMap();
+            if (m_BakeConfig.BakeSpecular)
+                BakePrefilterMapFace(m_BakeConvolveFace);
 
-        m_BakeCompleted = true;
+            if (++m_BakeConvolveFace >= 6)
+            {
+                m_BakeConvolveFace = 0;
+                m_BakeCompleted = true;
+            }
+        }
+        else
+        {
+            for (uint32_t face = 0; face < 6; ++face)
+            {
+                if (m_BakeConfig.BakeDiffuse)
+                    BakeIrradianceMapFace(face);
+
+                if (m_BakeConfig.BakeSpecular)
+                    BakePrefilterMapFace(face);
+            }
+            m_BakeCompleted = true;
+        }
     }
 
     void ReflectionProbe::Reset()
     {
         m_BakeResult = BakeResult{};
         m_BakeCompleted = false;
+        m_BakeConvolveFace = 0;
 
         /* 烘焙结果作废，预览随之作废：清空后由 UI 的按需请求在重新烘焙完成后重建 */
         for (auto& preview : m_BakePreviews)

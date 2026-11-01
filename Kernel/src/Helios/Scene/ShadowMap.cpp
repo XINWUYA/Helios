@@ -9,6 +9,7 @@
 #include <Helios/Renderer/RenderView.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderPasses/ObjectSorting.h>
+#include <Helios/Renderer/RenderPasses/GrassDrawParams.h>
 #include <Helios/Scene/Material.h>
 #include <Helios/Core/AssetManager.h>
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
@@ -20,6 +21,14 @@
 
 namespace Helios
 {
+	namespace
+	{
+		/* 草影的距离圈：圈内满密度，往外连续变稀到没有。草影单独占一层，不受 ShadowFar 限制，
+		 * 所以能一直铺到级联够不着的地方 —— 不然远处草地会是一整片没有影子的纯色 */
+		constexpr float kGrassShadowFullRadius = 20.0f;
+		constexpr float kGrassShadowFadeRadius = 60.0f;
+	}
+
 	namespace
 	{
 		constexpr uint32_t kFallbackCascadeCount = 4;
@@ -128,6 +137,8 @@ namespace Helios
 	{
 		if (!m_ShadowCasterShader)
 			m_ShadowCasterShader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Builtin/ShadowCaster.glsl"));
+		if (!m_GrassShadowShader)
+			m_GrassShadowShader = AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/Grass/GrassShadow.glsl"));
 
 		PrepareRequiredTexture();
 
@@ -660,9 +671,76 @@ namespace Helios
 				auto render_api = Renderer::GetRenderAPI();
 				const uint32_t shadow_size = m_RequiredTextureDesc.Size;
 
-				/* 每层的公共渲染体：清深度 + 提交本层投射物（级联按各自的剔除表，点光/聚光全量） */
+				/* 把源材质的数值参数抄进投影材质：贴图不需要，只要叶形与压弯这些系数 */
+				const auto copy_material_values = [](const Material& source, Material& target)
+				{
+					for (const auto& [key, info] : source.GetAllParameters())
+					{
+						(void)key;
+						if (info.Type == ParamType::Texture)
+							continue;
+						target.SetParameters(info.Type, info.Name, info.Value);
+					}
+				};
+
+				/* 草的投影：模拟投射物列表之外单独提交一笔。远近只做粗筛，疏密交给着色器按株抖点，
+				 * 走的是跟可见着色同一套叶片展开，所以风和脚印都对得上 */
+				const auto submit_grass_casters = [this, render_view, copy_material_values](uint8_t cascade_id)
+				{
+					if (m_GrassShadowShader == nullptr)
+						return;
+
+					const SharedPtr<Scene> scene = render_view->GetOwnerScene();
+					if (scene == nullptr)
+						return;
+
+					const Camera* camera = render_view->GetCullingCamera();
+					const glm::vec3 eye = camera != nullptr ? camera->GetPosition() : glm::vec3(0.0f);
+
+					const auto grass_material = Material::Create(m_GrassShadowShader);
+					grass_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
+					grass_material->SetParameters(ParamType::Vec3, "u_GrassShadowEye", eye);
+					grass_material->SetParameters(ParamType::Float, "u_GrassShadowFullRadius", kGrassShadowFullRadius);
+					grass_material->SetParameters(ParamType::Float, "u_GrassShadowFadeRadius", kGrassShadowFadeRadius);
+					/* 叶片是单面几何，投影不能剔背面，否则一半的草不写深度 */
+					grass_material->GetRasterState().CullMode = CullMode::Cull_None;
+
+					const MeshPrimitive& blade = GrassField::GetBladePrimitive();
+					for (auto [entity, grass] : scene->GetRegistry().view<GrassComponent>().each())
+					{
+						if (!grass.m_CastShadow || grass.GetMaterial() == nullptr
+							|| grass.m_Field == nullptr || grass.m_Field->IsEmpty())
+							continue;
+						if (!scene->IsEntityInRenderView(entity, render_view->GetCullingMask()))
+							continue;
+
+						const auto& instance_buffer = grass.m_Field->GetInstanceBuffer();
+						if (instance_buffer == nullptr)
+							continue;
+
+						/* 影子要跟草长得一模一样：把源材质的数值参数（叶形弯曲、压弯强度这些）整份搬过来。
+						 * 只有风与脚印走 per-draw，其余从材质来 */
+						copy_material_values(*grass.GetMaterial(), *grass_material);
+
+						DrawParams per_draw = GrassDraw::MakeDrawParams(grass, scene->GetGrassWindTime());
+						for (const GrassField::Chunk& chunk : grass.m_Field->GetChunks())
+						{
+							/* 按块的外接半径放宽筛选：块中心在圈外但叶子还伸进圈里的照样提交 */
+							const float distance = glm::distance(eye, chunk.Center)
+								- glm::length(glm::vec2(chunk.Extent.x, chunk.Extent.z));
+							if (distance > kGrassShadowFadeRadius)
+								continue;
+
+							Renderer::SubmitInstanced(grass_material, blade, instance_buffer,
+								chunk.First, chunk.Count, &per_draw, 0, &Renderer::GetGrassInstanceLayout());
+						}
+					}
+				};
+
+				/* 每层的公共渲染体：清深度 + 提交本层投射物（级联按各自的剔除表，点光/聚光全量）。
+				 * draw_grass 只对方向光级联打开：草的投影按级联矩阵走，点光层没有对应矩阵 */
 				const auto render_shadow_layer = [&](uint8_t layer, const SharedPtr<Material>& shadow_material,
-					const std::vector<uint32_t>* caster_indices)
+					const std::vector<uint32_t>* caster_indices, bool draw_grass)
 				{
 					/* 绑定FrameBuffer为指定层（统一 Bind 接口，自动设置 viewport 并按层附着 Depth 附件） */
 					render_pass_info->Bind(FrameBufferBindInfo::ToDepthLayer(layer));
@@ -738,6 +816,10 @@ namespace Helios
 						}
 					}
 
+					/* 草不在投射物列表里：在本层的渲染通道里单独补一笔 */
+					if (draw_grass)
+						submit_grass_casters(layer);
+
 					render_pass_info->Unbind();
 				};
 
@@ -747,22 +829,13 @@ namespace Helios
 					return Material::Create(m_ShadowCasterShader);
 				};
 
+
 				/* 渲染每级联阴影，复用UpdateCascadeMatrices已计算好的VP矩阵与Layer */
 				if (!m_CascadeShadowMaps.empty())
 				{
-					/* 一次性把全部级联 VP 矩阵写进光照 UBO（u_LightViewProjectionMat 数组），给阴影 Pass（按
-					 * 级联索引取矩阵）和 LightingPass（按视距选级联）用；深度跨度和逐级联偏移也一起下发。 */
-					std::vector<glm::mat4> light_vp_mats;
-					std::vector<float> cascade_depth_spans;
-					light_vp_mats.reserve(m_CascadeShadowMaps.size());
-					cascade_depth_spans.reserve(m_CascadeShadowMaps.size());
-					for (const auto& cascade_shadow_map : m_CascadeShadowMaps)
-					{
-						light_vp_mats.push_back(cascade_shadow_map->GetLightViewProjectionMat());
-						cascade_depth_spans.push_back(cascade_shadow_map->GetDepthRange());
-					}
-					Renderer::FillLightUniformBuffer(m_CascadeShadowMaps[0]->m_pLight, light_vp_mats, m_CascadeSplits,
-						cascade_depth_spans.empty() ? nullptr : &cascade_depth_spans);
+					/* 把级联矩阵和深度跨度写进光照 UBO：阴影 Pass 按级联索引取矩阵，
+					 * LightingPass 按视距选级联 */
+					Renderer::FillLightUniformBuffer(m_CascadeShadowMaps[0]->m_pLight, this);
 
 					/* 只画宿主方向光的级联：容器里可能还挂着别的方向光的层（级联只有一套，
 					 * 它们没被拟合，矩阵是单位阵），画了也只会写进没人采样的层 */
@@ -780,7 +853,9 @@ namespace Helios
 
 						/* 只提交与该级联正交盒相交的投射物；表没备好时退回全量 */
 						render_shadow_layer(cascade_id, shadow_material,
-							cascade_shadow_map->HasCasterList() ? &cascade_shadow_map->GetCasterIndices() : nullptr);
+							cascade_shadow_map->HasCasterList() ? &cascade_shadow_map->GetCasterIndices() : nullptr,
+							true);
+
 						render_api->PopDebugGroup();
 					}
 				}
@@ -809,7 +884,7 @@ namespace Helios
 						if (!face_frustum.IsOutside(casters[index]))
 							face_casters.push_back(index);
 					}
-					render_shadow_layer(layer, shadow_material, &face_casters);
+					render_shadow_layer(layer, shadow_material, &face_casters, false);
 					render_api->PopDebugGroup();
 				}
 			});

@@ -6,7 +6,7 @@
 #include "MetalConversions.h"
 #include "MetalShader.h"
 #include "Helios/Core/TextureSettings.h"
-#include "stb_image.h"
+#include "Helios/Core/TextureDecode.h"
 
 #include <algorithm>
 #include <cmath>
@@ -464,37 +464,26 @@ namespace Helios
         m_Path = path;
         m_TextureLoadConfig = load_config;
 
-        stbi_set_flip_vertically_on_load(load_config.IsFlipV ? 1 : 0);
+        /* 像素先问预解码：材质解析前提交过的话，这里通常已经解好了 */
+        DecodedImage image;
+        if (!TextureDecode::Take(path, image))
+            TextureDecode::Decode(path, image);
 
-        int width = 0;
-        int height = 0;
-        int channels = 0;
-        void* data = nullptr;
-        PixelDesc pixel_desc{};
-
-        if (load_config.IsHdr)
-        {
-            /* HDR 数据以 float 加载，使用 32 位浮点格式原样上传 */
-            data = stbi_loadf(path.c_str(), &width, &height, &channels, 4);
-            pixel_desc = PixelDesc{ PixelFormat::RGBA, PixelType::Float };
-            m_TextureDesc.Format = TextureFormat::RGBA32F;
-        }
-        else
-        {
-            data = stbi_load(path.c_str(), &width, &height, &channels, 4);
-            pixel_desc = PixelDesc{ PixelFormat::RGBA, PixelType::UnsignedByte };
-            /* 颜色纹理使用 sRGB 格式，采样时由硬件完成线性化 */
-            m_TextureDesc.Format = load_config.IsSrgb
-                ? ToSrgbFormat(TextureFormat::RGBA8)
-                : TextureFormat::RGBA8;
-        }
-
-        if (!data)
+        if (!image.IsValid())
         {
             CORE_LOG_ERROR("MetalTexture: failed to load texture '{}'", path);
             m_IsLoaded = false;
             return;
         }
+
+        const int width = image.Width;
+        const int height = image.Height;
+        const PixelDesc pixel_desc{ PixelFormat::RGBA,
+            image.IsFloat ? PixelType::Float : PixelType::UnsignedByte };
+
+        m_TextureDesc.Format = image.IsFloat
+            ? TextureFormat::RGBA32F
+            : (load_config.IsSrgb ? ToSrgbFormat(TextureFormat::RGBA8) : TextureFormat::RGBA8);
 
         m_TextureDesc.Width = static_cast<uint32_t>(width);
         m_TextureDesc.Height = static_cast<uint32_t>(height);
@@ -509,13 +498,12 @@ namespace Helios
 
         if (!m_Texture)
         {
-            stbi_image_free(data);
             m_IsLoaded = false;
             return;
         }
 
-        SetData(data, pixel_desc, 0);
-        stbi_image_free(data);
+        /* 像素归 DecodedImage 管，SetData 拷进纹理就完事 */
+        SetData(image.Pixels, pixel_desc, 0);
 
         if (m_TextureDesc.MipLevels > 1)
             GenerateMipmap();

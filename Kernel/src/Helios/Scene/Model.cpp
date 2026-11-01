@@ -5,6 +5,7 @@
 #include "Mesh.h"
 #include "SceneCommon.h"
 #include "Helios/Core/AssetManager.h"
+#include "Helios/Core/TextureDecode.h"
 #include "Helios/Common/Math.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
@@ -514,6 +515,11 @@ namespace Helios
 
 			model->m_Path = model_path;
 			model->m_GeometryPath = geometry_path;
+
+			/* 先把清单里各材质的贴图提交预解码：后面逐个加载材质的同时，
+			 * 后台已经在并排解图了 */
+			for (const ModelManifest::Slot& entry : entries)
+				TextureDecode::PrefetchMaterialTextures(entry.AssetPath);
 
 			/* 几何加载时按段补过一遍占位槽，这里换成清单里的槽表 */
 			model->m_MaterialSlots.clear();

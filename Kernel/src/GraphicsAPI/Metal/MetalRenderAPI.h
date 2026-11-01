@@ -38,6 +38,11 @@ namespace Helios
         void DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array) override;
 
         /* 实例化绘制：实例数据绑在顶点缓冲之后的槽位，偏移按 first_instance 算 */
+        void DrawIndexedIndirect(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
+            const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
+            const SharedPtr<DeviceStorageBuffer>& args_buffer, uint32_t args_offset_bytes,
+            const VertexBufferLayout& instance_layout) override;
+
         void DrawIndexedInstanced(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array,
             const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
             uint32_t instance_count, const VertexBufferLayout& instance_layout,

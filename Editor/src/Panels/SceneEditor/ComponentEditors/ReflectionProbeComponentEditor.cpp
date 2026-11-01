@@ -164,15 +164,19 @@ namespace Helios
 
 			bool changed = false;
 
-			SharedPtr<DeviceTexture> skybox = probe->GetSkyBoxTexture();
-			ImGuiExt::DrawTextureUI("SkyBox", skybox);
-			if (skybox != probe->GetSkyBoxTexture())
+			/* 只有从贴图烘焙时才需要这张源图；捕获场景的探针不显示它 */
+			if (probe->GetBakeConfig().BakeFromSkyTexture)
 			{
-				probe->SetSkyBoxTexture(skybox);
-				changed = true;
-			}
+				SharedPtr<DeviceTexture> skybox = probe->GetSkyBoxTexture();
+				ImGuiExt::DrawTextureUI("SkyBox", skybox);
+				if (skybox != probe->GetSkyBoxTexture())
+				{
+					probe->SetSkyBoxTexture(skybox);
+					changed = true;
+				}
 
-			ImGui::Separator();
+				ImGui::Separator();
+			}
 
 			/* 烘焙结果是只读状态：它随「保存场景」一并落盘，写盘要等 GPU 执行完，
 			 * 所以不是存档当帧就完成。状态行与上面的资源行共用同一套属性行布局。 */

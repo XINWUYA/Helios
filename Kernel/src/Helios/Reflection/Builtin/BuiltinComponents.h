@@ -16,9 +16,9 @@ namespace Helios
 	void RegisterReflectionProbeComponent();
 	void RegisterAnimatorComponent();
 	void RegisterScriptComponent();
-	void RegisterGrassComponent();
-	void RegisterGrassBendComponent();   /* GrassBend */
 	void RegisterPostProcessComponents();    /* PostProcess / Bloom */
+	void RegisterGrassComponent();           /* Grass（草地） */
+	void RegisterGrassBendComponent();       /* GrassBend（压草的物体） */
 	void RegisterSkyComponent();             /* Sky（天空与昼夜） */
 
 	/* 按清单顺序注册全部内置组件（由 ComponentRegistry 启动时调用一次） */

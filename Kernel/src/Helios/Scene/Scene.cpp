@@ -400,6 +400,42 @@ namespace Helios
 		return *m_pScriptRuntime;
 	}
 
+	void Scene::PrepareGrassIndirect(const RenderView& view)
+	{
+		const Camera* camera = view.GetCullingCamera();
+		if (camera == nullptr)
+			return;
+
+		const Frustum frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
+		const glm::vec3 eye = camera->GetPosition();
+		for (auto [entity, grass] : m_Registry.view<GrassComponent>().each())
+		{
+			if (grass.m_Field == nullptr)
+				continue;
+			grass.m_Field->PrepareIndirect(frustum.Planes, eye);
+		}
+	}
+
+	void Scene::GetPrimaryGrassArea(glm::vec2& area_min, glm::vec2& area_size) const
+	{
+		area_min = glm::vec2(0.0f);
+		area_size = glm::vec2(0.0f);
+		for (auto [entity, grass] : m_Registry.view<GrassComponent>().each())
+		{
+			if (grass.m_Field == nullptr || grass.m_Field->IsEmpty())
+				continue;
+
+			/* 脚印图的范围就是这一片草地的世界包围盒 */
+			const glm::vec4& rect = grass.m_Field->GetTrampleRect();
+			if (rect.z <= 0.0f || rect.w <= 0.0f)
+				continue;
+
+			area_min = glm::vec2(rect.x, rect.y);
+			area_size = glm::vec2(1.0f / rect.z, 1.0f / rect.w);
+			return;
+		}
+	}
+
 	void Scene::OnUpdate(float delta_time)
 	{
 		PROFILE_FUNCTION();
@@ -475,6 +511,37 @@ namespace Helios
 				GetEntityLayerMask(entity), record.Visible, !skinned);
 		}
 		m_MeshIndex.EndSync();
+
+		/* 草地：风场时间整场累加；叶片实例只在参数或变换变了才重建，
+		 * GPU 放置时在这里派发计算（还没开始画，命令缓冲借帧头那一份） */
+		m_PrevGrassWindTime = m_GrassWindTime;
+		m_GrassWindTime += delta_time;
+		for (auto [entity, grass_component] : m_Registry.view<GrassComponent>().each())
+		{
+			if (grass_component.GetMaterial() == nullptr)
+				continue;
+
+			if (grass_component.m_Field == nullptr)
+				grass_component.m_Field = CreateSharedPtr<GrassField>();
+
+			grass_component.m_Field->Rebuild(grass_component, FrameWorldTransform(entity));
+			grass_component.m_Field->TickBend(delta_time, grass_component.m_BendRecover);
+			grass_component.m_Field->EnsurePlaced();
+		}
+
+		/* 压倒草：物体踩着的地方弯下去，走开之后按各自的恢复时间慢慢弹回 */
+		for (auto [entity, bend_component] : m_Registry.view<GrassBendComponent>().each())
+		{
+			if (!bend_component.m_Enabled || !IsEntityVisible(entity))
+				continue;
+
+			const glm::vec3 position(FrameWorldTransform(entity)[3]);
+			for (auto [grass_entity, grass_component] : m_Registry.view<GrassComponent>().each())
+			{
+				if (grass_component.m_Field != nullptr)
+					grass_component.m_Field->StampBend(position, bend_component.m_Radius);
+			}
+		}
 
 		for (auto [entity, light_component] : m_Registry.view<LightComponent>().each())
 		{

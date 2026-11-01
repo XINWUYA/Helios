@@ -240,6 +240,7 @@ namespace HeliosJobs
 		bool HasBackgroundWork(bool ignore_slots) const noexcept;
 		uint32_t WaitFor(std::unique_lock<std::mutex>& lock, Job* job, bool background) noexcept;
 		void WakeWorker() noexcept;
+		bool WakeFrameWorker(uint32_t max_in_flight) noexcept;
 		void WakeWaiters() noexcept;
 		void WorkerLoop(ThreadState* state);
 		void DrainOnExit() noexcept;
@@ -253,13 +254,18 @@ namespace HeliosJobs
 		static thread_local bool t_InBackground;
 		static thread_local Priority t_BackgroundPriority;
 
-		/* 等待与唤醒：worker 等新任务，等待方等任务完成，两边分开避免互相吞掉通知 */
-		std::mutex m_WaitLock;
+		/* 帧内任务计数每次投递和取走都要写，单独占一条缓存行 */
+		alignas(kCacheLineSize) std::atomic<int32_t> m_ActiveJobs{ 0 };
+
+		/* 睡眠与唤醒状态只在睡下和醒来时写，投递方热路径上只读 */
+		alignas(kCacheLineSize) std::atomic<uint32_t> m_SleepingWorkers{ 0 };
+		std::atomic<uint32_t> m_WakesInFlight{ 0 };
+		std::atomic<bool> m_ExitRequested{ false };
+
+		/* worker 等新任务，等待方等任务完成，两边分开避免互相吞掉通知 */
+		alignas(kCacheLineSize) std::mutex m_WaitLock;
 		std::condition_variable m_WorkerCondition;
 		std::condition_variable m_WaiterCondition;
-		std::atomic<int32_t> m_ActiveJobs{ 0 };
-		std::atomic<uint32_t> m_SleepingWorkers{ 0 };
-		std::atomic<bool> m_ExitRequested{ false };
 
 		/* 任务池：定长数组 + 带版本号的无锁空闲链 */
 		std::unique_ptr<Job[]> m_Jobs;

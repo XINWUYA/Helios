@@ -238,6 +238,14 @@ namespace Helios
 		return condition;
 	}
 
+	/* 谓词条件：偏移读不到的值（开关藏在嵌套对象里）用它，谓词拿组件指针自行判断 */
+	inline FieldCondition MakePredicateCondition(bool (*predicate)(const void* component))
+	{
+		FieldCondition condition;
+		condition.Predicate = predicate;
+		return condition;
+	}
+
 	/* 判定条件是否满足 */
 	[[nodiscard]] HELIOS_API bool EvaluateCondition(const FieldCondition& condition, const void* component);
 

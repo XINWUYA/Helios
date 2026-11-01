@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "Helios/Common/Math.h"
+#include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderPasses/DeferredPasses.h"
 #include "Helios/Renderer/RenderPasses/ScenePass.h"
 #include "Renderer/RenderPasses/SelectionOutlinePass.h"
@@ -283,11 +284,18 @@ namespace Helios
 
 				render_pass_info->Bind();
 				{
+					/* gizmo 不能跟着时域抗锯齿的抖动走：换回相机原矩阵画，
+					 * 画完再换回渲染矩阵（后面的 Pass 和下一帧都按它来） */
+					Renderer::SetViewUniforms(GetViewMatrix(), GetProjectionMatrix(), GetPosition());
+
 					/* 场景 gizmo 叠加层（网格 / 世界轴 / 实体图标）：见 SceneGizmos */
 					SceneGizmos::Submit(render_view, *this);
 					/* 子网格高亮（模型预览：悬停子模型卡）：强调色平铺该段，垫在线框底下 */
 					if (m_HighlightSegment >= 0)
 						SceneGizmos::SubmitModelSegmentHighlight(render_view, m_HighlightSegment);
+
+					Renderer::SetViewUniforms(GetViewMatrix(),
+						render_view.GetRenderProjectionMatrix(), GetPosition());
 				}
 				render_pass_info->Unbind();
 			}

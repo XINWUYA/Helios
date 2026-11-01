@@ -1,4 +1,4 @@
-#include "Pch.h"
+﻿#include "Pch.h"
 #include "TimelinePanel.h"
 #include "Command/ClipEditCommand.h"
 #include "Command/ComponentFieldCommand.h"

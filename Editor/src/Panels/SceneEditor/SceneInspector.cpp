@@ -118,6 +118,8 @@ namespace Helios
 			if (type == typeid(BloomComponent))           return Icons::Id::Bloom;
 			if (type == typeid(SkyComponent))             return Icons::Id::Sky;
 			if (type == typeid(TaaComponent))             return Icons::Id::Taa;
+			if (type == typeid(GrassComponent))           return Icons::Id::Grass;
+			if (type == typeid(GrassBendComponent))       return Icons::Id::GrassBend;
 			if (type == typeid(AnimatorComponent))        return Icons::Id::Animation;
 			if (type == typeid(ScriptComponent))          return Icons::Id::ScriptComponent;
 
@@ -1476,12 +1478,19 @@ namespace Helios
 		}
 	}
 
-	/* 材质卡主体：Shader 行 + 参数行（可就地编辑 → 自动实例化） */
-	bool SceneInspector::DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index)
+	/* 材质卡主体：Shader 行 + 参数行 + 渲染队列 + 光栅化状态。
+	 * 材质从哪来、改动往哪写由调用方给的回调决定 —— 模型槽写回实体覆盖（首次改动自动克隆成实例），
+	 * 草地直接写它自己的那个槽。resolve_live 每行都重新取一次：一次改动可能已经把材质换成实例了。 */
+	bool SceneInspector::DrawMaterialCardBody(const SharedPtr<Material>& current,
+		const std::function<SharedPtr<Material>()>& resolve_live,
+		const MaterialParamWriter& write_param,
+		const std::function<void(int32_t)>& write_queue,
+		const std::function<void(const RenderRasterState&)>& write_raster)
 	{
 		bool changed = false;
 
-		const SharedPtr<Material> current = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
+		if (current == nullptr)
+			return false;
 
 		/* Shader 行（只读）：长路径只裁不换行（换行会撑成两行、错位）。裁剪必须走
 		 * DrawClippedTextLine（定宽占位 + 省略号）—— PushClipRect 只压绘制不压布局，超宽路径
@@ -1495,34 +1504,43 @@ namespace Helios
 		}
 
 		/* 参数行：集合与类型来自 Shader 反射（见 BuildMaterialParamRows）——换 Shader 行集跟着换；
-		 * 值取当前生效材质，反射声明而材质还没有的先显示默认值。每轮重新解析材质（上一轮改动可能已换成实例） */
+		 * 值取当前生效材质，反射声明而材质还没有的先显示默认值 */
 		const std::vector<MaterialParamUI::MaterialParamRow> rows = MaterialParamUI::BuildMaterialParamRows(*current);
 		if (rows.empty())
 			MaterialParamUI::DrawMaterialReflectionNotice(*current);
 
 		for (const MaterialParamUI::MaterialParamRow& row : rows)
 		{
-			const SharedPtr<Material> live = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
+			const SharedPtr<Material> live = resolve_live();
+			if (live == nullptr)
+				break;
+
 			const auto& parameters = live->GetAllParameters();
 			const auto iter = parameters.find(ToID(row.Param.Name));
 			const MaterialParamInfo& param_info = (iter != parameters.end()) ? iter->second : row.Param;
 
 			MaterialParamUI::DrawMaterialParamRow(param_info, row.Spec, m_AssetRevealFunc,
-				[&component, &model, slot_index, &changed](ParamType type, const std::string& name, const std::any& value)
+				[&write_param](ParamType type, const std::string& name, const std::any& value)
 				{
-					WriteBackMaterialParam(component, model, slot_index, type, name, value, changed);
+					write_param(type, name, value);
 				});
 		}
 
 		/* 渲染队列：小于 2500 不透明，2500 起透明（透明批次统一关深度写、按距离从远到近画） */
 		{
-			const SharedPtr<Material> live = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
-			int32_t render_queue = live->GetRenderQueue();
-			if (MaterialParamUI::DrawMaterialRenderQueueRow(render_queue))
-				WriteBackMaterialRenderQueue(component, model, slot_index, render_queue, changed);
+			const SharedPtr<Material> live = resolve_live();
+			if (live != nullptr)
+			{
+				int32_t render_queue = live->GetRenderQueue();
+				if (MaterialParamUI::DrawMaterialRenderQueueRow(render_queue))
+				{
+					write_queue(render_queue);
+					changed = true;
+				}
+			}
 		}
 
-		/* 光栅化状态：可折叠分区（默认收起；值画在临时副本上，改动时才实例化写回）。上方压一条
+		/* 光栅化状态：可折叠分区（默认收起；值画在临时副本上，改动时才写回）。上方压一条
 		 * 隔离线。注意：TreeNodeEx 只承担命中 / 折叠状态（标签传空串、三角自绘）；
 		 * NoTreePushOnOpen：内容不缩进（默认 TreePush 会 Indent 18px、整段右移错位）。 */
 		DrawCardSectionDivider();
@@ -1535,14 +1553,47 @@ namespace Helios
 
 			if (raster_open)
 			{
-				const SharedPtr<Material> live = ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
-				RenderRasterState state = live->GetRasterState();
-				if (DrawMaterialRasterStateRows(state))
-					WriteBackMaterialRasterState(component, model, slot_index, state, changed);
+				const SharedPtr<Material> live = resolve_live();
+				if (live != nullptr)
+				{
+					RenderRasterState state = live->GetRasterState();
+					if (DrawMaterialRasterStateRows(state))
+					{
+						write_raster(state);
+						changed = true;
+					}
+				}
 			}
 		}
 
 		return changed;
+	}
+
+	/* 模型槽的绑定：参数改动写回实体覆盖（首次改动从来源克隆成实例） */
+	bool SceneInspector::DrawMaterialCardBody(ModelComponent& component, const Model& model, int slot_index)
+	{
+		bool changed = false;
+
+		const auto resolve_live = [&component, &model, slot_index]()
+		{
+			return ResolveSlotMaterial(model, slot_index, &component.m_SlotOverrides);
+		};
+
+		const bool body_changed = DrawMaterialCardBody(resolve_live(), resolve_live,
+			[&](ParamType type, const std::string& name, const std::any& value)
+			{
+				WriteBackMaterialParam(component, model, slot_index, type, name, value, changed);
+			},
+			[&](int32_t render_queue)
+			{
+				WriteBackMaterialRenderQueue(component, model, slot_index, render_queue, changed);
+			},
+			[&](const RenderRasterState& state)
+			{
+				WriteBackMaterialRasterState(component, model, slot_index, state, changed);
+			});
+
+		return changed || body_changed;
 	}
 
 	/* 「Open in Model Editor」按钮：文件模型才有可编辑的东西（内建 / 空模型没有路径）。
@@ -1628,6 +1679,123 @@ namespace Helios
 			PanelChrome::EndCard(card);
 			ImGui::PopID();
 		}
+	}
+
+	namespace
+	{
+		/* 第一次改参数前把共享材质克隆成这片草地自己的副本：之后的改动只落在这里，
+		 * 来源 .mtl 与别的草地都不受影响（与模型槽"首次改动自动实例化"同一套语义） */
+		SharedPtr<Material> MakeGrassMaterialInstance(GrassComponent& component, bool& created)
+		{
+			MaterialSlotOverride& slot = component.m_MaterialSlot;
+			if (slot.IsInstance && slot.pMaterial != nullptr)
+				return slot.pMaterial;
+
+			if (slot.pMaterial == nullptr)
+				return nullptr;
+
+			const SharedPtr<Material> source = slot.pMaterial;
+			if (slot.SourceAssetPath.empty())
+				slot.SourceAssetPath = source->GetPath();
+
+			slot.pMaterial = source->Clone();
+			slot.IsInstance = true;
+			created = true;
+			return slot.pMaterial;
+		}
+	}
+
+	/* 草地卡的材质：草地只有一个槽，同样平铺在 Grass 组件卡之后。
+	 * 编辑语义与模型槽一致 —— 第一次改参数就把共享材质克隆成这片草地自己的副本，
+	 * 来源 .mtl 与其它草地不受影响；Reset 在组件卡的材质行里。 */
+	void SceneInspector::DrawGrassMaterialCard(Entity entity, GrassComponent& component)
+	{
+		PROFILE_FUNCTION();
+
+		if (component.GetMaterial() == nullptr)
+			return;
+
+		const ComponentDesc* desc = ComponentRegistry::Instance().Find(std::type_index(typeid(GrassComponent)));
+		if (desc == nullptr)
+			return;
+
+		ImGui::PushID("##GrassMaterial");
+		const PanelChrome::Card card = PanelChrome::BeginCard("Material · Grass", Icons::Id::FileMaterial);
+
+		/* 改了参数就地克隆出来的副本：卡头挂一枚 Instance，否则看着跟 .mtl 资产没两样 */
+		if (component.m_MaterialSlot.IsInstance)
+		{
+			PanelChrome::DrawCardBadge(card, "Instance",
+				"Edited copy for this grass — changes don't go into the material asset\n"
+				"Reset in the Grass card's Material row re-clones from the asset");
+		}
+
+		if (card.Open)
+		{
+			/* 与 DrawComponentBlock 同一套撤销语义：快照 + 事务合并 */
+			const bool can_record = m_pCommandStack != nullptr
+				&& desc->Capture != nullptr && desc->Restore != nullptr;
+
+			ComponentSnapshot before;
+			if (can_record)
+				desc->Capture(entity, before);
+
+			bool changed = false;
+			const auto resolve_live = [&component]() { return component.GetMaterial(); };
+
+			const bool body_changed = DrawMaterialCardBody(component.GetMaterial(), resolve_live,
+				[&](ParamType type, const std::string& name, const std::any& value)
+				{
+					bool created = false;
+					const SharedPtr<Material> live = MakeGrassMaterialInstance(component, created);
+					if (live == nullptr)
+						return;
+
+					if (type == ParamType::Texture)
+						live->SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
+					else
+						live->SetParameters(type, name, value);
+					changed = true;
+				},
+				[&](int32_t render_queue)
+				{
+					bool created = false;
+					if (const SharedPtr<Material> live = MakeGrassMaterialInstance(component, created))
+					{
+						live->SetRenderQueue(render_queue);
+						changed = true;
+					}
+				},
+				[&](const RenderRasterState& state)
+				{
+					bool created = false;
+					if (const SharedPtr<Material> live = MakeGrassMaterialInstance(component, created))
+					{
+						live->SetRasterState(state);
+						changed = true;
+					}
+				});
+
+			if ((changed || body_changed) && can_record && before.IsValid())
+			{
+				if (ImGui::IsAnyItemActive() && !m_ComponentEditTransactionOpen)
+				{
+					m_ComponentEditTransactionOpen = true;
+					m_pCommandStack->BeginTransaction();
+				}
+
+				ComponentSnapshot after;
+				desc->Capture(entity, after);
+				if (after.IsValid())
+				{
+					m_pCommandStack->Execute(CreateUniquePtr<ComponentCustomDrawCommand>(
+						entity, desc->Has, desc->Restore, std::move(before), std::move(after), desc->Name));
+				}
+			}
+		}
+
+		PanelChrome::EndCard(card);
+		ImGui::PopID();
 	}
 
 	/* ==================== 相机预览卡（Camera 组件的附加卡）====================
@@ -2104,14 +2272,23 @@ namespace Helios
 			DrawComponentBlock(desc, m_Entity, component, i, count,
 				model_footer.Label != nullptr ? &model_footer : nullptr);
 
+			/* 卡头菜单里的 Remove 当场就把组件销毁了，上面拿的指针已经悬空，
+			 * 附加卡动笔前重新查一次，组件没了就跳过。 */
+			void* live = (desc.Has != nullptr && desc.GetPtr != nullptr && desc.Has(m_Entity))
+				? desc.GetPtr(m_Entity)
+				: nullptr;
+
 			/* Model 的材质卡 / Camera 的预览卡：各自排在组件卡之后同级平铺
 			 * （卡片背景走绘制通道、通道不可嵌套 —— 附加卡画不进组件卡里）。 */
-			if (desc.Type == std::type_index(typeid(ModelComponent)))
+			if (live != nullptr)
 			{
-				DrawModelMaterialCards(m_Entity, *static_cast<ModelComponent*>(component));
+				if (desc.Type == std::type_index(typeid(ModelComponent)))
+					DrawModelMaterialCards(m_Entity, *static_cast<ModelComponent*>(live));
+				else if (desc.Type == std::type_index(typeid(CameraComponent)))
+					DrawCameraPreviewCard(*static_cast<CameraComponent*>(live));
+				else if (desc.Type == std::type_index(typeid(GrassComponent)))
+					DrawGrassMaterialCard(m_Entity, *static_cast<GrassComponent*>(live));
 			}
-			else if (desc.Type == std::type_index(typeid(CameraComponent)))
-				DrawCameraPreviewCard(*static_cast<CameraComponent*>(component));
 			ImGui::PopID();
 		}
 	}

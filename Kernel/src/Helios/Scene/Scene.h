@@ -116,6 +116,23 @@ namespace Helios
 		/* 获取动画播放器（保存 / 清空场景时会先停掉播放并还原姿势） */
 		AnimationRuntime& GetAnimationRuntime() { return m_AnimationRuntime; }
 
+		/* 逐视图给草地准备间接绘制数据（GPU 剔除 + 压实）。
+		 * 会借当前帧的命令缓冲，必须在开始渲染这个视图之前调用 */
+		void PrepareGrassIndirect(const RenderView& view);
+
+		/* 第一片草地的世界范围（xz 最小角与尺寸）：地面材质靠它决定在哪儿接管草色。
+		 * 场景里没有草地时尺寸为 0。 */
+		void GetPrimaryGrassArea(glm::vec2& area_min, glm::vec2& area_size) const;
+
+		/* 草地风场时间（秒，只增不减）：着色器按它推进行进波 */
+		[[nodiscard]] float GetGrassWindTime() const { return m_GrassWindTime; }
+		/* 上一帧的风场时间：草的运动矢量要用它重算叶片上一帧的位置 */
+		[[nodiscard]] float GetPrevGrassWindTime() const { return m_PrevGrassWindTime; }
+
+		/* 帧序号（每次 OnUpdate 递增）。同一帧里重复渲染时，跨帧状态据此只推进一次 */
+		[[nodiscard]] uint32_t GetFrameIndex() const { return m_FrameWorldStampNow; }
+
+
 		/* 脚本运行时：进 Runtime 模式 Start、退出 Stop，由编辑器驱动（见 SceneEditorLayer） */
 		ScriptRuntime& GetScriptRuntime();
 
@@ -195,6 +212,12 @@ namespace Helios
 
 		/* 动画播放器：每帧在变换推送之前推进 */
 		AnimationRuntime m_AnimationRuntime;
+
+		/* 草地风场的累计时间：整场共用一份，各片草地的相位差由风向与位置决定 */
+		float m_GrassWindTime{ 0.0f };
+		/* 上一帧的风场时间（运动矢量的草地版本用） */
+		float m_PrevGrassWindTime{ 0.0f };
+
 
 		/* 脚本运行时：同样在变换推送之前 tick */
 		UniquePtr<ScriptRuntime> m_pScriptRuntime;

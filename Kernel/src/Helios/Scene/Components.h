@@ -16,6 +16,7 @@
 #include "Light.h"
 #include "ReflectionProbe.h"
 #include "AnimationClip.h"
+#include "GrassField.h"
 
 namespace Helios
 {
@@ -158,6 +159,31 @@ namespace Helios
 		SharedPtr<Material> pMaterial; /* 覆盖（共享资产）或实例（独立） */
 		std::string SourceAssetPath;   /* 来源材质文件（"重置回来源"用；空 = 无来源） */
 		bool IsInstance{ false };      /* 实例：参数独立、序列化全量内嵌 */
+	};
+
+	/* 单个材质槽的值语义：实例在拷贝时深拷贝一份 —— 组件撤销快照靠这条把改过的参数
+	 * 一起存 / 还原；引用形态是共享资产，保持浅拷贝。模型槽是多槽表，深拷贝写在
+	 * ModelComponent 的拷贝构造里，两者口径一致。 */
+	struct GrassMaterialSlot : MaterialSlotOverride
+	{
+		GrassMaterialSlot() = default;
+		GrassMaterialSlot(const GrassMaterialSlot& other)
+			: MaterialSlotOverride(other)
+		{
+			if (IsInstance && pMaterial != nullptr)
+				pMaterial = pMaterial->Clone();
+		}
+		GrassMaterialSlot& operator=(const GrassMaterialSlot& other)
+		{
+			if (this == &other)
+				return *this;
+
+			MaterialSlotOverride copy(other);
+			if (copy.IsInstance && copy.pMaterial != nullptr)
+				copy.pMaterial = copy.pMaterial->Clone();
+			MaterialSlotOverride::operator=(std::move(copy));
+			return *this;
+		}
 	};
 
 	/* 模型组件 */
@@ -365,6 +391,64 @@ namespace Helios
 		void OnAdded(const Scene& scene, Entity& entity) override { m_pOwnerScene = &scene; }
 	};
 
+	/* 草地组件：实体局部空间的一块区域，叶片按密度程序化摆放。
+	 * 外观（颜色、透射、风参数默认值）由材质决定，这里只管范围、密度与这一片的风。
+	 * 实例数据挂在 m_Field 上，场景每帧按变换与参数是否变化决定要不要重建。 */
+	struct HELIOS_API GrassComponent : ComponentBase
+	{
+		glm::vec2 m_Extent{ 12.0f, 12.0f };      /* 局部空间的半宽半长（米） */
+		float m_Density{ 55.0f };                /* 每平米株数（近档） */
+		float m_Height{ 0.5f };
+		float m_Width{ 0.045f };
+
+		/* 距离 LOD：超过 LodDistance 开始按距离抽稀，超过 CullDistance 完全不画 */
+		float m_LodDistance{ 25.0f };
+		float m_CullDistance{ 90.0f };
+		float m_MinDensityScale{ 0.12f };
+
+		/* 风场：风向是水平方向，强度是叶尖的最大偏移（米） */
+		glm::vec2 m_WindDirection{ 1.0f, 0.35f };
+		float m_WindStrength{ 0.12f };
+		float m_WindSpeed{ 1.6f };
+		float m_WindSpatialScale{ 0.25f };
+
+		bool m_ReceiveShadow{ true };
+		/* 投影：跟模型组件同一口径，关掉这片草就不进阴影图。
+		 * 只投到近处两级联、密度取 1/4，付出的顶点量约为可见绘制的一小部分（见评估文档 5.3） */
+		bool m_CastShadow{ true };
+		/* 被踩过的草弹回原状要多久（秒） */
+		float m_BendRecover{ 6.0f };
+		int m_Seed{ 7 };
+
+		/* 材质槽：pMaterial 是生效材质；IsInstance / SourceAssetPath 的含义与模型槽一致 ——
+		 * 面板上改参数时从资产克隆一份，改动只落在这片草地上，Reset 回资产 */
+		GrassMaterialSlot m_MaterialSlot;
+		SharedPtr<GrassField> m_Field{ nullptr };
+
+		[[nodiscard]] const SharedPtr<Material>& GetMaterial() const { return m_MaterialSlot.pMaterial; }
+
+		/* 缺材质时的内建外观：场景没写 Material、或者从面板新加组件都落到这里。
+		 * 没有它就出现「组件在、草不在」这种完全没有提示的空状态 */
+		[[nodiscard]] static SharedPtr<Material> GetDefaultMaterial();
+		void OnAdded(const Scene& scene, Entity& entity) override;
+
+		GrassComponent() = default;
+		GrassComponent(const GrassComponent&) = default;
+		GrassComponent& operator=(const GrassComponent&) = default;
+	};
+
+	/* 压倒草的物体：以实体世界位置为心、按半径把叶片朝外压下去。
+	 * 用在角色 / 石头这类会站在草里的东西上，多个物体可以同时生效。 */
+	struct HELIOS_API GrassBendComponent : ComponentBase
+	{
+		float m_Radius{ 1.2f };   /* 影响半径（米，按实体缩放的垂直分量算） */
+		bool m_Enabled{ true };
+
+		GrassBendComponent() = default;
+		GrassBendComponent(const GrassBendComponent&) = default;
+		GrassBendComponent& operator=(const GrassBendComponent&) = default;
+	};
+
 	/* 天空与昼夜（Time of Day）：场景级配置，挂在哪个实体上无所谓（与后处理对象同层语义）。
 	 * 每帧由场景换算成 SkyState 推给各视图；场景里的方向光按实体顺序绑定 ——
 	 * 第一个当太阳、第二个当月亮，方向 / 颜色 / 强度都由这里驱动。 */
@@ -410,6 +494,8 @@ namespace Helios
 		ReflectionProbeComponent,
 		AnimatorComponent,
 		ScriptComponent,
+		GrassComponent,
+		GrassBendComponent,
 		SkyComponent
 	>;
 }

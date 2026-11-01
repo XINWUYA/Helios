@@ -8,6 +8,7 @@
 #include "MetalVertexArray.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/ShaderCompiler.h"
+#include "Helios/Renderer/GlslDeclScan.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -51,19 +52,97 @@ namespace Helios
         };
         BlockSlotOwner g_BlockSlotOwners[2][kMaxBlockSlots];
 
-        /* MSL 形参上的 [[texture(N)]] / [[sampler(N)]] 是资源槽位的权威来源 */
-        const std::regex& GetTextureRegex()
+        /* MSL 形参上的 [[texture(N)]] / [[sampler(N)]] 是资源槽位的权威来源。
+         * 原来用两条 std::regex 扫全文，一个大着色器就要几十毫秒，这里改成手写扫描。 */
+        [[nodiscard]] bool IsMslSpace(char c)
         {
-            static const std::regex re(
-                R"(([A-Za-z_][A-Za-z0-9_]*)\s*\[\[\s*texture\s*\(\s*(\d+)\s*\)\s*\]\])");
-            return re;
+            return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
         }
 
-        const std::regex& GetSamplerRegex()
+        [[nodiscard]] bool IsMslIdentStart(char c)
         {
-            static const std::regex re(
-                R"(([A-Za-z_][A-Za-z0-9_]*)\s*\[\[\s*sampler\s*\(\s*(\d+)\s*\)\s*\]\])");
-            return re;
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+        }
+
+        [[nodiscard]] bool IsMslIdentChar(char c)
+        {
+            return IsMslIdentStart(c) || (c >= '0' && c <= '9');
+        }
+
+        [[nodiscard]] size_t SkipMslSpace(const std::string& text, size_t pos)
+        {
+            while (pos < text.size() && IsMslSpace(text[pos]))
+                ++pos;
+            return pos;
+        }
+
+        /* 从 `[[` 的位置认一条属性，名字取它前面的标识符 */
+        [[nodiscard]] bool MatchMslBindingAt(const std::string& text, size_t bracket,
+            const char* attribute, std::string& name, uint32_t& index)
+        {
+            const size_t attribute_length = std::strlen(attribute);
+
+            size_t pos = SkipMslSpace(text, bracket + 2);
+            if (text.compare(pos, attribute_length, attribute) != 0)
+                return false;
+
+            pos = SkipMslSpace(text, pos + attribute_length);
+            if (pos >= text.size() || text[pos] != '(')
+                return false;
+
+            pos = SkipMslSpace(text, pos + 1);
+            const size_t digits_begin = pos;
+            while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+                ++pos;
+            if (pos == digits_begin)
+                return false;
+
+            const uint32_t value =
+                static_cast<uint32_t>(std::stoul(text.substr(digits_begin, pos - digits_begin)));
+
+            pos = SkipMslSpace(text, pos);
+            if (pos >= text.size() || text[pos] != ')')
+                return false;
+
+            pos = SkipMslSpace(text, pos + 1);
+            if (text.compare(pos, 2, "]]") != 0)
+                return false;
+
+            /* 名字在 [[ 前面，允许中间隔空白 */
+            size_t name_end = bracket;
+            while (name_end > 0 && IsMslSpace(text[name_end - 1]))
+                --name_end;
+
+            size_t name_begin = name_end;
+            while (name_begin > 0 && IsMslIdentChar(text[name_begin - 1]))
+                --name_begin;
+
+            if (name_begin == name_end || !IsMslIdentStart(text[name_begin]))
+                return false;
+
+            name.assign(text, name_begin, name_end - name_begin);
+            index = value;
+            return true;
+        }
+
+        /* 扫全文，按出现顺序收集 name + 槽位号（同名后者覆盖前者，与原来一致） */
+        void CollectMslBindings(const std::string& text, const char* attribute,
+            std::vector<std::pair<std::string, uint32_t>>& out)
+        {
+            size_t search_from = 0;
+            while (true)
+            {
+                const size_t bracket = text.find("[[", search_from);
+                if (bracket == std::string::npos)
+                    return;
+
+                std::string name;
+                uint32_t index = 0;
+                if (MatchMslBindingAt(text, bracket, attribute, name, index))
+                    out.emplace_back(std::move(name), index);
+
+                search_from = bracket + 2;
+            }
         }
 
         /* SPIRV-Cross 为从组合采样器中分离出的采样器追加的后缀 */
@@ -217,19 +296,26 @@ namespace Helios
         void CollectDefaultUniformValues(const std::string& glsl_source,
             std::unordered_map<std::string, std::vector<uint8_t>>& out_values)
         {
-            static const std::regex default_regex(
-                R"((?:layout\s*\([^)]*\)\s*)?uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(bool|bvec[234]|int|ivec[234]|uint|uvec[234]|float|vec[234])\s+([A-Za-z_]\w*)\s*=\s*([^;]+)\s*;)");
+            static const char* const kSupportedTypes[] = { "bool", "int", "uint", "float",
+                "bvec2", "bvec3", "bvec4", "ivec2", "ivec3", "ivec4", "uvec2", "uvec3", "uvec4",
+                "vec2", "vec3", "vec4" };
 
-            for (auto it = std::sregex_iterator(glsl_source.begin(), glsl_source.end(), default_regex);
-                 it != std::sregex_iterator(); ++it)
+            std::vector<GlslScan::ScannedDecl> decls;
+            GlslScan::ScanUniformDecls(glsl_source, decls);
+
+            for (const GlslScan::ScannedDecl& decl : decls)
             {
-                const std::string type = (*it)[1].str();
-                const std::string name = (*it)[2].str();
-                const std::string init_expr = (*it)[3].str();
+                if (!decl.HasInit || decl.HasArray)
+                    continue;
 
-                auto bytes = SerializeUniformDefaultValue(type, init_expr);
+                const bool supported = std::any_of(std::begin(kSupportedTypes), std::end(kSupportedTypes),
+                    [&decl](const char* type) { return decl.TypeName == type; });
+                if (!supported)
+                    continue;
+
+                auto bytes = SerializeUniformDefaultValue(decl.TypeName, decl.InitExpr);
                 if (!bytes.empty())
-                    out_values.emplace(name, std::move(bytes));
+                    out_values.emplace(decl.Name, std::move(bytes));
             }
         }
 
@@ -385,7 +471,6 @@ namespace Helios
             ShaderCompiler::ShaderStage::Vertex, ShaderCompiler::ShaderTarget::Metal, m_DebugName);
         m_FragmentMSL = ShaderCompiler::Compile(fragment_src,
             ShaderCompiler::ShaderStage::Fragment, ShaderCompiler::ShaderTarget::Metal, m_DebugName);
-
         m_Reflection.Clear();
         m_TextureStageMasks.clear();
         ReflectFromGLSLSource(vertex_src);
@@ -850,29 +935,117 @@ namespace Helios
 
     void MetalShader::ExtractMaterialBlocks(const std::string& msl_source, bool is_vertex_stage)
     {
-        static const std::regex struct_regex(R"(struct\s+(\w+)\s*\{([^}]*)\})");
-        static const std::regex block_regex(R"(constant\s+(\w+)\s*&\s+\w+\s*\[\[buffer\((\d+)\)\]\])");
-        static const std::regex member_regex(R"(([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*;)");
-
+        /* 扫 `struct Name { type member; ... }` 和 `constant Type& name [[buffer(N)]]`，
+         * 替代原来的三条全文正则 */
         std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> structs;
-        for (auto it = std::sregex_iterator(msl_source.begin(), msl_source.end(), struct_regex);
-             it != std::sregex_iterator(); ++it)
+
+        size_t cursor = 0;
+        while (true)
         {
-            const std::string body = (*it)[2].str();
+            const size_t struct_pos = GlslScan::FindWord(msl_source, cursor, "struct");
+            if (struct_pos == std::string::npos)
+                break;
+
+            cursor = struct_pos + std::strlen("struct");
+
+            std::string name;
+            size_t pos = GlslScan::ReadIdent(msl_source, GlslScan::SkipSpaces(msl_source, cursor), &name);
+            if (pos == std::string::npos)
+                continue;
+
+            pos = GlslScan::SkipSpaces(msl_source, pos);
+            if (pos >= msl_source.size() || msl_source[pos] != '{')
+                continue;
+
+            const size_t body_begin = pos + 1;
+            const size_t body_end = msl_source.find('}', body_begin);
+            if (body_end == std::string::npos)
+                break;
+
+            cursor = body_end + 1;
+
             std::vector<std::pair<std::string, std::string>> members;
-            for (auto mit = std::sregex_iterator(body.begin(), body.end(), member_regex);
-                 mit != std::sregex_iterator(); ++mit)
+            size_t member_begin = body_begin;
+            while (member_begin < body_end)
             {
-                members.emplace_back((*mit)[1].str(), (*mit)[2].str());
+                const size_t semi = msl_source.find(';', member_begin);
+                if (semi == std::string::npos || semi > body_end)
+                    break;
+
+                /* 成员形如 `type name;`（带数组的跳过，与原来的匹配规则一致） */
+                std::string type;
+                std::string member;
+                size_t member_pos = GlslScan::ReadIdent(msl_source, GlslScan::SkipSpaces(msl_source, member_begin),
+                    &type);
+                if (member_pos != std::string::npos)
+                {
+                    const size_t after_type = GlslScan::SkipSpaces(msl_source, member_pos);
+                    if (after_type > member_pos)
+                    {
+                        member_pos = GlslScan::ReadIdent(msl_source, after_type, &member);
+                        if (member_pos != std::string::npos
+                            && GlslScan::SkipSpaces(msl_source, member_pos) == semi)
+                            members.emplace_back(type, member);
+                    }
+                }
+
+                member_begin = semi + 1;
             }
-            structs[(*it)[1].str()] = std::move(members);
+
+            structs[name] = std::move(members);
         }
 
-        for (auto it = std::sregex_iterator(msl_source.begin(), msl_source.end(), block_regex);
-             it != std::sregex_iterator(); ++it)
+        cursor = 0;
+        while (true)
         {
-            const std::string struct_name = (*it)[1].str();
-            const uint32_t buffer_index = static_cast<uint32_t>(std::stoul((*it)[2].str()));
+            const size_t constant_pos = GlslScan::FindWord(msl_source, cursor, "constant");
+            if (constant_pos == std::string::npos)
+                break;
+
+            cursor = constant_pos + std::strlen("constant");
+
+            std::string struct_name;
+            size_t pos = GlslScan::ReadIdent(msl_source, GlslScan::SkipSpaces(msl_source, cursor), &struct_name);
+            if (pos == std::string::npos)
+                continue;
+
+            pos = GlslScan::SkipSpaces(msl_source, pos);
+            if (pos >= msl_source.size() || msl_source[pos] != '&')
+                continue;
+
+            pos = GlslScan::ReadIdent(msl_source, GlslScan::SkipSpaces(msl_source, pos + 1), nullptr);
+            if (pos == std::string::npos)
+                continue;
+
+            pos = GlslScan::SkipSpaces(msl_source, pos);
+            if (msl_source.compare(pos, 2, "[[") != 0)
+                continue;
+
+            pos = GlslScan::SkipSpaces(msl_source, pos + 2);
+            if (!GlslScan::IsWordAt(msl_source, pos, "buffer"))
+                continue;
+
+            pos = GlslScan::SkipSpaces(msl_source, pos + std::strlen("buffer"));
+            if (pos >= msl_source.size() || msl_source[pos] != '(')
+                continue;
+
+            pos = GlslScan::SkipSpaces(msl_source, pos + 1);
+            const size_t digits_begin = pos;
+            while (pos < msl_source.size() && msl_source[pos] >= '0' && msl_source[pos] <= '9')
+                ++pos;
+            if (pos == digits_begin)
+                continue;
+
+            const uint32_t buffer_index =
+                static_cast<uint32_t>(std::stoul(msl_source.substr(digits_begin, pos - digits_begin)));
+
+            pos = GlslScan::SkipSpaces(msl_source, pos);
+            if (pos >= msl_source.size() || msl_source[pos] != ')')
+                continue;
+
+            pos = GlslScan::SkipSpaces(msl_source, pos + 1);
+            if (msl_source.compare(pos, 2, "]]") != 0)
+                continue;
 
             /* 只有"默认 uniform 块"（非 block uniform 聚合出来的）才是着色器内嵌的材质参数。显式 binding
              * 的块归 DeviceUniformBuffer 管（View / Object / Material / Light / UI 等），重复提交会把
@@ -951,20 +1124,19 @@ namespace Helios
         const uint8_t stage = is_vertex_stage
             ? ShaderReflectionData::StageVertex : ShaderReflectionData::StageFragment;
 
-        for (auto it = std::sregex_iterator(msl_source.begin(), msl_source.end(), GetTextureRegex());
-             it != std::sregex_iterator(); ++it)
+        std::vector<std::pair<std::string, uint32_t>> bindings;
+        CollectMslBindings(msl_source, "texture", bindings);
+        for (const auto& [name, index] : bindings)
         {
-            const std::string name = (*it)[1].str();
-            m_Reflection.SamplerBindings[name] = static_cast<uint32_t>(std::stoul((*it)[2].str()));
+            m_Reflection.SamplerBindings[name] = index;
             m_Reflection.SamplerStages[name] |= stage;
         }
 
         const std::string suffix = kSamplerSuffix;
-        for (auto it = std::sregex_iterator(msl_source.begin(), msl_source.end(), GetSamplerRegex());
-             it != std::sregex_iterator(); ++it)
+        bindings.clear();
+        CollectMslBindings(msl_source, "sampler", bindings);
+        for (const auto& [name, index] : bindings)
         {
-            const std::string name = (*it)[1].str();
-            const uint32_t index = static_cast<uint32_t>(std::stoul((*it)[2].str()));
             m_Reflection.SamplerStateBindings[name] = index;
             m_Reflection.SamplerStages[name] |= stage;
 

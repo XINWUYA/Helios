@@ -180,7 +180,7 @@ namespace Helios
             /* 推进「烘焙结果预览」状态机：同样等烘焙完成 + GPU 执行完，再转换上传 */
             probe->TickBakePreview();
 
-            if (probe->IsRealtime() || !probe->IsBaked())
+            if (probe->NeedsRealtimeBake() || !probe->IsBaked())
                 m_NeedBakeProbes.push_back(probe);
         }
     }

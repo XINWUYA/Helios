@@ -2,6 +2,7 @@
 #include "DeviceShader.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/ShaderCompiler.h"
+#include "Helios/Renderer/GlslDeclScan.h"
 #include "GraphicsAPI/OpenGL/OpenGLShader.h"
 #ifdef PLATFORM_MACOS
 #include "GraphicsAPI/Metal/MetalShader.h"
@@ -13,6 +14,7 @@
 
 namespace Helios
 {
+	using namespace GlslScan;
 	DeviceShader::DeviceShader(std::string path)
 		: m_Path(std::move(path))
 	{
@@ -519,6 +521,7 @@ namespace Helios
 		if (source.empty())
 			return;
 
+
 		/* 材质参数表按名去重（顶点 / 片元各调用一次）：先到者定类型，
 		 * 后到的默认值只在前者没有时补上，材质标记取或、面板规范取有内容的那份。 */
 		const auto add_material_param = [this](ParamType type, const std::string& name, std::any default_value,
@@ -538,44 +541,37 @@ namespace Helios
 			m_Reflection.MaterialParams.push_back({ type, name, std::move(default_value), property, spec });
 		};
 
-		/* 匹配：可选的 layout(binding = N) + uniform <type> <name>[数组]?;（裸 sampler 也要进反射表，
-		 * 绑定点 / 面板可见性另按标记定）；binding 拿不到时就不填 SamplerBindings，交给后端另行解析
-		 * （Metal 从 MSL 的 [[texture(N)]] 拿）。行尾注释的第 4 组用来认 @property 标记。 */
-		static const std::regex sampler_regex(R"((?:layout\s*\(\s*binding\s*=\s*([0-9]+)\s*\)\s*)?uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*;[\r\t ]*(?://([^\n]*))?)");
+		/* 单遍扫出全部 uniform 声明，再按「贴图 → 标量 → 块」的原顺序落地，
+		 * 材质参数表的先后顺序与改造前一致 */
+		std::vector<ScannedDecl> decls;
+		ScanUniformDecls(source, decls);
 
-		for (auto it = std::sregex_iterator(source.begin(), source.end(), sampler_regex); it != std::sregex_iterator(); ++it)
+		/* 贴图 / 采样器：裸 sampler 也要进反射表；绑定点拿不到时交给后端解析
+		 * （Metal 从 MSL 的 [[texture(N)]] 拿） */
+		for (const ScannedDecl& decl : decls)
 		{
-			const std::smatch& match = *it;
-			const std::string type = match.str(2);
-			const std::string name = match.str(3);
-
-			/* 只关心纹理/采样器类资源，uniform block 的类型名不会以这些前缀开头 */
-			const bool is_texture_like =
-				type.rfind("sampler", 0) == 0 ||
-				type.rfind("image", 0) == 0 ||
-				type.rfind("texture", 0) == 0 ||
-				type.rfind("isampler", 0) == 0 ||
-				type.rfind("usampler", 0) == 0;
-			if (!is_texture_like)
+			if (decl.DeclKind != ScannedDecl::Kind::Texture || decl.HasInit)
 				continue;
 
-			/* 有 layout(binding) 才填绑定点；裸 sampler 不臆造绑定点 */
-			if (match.str(1).size() > 0)
-				m_Reflection.SamplerBindings[name] = static_cast<uint32_t>(std::stoul(match.str(1)));
-			add_material_param(ParamType::Texture, name, std::any{},
-				HasDirective(match.str(4), kPropertyMarker), ParsePropertySpec(match.str(4)));
+			uint32_t binding = 0;
+			if (decl.HasLayout && ParseOnlyBinding(decl.Qualifiers, binding))
+				m_Reflection.SamplerBindings[decl.Name] = binding;
+
+			add_material_param(ParamType::Texture, decl.Name, std::any{},
+				HasDirective(decl.Comment, kPropertyMarker), ParsePropertySpec(decl.Comment));
 		}
 
-		/* 非纹理材质参数：裸 uniform（int / float / vec2-4 / mat4，可选 layout 限定与源码默认值）。
-		 * uniform block 的块头（`uniform Xxx {`）与块内成员都不带 `uniform` 关键字，不会命中。 */
-		static const std::regex material_regex(
-			R"((?:layout\s*\([^)]*\)\s*)?uniform\s+(?:highp\s+|mediump\s+|lowp\s+)?(int|float|vec[234]|mat4)\s+([A-Za-z_]\w*)\s*(?:=\s*([^;]+?))?\s*;[\r\t ]*(?://([^\n]*))?)");
-
-		for (auto it = std::sregex_iterator(source.begin(), source.end(), material_regex); it != std::sregex_iterator(); ++it)
+		/* 非纹理材质参数：裸 uniform（int / float / vec2-4 / mat4，可选 layout 限定与源码默认值） */
+		for (const ScannedDecl& decl : decls)
 		{
-			const std::smatch& match = *it;
-			const std::string type = match.str(1);
-			const std::string name = match.str(2);
+			if (decl.DeclKind != ScannedDecl::Kind::Scalar || decl.HasArray)
+				continue;
+
+			const std::string& type = decl.TypeName;
+			const bool known = type == "int" || type == "float" || type == "vec2"
+				|| type == "vec3" || type == "vec4" || type == "mat4";
+			if (!known)
+				continue;
 
 			const ParamType param_type =
 				(type == "int") ? ParamType::Int :
@@ -586,23 +582,24 @@ namespace Helios
 				ParamType::Mat4;
 
 			std::any default_value;
-			if (match.str(3).size() > 0 && param_type != ParamType::Mat4)
-				default_value = ParseMaterialParamDefault(param_type, match.str(3));
+			if (decl.HasInit && param_type != ParamType::Mat4)
+				default_value = ParseMaterialParamDefault(param_type, decl.InitExpr);
 
-			add_material_param(param_type, name, std::move(default_value),
-				HasDirective(match.str(4), kPropertyMarker), ParsePropertySpec(match.str(4)));
+			add_material_param(param_type, decl.Name, std::move(default_value),
+				HasDirective(decl.Comment, kPropertyMarker), ParsePropertySpec(decl.Comment));
 		}
 
 		/* uniform 块（`layout(std140, binding = N) uniform Block {`）的 binding：
 		 * 只认块声明，裸 uniform 不带花括号、不会命中 */
-		static const std::regex block_regex(R"(layout\s*\(([^)]*)\)\s*uniform\s+[A-Za-z_]\w*\s*\{)");
-		static const std::regex block_binding_regex(R"(binding\s*=\s*(\d+))");
-		for (auto it = std::sregex_iterator(source.begin(), source.end(), block_regex); it != std::sregex_iterator(); ++it)
+		for (const ScannedDecl& decl : decls)
 		{
-			const std::string qualifiers = (*it).str(1);
-			std::smatch binding_match;
-			if (std::regex_search(qualifiers, binding_match, block_binding_regex))
-				m_Reflection.UniformBlockBindings.insert(static_cast<uint32_t>(std::stoul(binding_match[1].str())));
+			/* 只认带 layout 的块声明（`layout(std140, binding = N) uniform Block {`） */
+			if (decl.DeclKind != ScannedDecl::Kind::Block || !decl.HasLayout)
+				continue;
+
+			uint32_t binding = 0;
+			if (ParseAnyBinding(decl.Qualifiers, binding))
+				m_Reflection.UniformBlockBindings.insert(binding);
 		}
 
 		/* 变体维度：顶点 / 片元各调一次，同名只留一份 */
@@ -620,13 +617,58 @@ namespace Helios
 		if (source.empty())
 			return;
 
-		static const std::regex attribute_regex(
-			R"(layout\s*\(\s*location\s*=\s*(\d+)\s*\)\s*in\s+([^;]+);)");
-
-		for (auto it = std::sregex_iterator(source.begin(), source.end(), attribute_regex);
-			it != std::sregex_iterator(); ++it)
+		/* 扫 `layout(location = N) in ...;`，替代原来的一条全文正则 */
+		size_t cursor = 0;
+		while (true)
 		{
-			const std::string declaration = (*it)[2].str();
+			const size_t layout_pos = FindWord(source, cursor, "layout");
+			if (layout_pos == std::string::npos)
+				return;
+
+			cursor = layout_pos + std::strlen("layout");
+
+			size_t pos = SkipSpaces(source, cursor);
+			if (pos >= source.size() || source[pos] != '(')
+				continue;
+
+			pos = SkipSpaces(source, pos + 1);
+			if (!IsWordAt(source, pos, "location"))
+				continue;
+
+			pos = SkipSpaces(source, pos + std::strlen("location"));
+			if (pos >= source.size() || source[pos] != '=')
+				continue;
+
+			pos = SkipSpaces(source, pos + 1);
+			const size_t digits_begin = pos;
+			while (pos < source.size() && source[pos] >= '0' && source[pos] <= '9')
+				++pos;
+			if (pos == digits_begin)
+				continue;
+
+			const uint32_t location =
+				static_cast<uint32_t>(std::stoul(source.substr(digits_begin, pos - digits_begin)));
+
+			pos = SkipSpaces(source, pos);
+			if (pos >= source.size() || source[pos] != ')')
+				continue;
+
+			pos = SkipSpaces(source, pos + 1);
+			if (!IsWordAt(source, pos, "in"))
+				continue;
+
+			const size_t after_in = pos + std::strlen("in");
+			pos = SkipSpaces(source, after_in);
+			if (pos == after_in)
+				continue; /* in 后面要有空白 */
+
+			const size_t semi = source.find(';', pos);
+			if (semi == std::string::npos)
+				continue;
+
+			cursor = semi + 1;
+
+			const std::string declaration = source.substr(pos, semi - pos);
 			const size_t name_end = declaration.find_last_not_of(" \t\r\n");
 			if (name_end == std::string::npos)
 				continue;
@@ -637,7 +679,7 @@ namespace Helios
 				: declaration.substr(name_start + 1, name_end - name_start);
 
 			if (!name.empty())
-				m_Reflection.VertexAttributeLocations[name] = static_cast<uint32_t>(std::stoul((*it)[1].str()));
+				m_Reflection.VertexAttributeLocations[name] = location;
 		}
 	}
 }
