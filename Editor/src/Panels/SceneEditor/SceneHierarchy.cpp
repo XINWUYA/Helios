@@ -38,6 +38,9 @@ namespace Helios
 		/* 层级面板内部的拖拽载荷类型：被拖动实体的句柄 */
 		constexpr const char* kEntityDragPayload = "SCENE_HIERARCHY_ENTITY";
 
+		/* 双击定位的时限：按系统双击的口径取 0.5 秒（ImGui 默认的 0.3 秒偏紧，手慢会漏） */
+		constexpr double kDoubleClickSeconds = 0.5;
+
 		/* ---- 树的展开状态 ----
 		 * 键 = 从根往下逐级滚出来的名字路径哈希（FNV-1a）：实体句柄会随增删实体漂移，
 		 * 名字路径跨场景、跨会话都对得上（同一父链下同名的两个节点共用一份状态，无害）。 */
@@ -411,6 +414,9 @@ namespace Helios
 
 		/* 上一份场景里的挂接请求指向的句柄已经无效 */
 		m_PendingReparent = {};
+
+		/* 双击的记账也按场景清掉：句柄会在新场景里被复用 */
+		m_LastRowClickEntity = entt::null;
 
 		/* 上一份场景画过的树行也不再有效 */
 		m_TreeRows.clear();
@@ -1246,8 +1252,16 @@ namespace Helios
 		{
 			SetSelectedEntity(entity);
 
-			if (m_FocusEntityFunc != nullptr && ImGui::GetMousePos().x >= fold_arrow_right
-				&& ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+			/* 双击自己记：同一行在时限内再点一下就算。ImGui 的连击计数到第三下就不等于 2，
+			 * 连着双击下一行、或者手慢一点都认不出来（见 kDoubleClickSeconds） */
+			const double now = ImGui::GetTime();
+			const bool is_double_click = m_LastRowClickEntity == static_cast<entt::entity>(entity)
+				&& now - m_LastRowClickTime <= kDoubleClickSeconds;
+			m_LastRowClickEntity = is_double_click ? entt::null : static_cast<entt::entity>(entity);
+			m_LastRowClickTime = now;
+
+			if (is_double_click && m_FocusEntityFunc != nullptr
+				&& ImGui::GetMousePos().x >= fold_arrow_right)
 				m_FocusEntityFunc(entity);
 		}
 

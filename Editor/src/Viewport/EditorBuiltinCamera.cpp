@@ -22,6 +22,8 @@ namespace Helios
 		constexpr float kWheelSpeedStep = 1.15f;	/* 飞行速度每格调整比（乘性） */
 		constexpr float kMinFlySpeed = 0.5f;
 		constexpr float kMaxFlySpeed = 100.0f;
+		constexpr float kFlyBoostSeconds = 1.0f;	/* 按住移动键到这个时长吃满加速 */
+		constexpr float kFlyBoostMax = 4.0f;		/* 按住不放最多快到起始速度的几倍 */
 	}
 
 	EditorCamera::EditorCamera(float fov, float aspect_ratio, float near_clip, float far_clip)
@@ -130,6 +132,10 @@ namespace Helios
 		default:					break;
 		}
 
+		/* 不飞行了就把加速档位归零：下次起手从起始速度开始 */
+		if (m_ActiveGesture != NavGesture::Fly)
+			m_FlyHoldTime = 0.0f;
+
 		/* 帧末记录按键状态（下一帧的“按下沿”判据） */
 		m_WasAltPressed = is_alt_pressed;
 		m_WasLmbPressed = is_lmb_pressed;
@@ -137,9 +143,9 @@ namespace Helios
 		m_WasRmbPressed = is_rmb_pressed;
 	}
 
-	/* 飞行（RMB 按住）：鼠标原地转向；WASD 沿视线、E/Q 沿世界竖直方向平移。
-	 * 转向时枢轴重新落在视线正前方同距离处 —— 眼位保持不动，退出飞行后
-	 * 轨道中心就是当时的视线落点，无需交接。 */
+	/* 飞行（RMB 按住）：鼠标原地转向；WASD 沿视线、E/Q 沿世界竖直方向平移，
+	 * 移动速度按住越久越快。转向时枢轴重新落在视线正前方同距离处 —— 眼位保持不动，
+	 * 退出飞行后轨道中心就是当时的视线落点，无需交接。 */
 	void EditorCamera::UpdateFly(const glm::vec2& mouse_delta, float delta_time)
 	{
 		PROFILE_FUNCTION();
@@ -174,9 +180,18 @@ namespace Helios
 
 		if (glm::dot(move_direction, move_direction) > 0.0f)
 		{
+			/* 按住越久越快：起始速度乘性地爬到 kFlyBoostMax 倍，松手或结束飞行回起点 */
+			m_FlyHoldTime = glm::min(m_FlyHoldTime + delta_time, kFlyBoostSeconds);
+			const float ramp = m_FlyHoldTime / kFlyBoostSeconds;
+			const float speed = m_MoveSpeed * std::pow(kFlyBoostMax, ramp);
+
 			/* 眼位与枢轴同步平移（斜向先归一化，避免比单键更快） */
-			m_FocalPoint += glm::normalize(move_direction) * (m_MoveSpeed * delta_time);
+			m_FocalPoint += glm::normalize(move_direction) * (speed * delta_time);
 			m_IsDirty = true;
+		}
+		else
+		{
+			m_FlyHoldTime = 0.0f;
 		}
 	}
 
@@ -427,7 +442,7 @@ namespace Helios
 		m_IsDirty = true;
 	}
 
-	/* 滚轮调飞行速度（飞行中）：乘性步进 + 上下限 */
+	/* 滚轮调飞行的起始速度（飞行中）：乘性步进 + 上下限 */
 	void EditorCamera::AdjustMoveSpeed(float wheel)
 	{
 		PROFILE_FUNCTION();

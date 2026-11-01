@@ -53,7 +53,7 @@ namespace Helios
 		void SetDistance(float distance) { m_Distance = distance; m_IsDirty = true; }
 		[[nodiscard]]
 		float GetDistance() const { return m_Distance; }
-		/* 移动速度 */
+		/* 移动速度（飞行的起始速度；按住移动键会在它之上加速，见 UpdateFly） */
 		void SetMoveSpeed(float speed) { m_MoveSpeed = speed; }
 		[[nodiscard]]
 		float GetMoveSpeed() const { return m_MoveSpeed; }
@@ -83,7 +83,7 @@ namespace Helios
 		[[nodiscard]]
 		bool IsFlying() const { return m_ActiveGesture == NavGesture::Fly; }
 
-		/* 滚轮：轨道模式拉近拉远（乘性），飞行模式调整移动速度 */
+		/* 滚轮：轨道模式拉近拉远（乘性），飞行模式调整起始速度（按住加速在它之上叠乘） */
 		void OnMouseWheelZoom(float wheel);
 		void AdjustMoveSpeed(float wheel);
 
@@ -114,7 +114,7 @@ namespace Helios
 
 		/* 视口导航状态机：手势起手 / 保持 / 收尾，并派发本帧鼠标增量 */
 		void UpdateNavigation(float delta_time, bool allow_new_gesture);
-		/* 飞行：鼠标原地转向（枢轴跟到视线正前方）+ WASD/QE 沿视线平移 */
+		/* 飞行：鼠标原地转向（枢轴跟到视线正前方）+ WASD/QE 沿视线平移，按住越久越快 */
 		void UpdateFly(const glm::vec2& mouse_delta, float delta_time);
 
 		/* 轨道操作 */
@@ -133,8 +133,10 @@ namespace Helios
 		float m_Pitch{ glm::radians(20.0f) }, m_Yaw{ 0.0f };
 		/* 相机距离（轨道半径；位置 = 聚焦点 - 前向 * 距离，由它派生） */
 		float m_Distance{ 10.0f };
-		/* 相机移动速度（飞行） */
-		float m_MoveSpeed{ 5.0f };
+		/* 相机移动速度（飞行的起始速度） */
+		float m_MoveSpeed{ 10.0f };
+		/* 本次按住移动键的时长：决定加速到第几档，松手或结束飞行清零 */
+		float m_FlyHoldTime{ 0.0f };
 
 		/* 当前导航手势 */
 		NavGesture m_ActiveGesture{ NavGesture::None };

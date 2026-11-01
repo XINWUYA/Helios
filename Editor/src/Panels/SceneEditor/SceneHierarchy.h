@@ -190,6 +190,9 @@ namespace Helios
 		bool m_SceneDirty{ false };
 		/* 选中实体（层级树与属性面板共用这一份） */
 		Entity m_SelectedEntity;
+		/* 上一次点中的行与时刻：双击判定按行自己记（见 ShowEntityNode），不跟 ImGui 的连击计数 */
+		entt::entity m_LastRowClickEntity{ entt::null };
+		double       m_LastRowClickTime{ 0.0 };
 		/* 双击行定位（由所属 Layer 注入；未注入时双击无动作） */
 		FocusEntityFunc m_FocusEntityFunc;
 		/* 本帧画过的实体行矩形（见 GetLastRowRects） */
