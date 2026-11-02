@@ -239,10 +239,13 @@ namespace Helios
 		/* 整体下移到最低点为 0：实体位置就是地面最低处，物件摆在实体高度上不会浮空。
 		 * 只平移不缩放，起伏形态与幅度都不变 */
 		const auto lowest = std::min_element(heights.begin(), heights.end());
+		/* 先把最小值取出来再减：循环会改到最小值那一格本身，拿着迭代器反复读的话，
+		 * 读到它就是 0 了，后面的行会少减一截，地形上出现一条随 seed 移动的台阶 */
 		if (lowest != heights.end() && *lowest > 0.0f)
 		{
+			const float lowest_value = *lowest;
 			for (float& h : heights)
-				h -= *lowest;
+				h -= lowest_value;
 		}
 
 		UploadHeightMap(std::move(heights));
