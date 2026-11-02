@@ -23,6 +23,8 @@ namespace Helios
 
 		bool g_GpuPlacementEnabled = false;
 		bool g_IndirectDrawEnabled = false;
+		/* 画质档的全局密度系数：0 是全关，1 是各片草地自己的设置 */
+		float g_DensityScale = 1.0f;
 
 		/* 叶片模板的索引数：间接参数里的 count */
 		constexpr uint32_t kBladeIndexCount = 24;
@@ -56,6 +58,16 @@ namespace Helios
 		return g_GpuPlacementEnabled;
 	}
 
+	void GrassField::SetGlobalDensityScale(float scale)
+	{
+		g_DensityScale = std::clamp(scale, 0.0f, 4.0f);
+	}
+
+	float GrassField::GetGlobalDensityScale()
+	{
+		return g_DensityScale;
+	}
+
 	void GrassField::SetGlobalIndirectDrawEnabled(bool enabled)
 	{
 		g_IndirectDrawEnabled = enabled;
@@ -84,7 +96,7 @@ namespace Helios
 		};
 		mix(&component.m_Extent, sizeof(component.m_Extent));
 		for (const float value : { component.m_Density, component.m_Height, component.m_Width,
-			component.m_LodDistance, component.m_CullDistance, component.m_MinDensityScale })
+			component.m_StartCullDistance, component.m_EndCullDistance, component.m_MinDensityScale })
 		{
 			mix(&value, sizeof(value));
 		}
@@ -102,7 +114,7 @@ namespace Helios
 		mix(&ground_key, sizeof(ground_key));
 		/* 观察范围按块尺寸量化：相机缩放、平移动不到一个块就不重建。
 		 * 重建一次要重传几十兆实例数据，相机连续动起来卡顿全在这里 */
-		const float focus_quantum = std::clamp(component.m_CullDistance * 0.25f, 8.0f, 64.0f);
+		const float focus_quantum = std::clamp(component.m_EndCullDistance * 0.25f, 8.0f, 64.0f);
 		const glm::vec2 focus_min_key(std::floor(focus_min.x / focus_quantum),
 			std::floor(focus_min.y / focus_quantum));
 		const glm::vec2 focus_max_key(std::floor(focus_max.x / focus_quantum),
@@ -173,15 +185,15 @@ namespace Helios
 			m_Origin.z = m_Ground->GetOrigin().z;
 			m_HalfX = m_Ground->GetExtent().x;
 			m_HalfZ = m_Ground->GetExtent().y;
-			m_ChunkSize = std::clamp(component.m_CullDistance * 0.25f, kChunkSize, 64.0f);
+			m_ChunkSize = std::clamp(component.m_EndCullDistance * 0.25f, kChunkSize, 64.0f);
 		}
 		const float density = std::max(0.0f, component.m_Density);
 		m_Height = std::max(0.0f, component.m_Height);
 		m_Width = std::max(0.0f, component.m_Width);
 		m_SurfaceAlign = std::clamp(component.m_SurfaceAlign, 0.0f, 1.0f);
 		m_MaxSlope = std::max(0.0f, component.m_MaxSlope);
-		m_LodDistance = component.m_LodDistance;
-		m_CullDistance = component.m_CullDistance;
+		m_StartCullDistance = component.m_StartCullDistance;
+		m_EndCullDistance = component.m_EndCullDistance;
 		m_MinDensityScale = component.m_MinDensityScale;
 		m_ReceiveShadow = component.m_ReceiveShadow;
 		m_Seed = static_cast<uint32_t>(std::max(0, component.m_Seed));
@@ -206,7 +218,7 @@ namespace Helios
 		const uint32_t total_chunks = m_ChunksX * m_ChunksZ;
 		const float chunk_radius = 0.5f * glm::length(glm::vec2(m_ChunkWidth, m_ChunkDepth));
 		/* 多铺 25%：相机移动一小段时靠余量顶着，不必每个块边界都重建 */
-		const float cull_radius = std::max(component.m_CullDistance * 1.25f, m_ChunkWidth) + chunk_radius;
+		const float cull_radius = std::max(component.m_EndCullDistance * 1.25f, m_ChunkWidth) + chunk_radius;
 
 		/* 有效块：观察点周围 CullDistance 内的块。全地形均匀铺满在 1km² 上放不下预算，
 		 * 远处本来也会被剔除距离砍掉，干脆不生成。
@@ -704,7 +716,7 @@ namespace Helios
 		{
 			glm::vec4 Planes[6]{};
 			glm::vec4 Counts{ 0.0f };   /* x 每块株数、y 总株数、z 抽稀起点、w 剔除距离 */
-			glm::vec4 Extra{ 0.0f };    /* x 最小密度比例 */
+			glm::vec4 Extra{ 0.0f };    /* x 最小密度比例、y 全局密度系数 */
 			glm::vec4 Camera{ 0.0f };
 		};
 
@@ -712,8 +724,8 @@ namespace Helios
 		for (int index = 0; index < 6; ++index)
 			params.Planes[index] = planes[index];
 		params.Counts = glm::vec4(static_cast<float>(m_PerChunk), static_cast<float>(m_InstanceCount),
-			m_LodDistance, m_CullDistance);
-		params.Extra = glm::vec4(m_MinDensityScale, 0.0f, 0.0f, 0.0f);
+			m_StartCullDistance, m_EndCullDistance);
+		params.Extra = glm::vec4(m_MinDensityScale, g_DensityScale, 0.0f, 0.0f);
 		params.Camera = glm::vec4(eye, 0.0f);
 
 		if (!Renderer::DispatchGrassArgsReset(m_IndirectArgs, kBladeIndexCount))

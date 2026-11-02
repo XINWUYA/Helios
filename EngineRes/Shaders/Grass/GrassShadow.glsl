@@ -40,13 +40,15 @@ void main()
 	/* 距离抽稀：叶根到相机的水平距离在 full 以内全画，往外按实例自带的随机数逐株丢掉，
 	 * fade 处密度归零。逐株判定而不是整块截断，相机移动时是慢慢变稀，不会成块跳 */
 	const float distance = length(a_InstanceMatrix3.xz - u_GrassShadowEye.xz);
-	v_GrassShadowDensity = 1.0f
-		- smoothstep(u_GrassShadowFullRadius, u_GrassShadowFadeRadius, distance);
+	v_GrassShadowDensity = (1.0f
+		- smoothstep(u_GrassShadowFullRadius, u_GrassShadowFadeRadius, distance))
+		* u_BladeDensityScale;
 	v_GrassShadowDither = GrassShadowDither(a_InstanceParams);
 
 	vec3 blade_normal;
 	const vec3 pos = ExpandGrassBlade(a_Position, a_InstanceMatrix3.xyz, a_InstanceMatrix0.xyz,
-		a_InstanceMatrix1.xyz, a_InstanceMatrix2.xyz, a_InstanceParams, u_WindTime, blade_normal);
+		a_InstanceMatrix1.xyz, a_InstanceMatrix2.xyz, a_InstanceParams,
+		GrassWindWeight(length(a_InstanceMatrix3.xyz - u_GrassShadowEye)), u_WindTime, blade_normal);
 
 	const mat4 light_view_projection_mat = (u_CascadeIndex >= 0)
 		? u_LightViewProjectionMat[u_CascadeIndex]

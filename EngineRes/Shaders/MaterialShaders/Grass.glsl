@@ -61,7 +61,8 @@ void main()
 	}
 
 	/* 远处逐株抽稀：块内密度连续，块边界不会拉出一条竖边 */
-	if (GrassBladeFaded(base, a_InstanceParams))
+	const float view_distance = length(u_ViewPos - base);
+	if (GrassBladeFaded(view_distance, a_InstanceParams))
 	{
 		gl_Position = vec4(0.0f, 0.0f, -2.0f, 1.0f);
 		return;
@@ -69,7 +70,7 @@ void main()
 
 	vec3 blade_normal;
 	const vec3 pos = ExpandGrassBlade(a_Position, base, right, up, face, a_InstanceParams,
-		u_WindTime, blade_normal);
+		GrassWindWeight(view_distance), u_WindTime, blade_normal);
 	gl_Position = u_ViewProjectionMat * vec4(pos, 1.0f);
 
 	vert2frag.WorldNormal = blade_normal;

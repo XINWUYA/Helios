@@ -31,11 +31,13 @@ void main()
 	const vec3 face = a_InstanceMatrix2.xyz;
 
 	/* 抽稀跟可见着色同一套：被丢掉的株不能留速度，否则 TAA 会拖出残影 */
-	if (u_FlatPad == 0 && GrassBladeFaded(base, a_InstanceParams))
+	const float view_distance = length(u_ViewPos - base);
+	if (u_FlatPad == 0 && GrassBladeFaded(view_distance, a_InstanceParams))
 	{
 		gl_Position = vec4(0.0f, 0.0f, -2.0f, 1.0f);
 		return;
 	}
+	const float wind_weight = u_FlatPad == 0 ? GrassWindWeight(view_distance) : 1.0f;
 
 	vec3 cur_pos;
 	vec3 prev_pos;
@@ -50,9 +52,9 @@ void main()
 		vec3 normal_cur;
 		vec3 normal_prev;
 		cur_pos = ExpandGrassBlade(a_Position, base, right, up, face, a_InstanceParams,
-			u_WindTime, normal_cur);
+			wind_weight, u_WindTime, normal_cur);
 		prev_pos = ExpandGrassBlade(a_Position, base, right, up, face, a_InstanceParams,
-			u_PrevWindTime, normal_prev);
+			wind_weight, u_PrevWindTime, normal_prev);
 	}
 
 	/* 位移用不带抖动的矩阵；光栅化照旧走带抖动的 */

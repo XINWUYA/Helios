@@ -626,6 +626,21 @@ namespace Helios
 					if (ImGui::IsItemHovered())
 						ImGui::SetTooltip("On: grass is culled on the GPU and drawn with one indirect call. Off: one submit per chunk. Needs compute shader support");
 
+					ImGui::Separator();
+
+					/* 画质档：一次缩放所有草地的抽稀阈值，改完立即生效，不用重建 */
+					float density_scale = m_Settings.GrassDensityScale;
+					ImGui::SetNextItemWidth(140.0f);
+					if (ImGui::SliderFloat("Grass Density", &density_scale, 0.0f, 2.0f, "%.2f"))
+					{
+						m_Settings.GrassDensityScale = density_scale;
+						EditorSettings::Apply(m_Settings);
+					}
+					if (ImGui::IsItemDeactivatedAfterEdit())
+						EditorSettings::Save(m_Settings);
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Scales how much grass survives distance thinning. 1 = as authored, 0 = none");
+
 					ImGui::EndMenu();
 				}
 

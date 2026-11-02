@@ -25,6 +25,7 @@ namespace Helios::EditorSettings
 		state.GPUSkinning = SkeletonModel::IsGlobalGpuSkinningEnabled();
 		state.GpuGrassPlacement = GrassField::IsGlobalGpuPlacementEnabled();
 		state.GpuGrassIndirect = GrassField::IsGlobalIndirectDrawEnabled();
+		state.GrassDensityScale = GrassField::GetGlobalDensityScale();
 
 		std::ifstream file(SettingsPath());
 		for (std::string line; std::getline(file, line); )
@@ -47,6 +48,8 @@ namespace Helios::EditorSettings
 				state.GpuGrassPlacement = value;
 			else if (key == "GpuGrassIndirect")
 				state.GpuGrassIndirect = value;
+			else if (key == "GrassDensityScale")
+				state.GrassDensityScale = static_cast<float>(std::atof(raw.c_str()));
 			else if (key == "AutoReloadScripts")
 				state.AutoReloadScripts = value;
 			else if (key == "AutoCompileScripts")
@@ -80,6 +83,7 @@ namespace Helios::EditorSettings
 		file << "GPUSkinning=" << (state.GPUSkinning ? 1 : 0) << "\n";
 		file << "GpuGrassPlacement=" << (state.GpuGrassPlacement ? 1 : 0) << "\n";
 		file << "GpuGrassIndirect=" << (state.GpuGrassIndirect ? 1 : 0) << "\n";
+		file << "GrassDensityScale=" << state.GrassDensityScale << "\n";
 		file << "AutoReloadScripts=" << (state.AutoReloadScripts ? 1 : 0) << "\n";
 		file << "AutoCompileScripts=" << (state.AutoCompileScripts ? 1 : 0) << "\n";
 		file << "AutoReloadShaders=" << (state.AutoReloadShaders ? 1 : 0) << "\n";
@@ -92,6 +96,7 @@ namespace Helios::EditorSettings
 		SkeletonModel::SetGlobalGpuSkinningEnabled(state.GPUSkinning);
 		GrassField::SetGlobalGpuPlacementEnabled(state.GpuGrassPlacement);
 		GrassField::SetGlobalIndirectDrawEnabled(state.GpuGrassIndirect);
+		GrassField::SetGlobalDensityScale(state.GrassDensityScale);
 		EditorTheme::SetTheme(state.Theme);
 	}
 }

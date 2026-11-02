@@ -8,10 +8,13 @@
  * 否则影子和草会各走各的。
  * 调用方负责给 a_InstanceMatrix0..3、a_InstanceParams 这组实例属性。 */
 
-/* 距离抽稀的三个档位，由 GrassDraw::MakeDrawParams 逐片写入 */
+/* 距离抽稀的档位，由场景提交时逐片写入 */
 uniform float u_BladeFullDistance = 20.0f;
 uniform float u_BladeFadeDistance = 80.0f;
 uniform float u_BladeMinDensity = 0.1f;
+uniform float u_BladeDensityScale = 1.0f;
+/* 超过这个距离不算风场与压弯，0 是始终算 */
+uniform float u_WindCullDistance = 0.0f;
 
 uniform vec2 u_WindDirection = vec2(1.0f, 0.35f); // @property
 uniform float u_WindStrength = 0.12f;              // @property
@@ -42,18 +45,25 @@ float GrassWind(vec2 world_xz, float wind_time, out vec2 wind_dir)
 	return wave * mix(0.45f, 1.0f, gust);
 }
 
-/* 这一株是否已经稀到该丢：逐株判定，块内密度才连续 */
-bool GrassBladeFaded(vec3 base, vec4 params)
+/* 这一株是否已经稀到该丢：逐株判定，块内密度才连续。
+ * distance 由调用方算好传进来，同一帧里风场关停也要用 */
+bool GrassBladeFaded(float distance, vec4 params)
 {
-	const float distance = length(u_ViewPos - base);
 	return GrassDensityKeep(distance, GrassDensityDither(params),
-		u_BladeFullDistance, u_BladeFadeDistance, u_BladeMinDensity) < 0.5f;
+		u_BladeFullDistance, u_BladeFadeDistance, u_BladeMinDensity,
+		u_BladeDensityScale) < 0.5f;
+}
+
+/* 风场权重：超出关停距离就是 0，省掉风场与压弯的计算 */
+float GrassWindWeight(float distance)
+{
+	return (u_WindCullDistance > 0.0f && distance > u_WindCullDistance) ? 0.0f : 1.0f;
 }
 
 /* 把一个模板顶点（x ∈ [-1,1] 叶宽、y ∈ [0,1] 根到梢）展开成世界坐标。
  * base 是叶根、right/up/face 已经带好缩放；params 是实例参数（z 相位、w 色彩种子）。 */
 vec3 ExpandGrassBlade(vec3 template_pos, vec3 base, vec3 right, vec3 up, vec3 face,
-	vec4 params, float wind_time, out vec3 blade_normal)
+	vec4 params, float wind_weight, float wind_time, out vec3 blade_normal)
 {
 	const float height = max(length(up), 1e-4f);
 	const float t = template_pos.y;
@@ -65,19 +75,23 @@ vec3 ExpandGrassBlade(vec3 template_pos, vec3 base, vec3 right, vec3 up, vec3 fa
 	/* 自然弯垂：越靠梢越往叶面方向倒，每株倒的量略有不同 */
 	pos += face * (t * t) * (u_BladeCurl * height * (0.5f + params.w));
 
-	/* 风场推力：只有梢部动，根部钉在地上 */
-	vec2 wind_dir;
-	const float wind = GrassWind(base.xz, wind_time, wind_dir) * u_WindStrength;
-	const float flutter = sin(wind_time * u_WindSpeed * 4.7f + params.z * kGrassTwoPi)
-		* 0.12f * u_WindStrength;
-	const float bend = (wind + flutter) * t * t;
-	pos += vec3(wind_dir.x, 0.0f, wind_dir.y) * bend;
-	pos.y -= abs(bend) * 0.3f;
+	/* 风场推力：只有梢部动，根部钉在地上。远处的株跳过整段 */
+	if (wind_weight > 0.0f)
+	{
+		vec2 wind_dir;
+		const float wind = GrassWind(base.xz, wind_time, wind_dir) * u_WindStrength;
+		const float flutter = sin(wind_time * u_WindSpeed * 4.7f + params.z * kGrassTwoPi)
+			* 0.12f * u_WindStrength;
+		const float bend = (wind + flutter) * t * t * wind_weight;
+		pos += vec3(wind_dir.x, 0.0f, wind_dir.y) * bend;
+		pos.y -= abs(bend) * 0.3f;
+	}
 
 	/* 压弯：物体踩过的地方朝外倒，越靠近中心压得越平 */
-	const vec2 trample_uv = (base.xz - u_TrampleRect.xy) * u_TrampleRect.zw;
 	vec4 trample = vec4(0.5f, 0.5f, 0.0f, 0.0f);
-	if (all(greaterThanEqual(trample_uv, vec2(0.0f))) && all(lessThanEqual(trample_uv, vec2(1.0f))))
+	const vec2 trample_uv = (base.xz - u_TrampleRect.xy) * u_TrampleRect.zw;
+	if (wind_weight > 0.0f
+		&& all(greaterThanEqual(trample_uv, vec2(0.0f))) && all(lessThanEqual(trample_uv, vec2(1.0f))))
 		trample = texture(u_TrampleMap, trample_uv);
 
 	const float press_scale = u_TrampleStrength * t * t * height;

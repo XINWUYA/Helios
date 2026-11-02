@@ -16,7 +16,7 @@ layout(std140, binding = 4) uniform GrassCullBlock
 {
 	vec4 u_Planes[6];   /* 视锥六个平面（未归一化，按支撑函数判） */
 	vec4 u_Counts;      /* x 每块株数、y 总株数、z 抽稀起点、w 剔除距离 */
-	vec4 u_Extra;       /* x 最小密度比例 */
+	vec4 u_Extra;       /* x 最小密度比例、y 全局密度系数 */
 	vec4 u_Camera;      /* xyz 相机位置 */
 };
 
@@ -77,7 +77,7 @@ void main()
 	const vec3 blade_base = u_Source[source_base + 3u].xyz;
 	const float blade_distance = length(u_Camera.xyz - blade_base);
 	if (GrassDensityKeep(blade_distance, GrassDensityDither(u_Source[source_base + 4u]),
-			u_Counts.z, u_Counts.w, u_Extra.x) < 0.5f)
+			u_Counts.z, u_Counts.w, u_Extra.x, u_Extra.y) < 0.5f)
 		return;
 
 	/* 压实：原子计数器给出这一条在目标缓冲里的位置 */

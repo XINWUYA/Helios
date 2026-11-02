@@ -402,16 +402,19 @@ namespace Helios
 		float m_Height{ 0.5f };
 		float m_Width{ 0.045f };
 
-		/* 距离 LOD：超过 LodDistance 开始按距离抽稀，超过 CullDistance 完全不画 */
-		float m_LodDistance{ 25.0f };
-		float m_CullDistance{ 90.0f };
-		float m_MinDensityScale{ 0.12f };
+		/* 距离抽稀：StartCullDistance 以内满密度，之后逐株变稀，EndCullDistance 处归零。
+		 * 名字跟 UE 的 Grass Variety 一致，好对照 */
+		float m_StartCullDistance{ 25.0f };
+		float m_EndCullDistance{ 90.0f };
+		float m_MinDensityScale{ 0.12f };   /* 远端密度下限，改曲线形状用的，不是性能旋钮 */
 
 		/* 风场：风向是水平方向，强度是叶尖的最大偏移（米） */
 		glm::vec2 m_WindDirection{ 1.0f, 0.35f };
 		float m_WindStrength{ 0.12f };
 		float m_WindSpeed{ 1.6f };
 		float m_WindSpatialScale{ 0.25f };
+		/* 超过这个距离不再算风场与压弯（省顶点），0 是始终算 */
+		float m_WindCullDistance{ 0.0f };
 
 		bool m_ReceiveShadow{ true };
 		/* 投影：跟模型组件同一口径，关掉这片草就不进阴影图。

@@ -24,16 +24,16 @@ float GrassDensityCurve(float t, float min_scale)
 	return body * (1.0f - t * t);
 }
 
-/* 这一株留不留：distance 是叶根到相机的距离，参数含义与 GrassComponent 一致 */
+/* 这一株留不留：distance 是叶根到相机的距离，参数含义与 GrassComponent 一致。
+ * density_scale 是画质档的全局系数，乘在阈值上，0 就是整片不画 */
 float GrassDensityKeep(float distance, float random_value, float full_distance,
-	float fade_distance, float min_scale)
+	float fade_distance, float min_scale, float density_scale)
 {
-	if (distance <= full_distance)
-		return 1.0f;
-
-	const float span = max(fade_distance - full_distance, 1e-3f);
-	const float t = clamp((distance - full_distance) / span, 0.0f, 1.0f);
-	return random_value < GrassDensityCurve(t, min_scale) ? 1.0f : 0.0f;
+	const float keep = (distance <= full_distance)
+		? 1.0f
+		: GrassDensityCurve(clamp((distance - full_distance)
+			/ max(fade_distance - full_distance, 1e-3f), 0.0f, 1.0f), min_scale);
+	return random_value < keep * max(density_scale, 0.0f) ? 1.0f : 0.0f;
 }
 
 #endif // GRASS_DENSITY_GLSL

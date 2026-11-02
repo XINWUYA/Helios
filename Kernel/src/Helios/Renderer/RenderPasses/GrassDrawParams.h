@@ -17,6 +17,9 @@ namespace Helios::GrassDraw
 		per_draw.Overrides.emplace_back(ParamType::Float, "u_WindStrength", grass.m_WindStrength);
 		per_draw.Overrides.emplace_back(ParamType::Float, "u_WindSpeed", grass.m_WindSpeed);
 		per_draw.Overrides.emplace_back(ParamType::Float, "u_WindSpatialScale", grass.m_WindSpatialScale);
+		/* 画质档的全局密度系数：可见着色与草影共用一份，两边稀稠一致 */
+		per_draw.Overrides.emplace_back(ParamType::Float, "u_BladeDensityScale",
+			GrassField::GetGlobalDensityScale());
 
 		if (grass.m_Field != nullptr && grass.m_Field->HasTrample())
 		{

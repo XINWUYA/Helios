@@ -36,6 +36,15 @@ namespace Helios
 		void LoadGrassMaterial(const tinyxml2::XMLElement* element, void* component)
 		{
 			auto& grass = *static_cast<GrassComponent*>(component);
+
+			/* 老场景里的 LodDistance / CullDistance：新属性没写就按旧名字读一次 */
+			if (element->Attribute("StartCullDistance") == nullptr
+				&& element->Attribute("LodDistance") != nullptr)
+				grass.m_StartCullDistance = element->FloatAttribute("LodDistance");
+			if (element->Attribute("EndCullDistance") == nullptr
+				&& element->Attribute("CullDistance") != nullptr)
+				grass.m_EndCullDistance = element->FloatAttribute("CullDistance");
+
 			grass.m_MaterialSlot = GrassMaterialSlot{};
 
 			/* 实例形态：参数内嵌在场景里，来源只用于 Reset */
@@ -93,13 +102,18 @@ namespace Helios
 			.Field(&GrassComponent::m_Density, "Density", FieldType::Float, 0.5f)
 			.Field(&GrassComponent::m_Height, "Height", FieldType::Float, 0.01f)
 			.Field(&GrassComponent::m_Width, "Width", FieldType::Float, 0.001f)
-			.Field(&GrassComponent::m_LodDistance, "LodDistance", FieldType::Float, 0.5f)
-			.Field(&GrassComponent::m_CullDistance, "CullDistance", FieldType::Float, 0.5f)
+			.Field(&GrassComponent::m_StartCullDistance, "StartCullDistance", FieldType::Float, 0.5f)
+			.Range(0.0f, 400.0f)
+			.Field(&GrassComponent::m_EndCullDistance, "EndCullDistance", FieldType::Float, 0.5f)
+			.Range(1.0f, 400.0f)
 			.Field(&GrassComponent::m_MinDensityScale, "MinDensityScale", FieldType::Float, 0.01f)
+			.Range(0.0f, 1.0f)
 			.Field(&GrassComponent::m_WindDirection, "WindDirection", FieldType::Vec2, 0.01f)
 			.Field(&GrassComponent::m_WindStrength, "WindStrength", FieldType::Float, 0.005f)
 			.Field(&GrassComponent::m_WindSpeed, "WindSpeed", FieldType::Float, 0.01f)
 			.Field(&GrassComponent::m_WindSpatialScale, "WindSpatialScale", FieldType::Float, 0.005f)
+			.Field(&GrassComponent::m_WindCullDistance, "WindCullDistance", FieldType::Float, 0.5f)
+			.Range(0.0f, 400.0f)
 			.Field(&GrassComponent::m_ReceiveShadow, "ReceiveShadow", FieldType::Bool)
 			.Field(&GrassComponent::m_CastShadow, "CastShadow", FieldType::Bool)
 			.Field(&GrassComponent::m_BendRecover, "BendRecover", FieldType::Float, 0.05f)

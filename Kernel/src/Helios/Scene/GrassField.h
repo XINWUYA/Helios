@@ -46,6 +46,11 @@ namespace Helios
 		static void SetGlobalGpuPlacementEnabled(bool enabled);
 		[[nodiscard]] static bool IsGlobalGpuPlacementEnabled();
 
+		/* 全局密度系数：画质档用，一次缩放所有草地的抽稀阈值。
+		 * 只在绘制阶段生效，改它不触发重建 */
+		static void SetGlobalDensityScale(float scale);
+		[[nodiscard]] static float GetGlobalDensityScale();
+
 		/* 间接绘制的全局开关：开 = GPU 剔除 + 压实后一笔画完；关 = 逐块提交。
 		 * 需要计算着色器与可共享的存储缓冲，缺一样就自动退回逐块 */
 		static void SetGlobalIndirectDrawEnabled(bool enabled);
@@ -69,7 +74,7 @@ namespace Helios
 
 		/* 重建实例数据（参数与变换都没变时直接返回）。ground 非空时叶片贴到地形表面，
 		 * 块底面不再生成（草下就是地形）。
-		 * focus 是观察点（相机 xz）：只对 CullDistance 范围内的块生成实例，相机移动超过
+		 * focus 是观察点（相机 xz）：只对 EndCullDistance 范围内的块生成实例，相机移动超过
 		 * 一个网格再重建 —— 全地形均匀铺满在 1km² 上根本放不下预算，必须跟着视野走 */
 		void Rebuild(const GrassComponent& component, const glm::mat4& world,
 			const TerrainField* ground = nullptr,
@@ -207,8 +212,8 @@ namespace Helios
 		float m_ScaleY{ 1.0f };
 		float m_SurfaceAlign{ 1.0f };
 		float m_MaxSlope{ 42.0f };
-		float m_LodDistance{ 25.0f };
-		float m_CullDistance{ 90.0f };
+		float m_StartCullDistance{ 25.0f };
+		float m_EndCullDistance{ 90.0f };
 		float m_MinDensityScale{ 0.1f };
 		uint32_t m_ChunksX{ 0 };
 		uint32_t m_ChunksZ{ 0 };

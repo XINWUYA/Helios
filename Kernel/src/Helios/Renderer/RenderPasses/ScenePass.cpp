@@ -216,14 +216,16 @@ namespace Helios
 					per_draw.Overrides.emplace_back(ParamType::Int, "u_FlatPad", 0);
 					/* 叶片停画之后草色再撑一段，交接不至于突然断掉 */
 					per_draw.Overrides.emplace_back(ParamType::Float, "u_PadCullDistance",
-						grass.m_CullDistance * 2.0f);
-					/* 逐株抽稀的三个档位：与 GrassComponent 同名同义 */
+						grass.m_EndCullDistance * 2.0f);
+					/* 抽稀档位与风场关停距离：与 GrassComponent 同名同义 */
 					per_draw.Overrides.emplace_back(ParamType::Float, "u_BladeFullDistance",
-						grass.m_LodDistance);
+						grass.m_StartCullDistance);
 					per_draw.Overrides.emplace_back(ParamType::Float, "u_BladeFadeDistance",
-						grass.m_CullDistance);
+						grass.m_EndCullDistance);
 					per_draw.Overrides.emplace_back(ParamType::Float, "u_BladeMinDensity",
 						grass.m_MinDensityScale);
+					per_draw.Overrides.emplace_back(ParamType::Float, "u_WindCullDistance",
+						grass.m_WindCullDistance);
 
 					prepare_draw(grass, per_draw);
 
@@ -261,7 +263,7 @@ namespace Helios
 						 * 半径取包围盒对角线，与 GPU 剔除的块包围球同一口径 */
 						const float chunk_radius = glm::length(chunk.Extent);
 						const float distance = glm::distance(view_position, chunk.Center) - chunk_radius;
-						if (distance >= grass.m_CullDistance)
+						if (distance >= grass.m_EndCullDistance)
 							continue;
 
 						/* 距离抽稀逐株做（GrassBlade.glsl 的 GrassBladeFaded），这里整块提交：
