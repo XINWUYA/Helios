@@ -120,6 +120,7 @@ namespace Helios
 			if (type == typeid(TaaComponent))             return Icons::Id::Taa;
 			if (type == typeid(GrassComponent))           return Icons::Id::Grass;
 			if (type == typeid(GrassBendComponent))       return Icons::Id::GrassBend;
+			if (type == typeid(TerrainComponent))         return Icons::Id::Terrain;
 			if (type == typeid(AnimatorComponent))        return Icons::Id::Animation;
 			if (type == typeid(ScriptComponent))          return Icons::Id::ScriptComponent;
 

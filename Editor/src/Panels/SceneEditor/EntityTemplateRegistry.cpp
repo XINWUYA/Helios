@@ -91,6 +91,12 @@ namespace Helios
 					.Component([](Entity& entity) { entity.AddComponent<ModelComponent>(); })
 					.Register();
 
+				/* 地形：程序化高度场，外观走内建地形材质；范围与起伏由组件字段调 */
+				EntityTemplateRegistrar("Terrain")
+					.Icon(Icons::Id::Terrain)
+					.Component([](Entity& entity) { entity.AddComponent<TerrainComponent>(); })
+					.Register();
+
 				EntityTemplateRegistrar("Sprite")
 					.Icon(Icons::Id::Sprite)
 					.Component([](Entity& entity) { entity.AddComponent<SpriteComponent>(); })
