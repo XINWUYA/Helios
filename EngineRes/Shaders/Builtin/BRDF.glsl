@@ -32,13 +32,24 @@ vec3 F_Schlick(float cosTheta, float metallic, vec3 albedo)
 	return F;
 }
 
+/* 环境光用的菲涅尔：掠射时最多升到 1 - roughness，粗糙面不会被菲涅尔吃成黑边 */
+vec3 F_SchlickRoughness(float cosTheta, float metallic, vec3 albedo, float roughness)
+{
+	vec3 F0 = mix(vec3(0.04), albedo, metallic);
+	float f = 1.0 - cosTheta;
+	float f2 = f * f;
+	return F0 + (max(vec3(1.0 - roughness), F0) - F0) * (f2 * f2 * f);
+}
+
 /* 完整 BRDF：漫反射 + 镜面 */
 vec3 BRDF(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 albedo)
 {
 	vec3 H = normalize(V + L);
-	float dotNV = clamp(dot(N, V), 0.0, 1.0);
+	/* N·V 留个下限：轮廓上法线可能背对相机，到 0 时高光是 0/0 */
+	float dotNV = clamp(dot(N, V), 1e-4, 1.0);
 	float dotNL = clamp(dot(N, L), 0.0, 1.0);
 	float dotNH = clamp(dot(N, H), 0.0, 1.0);
+	float dotVH = clamp(dot(V, H), 0.0, 1.0);
 
 	vec3 color = vec3(0.0);
 
@@ -47,7 +58,8 @@ vec3 BRDF(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 albedo)
 		float rroughness = max(0.05, roughness);
 		float D = D_GGX(dotNH, roughness);
 		float G = G_SchlicksmithGGX(dotNL, dotNV, rroughness);
-		vec3 F = F_Schlick(dotNV, metallic, albedo);
+		/* 菲涅尔按 V·H 算：按 N·V 算的话掠射处 kD 归零，漫反射整条变黑 */
+		vec3 F = F_Schlick(dotVH, metallic, albedo);
 
 		vec3 kD = vec3(1.0) - F;
 		vec3 diff = kD * (1.0 - metallic) * albedo / PI;
@@ -63,12 +75,12 @@ vec3 BRDF(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 albedo)
 vec3 BRDFDiffuse(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 albedo)
 {
 	float dotNL = clamp(dot(N, L), 0.0, 1.0);
-	float dotNV = clamp(dot(N, V), 0.0, 1.0);
+	float dotVH = clamp(dot(V, normalize(V + L)), 0.0, 1.0);
 
 	if (dotNL <= 0.0)
 		return vec3(0.0);
 
-	vec3 F = F_Schlick(dotNV, metallic, albedo);
+	vec3 F = F_Schlick(dotVH, metallic, albedo);
 	vec3 kD = vec3(1.0) - F;
 	return kD * (1.0 - metallic) * albedo / PI * dotNL;
 }
@@ -77,8 +89,9 @@ vec3 BRDFSpecular(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 
 {
 	vec3 H = normalize(V + L);
 	float dotNL = clamp(dot(N, L), 0.0, 1.0);
-	float dotNV = clamp(dot(N, V), 0.0, 1.0);
+	float dotNV = clamp(dot(N, V), 1e-4, 1.0);
 	float dotNH = clamp(dot(N, H), 0.0, 1.0);
+	float dotVH = clamp(dot(V, H), 0.0, 1.0);
 
 	if (dotNL <= 0.0)
 		return vec3(0.0);
@@ -86,7 +99,7 @@ vec3 BRDFSpecular(vec3 L, vec3 V, vec3 N, float metallic, float roughness, vec3 
 	float rroughness = max(0.05, roughness);
 	float D = D_GGX(dotNH, roughness);
 	float G = G_SchlicksmithGGX(dotNL, dotNV, rroughness);
-	vec3 F = F_Schlick(dotNV, metallic, albedo);
+	vec3 F = F_Schlick(dotVH, metallic, albedo);
 	return D * F * G / (4.0 * dotNL * dotNV) * dotNL;
 }
 

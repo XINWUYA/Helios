@@ -25,30 +25,30 @@ vec3 ComposeDirectLight(vec3 L, vec3 V, vec3 N, float metallic, float roughness,
 	return max(vec3(0.0f), BRDF(L, V, N, metallic, roughness, albedo)) * LightFactor(attenuation, shadow);
 }
 
-/* IBL 漫反射分量：kd × 辐照度 × albedo */
-vec3 ComposeIBLDiffuse(vec3 N, vec3 V, float metallic, vec3 albedo, vec3 irradiance)
+/* IBL 漫反射分量：kd × 辐照度 × albedo。菲涅尔带粗糙度，掠射处 kd 不会归零 */
+vec3 ComposeIBLDiffuse(vec3 N, vec3 V, float metallic, float roughness, vec3 albedo, vec3 irradiance)
 {
 	const float ndv = max(dot(N, V), 0.0f);
-	const vec3 F = F_Schlick(ndv, metallic, albedo);
+	const vec3 F = F_SchlickRoughness(ndv, metallic, albedo, roughness);
 	const vec3 kd = (vec3(1.0f) - F) * (1.0f - metallic);
 	return kd * irradiance * albedo;
 }
 
 /* IBL 镜面分量：预滤波 × 环境 BRDF */
-vec3 ComposeIBLSpecular(vec3 N, vec3 V, float metallic, vec3 albedo, vec3 prefiltered, vec2 brdf)
+vec3 ComposeIBLSpecular(vec3 N, vec3 V, float metallic, float roughness, vec3 albedo, vec3 prefiltered, vec2 brdf)
 {
 	const float ndv = max(dot(N, V), 0.0f);
-	const vec3 F = F_Schlick(ndv, metallic, albedo);
+	const vec3 F = F_SchlickRoughness(ndv, metallic, albedo, roughness);
 	return prefiltered * (F * brdf.x + brdf.y);
 }
 
 /* 探针 IBL 合成：漫反射 + 镜面。取图在外（前向单探针绑定 / 延迟 top2 混合各取各的），
  * 这里只做合成；调试视图按分量取值，正常着色取这份和。 */
-vec3 ComposeIBL(vec3 N, vec3 V, float metallic, vec3 albedo,
+vec3 ComposeIBL(vec3 N, vec3 V, float metallic, float roughness, vec3 albedo,
 	vec3 irradiance, vec3 prefiltered, vec2 brdf)
 {
-	return ComposeIBLDiffuse(N, V, metallic, albedo, irradiance)
-		+ ComposeIBLSpecular(N, V, metallic, albedo, prefiltered, brdf);
+	return ComposeIBLDiffuse(N, V, metallic, roughness, albedo, irradiance)
+		+ ComposeIBLSpecular(N, V, metallic, roughness, albedo, prefiltered, brdf);
 }
 
 /* 无探针回退环境项：平面环境 × albedo × AO × 0.3（0.3 系数两条管线同口径） */

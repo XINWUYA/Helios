@@ -25,8 +25,8 @@ void EvaluateIBLComponents(vec3 N, vec3 V, float roughness, float metallic, vec3
 	vec3 prefiltered = textureLod(u_PrefilterMap, reflect(-V, N), roughness * max_lod).rgb;
 	vec2 brdf = texture(u_BRDFLut, vec2(ndv, roughness)).rg;
 
-	diffuse = ComposeIBLDiffuse(N, V, metallic, albedo, irradiance);
-	specular = ComposeIBLSpecular(N, V, metallic, albedo, prefiltered, brdf);
+	diffuse = ComposeIBLDiffuse(N, V, metallic, roughness, albedo, irradiance);
+	specular = ComposeIBLSpecular(N, V, metallic, roughness, albedo, prefiltered, brdf);
 }
 
 vec3 EvaluateIBL(vec3 N, vec3 V, float roughness, float metallic, vec3 albedo)
