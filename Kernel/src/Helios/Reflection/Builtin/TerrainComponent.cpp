@@ -81,7 +81,10 @@ namespace Helios
 				CORE_LOG_WARN("Failed to load terrain material '{}', falling back to the builtin one.", path);
 			}
 
-			terrain.m_MaterialSlot.pMaterial = TerrainComponent::GetDefaultMaterial();
+			/* 每块地形一份自己的副本：高度图这些参数是按地形写的，共用会互相覆盖 */
+			const SharedPtr<Material> default_material = TerrainComponent::GetDefaultMaterial();
+			terrain.m_MaterialSlot.pMaterial = default_material != nullptr
+				? default_material->Clone() : nullptr;
 		}
 	}
 
