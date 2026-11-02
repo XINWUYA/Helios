@@ -4,6 +4,7 @@
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Scene/GrassField.h"
 #include "Helios/Scene/SkeletonModel.h"
+#include "Helios/Scene/TerrainVirtualTexture.h"
 #include <cstdlib>
 #include <fstream>
 
@@ -26,6 +27,7 @@ namespace Helios::EditorSettings
 		state.GpuGrassPlacement = GrassField::IsGlobalGpuPlacementEnabled();
 		state.GpuGrassIndirect = GrassField::IsGlobalIndirectDrawEnabled();
 		state.GrassDensityScale = GrassField::GetGlobalDensityScale();
+		state.TerrainVirtualTexture = TerrainVirtualTexture::IsEnabled();
 
 		std::ifstream file(SettingsPath());
 		for (std::string line; std::getline(file, line); )
@@ -48,6 +50,8 @@ namespace Helios::EditorSettings
 				state.GpuGrassPlacement = value;
 			else if (key == "GpuGrassIndirect")
 				state.GpuGrassIndirect = value;
+			else if (key == "TerrainVirtualTexture")
+				state.TerrainVirtualTexture = value;
 			else if (key == "GrassDensityScale")
 				state.GrassDensityScale = static_cast<float>(std::atof(raw.c_str()));
 			else if (key == "AutoReloadScripts")
@@ -84,6 +88,7 @@ namespace Helios::EditorSettings
 		file << "GpuGrassPlacement=" << (state.GpuGrassPlacement ? 1 : 0) << "\n";
 		file << "GpuGrassIndirect=" << (state.GpuGrassIndirect ? 1 : 0) << "\n";
 		file << "GrassDensityScale=" << state.GrassDensityScale << "\n";
+		file << "TerrainVirtualTexture=" << (state.TerrainVirtualTexture ? 1 : 0) << "\n";
 		file << "AutoReloadScripts=" << (state.AutoReloadScripts ? 1 : 0) << "\n";
 		file << "AutoCompileScripts=" << (state.AutoCompileScripts ? 1 : 0) << "\n";
 		file << "AutoReloadShaders=" << (state.AutoReloadShaders ? 1 : 0) << "\n";
@@ -97,6 +102,7 @@ namespace Helios::EditorSettings
 		GrassField::SetGlobalGpuPlacementEnabled(state.GpuGrassPlacement);
 		GrassField::SetGlobalIndirectDrawEnabled(state.GpuGrassIndirect);
 		GrassField::SetGlobalDensityScale(state.GrassDensityScale);
+		TerrainVirtualTexture::SetEnabled(state.TerrainVirtualTexture);
 		EditorTheme::SetTheme(state.Theme);
 	}
 }

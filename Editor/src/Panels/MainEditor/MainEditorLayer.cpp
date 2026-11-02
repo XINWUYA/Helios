@@ -606,6 +606,18 @@ namespace Helios
 
 					ImGui::Separator();
 
+					bool terrain_vt = m_Settings.TerrainVirtualTexture;
+					if (ImGui::MenuItem("Terrain Virtual Texture", nullptr, &terrain_vt))
+					{
+						m_Settings.TerrainVirtualTexture = terrain_vt;
+						EditorSettings::Apply(m_Settings);
+						EditorSettings::Save(m_Settings);
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("On: terrain color comes from a paged cache around the camera. Off: shaded per pixel. Both look the same up close to within a couple of levels");
+
+					ImGui::Separator();
+
 					bool gpu_grass = m_Settings.GpuGrassPlacement;
 					if (ImGui::MenuItem("GPU Grass Placement", nullptr, &gpu_grass))
 					{

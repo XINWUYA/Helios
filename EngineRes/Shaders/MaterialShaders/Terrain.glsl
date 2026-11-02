@@ -45,6 +45,8 @@ void main()
 #version 410 core
 
 #include "TerrainCommon.glsl"
+#include "TerrainMaterial.glsl"
+#include "TerrainVTSample.glsl"
 #include "../Builtin/Math.glsl"
 #include "../Builtin/Velocity.glsl"
 
@@ -68,29 +70,22 @@ struct SVextex2Frag
 
 in SVextex2Frag vert2frag;
 
-/* 外观按高度与坡度混合：低处草色、陡坡岩色、高处砂色。
- * 三层够用，真要做多层 splat 得等虚拟纹理（见方案文档 4.6）。 */
-uniform vec3 u_GrassColor = vec3(0.26f, 0.36f, 0.16f);  // @property @type(color)
-uniform vec3 u_RockColor = vec3(0.32f, 0.30f, 0.27f);   // @property @type(color)
-uniform vec3 u_HighColor = vec3(0.55f, 0.47f, 0.34f);   // @property @type(color)
-uniform float u_Roughness = 0.85f;                       // @property @range(0.05, 1.0)
-uniform float u_RockSlope = 0.45f;                       // @property @range(0.0, 1.0)
-
 void main()
 {
-	const vec3 N = TerrainNormal(vert2frag.WorldPosition.xz, vert2frag.Step);
+	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz, vert2frag.Step);
 
-	/* 坡度 = 1 - N.y：陡的地方露岩，缓的地方长草 */
-	const float slope = clamp(1.0f - N.y, 0.0f, 1.0f);
-	vec3 albedo = mix(u_GrassColor, u_RockColor, smoothstep(u_RockSlope * 0.5f, u_RockSlope, slope));
+	/* 页驻留就采页池（粗糙度也一起回来），不驻留就用刚算出来的值。
+	 * 两条路混色公式同源，开关只差采样密度 */
+	vec4 page_albedo;
+	if (TerrainVirtualTextureLookup(vert2frag.WorldPosition.xz, page_albedo))
+	{
+		surface.Albedo = page_albedo.rgb;
+		surface.Roughness = page_albedo.a;
+	}
 
-	/* 高处混一点砂色，远山才有层次 */
-	const float height_t = clamp(vert2frag.WorldPosition.y / max(u_HeightScale, 1.0f), 0.0f, 1.0f);
-	albedo = mix(albedo, u_HighColor, smoothstep(0.55f, 0.9f, height_t) * 0.65f);
-
-	GBufferTexture0 = vec4(albedo, u_Roughness);
+	GBufferTexture0 = vec4(surface.Albedo, surface.Roughness);
 	/* 法线按 n * 0.5 + 0.5 编码，与 GBuffer.glsl 同一约定 */
-	GBufferTexture1 = vec4(N * 0.5f + 0.5f, 0.0f);
+	GBufferTexture1 = vec4(surface.Normal * 0.5f + 0.5f, 0.0f);
 	GBufferTexture2 = vec4(vec3(0.04f), 1.0f);
 	GBufferTexture3 = vec4(0.0f);
 	GBufferTexture4 = vec4(0.0f);

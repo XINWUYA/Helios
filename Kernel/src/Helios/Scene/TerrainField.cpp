@@ -273,6 +273,9 @@ namespace Helios
 		pixel_desc.Type = PixelType::Float;
 		m_HeightMap->SetData(heights.data(), pixel_desc);
 
+		/* 换了高度数据，页池里的旧页全作废（页池本身留着，下一帧重烘） */
+		m_VirtualTexture.Reset();
+
 		/* 留一份 CPU 副本：草地 / 物件贴地时按世界坐标双线性采样 */
 		m_Heights = std::move(heights);
 		/* 重新建了高度图，GPU 副本作废，下次要的时候重传 */

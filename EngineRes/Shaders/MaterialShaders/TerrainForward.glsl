@@ -38,6 +38,8 @@ void main()
 #version 410 core
 
 #include "TerrainCommon.glsl"
+#include "TerrainMaterial.glsl"
+#include "TerrainVTSample.glsl"
 #include "../Builtin/Math.glsl"
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
@@ -56,21 +58,20 @@ layout(location = 0) out vec4 OutFragColor;
 /* 地形不参与拾取 */
 layout(location = 1) out float ObjectId;
 
-uniform vec3 u_GrassColor = vec3(0.26f, 0.36f, 0.16f);  // @property @type(color)
-uniform vec3 u_RockColor = vec3(0.32f, 0.30f, 0.27f);   // @property @type(color)
-uniform vec3 u_HighColor = vec3(0.55f, 0.47f, 0.34f);   // @property @type(color)
-uniform float u_Roughness = 0.85f;                       // @property @range(0.05, 1.0)
-uniform float u_RockSlope = 0.45f;                       // @property @range(0.0, 1.0)
-
 void main()
 {
-	const vec3 N = TerrainNormal(vert2frag.WorldPosition.xz, vert2frag.Step);
+	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz, vert2frag.Step);
 
-	const float slope = clamp(1.0f - N.y, 0.0f, 1.0f);
-	vec3 albedo = mix(u_GrassColor, u_RockColor, smoothstep(u_RockSlope * 0.5f, u_RockSlope, slope));
+	/* 页驻留就采页池，不驻留用刚算的那份 —— 与延迟管线同一套判断 */
+	vec4 page_albedo;
+	if (TerrainVirtualTextureLookup(vert2frag.WorldPosition.xz, page_albedo))
+	{
+		surface.Albedo = page_albedo.rgb;
+		surface.Roughness = page_albedo.a;
+	}
 
-	const float height_t = clamp(vert2frag.WorldPosition.y / max(u_HeightScale, 1.0f), 0.0f, 1.0f);
-	albedo = mix(albedo, u_HighColor, smoothstep(0.55f, 0.9f, height_t) * 0.65f);
+	const vec3 N = surface.Normal;
+	vec3 albedo = surface.Albedo;
 
 	/* 地形只吃主方向光一笔：前向的地形提交在逐光源循环之外，光照 UBO 已经填成主光。
 	 * 不声明 u_ComposeAmbientEmission，SupportsDirectLighting 判为 false，正好走单笔路径 */
@@ -89,7 +90,7 @@ void main()
 	/* 调试分流：读数取自本笔实际着色用的量，与正常着色同源 */
 	if (u_DebugView != 0)
 	{
-		SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, u_Roughness, 0.0f);
+		SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, surface.Roughness, 0.0f);
 		SDebugLighting lit;
 		lit.DirectDiffuse = direct;
 		lit.DirectSpecular = vec3(0.0f);

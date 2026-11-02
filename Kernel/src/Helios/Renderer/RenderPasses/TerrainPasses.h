@@ -37,6 +37,9 @@ namespace Helios
 		/* 前向管线的运动矢量：地形是静止的，位移全部来自相机 */
 		HELIOS_API void SubmitVelocity(RenderView& view, Scene& scene);
 
+		/* 虚拟纹理：挑出本帧要烘的页并烘进页池（切自己的帧缓冲，调用方在绑主通道之前调） */
+		HELIOS_API void BakeVirtualTextures(RenderView& view, Scene& scene);
+
 		/* 探针捕获：按探针周围的一块范围选 patch，不受主相机视锥限制 */
 		HELIOS_API void SubmitCapture(RenderView& view, Scene& scene, const glm::vec3& center, float radius);
 	}

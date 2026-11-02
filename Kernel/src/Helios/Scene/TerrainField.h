@@ -7,6 +7,7 @@
 #include "Helios/Common/Export.h"
 #include "Helios/Renderer/RenderCommon.h"
 #include "Helios/Scene/Mesh.h"
+#include "Helios/Scene/TerrainVirtualTexture.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 
 namespace Helios
@@ -72,6 +73,10 @@ namespace Helios
 		/* 高度重建的版本号：贴地对象据此判断要不要重新采样 */
 		[[nodiscard]] uint64_t GetRevision() const { return m_BuildKey; }
 
+		/* 虚拟纹理：高度重建时页表作废，几何不动时每帧只补缺页 */
+		[[nodiscard]] TerrainVirtualTexture& GetVirtualTexture() { return m_VirtualTexture; }
+		[[nodiscard]] const TerrainVirtualTexture& GetVirtualTexture() const { return m_VirtualTexture; }
+
 		/* 高度数据的 GPU 副本（float 数组，归一化 0..1）：计算着色器里的贴地采样用。
 		 * 第一次要的时候才建，CPU 侧不改高度就不会重建 */
 		const SharedPtr<class DeviceStorageBuffer>& GetHeightStorage() const;
@@ -107,6 +112,7 @@ namespace Helios
 		float m_HeightScale{ 40.0f };
 		/* 本次高度图的来源（资产路径；程序化时为空） */
 		std::string m_AssetPath;
+		TerrainVirtualTexture m_VirtualTexture;
 		/* 节点边长（米）与相机距离的比值，小于它才继续细分。8 表示最近处一个节点约 8 个节点宽 */
 		float m_LodRatio{ 6.0f };
 		uint32_t m_MinNodeSize{ 64 };

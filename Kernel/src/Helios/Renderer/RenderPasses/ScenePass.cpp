@@ -628,6 +628,10 @@ namespace Helios
 						const auto render_pass_info = resources.GetPassRenderTarget();
 						render_view->EmplacePassFrameBuffer("ScenePass", render_pass_info);
 
+						/* 地形虚拟纹理：前向管线在用主通道画之前把缺页补上 */
+						if (const auto scene = render_view->GetOwnerScene())
+							TerrainDraw::BakeVirtualTextures(*render_view, *scene);
+
 						render_pass_info->Bind();
 						{
 							ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);

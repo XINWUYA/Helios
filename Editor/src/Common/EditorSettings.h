@@ -15,6 +15,8 @@ namespace Helios::EditorSettings
 		bool GpuGrassPlacement{ false };
 		/* 草地走 GPU 剔除 + 间接绘制（关掉退回逐块提交） */
 		bool GpuGrassIndirect{ false };
+		/* 地形虚拟纹理：页池缓存地表颜色（关掉逐像素直接算） */
+		bool TerrainVirtualTexture{ false };
 		/* 全局草地密度系数：画质档用，0 是全不画，1 是各片草地自己的设置 */
 		float GrassDensityScale{ 1.0f };
 		/* 脚本：产物变了自动重载 / 打开项目时没产物自动编一次 */
