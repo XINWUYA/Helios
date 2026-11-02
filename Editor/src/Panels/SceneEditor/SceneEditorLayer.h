@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <functional>
+#include <map>
 #include <unordered_map>
 #include "FrameGraphPanel.h"
 #include "RenderStatsPanel.h"
@@ -105,6 +106,31 @@ namespace Helios
 		void SetActiveScenePath(const std::string& path);
 		/* 把「干净点」记在当前编辑历史位置上：保存成功、以及切场景（历史被清空）后调用 */
 		void MarkSceneSaved();
+
+		/* 每个场景记一份视角：切场景 / 保存 / 关编辑器时记账，再打开时接回来。
+		 * 存 <项目>/.helios/view.cfg，键是场景相对项目根的路径。 */
+		struct SceneViewState
+		{
+			glm::vec3 Pivot{ 0.0f };
+			float Yaw{ 0.0f };
+			float Pitch{ 0.0f };
+			float Distance{ 10.0f };
+
+			/* 逐位比：只用来判断视角动没动，不需要容差 */
+			bool operator==(const SceneViewState& other) const
+			{
+				return Pivot.x == other.Pivot.x && Pivot.y == other.Pivot.y && Pivot.z == other.Pivot.z
+					&& Yaw == other.Yaw && Pitch == other.Pitch && Distance == other.Distance;
+			}
+		};
+		/* 相机此刻的视角记到当前场景名下，只改内存，落盘走 StoreViewStates */
+		void CaptureViewState();
+		/* 接回当前场景的视角；没有记录就保持当前视角 */
+		void ApplyViewState();
+		/* 视角停手一会儿就落盘：正常关窗走 OnDetached，但系统退出 / 强杀不跑析构 */
+		void UpdateViewStateAutosave(float delta_time);
+		void LoadViewStates();
+		void StoreViewStates();
 		/* 更新视口 */
 		void UpdateViewport();
 		/* 场景相机（游戏相机）的画面尺寸 = 窗口画布（物理像素）。
@@ -165,6 +191,14 @@ namespace Helios
 		SharedPtr<Scene> m_pMainScene;
 		/* 当前场景路径（只经 SetActiveScenePath 改） */
 		std::string m_ActiveScenePath{};
+		/* 各场景的视角：键 = 场景相对路径，切场景时同步落盘 */
+		std::map<std::string, SceneViewState> m_ViewStates;
+		/* 当前场景的键（随路径变，逐帧比对用不着每次换算） */
+		std::string m_ActiveSceneKey{};
+		/* 视角停手到落盘的计时 */
+		float m_ViewIdleSeconds{ 0.0f };
+		bool m_ViewStatesLoaded{ false };
+		bool m_ViewStatesDirty{ false };
 		/* 场景实体管理窗口 */
 		SceneHierarchy m_SceneHierarchy;
 		/* 编辑历史：所有改动经命令栈落地 */

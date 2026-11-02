@@ -1,6 +1,9 @@
 ﻿#include "Pch.h"
 #include "SceneEditorLayer.h"
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
 #include <glm/gtc/type_ptr.hpp>
 #include "Viewport/EditorBuiltinCamera.h"
 #include "UI/EditorIcons.h"
@@ -59,6 +62,22 @@ namespace Helios
 			std::vector<int> m_Before;
 			std::vector<int> m_After;
 		};
+
+		/* 视角记录文件：跟层级树的展开状态一样放在项目的 .helios 下 */
+		std::filesystem::path ViewStatePath()
+		{
+			return g_ProjectPath / ".helios" / "view.cfg";
+		}
+
+		/* 场景的键取相对项目根的路径：对话框给绝对路径、资源浏览器给相对路径，
+		 * 两种写法要落到同一把钥匙，否则同一个场景会攒出两份视角 */
+		std::string ViewKey(const std::string& path)
+		{
+			return PathToUtf8(ToAssetRelative(PathFromUtf8(path)));
+		}
+
+		/* 视角停手多久后写盘：关窗走 OnDetached，被系统退出就不一定了 */
+		constexpr float kViewAutosaveSeconds = 1.5f;
 	}
 
 	SceneEditorLayer::SceneEditorLayer()
@@ -80,6 +99,8 @@ namespace Helios
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
 		/* 层级树的展开状态跟着项目走：<项目>/.helios/hierarchy.cfg，按场景分段 */
 		m_SceneHierarchy.SetTreeStatePath(PathToUtf8(g_ProjectPath / ".helios" / "hierarchy.cfg"));
+		/* 各场景的视角：启动场景打开时要用，先读进来 */
+		LoadViewStates();
 
 		/* 属性面板的字段改动与撤销重做共用同一条历史 */
 		m_SceneHierarchy.SetCommandStack(&m_CommandStack);
@@ -102,6 +123,10 @@ namespace Helios
 	void SceneEditorLayer::OnDetached()
 	{
 		PROFILE_FUNCTION();
+
+		/* 关编辑器前把当前场景的视角落盘，下次打开还是这一眼 */
+		CaptureViewState();
+		StoreViewStates();
 
 		/* 相机先于场景销毁：按登记契约摘除（编辑器相机；属性面板的预览相机随
 		 * SetOwnerScene(nullptr) 一并摘除） */
@@ -534,6 +559,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		m_ActiveScenePath = path;
+		m_ActiveSceneKey = path.empty() ? std::string() : ViewKey(path);
 
 		/* 层级面板的根节点就是当前场景名：路径改了必须同步，否则另存为之后显示的仍是旧名字 */
 		m_SceneHierarchy.SetScenePath(path);
@@ -550,9 +576,147 @@ namespace Helios
 		m_HasUnrecordedChange = false;
 	}
 
+	/* 文件格式（<项目>/.helios/view.cfg）：
+	 *   [场景路径]
+	 *   Pivot=x y z / Angles=yaw pitch / Distance=d */
+	void SceneEditorLayer::LoadViewStates()
+	{
+		PROFILE_FUNCTION();
+
+		if (m_ViewStatesLoaded)
+			return;
+
+		m_ViewStatesLoaded = true;
+
+		std::ifstream stream(ViewStatePath());
+		if (!stream)
+			return;
+
+		/* 认不出的键直接跳过：旧版本的文件照样能读 */
+		std::string scene;
+		for (std::string line; std::getline(stream, line);)
+		{
+			if (!line.empty() && line.back() == '\r')
+				line.pop_back();
+			if (line.size() < 3)
+				continue;
+
+			if (line.front() == '[' && line.back() == ']')
+			{
+				scene = line.substr(1, line.size() - 2);
+				continue;
+			}
+
+			const size_t separator = line.find('=');
+			if (separator == std::string::npos || scene.empty())
+				continue;
+
+			const std::string key = line.substr(0, separator);
+			const std::string raw = line.substr(separator + 1);
+			SceneViewState& state = m_ViewStates[scene];
+			if (key == "Pivot")
+				std::sscanf(raw.c_str(), "%f %f %f", &state.Pivot.x, &state.Pivot.y, &state.Pivot.z);
+			else if (key == "Angles")
+				std::sscanf(raw.c_str(), "%f %f", &state.Yaw, &state.Pitch);
+			else if (key == "Distance")
+				state.Distance = static_cast<float>(std::atof(raw.c_str()));
+		}
+	}
+
+	void SceneEditorLayer::StoreViewStates()
+	{
+		PROFILE_FUNCTION();
+
+		if (!m_ViewStatesDirty)
+			return;
+
+		m_ViewStatesDirty = false;
+
+		std::error_code error;
+		std::filesystem::create_directories(ViewStatePath().parent_path(), error);
+
+		std::ofstream stream(ViewStatePath(), std::ios::trunc);
+		if (!stream)
+			return;
+
+		stream << std::fixed << std::setprecision(4);
+		for (const auto& [scene, state] : m_ViewStates)
+		{
+			stream << "[" << scene << "]\n";
+			stream << "Pivot=" << state.Pivot.x << " " << state.Pivot.y << " " << state.Pivot.z << "\n";
+			stream << "Angles=" << state.Yaw << " " << state.Pitch << "\n";
+			stream << "Distance=" << state.Distance << "\n";
+		}
+	}
+
+	void SceneEditorLayer::CaptureViewState()
+	{
+		PROFILE_FUNCTION();
+
+		/* 新建还没保存的场景没有名字，没处记 */
+		if (m_ActiveSceneKey.empty() || m_pEditorCamera == nullptr)
+			return;
+
+		SceneViewState& state = m_ViewStates[m_ActiveSceneKey];
+		state.Pivot = m_pEditorCamera->GetFocalPoint();
+		state.Yaw = m_pEditorCamera->GetYaw();
+		state.Pitch = m_pEditorCamera->GetPitch();
+		state.Distance = m_pEditorCamera->GetDistance();
+		m_ViewStatesDirty = true;
+	}
+
+	void SceneEditorLayer::ApplyViewState()
+	{
+		PROFILE_FUNCTION();
+
+		/* 新建还没保存的场景没有名字，也就没有记录可找 */
+		if (m_ActiveSceneKey.empty())
+			return;
+
+		const auto found = m_ViewStates.find(m_ActiveSceneKey);
+		if (found == m_ViewStates.end())
+			return;
+
+		const SceneViewState& state = found->second;
+		m_pEditorCamera->SetFocalPoint(state.Pivot);
+		m_pEditorCamera->SetOrbitAngles(state.Yaw, state.Pitch);
+		m_pEditorCamera->SetDistance(state.Distance);
+	}
+
+	/* 视角动了就重新计时，停手够久才写一次盘：拖拽中不反复写文件，
+	 * 被系统直接退出也不至于丢掉这一段导航 */
+	void SceneEditorLayer::UpdateViewStateAutosave(float delta_time)
+	{
+		PROFILE_FUNCTION();
+
+		if (m_ActiveSceneKey.empty() || m_pEditorCamera == nullptr)
+			return;
+
+		const SceneViewState live{ m_pEditorCamera->GetFocalPoint(), m_pEditorCamera->GetYaw(),
+			m_pEditorCamera->GetPitch(), m_pEditorCamera->GetDistance() };
+		const auto found = m_ViewStates.find(m_ActiveSceneKey);
+		if (found != m_ViewStates.end() && found->second == live)
+		{
+			m_ViewIdleSeconds = 0.0f;
+			return;
+		}
+
+		m_ViewIdleSeconds += delta_time;
+		if (m_ViewIdleSeconds < kViewAutosaveSeconds)
+			return;
+
+		m_ViewIdleSeconds = 0.0f;
+		CaptureViewState();
+		StoreViewStates();
+	}
+
 	void SceneEditorLayer::SetActiveScene(const SharedPtr<Scene>& scene, const std::string& path)
 	{
 		PROFILE_FUNCTION();
+
+		/* 旧场景的视角先记账落盘，再换内容 */
+		CaptureViewState();
+		StoreViewStates();
 
 		/* 旧场景摘除编辑器相机（场景可能仍被别处引用而继续存活）；
 		 * 脚本实例挂在旧场景上，一并停掉，别让它们继续引用要被替换的实体 */
@@ -570,6 +734,9 @@ namespace Helios
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
 		m_pEditorCamera->GetRenderView()->SetOwnerScene(m_pMainScene);
 		m_pMainScene->AddExternalCamera(m_pEditorCamera.get());
+
+		/* 接回这个场景上次的视角（第一次打开没有记录就保持当前视角） */
+		ApplyViewState();
 
 		/* 场景内容已整体替换：缓存的实体句柄（悬停 / 选中）与旧命令都不再有效 */
 		m_HoveredEntity = {};
@@ -878,6 +1045,10 @@ namespace Helios
 
 		/* 场景内容与文件一致了：当前位置成为新的干净点 */
 		MarkSceneSaved();
+
+		/* 顺手记下视角：保存是用户认账这个场景的时刻，此时落盘不会丢 */
+		CaptureViewState();
+		StoreViewStates();
 	}
 
 	/* 保存场景到指定路径 */
@@ -896,6 +1067,10 @@ namespace Helios
 		/* 保存成功后，当前场景路径切换为新路径 */
 		SetActiveScenePath(file_path);
 		MarkSceneSaved();
+
+		/* 视角换个名字记在新路径下，原路径那份留着 */
+		CaptureViewState();
+		StoreViewStates();
 	}
 
 	bool SceneEditorLayer::Undo()
@@ -1475,6 +1650,9 @@ namespace Helios
 				m_pMainScene->OnUpdate(delta_time);
 				break;
 			}
+
+			/* 相机这一帧的姿态定下来了，顺手看看要不要落盘 */
+			UpdateViewStateAutosave(delta_time);
 
 			/* Frame Graph 面板的抓取目标（上一帧 UI 落下）：面板可见且开着 Capture 时，
 			 * 只给所选相机的渲染图打开抓取（其余一律关）—— 本帧渲染图的执行会抓取

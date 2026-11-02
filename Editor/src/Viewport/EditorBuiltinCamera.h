@@ -59,6 +59,8 @@ namespace Helios
 		float GetMoveSpeed() const { return m_MoveSpeed; }
 
 		void SetFocalPoint(const glm::vec3& position) { m_FocalPoint = position; m_IsDirty = true; }
+		[[nodiscard]]
+		const glm::vec3& GetFocalPoint() const { return m_FocalPoint; }
 
 		[[nodiscard]]
 		float GetPitch() const { return m_Pitch; }
