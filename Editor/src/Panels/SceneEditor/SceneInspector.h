@@ -82,6 +82,8 @@ namespace Helios
 		void DrawModelMaterialCards(Entity entity, ModelComponent& component);
 		/* 草地的材质卡：草地只有一个槽，同样平铺在 Grass 组件卡之后 */
 		void DrawGrassMaterialCard(Entity entity, GrassComponent& component);
+		/* 地形的材质卡：与草地同一路数，排在 Terrain 组件卡之后 */
+		void DrawTerrainMaterialCard(Entity entity, TerrainComponent& component);
 		/* Model 编辑器的入口按钮：模型是文件资产时才有（内建模型没有资产文件，不出现）。
 		 * 画在当前卡片里 —— 实体侧在 Model 组件卡尾部，资源侧在详情卡尾部。 */
 		void DrawOpenInModelEditorButton(const std::string& absolute_path);

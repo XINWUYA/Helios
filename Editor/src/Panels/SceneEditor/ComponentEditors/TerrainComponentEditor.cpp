@@ -8,7 +8,6 @@
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/TerrainAsset.h"
-#include "Helios/Scene/TerrainField.h"
 
 namespace Helios
 {
@@ -117,36 +116,6 @@ namespace Helios
 			return changed;
 		}
 
-		/* 实际生效的读数：绑了资产时是资产的值，否则是程序化生成出来的那份 */
-		void DrawTerrainInfoRows(const TerrainComponent& component)
-		{
-			const TerrainField* field = component.m_Field.get();
-			if (field == nullptr || field->IsEmpty())
-			{
-				ImGuiExt::DrawCommonTextUI("Built", "Pending");
-				return;
-			}
-
-			ImGuiExt::DrawCommonTextUI("Source", field->IsFromAsset() ? "Asset" : "Procedural");
-
-			const uint32_t resolution = field->GetResolution();
-			ImGuiExt::DrawCommonTextUI("Heightmap",
-				std::to_string(resolution) + " x " + std::to_string(resolution) + ", R32F, "
-				+ FormatFileSize(static_cast<size_t>(resolution) * resolution * sizeof(float)));
-
-			const glm::vec2 extent = field->GetExtent();
-			char extent_text[48];
-			std::snprintf(extent_text, sizeof(extent_text), "%.0f x %.0f m", extent.x * 2.0f, extent.y * 2.0f);
-			ImGuiExt::DrawCommonTextUI("World size", extent_text);
-
-			/* 高度按实体位置往上算：读数的零点就是实体所在的地面 */
-			const float base = field->GetOrigin().y;
-			char range_text[48];
-			std::snprintf(range_text, sizeof(range_text), "%.1f - %.1f m",
-				field->GetMinWorldHeight() - base, field->GetMaxWorldHeight() - base);
-			ImGuiExt::DrawCommonTextUI("Height range", range_text);
-		}
-
 		/* 材质槽：与草地卡共用版式；清掉回资产的材质，资产也没有才回内建默认 */
 		bool DrawTerrainMaterialBlock(TerrainComponent& component)
 		{
@@ -215,7 +184,6 @@ namespace Helios
 			auto& component = *static_cast<TerrainComponent*>(raw);
 
 			bool changed = DrawTerrainAssetRow(component);
-			DrawTerrainInfoRows(component);
 			changed |= DrawTerrainMaterialBlock(component);
 			return changed;
 		}

@@ -1904,6 +1904,26 @@ namespace Helios
 			created = true;
 			return slot.pMaterial;
 		}
+
+		/* 地形与草地同一个语义：改参数就地克隆一份实例，Reset 回来源 .mtl */
+		SharedPtr<Material> MakeTerrainMaterialInstance(TerrainComponent& component, bool& created)
+		{
+			MaterialSlotOverride& slot = component.m_MaterialSlot;
+			if (slot.IsInstance && slot.pMaterial != nullptr)
+				return slot.pMaterial;
+
+			if (slot.pMaterial == nullptr)
+				return nullptr;
+
+			const SharedPtr<Material> source = slot.pMaterial;
+			if (slot.SourceAssetPath.empty())
+				slot.SourceAssetPath = source->GetPath();
+
+			slot.pMaterial = source->Clone();
+			slot.IsInstance = true;
+			created = true;
+			return slot.pMaterial;
+		}
 	}
 
 	/* 草地卡的材质：草地只有一个槽，同样平铺在 Grass 组件卡之后。
@@ -1971,6 +1991,96 @@ namespace Helios
 				{
 					bool created = false;
 					if (const SharedPtr<Material> live = MakeGrassMaterialInstance(component, created))
+					{
+						live->SetRasterState(state);
+						changed = true;
+					}
+				});
+
+			if ((changed || body_changed) && can_record && before.IsValid())
+			{
+				if (ImGui::IsAnyItemActive() && !m_ComponentEditTransactionOpen)
+				{
+					m_ComponentEditTransactionOpen = true;
+					m_pCommandStack->BeginTransaction();
+				}
+
+				ComponentSnapshot after;
+				desc->Capture(entity, after);
+				if (after.IsValid())
+				{
+					m_pCommandStack->Execute(CreateUniquePtr<ComponentCustomDrawCommand>(
+						entity, desc->Has, desc->Restore, std::move(before), std::move(after), desc->Name));
+				}
+			}
+		}
+
+		PanelChrome::EndCard(card);
+		ImGui::PopID();
+	}
+
+	/* 地形卡的材质：地形只有一个槽，与草地一样平铺在 Terrain 组件卡之后。
+	 * 卡片背景走绘制通道、通道不可嵌套，所以材质只能单独一张卡 */
+	void SceneInspector::DrawTerrainMaterialCard(Entity entity, TerrainComponent& component)
+	{
+		PROFILE_FUNCTION();
+
+		if (component.GetMaterial() == nullptr)
+			return;
+
+		const ComponentDesc* desc = ComponentRegistry::Instance().Find(std::type_index(typeid(TerrainComponent)));
+		if (desc == nullptr)
+			return;
+
+		ImGui::PushID("##TerrainMaterial");
+		const PanelChrome::Card card = PanelChrome::BeginCard("Material · Terrain", Icons::Id::FileMaterial);
+
+		if (component.m_MaterialSlot.IsInstance)
+		{
+			PanelChrome::DrawCardBadge(card, "Instance",
+				"Edited copy for this terrain — changes don't go into the material asset\n"
+				"Reset in the Terrain card's Material row re-clones from the asset");
+		}
+
+		if (card.Open)
+		{
+			const bool can_record = m_pCommandStack != nullptr
+				&& desc->Capture != nullptr && desc->Restore != nullptr;
+
+			ComponentSnapshot before;
+			if (can_record)
+				desc->Capture(entity, before);
+
+			bool changed = false;
+			const auto resolve_live = [&component]() { return component.GetMaterial(); };
+
+			const bool body_changed = DrawMaterialCardBody(component.GetMaterial(), resolve_live,
+				[&](ParamType type, const std::string& name, const std::any& value)
+				{
+					bool created = false;
+					const SharedPtr<Material> live = MakeTerrainMaterialInstance(component, created);
+					if (live == nullptr)
+						return;
+
+					if (type == ParamType::Texture)
+						live->SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
+					else
+						live->SetParameters(type, name, value);
+					changed = true;
+				},
+				[&](int32_t render_queue)
+				{
+					bool created = false;
+					if (const SharedPtr<Material> live = MakeTerrainMaterialInstance(component, created))
+					{
+						live->SetRenderQueue(render_queue);
+						changed = true;
+					}
+				},
+				[&](const RenderRasterState& state)
+				{
+					bool created = false;
+					if (const SharedPtr<Material> live = MakeTerrainMaterialInstance(component, created))
 					{
 						live->SetRasterState(state);
 						changed = true;
@@ -2489,6 +2599,8 @@ namespace Helios
 					DrawCameraPreviewCard(*static_cast<CameraComponent*>(live));
 				else if (desc.Type == std::type_index(typeid(GrassComponent)))
 					DrawGrassMaterialCard(m_Entity, *static_cast<GrassComponent*>(live));
+				else if (desc.Type == std::type_index(typeid(TerrainComponent)))
+					DrawTerrainMaterialCard(m_Entity, *static_cast<TerrainComponent*>(live));
 			}
 			ImGui::PopID();
 		}
