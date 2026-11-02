@@ -276,8 +276,9 @@ namespace Helios
 		}
 
 		const bool shared_ok = m_InstanceStorage != nullptr && m_GpuVertexView != nullptr;
-		/* GPU 放置暂时不贴地（计算里还读不到高度图），有地形时先走 CPU 路径 */
-		const bool gpu_path = m_Ground == nullptr && g_GpuPlacementEnabled && shared_ok
+		/* 贴地时把地形高度上传成 storage buffer；建不出来就退回 CPU 路径 */
+		const bool ground_ready = m_Ground == nullptr || m_Ground->GetHeightStorage() != nullptr;
+		const bool gpu_path = ground_ready && g_GpuPlacementEnabled && shared_ok
 			&& Renderer::GetRenderAPI() != nullptr && Renderer::GetRenderAPI()->SupportsCompute();
 		m_UsingGpuPlacement = gpu_path;
 		if (gpu_path)
@@ -354,18 +355,13 @@ namespace Helios
 						}
 					}
 
-					/* 叶面姿态：按坡面法线整体旋转，SurfaceAlign 控制贴合程度（0 = 始终竖直） */
-					glm::quat align = glm::identity<glm::quat>();
-					if (m_Ground != nullptr && m_SurfaceAlign > 0.0f)
-					{
-						const glm::quat target = glm::rotation(glm::vec3(0.0f, 1.0f, 0.0f), ground_normal);
-						align = glm::slerp(glm::identity<glm::quat>(), target, m_SurfaceAlign);
-					}
-
-					/* 叶片朝向决定倒向哪边；宽高已经折进基向量，着色器直接加就行 */
-					const glm::vec3 dir_right = align * (m_Right * std::cos(yaw) + m_Forward * std::sin(yaw));
-					const glm::vec3 dir_face = align * (-m_Right * std::sin(yaw) + m_Forward * std::cos(yaw));
-					const glm::vec3 up_axis = align * glm::vec3(0.0f, 1.0f, 0.0f);
+					/* 叶面姿态：up 向坡面法线插值，右/前向对 up 正交化。
+					 * 这套公式在 GrassPlacement.glsl 里一字不差，两条路径才长得一样 */
+					const glm::vec3 up_axis = glm::normalize(glm::mix(glm::vec3(0.0f, 1.0f, 0.0f),
+						ground_normal, m_SurfaceAlign));
+					glm::vec3 dir_right = m_Right * std::cos(yaw) + m_Forward * std::sin(yaw);
+					dir_right = glm::normalize(dir_right - up_axis * glm::dot(dir_right, up_axis));
+					const glm::vec3 dir_face = glm::cross(dir_right, up_axis);
 
 					GrassInstanceData& instance = instances[first + i];
 					instance.Basis = glm::mat4(
@@ -425,6 +421,9 @@ namespace Helios
 			glm::vec4 Grid{ 0.0f };          /* x 块数 x、y 块数 z、z 每块株数、w 种子 */
 			glm::vec4 Shape{ 0.0f };         /* x 半宽、y 半长、z 块宽、w 块深 */
 			glm::vec4 Blade{ 0.0f };         /* x 叶高、y 叶宽、z 接受阴影、w 总株数 */
+			glm::vec4 Terrain{ 0.0f };       /* xyz 地形中心、w 起伏总高差 */
+			glm::vec4 TerrainShape{ 0.0f };  /* x 半宽、y 半长、z 分辨率、w 是否有地形 */
+			glm::vec4 GrassShape{ 0.0f };    /* x 贴面程度、y cos(最大坡度)、z 启用坡度过滤 */
 		};
 
 		PlacementParams params;
@@ -438,7 +437,21 @@ namespace Helios
 		params.Blade = glm::vec4(m_Height, m_Width, m_ReceiveShadow ? 1.0f : 0.0f,
 			static_cast<float>(m_InstanceCount));
 
-		if (Renderer::DispatchGrassPlacement(m_InstanceStorage, &params, sizeof(params), m_InstanceCount))
+		SharedPtr<DeviceStorageBuffer> terrain_heights;
+		if (m_Ground != nullptr)
+		{
+			terrain_heights = m_Ground->GetHeightStorage();
+			params.Terrain = glm::vec4(m_Ground->GetOrigin(), m_Ground->GetHeightScale());
+			params.TerrainShape = glm::vec4(m_Ground->GetExtent().x, m_Ground->GetExtent().y,
+				static_cast<float>(m_Ground->GetResolution()), 1.0f);
+			const bool slope_filter = m_MaxSlope > 0.0f && m_MaxSlope < 90.0f;
+			params.GrassShape = glm::vec4(m_SurfaceAlign,
+				slope_filter ? std::cos(glm::radians(m_MaxSlope)) : -1.0f,
+				slope_filter ? 1.0f : 0.0f, 0.0f);
+		}
+
+		if (Renderer::DispatchGrassPlacement(m_InstanceStorage, &params, sizeof(params), m_InstanceCount,
+			terrain_heights))
 			m_GpuDirty = false;
 	}
 

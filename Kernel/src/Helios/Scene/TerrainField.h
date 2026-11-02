@@ -60,6 +60,10 @@ namespace Helios
 		/* 高度重建的版本号：贴地对象据此判断要不要重新采样 */
 		[[nodiscard]] uint64_t GetRevision() const { return m_BuildKey; }
 
+		/* 高度数据的 GPU 副本（float 数组，归一化 0..1）：计算着色器里的贴地采样用。
+		 * 第一次要的时候才建，CPU 侧不改高度就不会重建 */
+		const SharedPtr<class DeviceStorageBuffer>& GetHeightStorage() const;
+
 		/* 模板网格：33×33 顶点，顶点只有 UV（0..1）。所有地形共用一份。 */
 		static const MeshPrimitive& GetPatchPrimitive();
 		/* 实例数据布局，与 Terrain.glsl 的 location 5/6 对应 */
@@ -76,6 +80,7 @@ namespace Helios
 		SharedPtr<DeviceTexture> m_HeightMap;
 		/* 高度图的 CPU 副本（归一化 0..1）：贴地查询用，GPU 放置后续也读它 */
 		std::vector<float> m_Heights;
+		mutable SharedPtr<class DeviceStorageBuffer> m_HeightStorage;
 		glm::vec3 m_Origin{ 0.0f };
 		glm::vec2 m_Extent{ 512.0f, 512.0f }; /* 半宽半长 */
 		uint32_t m_Resolution{ 512 };

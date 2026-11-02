@@ -19,6 +19,16 @@ layout(std140, binding = 4) uniform GrassPlacementBlock
 	vec4 u_Grid;          /* x 块数 x、y 块数 z、z 每块株数、w 种子 */
 	vec4 u_Shape;         /* x 半宽、y 半长、z 块宽、w 块深 */
 	vec4 u_Blade;         /* x 叶高、y 叶宽、z 接受阴影、w 总株数 */
+	/* ---- 贴地：有地形时叶片落到地形表面、姿态对齐坡面 ---- */
+	vec4 u_Terrain;       /* xyz 地形中心世界坐标、w 起伏总高差 */
+	vec4 u_TerrainShape;  /* x 半宽、y 半长、z 高度图分辨率、w 是否有地形 */
+	vec4 u_GrassShape;    /* x 贴面程度、y cos(最大坡度)、z 是否启用坡度过滤 */
+};
+
+/* 地形高度数据：与 TerrainField 的 CPU 副本同一份，归一化 0..1 */
+layout(std430, binding = 2) readonly buffer TerrainHeights
+{
+	float u_Heights[];
 };
 
 layout(std430, binding = 1) writeonly buffer GrassInstanceBuffer
@@ -27,6 +37,43 @@ layout(std430, binding = 1) writeonly buffer GrassInstanceBuffer
 };
 
 const float kTwoPi = 6.2831853f;
+
+/* 双线性采样地形高度（世界单位），与 C++ 侧 SampleHeightWorld 同口径 */
+float TerrainHeightAt(vec2 world_xz)
+{
+	if (u_TerrainShape.w < 0.5f)
+		return u_Terrain.y;
+
+	const vec2 half_extent = max(u_TerrainShape.xy, vec2(1e-3f));
+	vec2 uv = clamp((world_xz - u_Terrain.xz) / (half_extent * 2.0f) + 0.5f, vec2(0.0f), vec2(1.0f));
+
+	const int width = max(int(u_TerrainShape.z), 2);
+	const float max_index = float(width - 1);
+	const vec2 texel = uv * max_index;
+	const vec2 base = floor(texel);
+	const vec2 frac = texel - base;
+	const ivec2 i0 = ivec2(base);
+	const ivec2 i1 = min(i0 + 1, ivec2(width - 1));
+
+	const float h00 = u_Heights[i0.y * width + i0.x];
+	const float h10 = u_Heights[i0.y * width + i1.x];
+	const float h01 = u_Heights[i1.y * width + i0.x];
+	const float h11 = u_Heights[i1.y * width + i1.x];
+	const float h = mix(mix(h00, h10, frac.x), mix(h01, h11, frac.x), frac.y);
+	return u_Terrain.y + (h - 0.5f) * u_Terrain.w;
+}
+
+/* 坡面法线：邻居差分，步长取两个纹素 */
+vec3 TerrainNormalAt(vec2 world_xz)
+{
+	const float texel = (u_TerrainShape.x * 2.0f) / max(u_TerrainShape.z - 1.0f, 1.0f);
+	const float step = max(texel * 2.0f, 0.01f);
+	const float hl = TerrainHeightAt(world_xz - vec2(step, 0.0f));
+	const float hr = TerrainHeightAt(world_xz + vec2(step, 0.0f));
+	const float hd = TerrainHeightAt(world_xz - vec2(0.0f, step));
+	const float hu = TerrainHeightAt(world_xz + vec2(0.0f, step));
+	return normalize(vec3(hl - hr, 2.0f * step, hd - hu));
+}
 
 /* 与 C++ 侧 MixHash 完全一致：PCG 的输出散列 */
 uint MixHash(uint value)
@@ -69,14 +116,30 @@ void main()
 	const float height = u_Blade.x * u_BasisUp.w * (0.7f + 0.55f * HashUnit(hash_base, 4u));
 	const float width = u_Blade.y * u_BasisRight.w * (0.75f + 0.5f * HashUnit(hash_base, 5u));
 
-	const vec3 dir_right = right_axis * cos(yaw) + forward_axis * sin(yaw);
-	const vec3 dir_face = -right_axis * sin(yaw) + forward_axis * cos(yaw);
-	const vec3 position = u_Origin.xyz + right_axis * local_x + forward_axis * local_z;
+	vec3 position = u_Origin.xyz + right_axis * local_x + forward_axis * local_z;
+
+	/* 贴地：叶根落到地形表面；坡太陡的株退化掉（不跳过，保持每块株数固定） */
+	vec3 ground_normal = vec3(0.0f, 1.0f, 0.0f);
+	float growth = 1.0f;
+	if (u_TerrainShape.w > 0.5f)
+	{
+		position.y = TerrainHeightAt(position.xz);
+		ground_normal = TerrainNormalAt(position.xz);
+		if (u_GrassShape.z > 0.5f && ground_normal.y < u_GrassShape.y)
+			growth = 0.0f;
+	}
+
+	/* 姿态对齐坡面：up 向法线插值，右/前向对 up 正交化（与 C++ 侧同一套公式） */
+	const vec3 up_axis = normalize(mix(vec3(0.0f, 1.0f, 0.0f), ground_normal,
+		clamp(u_GrassShape.x, 0.0f, 1.0f)));
+	vec3 dir_right = right_axis * cos(yaw) + forward_axis * sin(yaw);
+	dir_right = normalize(dir_right - up_axis * dot(dir_right, up_axis));
+	const vec3 dir_face = cross(dir_right, up_axis);
 
 	const uint base = instance * 5u;
-	u_Instances[base + 0u] = vec4(dir_right * width, 0.0f);
-	u_Instances[base + 1u] = vec4(0.0f, height, 0.0f, 0.0f);
-	u_Instances[base + 2u] = vec4(dir_face * width, 0.0f);
+	u_Instances[base + 0u] = vec4(dir_right * (width * growth), 0.0f);
+	u_Instances[base + 1u] = vec4(up_axis * (height * growth), 0.0f);
+	u_Instances[base + 2u] = vec4(dir_face * (width * growth), 0.0f);
 	u_Instances[base + 3u] = vec4(position, 1.0f);
 	u_Instances[base + 4u] = vec4(-1.0f, u_Blade.z, HashUnit(hash_base, 6u), HashUnit(hash_base, 7u));
 }

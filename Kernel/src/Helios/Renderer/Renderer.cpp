@@ -663,7 +663,8 @@ namespace Helios
 	}
 
 	bool Renderer::DispatchGrassPlacement(const SharedPtr<DeviceStorageBuffer>& instances,
-		const void* param_data, uint32_t param_size, uint32_t instance_count)
+		const void* param_data, uint32_t param_size, uint32_t instance_count,
+		const SharedPtr<DeviceStorageBuffer>& terrain_heights)
 	{
 		if (m_pRenderAPI == nullptr || instances == nullptr || instance_count == 0
 			|| !m_pRenderAPI->SupportsCompute())
@@ -673,8 +674,10 @@ namespace Helios
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
 
-		/* 绑定点跟 GrassPlacement.glsl 对齐：1 号是实例数据，参数块在 4 号 */
-		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = { { 1, instances } };
+		/* 绑定点跟 GrassPlacement.glsl 对齐：1 号是实例数据、2 号是地形高度，参数块在 4 号 */
+		std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = { { 1, instances } };
+		if (terrain_heights != nullptr)
+			buffers.emplace_back(2, terrain_heights);
 		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
 		const uint32_t group_count = (instance_count + group_size - 1) / group_size;
 		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);

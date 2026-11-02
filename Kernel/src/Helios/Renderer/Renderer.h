@@ -50,8 +50,10 @@ namespace Helios
 			const void* param_data, uint32_t param_size, uint32_t instance_count);
 
 		/* 草地 GPU 放置：一次派发把整片草地的叶片实例算出来。运行期不支持计算着色器时返回 false */
+		/* terrain_heights 非空时绑到 2 号：计算里按世界坐标采样地形高度做贴地 */
 		static bool DispatchGrassPlacement(const SharedPtr<class DeviceStorageBuffer>& instances,
-			const void* param_data, uint32_t param_size, uint32_t instance_count);
+			const void* param_data, uint32_t param_size, uint32_t instance_count,
+			const SharedPtr<class DeviceStorageBuffer>& terrain_heights = nullptr);
 
 		/* per_draw：单次绘制的覆盖参数（IBL 这类"每次绘制不同"的绑定）。
 	 * 只写当前绑定的 Shader 与纹理、不落材质对象 —— 共享材质因此保持只读。 */

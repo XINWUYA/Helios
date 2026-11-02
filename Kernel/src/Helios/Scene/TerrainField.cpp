@@ -167,6 +167,18 @@ namespace Helios
 
 		/* 留一份 CPU 副本：草地 / 物件贴地时按世界坐标双线性采样 */
 		m_Heights = std::move(heights);
+		/* 重新建了高度图，GPU 副本作废，下次要的时候重传 */
+		m_HeightStorage = nullptr;
+	}
+
+	const SharedPtr<DeviceStorageBuffer>& TerrainField::GetHeightStorage() const
+	{
+		if (m_HeightStorage == nullptr && !m_Heights.empty())
+		{
+			m_HeightStorage = DeviceStorageBuffer::Create("TerrainHeights",
+				m_Heights.data(), static_cast<uint32_t>(m_Heights.size() * sizeof(float)));
+		}
+		return m_HeightStorage;
 	}
 
 	bool TerrainField::ContainsPoint(const glm::vec2& world_xz) const
