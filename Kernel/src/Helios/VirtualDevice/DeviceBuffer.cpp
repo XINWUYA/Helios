@@ -211,4 +211,13 @@ namespace Helios
 	{
 		return Create(name, nullptr, size);
 	}
+
+	SharedPtr<DeviceStorageBuffer> DeviceStorageBuffer::Dummy()
+	{
+		/* 不缓存失败结果：后端没就绪时先返回空，下次调用再试 */
+		static SharedPtr<DeviceStorageBuffer> s_Dummy;
+		if (s_Dummy == nullptr)
+			s_Dummy = Create("DummyStorageBuffer", 16u);
+		return s_Dummy;
+	}
 }

@@ -553,6 +553,17 @@ namespace Helios
 				}
 			}
 
+			/* 开了贴地却没找到地形：给一次提示，否则面板上开关是开的、行为却退回平面，很难查 */
+			if (grass_component.m_ConformToTerrain && ground == nullptr && !grass_component.m_WarnedMissingTerrain)
+			{
+				const char* name = "Grass";
+				if (const auto* name_component = m_Registry.try_get<NameComponent>(entity))
+					name = name_component->m_Name.c_str();
+				CORE_LOG_WARN("Grass '{}' is set to conform to terrain, but no terrain covers its center; "
+					"falling back to a flat field.", name);
+				grass_component.m_WarnedMissingTerrain = true;
+			}
+
 			grass_component.m_Field->Rebuild(grass_component, grass_world, ground);
 			grass_component.m_Field->TickBend(delta_time, grass_component.m_BendRecover);
 			grass_component.m_Field->EnsurePlaced();

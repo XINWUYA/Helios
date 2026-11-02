@@ -433,6 +433,9 @@ namespace Helios
 		/* 总株数预算：跟随地形时按块数分摊，避免范围一大就炸 */
 		uint32_t m_MaxInstances{ 500000 };
 
+		/* 运行期：已经提示过"开了贴地但没找到地形"，避免每帧刷日志（不序列化） */
+		bool m_WarnedMissingTerrain{ false };
+
 		/* 材质槽：pMaterial 是生效材质；IsInstance / SourceAssetPath 的含义与模型槽一致 ——
 		 * 面板上改参数时从资产克隆一份，改动只落在这片草地上，Reset 回资产 */
 		GrassMaterialSlot m_MaterialSlot;

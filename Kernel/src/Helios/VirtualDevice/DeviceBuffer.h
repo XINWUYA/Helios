@@ -113,6 +113,10 @@ namespace Helios
 
 		static SharedPtr<DeviceStorageBuffer> Create(const std::string& name, const void* data, uint32_t size);
 		static SharedPtr<DeviceStorageBuffer> Create(const std::string& name, uint32_t size);
+		/* 绑定占位缓冲：着色器声明了某个 storage buffer、本次派发却没有真实数据时用它。
+		 * 内容全零，配套的开关位保证着色器不会读它；后端不支持 SSBO 时返回空，调用方自己回退。
+		 * 与 DeviceTexture::White / Black 同一套约定，进程内只建一块。 */
+		static SharedPtr<DeviceStorageBuffer> Dummy();
 	};
 
 	class HELIOS_API IndexBuffer

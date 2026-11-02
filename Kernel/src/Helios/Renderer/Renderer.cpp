@@ -674,10 +674,15 @@ namespace Helios
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
 
-		/* 绑定点跟 GrassPlacement.glsl 对齐：1 号是实例数据、2 号是地形高度，参数块在 4 号 */
-		std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = { { 1, instances } };
-		if (terrain_heights != nullptr)
-			buffers.emplace_back(2, terrain_heights);
+		/* 绑定点跟 GrassPlacement.glsl 对齐：1 号是实例数据、2 号是地形高度，参数块在 4 号。
+		 * 着色器声明了 2 号就必须有绑定，没地形时用引擎的哑缓冲顶上（Metal 缺绑定直接断言） */
+		const SharedPtr<DeviceStorageBuffer> heights =
+			(terrain_heights != nullptr) ? terrain_heights : DeviceStorageBuffer::Dummy();
+		if (heights == nullptr)
+			return false;
+
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers =
+			{ { 1, instances }, { 2, heights } };
 		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
 		const uint32_t group_count = (instance_count + group_size - 1) / group_size;
 		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);
@@ -689,7 +694,9 @@ namespace Helios
 		const SharedPtr<DeviceStorageBuffer>& skinned,
 		uint32_t vertex_count)
 	{
-		if (m_pRenderAPI == nullptr || vertex_count == 0 || !m_pRenderAPI->SupportsCompute())
+		/* 四块缓冲都要有绑定：着色器声明了就得绑，缺一个 Metal 校验直接断言 */
+		if (m_pRenderAPI == nullptr || vertex_count == 0 || !m_pRenderAPI->SupportsCompute()
+			|| palette == nullptr || bind_vertices == nullptr || weights == nullptr || skinned == nullptr)
 			return false;
 
 		const SharedPtr<DeviceShader> shader = s_SkinComputeShader.Get();
