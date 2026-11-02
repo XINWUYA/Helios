@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <string>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -45,6 +46,9 @@ namespace Helios
 		[[nodiscard]] uint32_t GetResolution() const { return m_Resolution; }
 		[[nodiscard]] float GetHeightScale() const { return m_HeightScale; }
 		[[nodiscard]] bool IsEmpty() const { return m_HeightMap == nullptr; }
+		/* 高度数据来自 .terrain 资产时给出资产路径，程序化生成时为空 */
+		[[nodiscard]] bool IsFromAsset() const { return !m_AssetPath.empty(); }
+		[[nodiscard]] const std::string& GetAssetPath() const { return m_AssetPath; }
 
 		/* 世界高度采样（CPU 侧）：草地与其它物体贴地时用。
 		 * 点不在地形范围内返回 false，out_height 不动 */
@@ -82,6 +86,8 @@ namespace Helios
 
 	private:
 		void BuildHeightMap(const TerrainComponent& component);
+		/* 高度图上传：纹理 + CPU 副本，两种来源共用 */
+		void UploadHeightMap(std::vector<float> heights);
 		/* frustum 为空表示不做视锥剔除；max_distance 为 0 表示不限距离 */
 		void CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
 			const glm::vec3& center, float size, uint32_t lod, std::vector<TerrainPatch>& out) const;
@@ -94,6 +100,8 @@ namespace Helios
 		glm::vec2 m_Extent{ 512.0f, 512.0f }; /* 半宽半长 */
 		uint32_t m_Resolution{ 512 };
 		float m_HeightScale{ 40.0f };
+		/* 本次高度图的来源（资产路径；程序化时为空） */
+		std::string m_AssetPath;
 		/* 节点边长（米）与相机距离的比值，小于它才继续细分。8 表示最近处一个节点约 8 个节点宽 */
 		float m_LodRatio{ 6.0f };
 		uint32_t m_MinNodeSize{ 64 };

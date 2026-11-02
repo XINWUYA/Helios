@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "AssetFileOps.h"
 #include "Helios/Core/TextureSettings.h"
+#include "Helios/Scene/TerrainAsset.h"
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -198,6 +199,7 @@ namespace Helios
 			{ ".MODEL", AssetFileKind::Model },
 			/* 材质：一层 .mtl（单条材质资产） */
 			{ ".MTL", AssetFileKind::Material },
+			{ ".TERRAIN", AssetFileKind::Terrain },
 			/* 反射探针的烘焙缓存（保存场景时落盘，加载时直接恢复） */
 			{ ".PROBE", AssetFileKind::Probe },
 			/* 动画片段（属性面板的 Animator 卡拖进去就能播） */
@@ -341,6 +343,17 @@ namespace Helios
 				"        <ParamInfo Type=\"0\" Name=\"u_AmbientTexture\" Value=\"Textures/Black.png\"/>\n"
 				"    </Parameters>\n"
 				"</Material>\n";
+		}
+
+		/* 地形：二进制容器，给一份带平缓起伏的初始高度图（空阵列看不出是地形） */
+		if (ext == ".terrain")
+		{
+			std::vector<uint8_t> bytes;
+			const TerrainAsset::Data data = TerrainAsset::MakeDefault();
+			if (!TerrainAsset::Encode(data, bytes))
+				return std::string();
+
+			return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 		}
 
 		/* 空动画：时长 1 秒、循环，没有轨道（挂到 Animator 上不报错，先给个可播的壳） */

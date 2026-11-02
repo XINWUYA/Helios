@@ -15,4 +15,5 @@ namespace Helios
 	void RegisterSpriteComponentEditor();
 	void RegisterPostProcessComponentEditor();
 	void RegisterGrassComponentEditor();
+	void RegisterTerrainComponentEditor();
 }

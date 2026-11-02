@@ -95,6 +95,7 @@ namespace Helios
 			{ "Scene",          ".scn",      "New Scene",          Icons::Id::FileScene,     nullptr },
 			{ "Material Graph", ".mtlgraph", "New Material Graph", Icons::Id::FileMtlGraph,  nullptr },
 			{ "Material",       ".mtl",      "New Material",       Icons::Id::FileMaterial,  nullptr },
+			{ "Terrain",        ".terrain",  "New Terrain",        Icons::Id::FileTerrain,   nullptr },
 			/* 项目里的 shader 走同一套相对路径：写在 Shaders 下，材质里填 Shaders/<名字>.glsl */
 			{ "Shader",         ".glsl",     "NewShader",          Icons::Id::FileShader,    "Shaders" },
 			{ "Animation Clip", ".anim",     "New Animation",      Icons::Id::AnimationClip, nullptr },
@@ -329,6 +330,7 @@ namespace Helios
 		case FileType::Shader:   return Icons::Id::FileShader;
 		case FileType::Model:    return Icons::Id::FileModel;
 		case FileType::Material: return Icons::Id::FileMaterial;
+		case FileType::Terrain:  return Icons::Id::FileTerrain;
 		case FileType::Probe:    return Icons::Id::FileProbe;
 		case FileType::Animation: return Icons::Id::AnimationClip;
 		case FileType::CppHeader: return Icons::Id::FileCppHeader;
@@ -352,6 +354,7 @@ namespace Helios
 		case AssetFileKind::Shader:   return FileType::Shader;
 		case AssetFileKind::Model:    return FileType::Model;
 		case AssetFileKind::Material: return FileType::Material;
+		case AssetFileKind::Terrain:  return FileType::Terrain;
 		case AssetFileKind::Probe:    return FileType::Probe;
 		case AssetFileKind::Animation: return FileType::Animation;
 		case AssetFileKind::CppHeader: return FileType::CppHeader;
@@ -374,6 +377,7 @@ namespace Helios
 		case FileType::Shader:   return AssetFileKind::Shader;
 		case FileType::Model:    return AssetFileKind::Model;
 		case FileType::Material: return AssetFileKind::Material;
+		case FileType::Terrain:  return AssetFileKind::Terrain;
 		case FileType::Probe:    return AssetFileKind::Probe;
 		case FileType::Animation: return AssetFileKind::Animation;
 		case FileType::CppHeader: return AssetFileKind::CppHeader;
@@ -399,6 +403,7 @@ namespace Helios
 		case TypeFilter::Shader:   return "Shaders";
 		case TypeFilter::Model:    return "Models";
 		case TypeFilter::Material: return "Materials";
+		case TypeFilter::Terrain:  return "Terrains";
 		case TypeFilter::Probe:    return "Reflection Probes";
 		case TypeFilter::Animation: return "Animations";
 		case TypeFilter::CppHeader: return "C++ Headers";
@@ -421,6 +426,7 @@ namespace Helios
 		case TypeFilter::Shader:   return type == FileType::Shader;
 		case TypeFilter::Model:    return type == FileType::Model;
 		case TypeFilter::Material: return type == FileType::Material;
+		case TypeFilter::Terrain:  return type == FileType::Terrain;
 		case TypeFilter::Probe:    return type == FileType::Probe;
 		case TypeFilter::Animation: return type == FileType::Animation;
 		case TypeFilter::CppHeader: return type == FileType::CppHeader;
@@ -1575,6 +1581,7 @@ namespace Helios
 		case TypeFilter::Shader:   return Icons::Id::FileShader;
 		case TypeFilter::Model:    return Icons::Id::FileModel;
 		case TypeFilter::Material: return Icons::Id::FileMaterial;
+		case TypeFilter::Terrain:  return Icons::Id::FileTerrain;
 		case TypeFilter::Probe:    return Icons::Id::FileProbe;
 		case TypeFilter::Animation: return Icons::Id::AnimationClip;
 		case TypeFilter::CppHeader: return Icons::Id::FileCppHeader;

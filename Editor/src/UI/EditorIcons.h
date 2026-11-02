@@ -60,6 +60,7 @@ namespace Helios
 			Capture,
 			/* 内容（资源浏览器）：文件夹管"在哪"，文件图标管"是什么" */
 			Directory, File, FileImage, FileSvg, FileScene, FileMtlGraph, FileShader, FileModel, FileMaterial, FileProbe,
+			FileTerrain,
 			/* 脚本源码：头文件 / 源文件 */
 			FileCppHeader, FileCppSource,
 			/* 视口辅助（Gizmos 显隐菜单）：工具栏按钮 + 弹层分项 */

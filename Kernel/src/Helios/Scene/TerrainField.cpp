@@ -1,11 +1,14 @@
 #include "Pch.h"
 #include "TerrainField.h"
+#include "TerrainAsset.h"
 #include "TerrainSampling.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <glm/gtc/type_ptr.hpp>
 
 #include "Components.h"
+#include "Helios/Common/PathUtils.h"
 #include "Helios/Renderer/Frustum.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
@@ -70,13 +73,74 @@ namespace Helios
 			}
 			return total > 0.0f ? sum / total : 0.0f;
 		}
+
+		/* 资产读取缓存：Rebuild 每帧都被调，按写入时间判断要不要重读。
+		 * 文件不存在也记一行，免得每帧都去开一次必然失败的文件 */
+		struct AssetEntry
+		{
+			std::string Path;
+			std::filesystem::file_time_type WriteTime{};
+			TerrainAsset::Data Data;
+			bool Loaded{ false };
+		};
+
+		const TerrainAsset::Data* LoadAssetCached(const std::string& path,
+			std::filesystem::file_time_type& out_write_time)
+		{
+			out_write_time = std::filesystem::file_time_type{};
+
+			std::filesystem::path file_path;
+			if (!TryPathFromUtf8(path, file_path))
+				return nullptr;
+
+			std::error_code error;
+			const std::filesystem::file_time_type write_time =
+				std::filesystem::last_write_time(file_path, error);
+			const bool exists = !error;
+			if (exists)
+				out_write_time = write_time;
+
+			static std::vector<AssetEntry> s_Cache;
+			AssetEntry* entry = nullptr;
+			for (AssetEntry& candidate : s_Cache)
+			{
+				if (candidate.Path == path)
+				{
+					entry = &candidate;
+					break;
+				}
+			}
+
+			if (entry != nullptr && entry->WriteTime == out_write_time && entry->Loaded == exists)
+				return entry->Loaded ? &entry->Data : nullptr;
+
+			if (entry == nullptr)
+			{
+				s_Cache.push_back(AssetEntry{});
+				entry = &s_Cache.back();
+			}
+
+			entry->Path = path;
+			entry->WriteTime = out_write_time;
+			entry->Loaded = false;
+
+			if (exists && TerrainAsset::Read(path, entry->Data))
+				entry->Loaded = true;
+
+			return entry->Loaded ? &entry->Data : nullptr;
+		}
 	}
 
 	void TerrainField::Rebuild(const TerrainComponent& component, const glm::mat4& world)
 	{
 		PROFILE_FUNCTION();
 
-		/* 构建键：参数与变换都算进来，没变就整段跳过 */
+		/* 绑了资产就从资产取高度；取不到退回程序化，场景不至于整块消失 */
+		std::filesystem::file_time_type asset_write_time{};
+		const TerrainAsset::Data* asset = component.m_AssetPath.empty()
+			? nullptr : LoadAssetCached(component.m_AssetPath, asset_write_time);
+
+		/* 构建键：参数、变换与资产都算进来，没变就整段跳过 */
 		uint64_t key = 0xcbf29ce484222325ull;
 		const auto mix = [&key](const void* data, size_t size)
 		{
@@ -95,11 +159,19 @@ namespace Helios
 		mix(&component.m_MinNodeSize, sizeof(component.m_MinNodeSize));
 		mix(glm::value_ptr(world), sizeof(glm::mat4));
 
+		/* 资产内容换了（重新导出 / 外部编辑）也要重建，时间戳就是它的版本号 */
+		const bool from_asset = asset != nullptr;
+		if (from_asset)
+		{
+			mix(&asset_write_time, sizeof(asset_write_time));
+			mix(component.m_AssetPath.data(), component.m_AssetPath.size());
+		}
+
 		if (key == m_BuildKey && m_HeightMap != nullptr)
 			return;
 		m_BuildKey = key;
 
-		/* 范围按世界尺度展开：组件的是局部半宽半长，缩放挂在实体变换上 */
+		/* 范围按世界尺度展开：组件的局部半宽半长乘实体缩放 */
 		const glm::vec3 axis_x(world[0]);
 		const glm::vec3 axis_y(world[1]);
 		const glm::vec3 axis_z(world[2]);
@@ -107,14 +179,30 @@ namespace Helios
 		const float scale_y = glm::length(axis_y);
 		const float scale_z = glm::length(axis_z);
 		m_Origin = glm::vec3(world[3]);
-		m_Extent = glm::vec2(std::max(0.0f, component.m_Extent.x * scale_x),
-			std::max(0.0f, component.m_Extent.y * scale_z));
-		m_Resolution = std::clamp(component.m_Resolution, 16u, 4096u);
-		m_HeightScale = std::max(0.0f, component.m_HeightScale * scale_y);
-		m_LodRatio = std::max(0.5f, component.m_LodRatio);
-		m_MinNodeSize = std::max(1u, component.m_MinNodeSize);
 
-		BuildHeightMap(component);
+		if (from_asset)
+		{
+			/* 数据以资产为准：组件上的分辨率 / 范围 / 起伏只在程序化模式下起作用 */
+			m_Extent = glm::vec2(std::max(0.0f, asset->Extent.x * scale_x),
+				std::max(0.0f, asset->Extent.y * scale_z));
+			m_Resolution = std::clamp(asset->Resolution, 16u, 4096u);
+			m_HeightScale = std::max(0.0f, asset->HeightScale * scale_y);
+			m_LodRatio = std::max(0.5f, component.m_LodRatio);
+			m_MinNodeSize = std::max(1u, component.m_MinNodeSize);
+			m_AssetPath = component.m_AssetPath;
+			UploadHeightMap(asset->Heights);
+		}
+		else
+		{
+			m_Extent = glm::vec2(std::max(0.0f, component.m_Extent.x * scale_x),
+				std::max(0.0f, component.m_Extent.y * scale_z));
+			m_Resolution = std::clamp(component.m_Resolution, 16u, 4096u);
+			m_HeightScale = std::max(0.0f, component.m_HeightScale * scale_y);
+			m_LodRatio = std::max(0.5f, component.m_LodRatio);
+			m_MinNodeSize = std::max(1u, component.m_MinNodeSize);
+			m_AssetPath.clear();
+			BuildHeightMap(component);
+		}
 	}
 
 	void TerrainField::BuildHeightMap(const TerrainComponent& component)
@@ -153,6 +241,13 @@ namespace Helios
 			for (float& h : heights)
 				h -= *lowest;
 		}
+
+		UploadHeightMap(std::move(heights));
+	}
+
+	void TerrainField::UploadHeightMap(std::vector<float> heights)
+	{
+		const uint32_t resolution = m_Resolution;
 
 		/* 高度图存归一化值（0..1），世界高度 = 实体高度 + 值 × HeightScale */
 		TextureDesc desc;

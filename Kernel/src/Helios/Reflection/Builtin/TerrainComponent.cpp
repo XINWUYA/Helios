@@ -11,9 +11,13 @@ namespace Helios
 	{
 		/* 材质是资源引用：字段表只认 POD，路径与实例内嵌单独读写，
 		 * 两种形态与模型槽 / 草地槽一致（引用只写路径，实例全量内嵌） */
-		void SaveTerrainMaterial(tinyxml2::XMLElement* element, const void* component)
+		void SaveTerrainExtra(tinyxml2::XMLElement* element, const void* component)
 		{
-			const auto& slot = static_cast<const TerrainComponent*>(component)->m_MaterialSlot;
+			const auto* terrain = static_cast<const TerrainComponent*>(component);
+			if (!terrain->m_AssetPath.empty())
+				element->SetAttribute("Asset", RELATIVE_PATH(terrain->m_AssetPath).c_str());
+
+			const auto& slot = terrain->m_MaterialSlot;
 			if (slot.pMaterial == nullptr)
 				return;
 
@@ -33,9 +37,14 @@ namespace Helios
 				element->SetAttribute("Material", RELATIVE_PATH(path).c_str());
 		}
 
-		void LoadTerrainMaterial(const tinyxml2::XMLElement* element, void* component)
+		void LoadTerrainExtra(const tinyxml2::XMLElement* element, void* component)
 		{
 			auto& terrain = *static_cast<TerrainComponent*>(component);
+			if (const char* asset = element->Attribute("Asset"))
+				terrain.m_AssetPath = ABSOLUTE_PATH(asset);
+			else
+				terrain.m_AssetPath.clear();
+
 			terrain.m_MaterialSlot = MaterialSlotOverride{};
 
 			for (const tinyxml2::XMLElement* instance_doc = element->FirstChildElement("MaterialOverride");
@@ -94,8 +103,8 @@ namespace Helios
 			.Slider()
 			.Field(&TerrainComponent::m_ReceiveShadow, "ReceiveShadow", FieldType::Bool)
 			.Field(&TerrainComponent::m_CastShadow, "CastShadow", FieldType::Bool)
-			.SaveExtra(&SaveTerrainMaterial)
-			.LoadExtra(&LoadTerrainMaterial)
+			.SaveExtra(&SaveTerrainExtra)
+			.LoadExtra(&LoadTerrainExtra)
 			.Register();
 	}
 }

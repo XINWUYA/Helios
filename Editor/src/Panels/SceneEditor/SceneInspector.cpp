@@ -18,6 +18,7 @@
 #include "Helios/Common/Utils.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/Scene/ReflectionProbe.h"	/* .probe 详情的烘焙结果预览（BuildPreviewTexture） */
+#include "Helios/Scene/TerrainAsset.h"
 #include "Helios/Scene/AnimationClip.h"
 #include "UI/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
@@ -363,6 +364,120 @@ namespace Helios
 		inline float kAssetPreviewMaxWidth() { return Scaled(220.0f); }
 		inline float kAssetPreviewMaxHeight() { return Scaled(240.0f); }
 
+		/* .terrain 的高度图缩略图：灰度 + 一点明暗，只为认出形状。
+		 * 只取到 256²，去掉驱动上下文的差异也能画 */
+		SharedPtr<DeviceTexture> BuildTerrainPreviewTexture(const std::string& name, const TerrainAsset::Data& data)
+		{
+			if (Renderer::GetRenderAPI() == nullptr || !data.IsValid())
+				return nullptr;
+
+			const uint32_t resolution = data.Resolution;
+			constexpr uint32_t kSide = 256;
+			const auto sample = [&data, resolution](uint32_t x, uint32_t z)
+			{
+				const uint32_t sx = std::min(x, resolution - 1);
+				const uint32_t sz = std::min(z, resolution - 1);
+				return data.Heights[static_cast<size_t>(sz) * resolution + sx];
+			};
+
+			std::vector<uint8_t> pixels(static_cast<size_t>(kSide) * kSide * 4);
+			for (uint32_t y = 0; y < kSide; ++y)
+			{
+				for (uint32_t x = 0; x < kSide; ++x)
+				{
+					const uint32_t hx = x * resolution / kSide;
+					const uint32_t hz = y * resolution / kSide;
+					const float height = sample(hx, hz);
+					/* 邻居差分当坡向：左上亮、右下暗，起伏一眼看得出来 */
+					const float left = sample(hx > 0 ? hx - 1 : 0, hz);
+					const float up = sample(hx, hz > 0 ? hz - 1 : 0);
+					const float shade = glm::clamp(0.72f + (height - left) * 8.0f + (height - up) * 8.0f, 0.35f, 1.25f);
+					const float value = glm::clamp((0.25f + height * 0.65f) * shade, 0.0f, 1.0f);
+
+					const uint8_t gray = static_cast<uint8_t>(value * 255.0f);
+					const size_t index = (static_cast<size_t>(y) * kSide + x) * 4;
+					pixels[index + 0] = gray;
+					pixels[index + 1] = gray;
+					pixels[index + 2] = gray;
+					pixels[index + 3] = 255;
+				}
+			}
+
+			TextureDesc desc;
+			desc.Width = kSide;
+			desc.Height = kSide;
+			desc.MipLevels = 1;
+			desc.Format = TextureFormat::RGBA8;
+			desc.SamplerType = SamplerType::Sampler2D;
+			desc.Usage = TextureUsage::Sampleable;
+
+			const SharedPtr<DeviceTexture> texture = DeviceTexture::Create(name, desc);
+			if (texture == nullptr)
+				return nullptr;
+
+			PixelDesc pixel_desc;
+			pixel_desc.Format = PixelFormat::RGBA;
+			pixel_desc.Type = PixelType::UnsignedByte;
+			texture->SetData(pixels.data(), pixel_desc);
+			return texture;
+		}
+
+		/* 材质里的数值参数（层颜色 / 粗糙度）：读不到就用着色器默认值兜底 */
+		bool TryReadMaterialParam(const SharedPtr<Material>& material, const char* name, MaterialParamInfo& out)
+		{
+			if (material == nullptr)
+				return false;
+
+			for (const auto& [key, info] : material->GetAllParameters())
+			{
+				(void)key;
+				if (info.Name == name)
+				{
+					out = info;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		glm::vec4 ReadMaterialColor(const SharedPtr<Material>& material, const char* name, const glm::vec3& fallback)
+		{
+			MaterialParamInfo info;
+			if (TryReadMaterialParam(material, name, info) && info.Type == ParamType::Vec3)
+			{
+				const glm::vec3 value = std::any_cast<glm::vec3>(info.Value);
+				return glm::vec4(value, 1.0f);
+			}
+			return glm::vec4(fallback, 1.0f);
+		}
+
+		float ReadMaterialFloat(const SharedPtr<Material>& material, const char* name, float fallback)
+		{
+			MaterialParamInfo info;
+			if (TryReadMaterialParam(material, name, info) && info.Type == ParamType::Float)
+				return std::any_cast<float>(info.Value);
+			return fallback;
+		}
+
+		/* 一行的颜色块 + 十六进制：层信息只有颜色，没有贴图 */
+		void DrawColorChipRow(const std::string& label, const glm::vec4& color)
+		{
+			ImGuiExt::BeginPropertyRow(label.c_str());
+			const float height = ImGui::GetFrameHeight();
+			ImGui::ColorButton("##Chip", ImVec4(color.r, color.g, color.b, 1.0f),
+				ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
+				ImVec2(height * 2.2f, height));
+			ImGui::SameLine();
+
+			char text[16];
+			std::snprintf(text, sizeof(text), "#%02X%02X%02X",
+				static_cast<int>(color.r * 255.0f + 0.5f),
+				static_cast<int>(color.g * 255.0f + 0.5f),
+				static_cast<int>(color.b * 255.0f + 0.5f));
+			ImGui::TextUnformatted(text);
+			ImGuiExt::EndPropertyRow();
+		}
+
 		/* 资源大类 -> 头部图标（与资源浏览器同一套图标语言；文件夹单独一档） */
 		Icons::Id AssetIconOf(const AssetSelectionEntry& entry)
 		{
@@ -378,6 +493,7 @@ namespace Helios
 			case AssetFileKind::Shader:   return Icons::Id::FileShader;
 			case AssetFileKind::Model:    return Icons::Id::FileModel;
 			case AssetFileKind::Material: return Icons::Id::FileMaterial;
+			case AssetFileKind::Terrain:  return Icons::Id::FileTerrain;
 			case AssetFileKind::Probe:    return Icons::Id::FileProbe;
 			case AssetFileKind::Animation: return Icons::Id::AnimationClip;
 			case AssetFileKind::CppHeader: return Icons::Id::FileCppHeader;
@@ -404,6 +520,7 @@ namespace Helios
 			case AssetFileKind::Shader:   return "Shader";
 			case AssetFileKind::Model:    return "Model";
 			case AssetFileKind::Material: return "Material";
+			case AssetFileKind::Terrain:  return "Terrain";
 			case AssetFileKind::Probe:    return "Reflection Probe";
 			case AssetFileKind::Animation: return "Animation Clip";
 			case AssetFileKind::CppHeader: return "C++ Header";
@@ -705,6 +822,25 @@ namespace Helios
 			}
 		}
 
+		/* 地形资产：高度图缩略图 + 三层混色（层只有颜色，没有贴图） */
+		else if (entry.Kind == AssetFileKind::Terrain)
+		{
+			if (m_AssetTerrain.HeightTexture != nullptr)
+			{
+				ImGui::Spacing();
+				const float side = ImMin(ImGui::GetContentRegionAvail().x, kAssetPreviewMaxWidth());
+				ImGui::Image((ImTextureID)m_AssetTerrain.HeightTexture.get(), ImVec2(side, side),
+					ImVec2(0, 1), ImVec2(1, 0));
+			}
+
+			if (!m_AssetTerrain.LayerColors.empty())
+			{
+				DrawCardSectionDivider();
+				for (const auto& [label, color] : m_AssetTerrain.LayerColors)
+					DrawColorChipRow(label, color);
+			}
+		}
+
 		/* 图片的采样与格式：GIF 走自己的图集，不在这里配 */
 		if (!entry.IsFolder && entry.Kind == AssetFileKind::Image)
 		{
@@ -899,6 +1035,7 @@ namespace Helios
 			m_AssetDetailRows.clear();
 			m_AssetShaderIncludes.clear();
 			m_AssetProbeCards.clear();
+			m_AssetTerrain = TerrainAssetPreview{};
 			m_AssetMaterial = nullptr;
 			m_AssetMaterialDirty = false;
 			return;
@@ -912,6 +1049,7 @@ namespace Helios
 		m_AssetDetailRows.clear();
 		m_AssetShaderIncludes.clear();
 		m_AssetProbeCards.clear();
+		m_AssetTerrain = TerrainAssetPreview{};
 		m_AssetMaterial = nullptr;
 		m_AssetMaterialDirty = false;
 
@@ -1043,6 +1181,68 @@ namespace Helios
 			}
 
 			m_AssetMaterialDirty = false;	/* 刚读上来的缓冲与文件一致（Apply 的禁用依据） */
+		}
+		else if (entry.Kind == AssetFileKind::Terrain)
+		{
+			/* 地形资产：高度图规格 + 高度范围 + 材质里的三层混色。
+			 * 层只有颜色没有贴图，所以"层信息"就是这三档颜色与坡度阈值 */
+			TerrainAsset::Data data;
+			if (!TerrainAsset::Read(PathToUtf8(absolute_path), data))
+			{
+				m_AssetDetailRows.emplace_back("Heightmap", "unreadable");
+				return;
+			}
+
+			const uint32_t resolution = data.Resolution;
+			const size_t disk_bytes = static_cast<size_t>(resolution) * resolution * sizeof(uint16_t);
+			const size_t gpu_bytes = static_cast<size_t>(resolution) * resolution * sizeof(float);
+
+			const auto [min_it, max_it] = std::minmax_element(data.Heights.begin(), data.Heights.end());
+			const float min_height = min_it != data.Heights.end() ? *min_it * data.HeightScale : 0.0f;
+			const float max_height = max_it != data.Heights.end() ? *max_it * data.HeightScale : 0.0f;
+
+			char extent_text[48];
+			std::snprintf(extent_text, sizeof(extent_text), "%.0f x %.0f m",
+				data.Extent.x * 2.0f, data.Extent.y * 2.0f);
+			char range_text[48];
+			std::snprintf(range_text, sizeof(range_text), "%.1f - %.1f m", min_height, max_height);
+			char scale_text[32];
+			std::snprintf(scale_text, sizeof(scale_text), "%.1f m", data.HeightScale);
+
+			m_AssetDetailRows.emplace_back("Resolution",
+				std::to_string(resolution) + " x " + std::to_string(resolution));
+			m_AssetDetailRows.emplace_back("Extent", extent_text);
+			m_AssetDetailRows.emplace_back("HeightScale", scale_text);
+			m_AssetDetailRows.emplace_back("Height range", range_text);
+			m_AssetDetailRows.emplace_back("Heightmap", "16-bit, " + FormatFileSize(disk_bytes));
+			m_AssetDetailRows.emplace_back("GPU texture", "R32F, " + FormatFileSize(gpu_bytes));
+
+			/* 材质：资产里写的 .mtl，没写就用内建默认；三档颜色就是现在的"层" */
+			const SharedPtr<Material> material = data.MaterialPath.empty()
+				? TerrainComponent::GetDefaultMaterial()
+				: AssetManager::Instance().GetOrLoad<Material>(ABSOLUTE_PATH(data.MaterialPath));
+
+			m_AssetTerrain.MaterialLine = data.MaterialPath.empty() ? "Built-in default" : data.MaterialPath;
+			m_AssetDetailRows.emplace_back("Material", m_AssetTerrain.MaterialLine);
+			if (material != nullptr && material->GetShader() != nullptr)
+				m_AssetDetailRows.emplace_back("Shader", RELATIVE_PATH(material->GetShader()->GetPath()));
+
+			/* 三层：低处草色、陡坡岩色、高处砂色；坡度阈值决定草岩怎么分 */
+			m_AssetDetailRows.emplace_back("Layers", "3 (height + slope blend)");
+			char slope_text[32];
+			std::snprintf(slope_text, sizeof(slope_text), "%.2f", ReadMaterialFloat(material, "u_RockSlope", 0.45f));
+			char roughness_text[32];
+			std::snprintf(roughness_text, sizeof(roughness_text), "%.2f", ReadMaterialFloat(material, "u_Roughness", 0.85f));
+			m_AssetDetailRows.emplace_back("Rock slope", slope_text);
+			m_AssetDetailRows.emplace_back("Roughness", roughness_text);
+
+			m_AssetTerrain.LayerColors = {
+				{ "Grass", ReadMaterialColor(material, "u_GrassColor", glm::vec3(0.26f, 0.36f, 0.16f)) },
+				{ "Rock", ReadMaterialColor(material, "u_RockColor", glm::vec3(0.32f, 0.30f, 0.27f)) },
+				{ "High", ReadMaterialColor(material, "u_HighColor", glm::vec3(0.55f, 0.47f, 0.34f)) },
+			};
+			m_AssetTerrain.HeightTexture = BuildTerrainPreviewTexture(
+				PathToUtf8(absolute_path.filename()) + "_HeightPreview", data);
 		}
 		else if (entry.Kind == AssetFileKind::Shader && IsGlslSource(absolute_path))
 		{

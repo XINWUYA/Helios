@@ -473,6 +473,10 @@ namespace Helios
 	 * 外观（草色 / 岩色 / 粗糙度）由材质决定，这里只管范围、起伏与 LOD。 */
 	struct HELIOS_API TerrainComponent : ComponentBase
 	{
+		/* 高度数据来自 .terrain 资产（绝对路径；空 = 按下面的参数程序化生成）。
+		 * 绑了资产时分辨率 / 范围 / 起伏幅度都由资产说了算，这几项只当程序化模式的输入 */
+		std::string m_AssetPath;
+
 		glm::vec2 m_Extent{ 256.0f, 256.0f }; /* 局部空间半宽半长（米） */
 		uint32_t m_Resolution{ 512 };          /* 高度图边长（纹素） */
 		float m_HeightScale{ 80.0f };          /* 起伏幅度（米）：最低点落在实体位置，往上乘这个数 */

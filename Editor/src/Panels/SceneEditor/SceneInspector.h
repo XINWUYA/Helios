@@ -201,6 +201,14 @@ namespace Helios
 			SharedPtr<DeviceTexture> Texture;   /* 十字展开预览；无图形上下文时为空 */
 		};
 		std::vector<ProbeImageCard> m_AssetProbeCards;
+		/* .terrain 资产的预览：高度图缩略图 + 材质里的三层混色（层信息只有颜色，没有贴图） */
+		struct TerrainAssetPreview
+		{
+			SharedPtr<DeviceTexture> HeightTexture;                        /* 灰度缩略图；无图形上下文为空 */
+			std::vector<std::pair<std::string, glm::vec4>> LayerColors;    /* 层名 + 颜色 */
+			std::string MaterialLine;                                      /* 材质来源：相对路径或内建默认 */
+		};
+		TerrainAssetPreview m_AssetTerrain;
 		/* 材质资产（.mtl）的编辑缓冲：与深挖详情同一缓存键（路径 + 写入时间）从磁盘读入；
 		 * 编辑只改缓冲（不碰场景与缓存），点「Apply」才序列化回文件。
 		 * 可选 Shader 清单不在这里存 —— 归 AssetFileOps 统一缓存（见 CollectShaderOptions）。 */
