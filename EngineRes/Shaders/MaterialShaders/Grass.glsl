@@ -60,6 +60,13 @@ void main()
 		return;
 	}
 
+	/* 远处逐株抽稀：块内密度连续，块边界不会拉出一条竖边 */
+	if (GrassBladeFaded(base, a_InstanceParams))
+	{
+		gl_Position = vec4(0.0f, 0.0f, -2.0f, 1.0f);
+		return;
+	}
+
 	vec3 blade_normal;
 	const vec3 pos = ExpandGrassBlade(a_Position, base, right, up, face, a_InstanceParams,
 		u_WindTime, blade_normal);

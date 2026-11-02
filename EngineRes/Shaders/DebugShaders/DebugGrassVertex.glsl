@@ -55,6 +55,13 @@ void main()
 		return;
 	}
 
+	/* 抽稀与可见着色同一套，调试视图里看到的草才是同一批 */
+	if (GrassBladeFaded(base, a_InstanceParams))
+	{
+		gl_Position = vec4(0.0f, 0.0f, -2.0f, 1.0f);
+		return;
+	}
+
 	vec3 blade_normal;
 	const vec3 pos = ExpandGrassBlade(a_Position, base, right, up, face, a_InstanceParams,
 		u_WindTime, blade_normal);

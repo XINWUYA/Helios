@@ -42,6 +42,9 @@ layout(std430, binding = 5) readonly buffer ChunkBounds
 	vec4 u_ChunkBounds[];
 };
 
+/* 抽稀曲线与可见着色共用一份，两边丢的是同一批株 */
+#include "../Builtin/GrassDensity.glsl"
+
 void main()
 {
 	const uint instance = gl_GlobalInvocationID.x;
@@ -62,29 +65,23 @@ void main()
 			return;
 	}
 
-	/* 距离按到块表面的最近距离算，跟逐块提交那条路径同一口径：
-	 * 用块中心的话，大块在相机身边也会因为中心远而整块砍掉 */
-	const float view_distance = max(length(u_Camera.xyz - center) - radius, 0.0f);
-	if (view_distance >= u_Counts.w)
+	/* 距离按到块表面的最近距离算：整块都在剔除距离之外才丢。
+	 * 块内的稀稠不在这里截断，改由下面逐株判 */
+	if (max(length(u_Camera.xyz - center) - radius, 0.0f) >= u_Counts.w)
 		return;
 
-	float scale = 1.0f;
-	if (view_distance > u_Counts.z)
-	{
-		const float span = max(u_Counts.w - u_Counts.z, 1e-3f);
-		const float t = clamp((view_distance - u_Counts.z) / span, 0.0f, 1.0f);
-		scale = mix(1.0f, max(u_Extra.x, 0.0f), t * t);
-	}
+	const uint source_base = instance * 5u;
 
-	/* 块内只有前 draw_count 条要画：块内顺序本来就是随机的，取前缀等于均匀抽稀 */
-	const uint blade_index = instance - packed_chunk * per_chunk;
-	const uint draw_count = max(1u, uint(float(per_chunk) * scale));
-	if (blade_index >= draw_count)
+	/* 距离抽稀逐株判：块内密度连续，块边界不出台阶。可见着色里还有同样的一次，
+	 * 两边用同一条曲线；这里先丢一遍是为了缩小压实后的缓冲 */
+	const vec3 blade_base = u_Source[source_base + 3u].xyz;
+	const float blade_distance = length(u_Camera.xyz - blade_base);
+	if (GrassDensityKeep(blade_distance, GrassDensityDither(u_Source[source_base + 4u]),
+			u_Counts.z, u_Counts.w, u_Extra.x) < 0.5f)
 		return;
 
 	/* 压实：原子计数器给出这一条在目标缓冲里的位置 */
 	const uint slot = atomicAdd(u_Args[1], 1u);
-	const uint source_base = instance * 5u;
 	const uint draw_base = slot * 5u;
 	for (uint item = 0u; item < 5u; ++item)
 		u_Draw[draw_base + item] = u_Source[source_base + item];

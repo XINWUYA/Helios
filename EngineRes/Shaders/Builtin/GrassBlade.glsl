@@ -1,9 +1,17 @@
 #ifndef GRASS_BLADE_GLSL
 #define GRASS_BLADE_GLSL
 
+#include "Uniforms.glsl"
+#include "GrassDensity.glsl"
+
 /* 草叶的形变数学：可见着色与阴影投影共用这一份，两边算出来的形状必须一模一样，
  * 否则影子和草会各走各的。
  * 调用方负责给 a_InstanceMatrix0..3、a_InstanceParams 这组实例属性。 */
+
+/* 距离抽稀的三个档位，由 GrassDraw::MakeDrawParams 逐片写入 */
+uniform float u_BladeFullDistance = 20.0f;
+uniform float u_BladeFadeDistance = 80.0f;
+uniform float u_BladeMinDensity = 0.1f;
 
 uniform vec2 u_WindDirection = vec2(1.0f, 0.35f); // @property
 uniform float u_WindStrength = 0.12f;              // @property
@@ -32,6 +40,14 @@ float GrassWind(vec2 world_xz, float wind_time, out vec2 wind_dir)
 	const float wave = sin(phase);
 	const float gust = sin(phase * 0.21f + wind_time * 0.37f) * 0.5f + 0.5f;
 	return wave * mix(0.45f, 1.0f, gust);
+}
+
+/* 这一株是否已经稀到该丢：逐株判定，块内密度才连续 */
+bool GrassBladeFaded(vec3 base, vec4 params)
+{
+	const float distance = length(u_ViewPos - base);
+	return GrassDensityKeep(distance, GrassDensityDither(params),
+		u_BladeFullDistance, u_BladeFadeDistance, u_BladeMinDensity) < 0.5f;
 }
 
 /* 把一个模板顶点（x ∈ [-1,1] 叶宽、y ∈ [0,1] 根到梢）展开成世界坐标。

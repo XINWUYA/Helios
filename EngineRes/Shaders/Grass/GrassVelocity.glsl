@@ -30,6 +30,13 @@ void main()
 	const vec3 up = a_InstanceMatrix1.xyz;
 	const vec3 face = a_InstanceMatrix2.xyz;
 
+	/* 抽稀跟可见着色同一套：被丢掉的株不能留速度，否则 TAA 会拖出残影 */
+	if (u_FlatPad == 0 && GrassBladeFaded(base, a_InstanceParams))
+	{
+		gl_Position = vec4(0.0f, 0.0f, -2.0f, 1.0f);
+		return;
+	}
+
 	vec3 cur_pos;
 	vec3 prev_pos;
 	if (u_FlatPad != 0)

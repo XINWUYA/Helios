@@ -177,18 +177,6 @@ namespace Helios
 				}
 			}
 
-			/* 草的密度系数：LodDistance 以内满密度，往外按平方衰减到 MinDensityScale，
-			 * CullDistance 处归零。块内叶片顺序是随机的，按系数取前缀就是均匀抽稀。 */
-			float GrassDensityScale(float distance, const GrassComponent& grass)
-			{
-				if (distance <= grass.m_LodDistance)
-					return 1.0f;
-
-				const float span = std::max(grass.m_CullDistance - grass.m_LodDistance, 1e-3f);
-				const float t = std::clamp((distance - grass.m_LodDistance) / span, 0.0f, 1.0f);
-				return glm::mix(1.0f, std::max(0.0f, grass.m_MinDensityScale), t * t);
-			}
-
 			/* 逐片草地的绘制：块底面先、叶片后（抽稀 / 剔除 / 间接），材质与逐绘制参数
 			 * 由调用方准备 —— 可见着色与调试重绘共用这一套提交。 */
 			template <typename GetMaterial, typename PrepareDraw>
@@ -229,6 +217,13 @@ namespace Helios
 					/* 叶片停画之后草色再撑一段，交接不至于突然断掉 */
 					per_draw.Overrides.emplace_back(ParamType::Float, "u_PadCullDistance",
 						grass.m_CullDistance * 2.0f);
+					/* 逐株抽稀的三个档位：与 GrassComponent 同名同义 */
+					per_draw.Overrides.emplace_back(ParamType::Float, "u_BladeFullDistance",
+						grass.m_LodDistance);
+					per_draw.Overrides.emplace_back(ParamType::Float, "u_BladeFadeDistance",
+						grass.m_CullDistance);
+					per_draw.Overrides.emplace_back(ParamType::Float, "u_BladeMinDensity",
+						grass.m_MinDensityScale);
 
 					prepare_draw(grass, per_draw);
 
@@ -269,11 +264,10 @@ namespace Helios
 						if (distance >= grass.m_CullDistance)
 							continue;
 
-						const float scale = GrassDensityScale(distance, grass);
-						const uint32_t count = static_cast<uint32_t>(
-							std::max(1.0f, std::round(static_cast<float>(chunk.Count) * scale)));
-						Renderer::SubmitInstanced(material, blade, instance_buffer, chunk.First, count, &per_draw,
-							0, &Renderer::GetGrassInstanceLayout());
+						/* 距离抽稀逐株做（GrassBlade.glsl 的 GrassBladeFaded），这里整块提交：
+						 * 按块截断实例数会在块边界上留台阶 */
+						Renderer::SubmitInstanced(material, blade, instance_buffer, chunk.First, chunk.Count,
+							&per_draw, 0, &Renderer::GetGrassInstanceLayout());
 					}
 				}
 			}
