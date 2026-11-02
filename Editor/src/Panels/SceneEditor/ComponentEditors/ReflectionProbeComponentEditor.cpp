@@ -62,17 +62,14 @@ namespace Helios
 
 		/* 烘焙结果预览：三张十字展开图并排（立方图不能直接被 2D UI 采样，
 		 * 探针把它按需转成 2D —— 见 ReflectionProbe::RequestBakePreview）。
-		 * 首次显示 / Rebake 后自动请求生成；鼠标悬停放大看细节。 */
+		 * 首次显示和 Rebake 后自动生成，实时探针烘焙出新结果时按节流跟进；鼠标悬停放大看细节。 */
 		void DrawBakePreviewRow(ReflectionProbe& probe)
 		{
 			using PreviewState = ReflectionProbe::BakePreviewState;
 
-			/* 已烘焙但还没有预览 → 请求生成（幂等；生成由探针的状态机在渲染帧推进） */
-			if (probe.GetBakePreviewState() == PreviewState::Idle
-				&& !probe.HasBakePreview() && !probe.HasBakePreviewFailed())
-			{
-				probe.RequestBakePreview();
-			}
+			/* 面板每帧都报一次到：探针据此把实时烘焙的结果刷进预览，面板关掉就停。
+			 * 首次生成也从这个入口发起（幂等） */
+			probe.RequestBakePreview();
 
 			if (!probe.HasBakePreview())
 			{

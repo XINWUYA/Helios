@@ -63,6 +63,7 @@ namespace Helios
             {
                 m_BakeConvolveFace = 0;
                 m_BakeCompleted = true;
+                ++m_BakeRevision;   /* 六面转完一圈：预览可以跟着换一版了 */
             }
         }
         else
@@ -76,6 +77,7 @@ namespace Helios
                     BakePrefilterMapFace(face);
             }
             m_BakeCompleted = true;
+            ++m_BakeRevision;
         }
     }
 
@@ -124,6 +126,13 @@ namespace Helios
 
         /* 预览生成在烘焙完成后至少等待的帧数：让承载烘焙绘制的命令缓冲区先提交 */
         constexpr uint8_t kBakePreviewFrameDelay = 1;
+
+        /* 两次重建之间至少间隔的帧数：实时探针每六帧产一版新结果，回读又要等 GPU，
+         * 按帧数节流才不会把回读做成帧率负担（60fps 下约四分之一秒一版）。 */
+        constexpr uint32_t kBakePreviewRefreshTicks = 15;
+
+        /* 面板多久没来调 RequestBakePreview 就算关掉了（帧） */
+        constexpr uint32_t kBakePreviewVisibleTicks = 2;
 
         /* IEEE 754 半精度 -> float。回读的 RGBA16F 是原始字节，CPU 侧要自己解出数值；
          * 不用平台的 _Float16 —— 跨编译器（MSVC / clang）行为一致更重要。 */
@@ -451,15 +460,38 @@ namespace Helios
 
     void ReflectionProbe::RequestBakePreview()
     {
+        /* 面板还在画这一行：实时探针靠这个标记决定要不要继续刷新 */
+        m_PreviewVisible = true;
+        m_PreviewRequestTick = m_PreviewTick;
+
         if (m_PreviewState != BakePreviewState::Idle)
             return; /* 已在生成中：幂等 */
+
+        if (!IsPreviewRefreshDue())
+            return; /* 手上这版就是最新的 */
 
         m_PreviewFailed = false;
         m_PreviewState = BakePreviewState::Requested;
     }
 
+    bool ReflectionProbe::IsPreviewRefreshDue() const
+    {
+        if (m_PreviewFailed)
+            return false; /* 失败过的不自动重试，等重烘焙 Reset 重新武装 */
+
+        if (m_BakePreviews[0] == nullptr)
+            return true; /* 还没生成过 */
+
+        if (m_PreviewRevision == m_BakeRevision)
+            return false; /* 烘焙没出新结果 */
+
+        return m_PreviewTick - m_PreviewBuiltTick >= kBakePreviewRefreshTicks;
+    }
+
     void ReflectionProbe::TickBakePreview()
     {
+        ++m_PreviewTick;
+
         /* 重烘焙请求：UI 帧里点的（当帧绘制列表可能还引用着预览纹理，
          * 当场销毁会悬垂），在这里统一执行 —— Prepare 先于本帧的绘制/UI */
         if (m_RebakeRequested)
@@ -468,8 +500,18 @@ namespace Helios
             Reset();
         }
 
+        /* 面板连续几帧没来报到：关掉了，实时探针不用再回读 */
+        if (m_PreviewVisible && m_PreviewTick - m_PreviewRequestTick > kBakePreviewVisibleTicks)
+            m_PreviewVisible = false;
+
         if (m_PreviewState == BakePreviewState::Idle)
-            return;
+        {
+            /* 面板开着、烘焙又有新结果才自动刷新；一次性烘焙的探针版本不动，走不到这里 */
+            if (!m_PreviewVisible || !m_BakeCompleted || !IsPreviewRefreshDue())
+                return;
+
+            m_PreviewState = BakePreviewState::Requested;
+        }
 
         if (m_PreviewState == BakePreviewState::Requested)
         {
@@ -477,6 +519,8 @@ namespace Helios
             if (!m_BakeCompleted)
                 return;
 
+            /* 记下这一版：生成期间又烘出新版本的话，下一轮还会再刷 */
+            m_PreviewRevision = m_BakeRevision;
             m_PreviewState = BakePreviewState::WaitingForGPU;
             m_PreviewCountdown = kBakePreviewFrameDelay;
             return;
@@ -493,6 +537,7 @@ namespace Helios
             render_api->WaitForGPU();
 
         m_PreviewFailed = !BuildBakePreviews();
+        m_PreviewBuiltTick = m_PreviewTick;
         m_PreviewState = BakePreviewState::Idle;
     }
 

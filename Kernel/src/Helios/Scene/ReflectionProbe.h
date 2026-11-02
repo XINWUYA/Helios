@@ -163,7 +163,8 @@ namespace Helios
         };
 
         /* 请求生成（或刷新）预览。幂等：生成中重复调用不生效；
-         * 失败后不再自动重试（重烘焙 Reset 会重新武装）。 */
+         * 失败后不再自动重试（重烘焙 Reset 会重新武装）。
+         * 面板每帧都调一次，顺带表示"面板还开着"——实时探针据此跟进新结果。 */
         void RequestBakePreview();
 
         /* 每帧推进预览生成状态机（由 ReflectionProbeManager 驱动，与缓存写入同一帧序） */
@@ -206,6 +207,9 @@ namespace Helios
          * 需要 GPU 已完成烘焙绘制（调用方先 WaitForGPU）。 */
         bool BuildBakePreviews();
 
+        /* 要不要重建预览：没生成过、烘焙出了新版本（按帧数节流）。 */
+        [[nodiscard]] bool IsPreviewRefreshDue() const;
+
         /* IBL烘焙结果 */
         struct BakeResult
         {
@@ -242,6 +246,15 @@ namespace Helios
         BakePreviewState m_PreviewState{ BakePreviewState::Idle };
         uint8_t m_PreviewCountdown{ 0 };
         bool m_PreviewFailed{ false };
+        /* 烘焙产出版本：每跑完一轮 +1；预览记住自己是对着哪一版生成的，
+         * 实时探针靠这个版本差把新结果刷进面板 */
+        uint32_t m_BakeRevision{ 0 };
+        uint32_t m_PreviewRevision{ 0 };
+        /* 面板还开着吗：每帧一次 Tick，超过几帧没来报到就算关掉，停掉自动刷新 */
+        uint32_t m_PreviewTick{ 0 };
+        uint32_t m_PreviewRequestTick{ 0 };
+        uint32_t m_PreviewBuiltTick{ 0 };
+        bool m_PreviewVisible{ false };
         /* 重烘焙请求（UI 帧里只置位，TickBakePreview 里执行，见 RequestRebake） */
         bool m_RebakeRequested{ false };
 
