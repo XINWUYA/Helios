@@ -100,9 +100,13 @@ namespace Helios
 		/* 地形换了一份或重建过：贴地高度要重新采样 */
 		const uint64_t ground_key = ground != nullptr ? ground->GetRevision() : 0ull;
 		mix(&ground_key, sizeof(ground_key));
-		/* 观察范围按 32 米量化：相机小范围移动不触发重建，跨格了才重铺 */
-		const glm::vec2 focus_min_key(std::floor(focus_min.x / 32.0f), std::floor(focus_min.y / 32.0f));
-		const glm::vec2 focus_max_key(std::floor(focus_max.x / 32.0f), std::floor(focus_max.y / 32.0f));
+		/* 观察范围按块尺寸量化：相机缩放、平移动不到一个块就不重建。
+		 * 重建一次要重传几十兆实例数据，相机连续动起来卡顿全在这里 */
+		const float focus_quantum = std::clamp(component.m_CullDistance * 0.25f, 8.0f, 64.0f);
+		const glm::vec2 focus_min_key(std::floor(focus_min.x / focus_quantum),
+			std::floor(focus_min.y / focus_quantum));
+		const glm::vec2 focus_max_key(std::floor(focus_max.x / focus_quantum),
+			std::floor(focus_max.y / focus_quantum));
 		mix(&focus_min_key, sizeof(focus_min_key));
 		mix(&focus_max_key, sizeof(focus_max_key));
 
@@ -121,6 +125,16 @@ namespace Helios
 
 		if (key == m_BuildKey && m_InstanceBuffer != nullptr)
 			return;
+
+		/* 后台还在算：同一个 key 就等它；key 变了就取消，别让连续缩放堆一串任务 */
+		if (m_AsyncBuild != nullptr)
+		{
+			if (m_AsyncKey == key)
+				return;
+			m_AsyncTask.Cancel();
+			m_AsyncBuild.reset();
+		}
+
 		m_BuildKey = key;
 		m_Ground = ground;
 		m_FocusMin = focus_min;
@@ -189,7 +203,8 @@ namespace Helios
 
 		const uint32_t total_chunks = m_ChunksX * m_ChunksZ;
 		const float chunk_radius = 0.5f * glm::length(glm::vec2(m_ChunkWidth, m_ChunkDepth));
-		const float cull_radius = std::max(component.m_CullDistance, m_ChunkWidth) + chunk_radius;
+		/* 多铺 25%：相机移动一小段时靠余量顶着，不必每个块边界都重建 */
+		const float cull_radius = std::max(component.m_CullDistance * 1.25f, m_ChunkWidth) + chunk_radius;
 
 		/* 有效块：观察点周围 CullDistance 内的块。全地形均匀铺满在 1km² 上放不下预算，
 		 * 远处本来也会被剔除距离砍掉，干脆不生成。
@@ -388,9 +403,10 @@ namespace Helios
 				m_AsyncBuild = state;
 
 				const BuildParams params = CaptureBuildParams();
-				Jobs::RunBackground([state, params]()
+				m_AsyncTask = Jobs::RunBackground([state, params]()
 				{
-					std::vector<GrassInstanceData> instances = GenerateInstances(params);
+					std::vector<GrassInstanceData> instances = GenerateInstances(params,
+						[]() { return Jobs::IsCancelled(); });
 					if (Jobs::IsCancelled())
 						return;
 					state->Instances = std::move(instances);
@@ -457,7 +473,8 @@ namespace Helios
 		return params;
 	}
 
-	std::vector<GrassInstanceData> GrassField::GenerateInstances(const BuildParams& params)
+	std::vector<GrassInstanceData> GrassField::GenerateInstances(const BuildParams& params,
+		const std::function<bool()>& should_cancel)
 	{
 		PROFILE_FUNCTION();
 
@@ -466,6 +483,9 @@ namespace Helios
 
 		for (uint32_t chunk_index = 0; chunk_index < params.ChunkRanges.size(); ++chunk_index)
 		{
+			if (should_cancel && (chunk_index & 63u) == 0u && should_cancel())
+				return {};
+
 			const glm::uvec2 range = params.ChunkRanges[chunk_index];
 			if (range.y == 0)
 				continue;

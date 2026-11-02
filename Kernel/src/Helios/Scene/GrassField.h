@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 #include "Helios/Common/Export.h"
+#include "Helios/Core/Jobs.h"
 #include "Helios/Renderer/RenderCommon.h"
 #include "Helios/Scene/Mesh.h"
 
@@ -151,7 +152,9 @@ namespace Helios
 		};
 
 		[[nodiscard]] BuildParams CaptureBuildParams() const;
-		static std::vector<GrassInstanceData> GenerateInstances(const BuildParams& params);
+		/* should_cancel 非空时每 64 块查一次：后台任务被取消后能立刻退出，不白占 CPU */
+		static std::vector<GrassInstanceData> GenerateInstances(const BuildParams& params,
+			const std::function<bool()>& should_cancel = {});
 		void UploadInstances(std::vector<GrassInstanceData>& instances,
 			const SharedPtr<DeviceStorageBuffer>& storage);
 		void BuildCpuInstances(const SharedPtr<DeviceStorageBuffer>& storage);
@@ -210,6 +213,7 @@ namespace Helios
 		/* 后台重建：同 key 只起一个任务，结果在主线程上传 */
 		std::shared_ptr<AsyncBuild> m_AsyncBuild;
 		uint64_t m_AsyncKey{ 0 };
+		Jobs::Task m_AsyncTask;
 		uint32_t m_CapacityBytes{ 0 };
 		bool m_ReceiveShadow{ true };
 		bool m_GpuDirty{ false };
