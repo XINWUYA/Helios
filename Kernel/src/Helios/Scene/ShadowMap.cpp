@@ -10,6 +10,8 @@
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderPasses/ObjectSorting.h>
 #include <Helios/Renderer/RenderPasses/GrassDrawParams.h>
+#include <Helios/Renderer/RenderPasses/TerrainPasses.h>
+#include <Helios/Scene/TerrainField.h>
 #include <Helios/Scene/Material.h>
 #include <Helios/Core/AssetManager.h>
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
@@ -27,6 +29,9 @@ namespace Helios
 		 * 所以能一直铺到级联够不着的地方 —— 不然远处草地会是一整片没有影子的纯色 */
 		constexpr float kGrassShadowFullRadius = 20.0f;
 		constexpr float kGrassShadowFadeRadius = 60.0f;
+
+		/* 级联深度板里地形高度的采样上限（每轴）：只用来撑深度区间，不必逐纹素扫 */
+		constexpr uint32_t kTerrainDepthSamples = 96;
 	}
 
 	namespace
@@ -145,13 +150,14 @@ namespace Helios
 		/* 准备方向光 ShadowMap：算级联 VP 矩阵和分割距离。这里拿不到可见网格列表，先按相机
 		 * 子视锥拟合一次；RenderView::Execute 随后会带着投射物重新拟合（脏检测把投射物输入
 		 * 也算上），保证投射物不被 near / far 板裁掉。 */
-		UpdateCascadeMatrices(camera, nullptr);
+		UpdateCascadeMatrices(camera, nullptr, scene.get());
 	}
 
 	/* 依据当前方向光方向、相机与场景投射物，重算各级联的视图投影矩阵与分割距离。
 	 * 供 PrepareForShadowMaps（首次准备）与每帧执行前（方向光旋转 / 相机移动）共用。
 	 * 通过对比缓存（方向光方向 + 相机视图/投影矩阵 + 是否拿到投射物）跳过无变化的重算。 */
-	void ShadowMapManager::UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects)
+	void ShadowMapManager::UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects,
+		Scene* scene)
 	{
 		/* 准备方向光的ShadowMap */
 		if (m_CascadeShadowMaps.empty())
@@ -184,12 +190,25 @@ namespace Helios
 		/* 可见网格数量：级联剔除表按它生成，数量变了表就过期 */
 		const uint32_t caster_count = (mesh_objects != nullptr)
 			? static_cast<uint32_t>(mesh_objects->size()) : 0u;
+
+		/* 地形重建过（换了参数或高度）也要重算：深度板按它的高度范围拟合 */
+		uint64_t terrain_revision = 0;
+		if (scene != nullptr)
+		{
+			for (auto [entity, terrain] : scene->GetRegistry().view<TerrainComponent>().each())
+			{
+				if (terrain.m_Field != nullptr)
+					terrain_revision ^= terrain.m_Field->GetRevision();
+			}
+		}
+
 		const bool unchanged =
 			!m_IsDirty &&
 			dir_equal &&
 			mat_equal(view_mat, m_LastViewMat) &&
 			mat_equal(proj_mat, m_LastProjMat) &&
-			caster_count == m_LastCasterCount;
+			caster_count == m_LastCasterCount &&
+			terrain_revision == m_LastTerrainRevision;
 		if (unchanged)
 			return;
 
@@ -198,6 +217,7 @@ namespace Helios
 		m_LastViewMat = view_mat;
 		m_LastProjMat = proj_mat;
 		m_LastCasterCount = caster_count;
+		m_LastTerrainRevision = terrain_revision;
 		m_IsDirty = false;
 
 
@@ -392,6 +412,61 @@ namespace Helios
 			{
 				ls_depth_z_min = std::min(ls_depth_z_min, geometry_z_min);
 				ls_depth_z_max = std::max(ls_depth_z_max, geometry_z_max);
+			}
+
+			/* 地形不参与 XY 拟合，高度得并进深度板：视锥外的山体照样能把影子甩进画面，
+			 * 只按投射物列表取近端，远山的影子会被近平面裁掉 */
+			if (scene != nullptr)
+			{
+				/* 正交盒的四个角反变换回世界，取 xz 范围再跟地形求交 */
+				const glm::mat4 inverse_light_view = glm::inverse(light_view_mat);
+				glm::vec2 rect_min(std::numeric_limits<float>::max());
+				glm::vec2 rect_max(-std::numeric_limits<float>::max());
+				const glm::vec2 corner_xy[4] = {
+					{ ortho_left,  ortho_bottom }, { ortho_right, ortho_bottom },
+					{ ortho_right, ortho_top },    { ortho_left,  ortho_top } };
+				for (const glm::vec2& corner : corner_xy)
+				{
+					const glm::vec3 world = glm::vec3(inverse_light_view * glm::vec4(corner.x, corner.y, 0.0f, 1.0f));
+					rect_min = glm::min(rect_min, glm::vec2(world.x, world.z));
+					rect_max = glm::max(rect_max, glm::vec2(world.x, world.z));
+				}
+
+				for (auto [entity, terrain] : scene->GetRegistry().view<TerrainComponent>().each())
+				{
+					if (!terrain.m_CastShadow)
+						continue;
+					if (terrain.m_Field == nullptr)
+						terrain.m_Field = CreateSharedPtr<TerrainField>();
+					terrain.m_Field->Rebuild(terrain, scene->GetRenderWorldTransform(entity));
+					if (terrain.m_Field->IsEmpty())
+						continue;
+
+					const glm::vec3 origin = terrain.m_Field->GetOrigin();
+					const glm::vec2 extent = terrain.m_Field->GetExtent();
+					const glm::vec2 lo = glm::max(rect_min,
+						glm::vec2(origin.x - extent.x, origin.z - extent.y));
+					const glm::vec2 hi = glm::min(rect_max,
+						glm::vec2(origin.x + extent.x, origin.z + extent.y));
+					if (lo.x >= hi.x || lo.y >= hi.y)
+						continue;
+
+					float height_min = 0.0f;
+					float height_max = 0.0f;
+					if (!terrain.m_Field->GetHeightRange(lo, hi, height_min, height_max, kTerrainDepthSamples))
+						continue;
+
+					for (int corner = 0; corner < 8; ++corner)
+					{
+						const glm::vec3 world(
+							(corner & 1) ? hi.x : lo.x,
+							(corner & 2) ? height_max : height_min,
+							(corner & 4) ? hi.y : lo.y);
+						const glm::vec3 ls = glm::vec3(light_view_mat * glm::vec4(world, 1.0f));
+						ls_depth_z_min = std::min(ls_depth_z_min, ls.z);
+						ls_depth_z_max = std::max(ls_depth_z_max, ls.z);
+					}
+				}
 			}
 
 			// near/far 由光照空间 Z 范围推导（视图空间 Z = -光照空间 Z）
@@ -740,7 +815,8 @@ namespace Helios
 				/* 每层的公共渲染体：清深度 + 提交本层投射物（级联按各自的剔除表，点光/聚光全量）。
 				 * draw_grass 只对方向光级联打开：草的投影按级联矩阵走，点光层没有对应矩阵 */
 				const auto render_shadow_layer = [&](uint8_t layer, const SharedPtr<Material>& shadow_material,
-					const std::vector<uint32_t>* caster_indices, bool draw_grass)
+					const std::vector<uint32_t>* caster_indices, bool draw_grass,
+					const glm::mat4* light_view_projection)
 				{
 					/* 绑定FrameBuffer为指定层（统一 Bind 接口，自动设置 viewport 并按层附着 Depth 附件） */
 					render_pass_info->Bind(FrameBufferBindInfo::ToDepthLayer(layer));
@@ -820,6 +896,13 @@ namespace Helios
 					if (draw_grass)
 						submit_grass_casters(layer);
 
+					/* 地形同样不在投射物列表里：patch 按这一层的盒子选，单独补一笔 */
+					if (light_view_projection != nullptr)
+					{
+						if (const SharedPtr<Scene> scene = render_view->GetOwnerScene())
+							TerrainDraw::SubmitShadow(*render_view, *scene, *light_view_projection, layer);
+					}
+
 					render_pass_info->Unbind();
 				};
 
@@ -852,9 +935,10 @@ namespace Helios
 						shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
 
 						/* 只提交与该级联正交盒相交的投射物；表没备好时退回全量 */
+						const glm::mat4 light_view_projection = cascade_shadow_map->GetLightViewProjectionMat();
 						render_shadow_layer(cascade_id, shadow_material,
 							cascade_shadow_map->HasCasterList() ? &cascade_shadow_map->GetCasterIndices() : nullptr,
-							true);
+							true, &light_view_projection);
 
 						render_api->PopDebugGroup();
 					}
@@ -884,7 +968,7 @@ namespace Helios
 						if (!face_frustum.IsOutside(casters[index]))
 							face_casters.push_back(index);
 					}
-					render_shadow_layer(layer, shadow_material, &face_casters, false);
+					render_shadow_layer(layer, shadow_material, &face_casters, false, nullptr);
 					render_api->PopDebugGroup();
 				}
 			});

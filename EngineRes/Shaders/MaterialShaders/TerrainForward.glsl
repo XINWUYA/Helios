@@ -39,6 +39,7 @@ void main()
 #include "../Builtin/Math.glsl"
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
+#include "../DebugShaders/DebugForward.glsl"
 
 struct SVextex2Frag
 {
@@ -82,5 +83,19 @@ void main()
 	const vec3 ambient = ComposeFallbackAmbient(vec3(1.0f), albedo, 1.0f) * 0.5f;
 
 	ObjectId = -1.0f;
+
+	/* 调试分流：读数取自本笔实际着色用的量，与正常着色同源 */
+	if (u_DebugView != 0)
+	{
+		SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, u_Roughness, 0.0f);
+		SDebugLighting lit;
+		lit.DirectDiffuse = direct;
+		lit.DirectSpecular = vec3(0.0f);
+		lit.IndirectDiffuse = ambient;
+		lit.IndirectSpecular = vec3(0.0f);
+		OutFragColor = DebugForwardOutput(mtl, lit, attenuation, shadow);
+		return;
+	}
+
 	OutFragColor = vec4(direct + ambient, 1.0f);
 }

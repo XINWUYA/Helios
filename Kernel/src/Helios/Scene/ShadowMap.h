@@ -117,7 +117,8 @@ namespace Helios
 		 * 调用，让方向光旋转 / 相机移动实时反映）。mesh_objects = 当前可见网格，把投射物包围盒也
 		 * 纳入光源视锥拟合，防落 near/far 板外被裁；顺带记下每级要画的投射物（与正交盒 xy 相交
 		 * 的那些）。传 nullptr 就退化成只按相机子视锥拟合，剔除表同时失效、调用方回退全量提交。 */
-		void UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects);
+		void UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects,
+			Scene* scene = nullptr);
 
 		/* 重算全部点光/聚光阴影面的视图投影矩阵（位置 / 旋转 / 范围变化即时反映）。
 		 * 光源数量少、单光源只有 1 / 6 个矩阵，不做脏检测，每帧直接重算。 */
@@ -192,5 +193,7 @@ namespace Helios
 		/* 上次拟合时可见网格的数量：既用来判断"这轮有没有几何数据"，也决定级联剔除表
 		 * 是否过期 —— 数量变了就重算，否则表里记的下标对不上当前可见表。 */
 		uint32_t m_LastCasterCount{ 0 };
+		/* 上次拟合时地形高度数据的版本：地形重建过就得重算深度板 */
+		uint64_t m_LastTerrainRevision{ 0 };
 	};
 }

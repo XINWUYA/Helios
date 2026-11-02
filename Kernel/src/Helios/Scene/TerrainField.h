@@ -35,6 +35,9 @@ namespace Helios
 		 * 只做视锥剔除，不含遮挡与背面锥（见方案文档 P4 之后的补充项）。 */
 		void BuildPatches(const Frustum& frustum, const glm::vec3& eye,
 			std::vector<TerrainPatch>& out) const;
+		/* 按球范围生成 patch 列表（探针捕获用）：没有固定视锥，超出范围的节点整块跳过 */
+		void BuildPatchesAround(const glm::vec3& center, float radius,
+			std::vector<TerrainPatch>& out) const;
 
 		[[nodiscard]] const SharedPtr<DeviceTexture>& GetHeightMap() const { return m_HeightMap; }
 		[[nodiscard]] glm::vec3 GetOrigin() const { return m_Origin; }
@@ -54,9 +57,10 @@ namespace Helios
 		[[nodiscard]] float GetMinWorldHeight() const;
 		[[nodiscard]] float GetMaxWorldHeight() const;
 		/* 一块 XZ 矩形内的表面高度范围：贴地对象的包围盒按它算，比整张地形的范围紧
-		 * （矩形完全在地形外返回 false） */
+		 * （矩形完全在地形外返回 false）。max_samples 给范围估计用：每轴最多取这么多个点，
+		 * 0 表示逐纹素扫 */
 		bool GetHeightRange(const glm::vec2& min_xz, const glm::vec2& max_xz,
-			float& out_min, float& out_max) const;
+			float& out_min, float& out_max, uint32_t max_samples = 0) const;
 		/* 最细节点边长（米）：草地块网格跟它对齐时用 */
 		[[nodiscard]] uint32_t GetMinNodeSize() const { return m_MinNodeSize; }
 		/* 高度数组的拷贝：后台重建任务拿一份快照，不跟地形共用指针 */
@@ -78,8 +82,9 @@ namespace Helios
 
 	private:
 		void BuildHeightMap(const TerrainComponent& component);
-		void CollectNodes(const Frustum& frustum, const glm::vec3& eye, const glm::vec3& center,
-			float size, uint32_t lod, std::vector<TerrainPatch>& out) const;
+		/* frustum 为空表示不做视锥剔除；max_distance 为 0 表示不限距离 */
+		void CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
+			const glm::vec3& center, float size, uint32_t lod, std::vector<TerrainPatch>& out) const;
 
 		SharedPtr<DeviceTexture> m_HeightMap;
 		/* 高度图的 CPU 副本（归一化 0..1）：贴地查询用，GPU 放置后续也读它 */

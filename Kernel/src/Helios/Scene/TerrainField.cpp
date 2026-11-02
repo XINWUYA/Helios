@@ -224,7 +224,7 @@ namespace Helios
 	}
 
 	bool TerrainField::GetHeightRange(const glm::vec2& min_xz, const glm::vec2& max_xz,
-		float& out_min, float& out_max) const
+		float& out_min, float& out_max, uint32_t max_samples) const
 	{
 		const uint32_t resolution = m_Resolution;
 		if (m_Heights.size() < static_cast<size_t>(resolution) * resolution || m_Extent.x <= 0.0f)
@@ -247,11 +247,19 @@ namespace Helios
 		const glm::ivec2 texel_min = to_texel(min_xz);
 		const glm::ivec2 texel_max = to_texel(max_xz);
 
+		/* 范围估计（级联深度板）不必逐纹素扫：按每轴的最大采样数定步长 */
+		int step = 1;
+		if (max_samples > 0)
+		{
+			const int axis = std::max(texel_max.x - texel_min.x + 1, texel_max.y - texel_min.y + 1);
+			step = std::max(1, (axis + static_cast<int>(max_samples) - 1) / static_cast<int>(max_samples));
+		}
+
 		float lo = std::numeric_limits<float>::max();
 		float hi = -std::numeric_limits<float>::max();
-		for (int z = texel_min.y; z <= texel_max.y; ++z)
+		for (int z = texel_min.y; z <= texel_max.y; z += step)
 		{
-			for (int x = texel_min.x; x <= texel_max.x; ++x)
+			for (int x = texel_min.x; x <= texel_max.x; x += step)
 			{
 				const float h = m_Heights[static_cast<size_t>(z) * resolution + static_cast<uint32_t>(x)];
 				lo = std::min(lo, h);
@@ -259,6 +267,22 @@ namespace Helios
 			}
 		}
 
+		/* 步长跳过的最后一行一列补上，矩形边界上的峰不能被漏掉 */
+		if (step > 1)
+		{
+			for (int x = texel_min.x; x <= texel_max.x; x += step)
+			{
+				const float h = m_Heights[static_cast<size_t>(texel_max.y) * resolution + static_cast<uint32_t>(x)];
+				lo = std::min(lo, h);
+				hi = std::max(hi, h);
+			}
+			for (int z = texel_min.y; z <= texel_max.y; z += step)
+			{
+				const float h = m_Heights[static_cast<size_t>(z) * resolution + static_cast<uint32_t>(texel_max.x)];
+				lo = std::min(lo, h);
+				hi = std::max(hi, h);
+			}
+		}
 		if (lo > hi)
 			return false;
 		out_min = m_Origin.y + lo * m_HeightScale;
@@ -279,21 +303,39 @@ namespace Helios
 
 		/* 根节点的包围盒盖住 0..HeightScale 这段：中心抬半高 */
 		const glm::vec3 root_center(m_Origin.x, m_Origin.y + m_HeightScale * 0.5f, m_Origin.z);
-		CollectNodes(frustum, eye, root_center, root_size, 0, out);
+		CollectNodes(&frustum, eye, 0.0f, root_center, root_size, 0, out);
 	}
 
-	void TerrainField::CollectNodes(const Frustum& frustum, const glm::vec3& eye, const glm::vec3& center,
-		float size, uint32_t lod, std::vector<TerrainPatch>& out) const
+	void TerrainField::BuildPatchesAround(const glm::vec3& center, float radius,
+		std::vector<TerrainPatch>& out) const
+	{
+		if (m_HeightMap == nullptr || radius <= 0.0f)
+			return;
+
+		const float root_size = std::max(m_Extent.x, m_Extent.y) * 2.0f;
+		if (root_size <= 0.0f)
+			return;
+
+		const glm::vec3 root_center(m_Origin.x, m_Origin.y + m_HeightScale * 0.5f, m_Origin.z);
+		CollectNodes(nullptr, center, radius, root_center, root_size, 0, out);
+	}
+
+	void TerrainField::CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
+		const glm::vec3& center, float size, uint32_t lod, std::vector<TerrainPatch>& out) const
 	{
 		if (out.size() >= kMaxPatches)
 			return;
 
 		/* 剔除：包围盒含高度范围，只按 XZ 矩形判会把山体切掉 */
 		const glm::vec3 extent(size * 0.5f, std::max(m_HeightScale * 0.5f, 0.01f), size * 0.5f);
-		if (frustum.IsOutside(center, extent))
+		if (frustum != nullptr && frustum->IsOutside(center, extent))
 			return;
 
 		const float distance = glm::length(eye - center);
+		/* 球范围（探针捕获）：节点自己的半对角线算进去，边角节点的叶子可能还伸进范围里 */
+		if (max_distance > 0.0f && distance - size * 0.7072f > max_distance)
+			return;
+
 		const bool can_split = size > static_cast<float>(m_MinNodeSize) * 1.01f;
 		if (can_split && distance < size * m_LodRatio)
 		{
@@ -303,7 +345,8 @@ namespace Helios
 			{
 				const float dx = (quadrant & 1) ? offset : -offset;
 				const float dz = (quadrant & 2) ? offset : -offset;
-				CollectNodes(frustum, eye, center + glm::vec3(dx, 0.0f, dz), child_size, lod + 1, out);
+				CollectNodes(frustum, eye, max_distance, center + glm::vec3(dx, 0.0f, dz),
+					child_size, lod + 1, out);
 			}
 			return;
 		}

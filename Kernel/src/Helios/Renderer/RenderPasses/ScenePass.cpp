@@ -521,6 +521,9 @@ namespace Helios
 								per_draw_grass.RasterStateOverride =
 									MakeVelocityRasterState(grass.GetMaterial()->GetRasterState());
 							});
+
+						/* 地形同样不在可见对象表里：静止几何的位移全部来自相机 */
+						TerrainDraw::SubmitVelocity(*render_view, *scene);
 					}
 					render_pass_info->Unbind();
 					Renderer::GetRenderAPI()->Flush();

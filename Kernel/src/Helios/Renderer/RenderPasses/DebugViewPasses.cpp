@@ -1,6 +1,7 @@
 #include "Pch.h"
 #include "DebugViewPasses.h"
 #include "ScenePass.h"
+#include "TerrainPasses.h"
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/Renderer.h>
@@ -125,6 +126,28 @@ namespace Helios
 				return material;
 			}
 
+			/* 地形的调试材质：一份着色器覆盖 Overdraw / Mipmap / Wireframe 档。
+			 * 外观参数由 SubmitDebug 按源材质 per-draw 带过来 */
+			SharedPtr<Material> CreateTerrainDebugMaterial(const SharedPtr<DeviceShader>& shader, DebugViewMode mode)
+			{
+				auto material = Material::Create(shader);
+				material->SetParameters(ParamType::Int, "u_DebugMode", static_cast<int>(mode));
+				material->SetParameters(ParamType::Vec4, "u_WireframeColor", kDebugWireframeColor);
+
+				auto& raster_state = material->GetRasterState();
+				if (mode == DebugViewMode::Overdraw)
+				{
+					raster_state.SetAdditiveBlend();
+				}
+				else if (mode == DebugViewMode::Wireframe)
+				{
+					raster_state.EnableDepthTest = false;
+					raster_state.EnableDepthWrite = false;
+					raster_state.Wireframe = true;
+				}
+				return material;
+			}
+
 			/* Overdraw 计数 Pass：所有不透明对象按"加法混合、不测深度"重画一遍，
 			 * 每个片元向计数纹理累加一份步进（DebugMaterial.glsl 的 Overdraw 档）—— 拾取值即
 			 * 该像素被写过的次数（饱和），显示层由合成 Pass 的热力图承担。 */
@@ -189,6 +212,11 @@ namespace Helios
 								static BuiltinAsset<DeviceShader> s_grass_shader("Shaders/DebugShaders/DebugGrass.glsl");
 								Forward::SubmitGrassDebug(render_view, *scene,
 									CreateGrassDebugMaterial(s_grass_shader.Get(), DebugViewMode::Overdraw));
+
+								/* 地形同样不在可见网格里，重叠次数照算 */
+								static BuiltinAsset<DeviceShader> s_terrain_shader("Shaders/DebugShaders/DebugTerrain.glsl");
+								TerrainDraw::SubmitDebug(render_view, *scene,
+									CreateTerrainDebugMaterial(s_terrain_shader.Get(), DebugViewMode::Overdraw));
 							}
 						}
 						render_pass_info->Unbind();
@@ -271,6 +299,10 @@ namespace Helios
 								static BuiltinAsset<DeviceShader> s_grass_shader("Shaders/DebugShaders/DebugGrass.glsl");
 								Forward::SubmitGrassDebug(render_view, *scene,
 									CreateGrassDebugMaterial(s_grass_shader.Get(), DebugViewMode::Wireframe));
+
+								static BuiltinAsset<DeviceShader> s_terrain_shader("Shaders/DebugShaders/DebugTerrain.glsl");
+								TerrainDraw::SubmitDebug(render_view, *scene,
+									CreateTerrainDebugMaterial(s_terrain_shader.Get(), DebugViewMode::Wireframe));
 							}
 						}
 						render_pass_info->Unbind();
@@ -435,6 +467,8 @@ namespace Helios
 							Forward::SubmitSceneObjects(render_view, *scene, false, Forward::SubmitBatch::All,
 								DebugViewMode::Shadow);
 							Forward::SubmitGrassFields(render_view, *scene, DebugViewMode::Shadow);
+							/* 地形不在可见对象表里，按同一档补一笔（只吃主方向光，与正常着色一个口径） */
+							TerrainDraw::SubmitForward(render_view, *scene, DebugViewMode::Shadow);
 						}
 						render_pass_info->Unbind();
 						Renderer::GetRenderAPI()->Flush();
@@ -609,6 +643,10 @@ namespace Helios
 								static BuiltinAsset<DeviceShader> s_grass_shader("Shaders/DebugShaders/DebugGrass.glsl");
 								Forward::SubmitGrassDebug(render_view, *scene,
 									CreateGrassDebugMaterial(s_grass_shader.Get(), mode));
+
+								static BuiltinAsset<DeviceShader> s_terrain_shader("Shaders/DebugShaders/DebugTerrain.glsl");
+								TerrainDraw::SubmitDebug(render_view, *scene,
+									CreateTerrainDebugMaterial(s_terrain_shader.Get(), mode));
 							}
 						}
 						render_pass_info->Unbind();

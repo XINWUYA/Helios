@@ -132,7 +132,8 @@ namespace Helios
 		 * 光源视锥拟合需纳入投射物包围盒）；点光/聚光的矩阵随处 → 范围变化即更新。 */
 		if (m_IsHasShadowCast)
 		{
-			m_pShadowMapManager->UpdateCascadeMatrices(GetCullingCamera(), &m_SceneMeshObjects);
+			m_pShadowMapManager->UpdateCascadeMatrices(GetCullingCamera(), &m_SceneMeshObjects,
+				GetOwnerScene().get());
 			m_pShadowMapManager->UpdatePunctualMatrices();
 		}
 

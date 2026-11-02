@@ -6,6 +6,7 @@
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderCommon.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
+#include <Helios/Renderer/RenderPasses/TerrainPasses.h>
 #include <Helios/Common/Math.h>
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Scene/Camera.h>
@@ -161,6 +162,9 @@ namespace Helios
             {
                 Forward::SubmitSceneObjects(*render_view, *scene, false, submit_params);
                 Forward::SubmitSceneObjects(*render_view, *scene, true, submit_params);
+
+                /* 地形同样不在可见对象表里：不补这一趟，反射里就没有地面 */
+                TerrainDraw::SubmitCapture(*render_view, *scene, capture_position, far_plane);
             }
         }
         capture_fb->Unbind();
