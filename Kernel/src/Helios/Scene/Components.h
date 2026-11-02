@@ -455,9 +455,9 @@ namespace Helios
 	 * 外观（草色 / 岩色 / 粗糙度）由材质决定，这里只管范围、起伏与 LOD。 */
 	struct HELIOS_API TerrainComponent : ComponentBase
 	{
-		glm::vec2 m_Extent{ 512.0f, 512.0f }; /* 局部空间半宽半长（米） */
+		glm::vec2 m_Extent{ 256.0f, 256.0f }; /* 局部空间半宽半长（米） */
 		uint32_t m_Resolution{ 512 };          /* 高度图边长（纹素） */
-		float m_HeightScale{ 60.0f };          /* 高度幅度（米） */
+		float m_HeightScale{ 80.0f };          /* 起伏总高差（米），以实体位置为中间值上下各一半 */
 		int m_Seed{ 1337 };
 
 		/* 节点边长与相机距离的比值：小于它就继续细分，越大越激进 */

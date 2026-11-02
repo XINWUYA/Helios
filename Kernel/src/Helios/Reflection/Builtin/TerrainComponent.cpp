@@ -83,7 +83,7 @@ namespace Helios
 			.Field(&TerrainComponent::m_Resolution, "Resolution", FieldType::Int, 1.0f)
 			.Range(64.0f, 2048.0f)
 			.Field(&TerrainComponent::m_HeightScale, "HeightScale", FieldType::Float, 0.5f)
-			.Range(0.0f, 400.0f)
+			.Range(0.0f, 800.0f)
 			.Slider()
 			.Field(&TerrainComponent::m_Seed, "Seed", FieldType::Int, 1.0f)
 			.Field(&TerrainComponent::m_LodRatio, "LodRatio", FieldType::Float, 0.1f)

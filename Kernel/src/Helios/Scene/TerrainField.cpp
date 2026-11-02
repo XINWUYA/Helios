@@ -177,7 +177,8 @@ namespace Helios
 		if (root_size <= 0.0f)
 			return;
 
-		const glm::vec3 root_center(m_Origin.x, m_HeightScale * 0.5f, m_Origin.z);
+		/* 根节点以实体位置为中心：高度是 ±HeightScale/2，上下各一半 */
+		const glm::vec3 root_center(m_Origin.x, m_Origin.y, m_Origin.z);
 		CollectNodes(frustum, eye, root_center, root_size, 0, out);
 	}
 
