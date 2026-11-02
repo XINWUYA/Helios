@@ -93,6 +93,8 @@ namespace Helios
 		mix(&component.m_MaxSlope, sizeof(component.m_MaxSlope));
 		mix(&component.m_FollowTerrain, sizeof(component.m_FollowTerrain));
 		mix(&component.m_MaxInstances, sizeof(component.m_MaxInstances));
+		/* 接受阴影写进实例参数，改了要重建才生效 */
+		mix(&component.m_ReceiveShadow, sizeof(component.m_ReceiveShadow));
 		mix(&g_GpuPlacementEnabled, sizeof(g_GpuPlacementEnabled));
 		mix(glm::value_ptr(world), sizeof(glm::mat4));
 		/* 地形换了一份或重建过：贴地高度要重新采样 */
@@ -145,8 +147,9 @@ namespace Helios
 		m_HalfX = std::max(0.0f, component.m_Extent.x * m_ScaleX);
 		m_HalfZ = std::max(0.0f, component.m_Extent.y * scale_z);
 
-		/* 跟随地形：范围取地形覆盖范围，块网格与地形最细节点对齐，
-		 * 草块的剔除粒度与地形 patch 一致 */
+		/* 跟随地形：范围取地形覆盖范围。
+		 * 块尺寸按剔除距离推：块必须明显小于 CullDistance，否则剔除按块中心判定时，
+		 * 相机身边只有一两块能通过，视野剩下全是空的。地形 patch 的粒度不参与这里。 */
 		m_ChunkSize = kChunkSize;
 		if (component.m_FollowTerrain && m_Ground != nullptr)
 		{
@@ -154,7 +157,7 @@ namespace Helios
 			m_Origin.z = m_Ground->GetOrigin().z;
 			m_HalfX = m_Ground->GetExtent().x;
 			m_HalfZ = m_Ground->GetExtent().y;
-			m_ChunkSize = std::max(kChunkSize, static_cast<float>(m_Ground->GetMinNodeSize()));
+			m_ChunkSize = std::clamp(component.m_CullDistance * 0.25f, kChunkSize, 64.0f);
 		}
 		const float density = std::max(0.0f, component.m_Density);
 		m_Height = std::max(0.0f, component.m_Height);
