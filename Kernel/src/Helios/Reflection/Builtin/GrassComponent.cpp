@@ -110,6 +110,9 @@ namespace Helios
 			.Slider()
 			.Field(&GrassComponent::m_MaxSlope, "MaxSlope", FieldType::Float, 0.5f)
 			.Range(0.0f, 90.0f)
+			.Field(&GrassComponent::m_FollowTerrain, "FollowTerrain", FieldType::Bool)
+			.Field(&GrassComponent::m_MaxInstances, "MaxInstances", FieldType::Int, 1000.0f)
+			.Range(1000.0f, 4000000.0f)
 			.SaveExtra(&SaveGrassMaterial)
 			.LoadExtra(&LoadGrassMaterial)
 			.Register();

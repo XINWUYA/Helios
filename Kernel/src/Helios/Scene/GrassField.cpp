@@ -89,6 +89,8 @@ namespace Helios
 		mix(&component.m_Seed, sizeof(component.m_Seed));
 		mix(&component.m_SurfaceAlign, sizeof(component.m_SurfaceAlign));
 		mix(&component.m_MaxSlope, sizeof(component.m_MaxSlope));
+		mix(&component.m_FollowTerrain, sizeof(component.m_FollowTerrain));
+		mix(&component.m_MaxInstances, sizeof(component.m_MaxInstances));
 		mix(&g_GpuPlacementEnabled, sizeof(g_GpuPlacementEnabled));
 		mix(glm::value_ptr(world), sizeof(glm::mat4));
 		/* 地形换了一份或重建过：贴地高度要重新采样 */
@@ -120,6 +122,18 @@ namespace Helios
 
 		m_HalfX = std::max(0.0f, component.m_Extent.x * m_ScaleX);
 		m_HalfZ = std::max(0.0f, component.m_Extent.y * scale_z);
+
+		/* 跟随地形：范围取地形覆盖范围，块网格与地形最细节点对齐，
+		 * 草块的剔除粒度与地形 patch 一致 */
+		m_ChunkSize = kChunkSize;
+		if (component.m_FollowTerrain && m_Ground != nullptr)
+		{
+			m_Origin.x = m_Ground->GetOrigin().x;
+			m_Origin.z = m_Ground->GetOrigin().z;
+			m_HalfX = m_Ground->GetExtent().x;
+			m_HalfZ = m_Ground->GetExtent().y;
+			m_ChunkSize = std::max(kChunkSize, static_cast<float>(m_Ground->GetMinNodeSize()));
+		}
 		const float density = std::max(0.0f, component.m_Density);
 		m_Height = std::max(0.0f, component.m_Height);
 		m_Width = std::max(0.0f, component.m_Width);
@@ -143,8 +157,8 @@ namespace Helios
 			return;
 		}
 
-		m_ChunksX = std::max(1u, static_cast<uint32_t>(std::ceil(m_HalfX * 2.0f / kChunkSize)));
-		m_ChunksZ = std::max(1u, static_cast<uint32_t>(std::ceil(m_HalfZ * 2.0f / kChunkSize)));
+		m_ChunksX = std::max(1u, static_cast<uint32_t>(std::ceil(m_HalfX * 2.0f / m_ChunkSize)));
+		m_ChunksZ = std::max(1u, static_cast<uint32_t>(std::ceil(m_HalfZ * 2.0f / m_ChunkSize)));
 		m_ChunkWidth = m_HalfX * 2.0f / static_cast<float>(m_ChunksX);
 		m_ChunkDepth = m_HalfZ * 2.0f / static_cast<float>(m_ChunksZ);
 
@@ -152,7 +166,8 @@ namespace Helios
 		uint32_t per_chunk = static_cast<uint32_t>(
 			std::max(0.0f, std::round(density * m_ChunkWidth * m_ChunkDepth)));
 		const uint32_t chunk_count = m_ChunksX * m_ChunksZ;
-		while (per_chunk > 0 && per_chunk * chunk_count > kMaxInstances)
+		const uint32_t budget = std::min(kMaxInstances, std::max(1024u, component.m_MaxInstances));
+		while (per_chunk > 0 && per_chunk * chunk_count > budget)
 			--per_chunk;
 		m_PerChunk = per_chunk;
 		m_InstanceCount = per_chunk * chunk_count;

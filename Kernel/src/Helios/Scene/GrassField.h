@@ -130,6 +130,7 @@ namespace Helios
 		glm::vec4 m_TrampleRect{ 0.0f };
 		float m_HalfX{ 0.0f };
 		float m_HalfZ{ 0.0f };
+		float m_ChunkSize{ 8.0f };
 		float m_ChunkWidth{ 0.0f };
 		float m_ChunkDepth{ 0.0f };
 		float m_Height{ 0.0f };

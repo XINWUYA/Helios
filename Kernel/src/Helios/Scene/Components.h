@@ -427,6 +427,11 @@ namespace Helios
 		float m_SurfaceAlign{ 1.0f };
 		/* 长草的最大坡度（度）：超过它的地方退化不画，0 = 不限 */
 		float m_MaxSlope{ 42.0f };
+		/* 跟随地形：打开后范围自动取覆盖它的地形，块网格与地形最细节点对齐，
+		 * 组件上的 Extent 不再生效 */
+		bool m_FollowTerrain{ false };
+		/* 总株数预算：跟随地形时按块数分摊，避免范围一大就炸 */
+		uint32_t m_MaxInstances{ 500000 };
 
 		/* 材质槽：pMaterial 是生效材质；IsInstance / SourceAssetPath 的含义与模型槽一致 ——
 		 * 面板上改参数时从资产克隆一份，改动只落在这片草地上，Reset 回资产 */
