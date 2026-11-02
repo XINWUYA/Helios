@@ -104,6 +104,12 @@ namespace Helios
 			.Field(&GrassComponent::m_CastShadow, "CastShadow", FieldType::Bool)
 			.Field(&GrassComponent::m_BendRecover, "BendRecover", FieldType::Float, 0.05f)
 			.Field(&GrassComponent::m_Seed, "Seed", FieldType::Int)
+			.Field(&GrassComponent::m_ConformToTerrain, "ConformToTerrain", FieldType::Bool)
+			.Field(&GrassComponent::m_SurfaceAlign, "SurfaceAlign", FieldType::Float, 0.01f)
+			.Range(0.0f, 1.0f)
+			.Slider()
+			.Field(&GrassComponent::m_MaxSlope, "MaxSlope", FieldType::Float, 0.5f)
+			.Range(0.0f, 90.0f)
 			.SaveExtra(&SaveGrassMaterial)
 			.LoadExtra(&LoadGrassMaterial)
 			.Register();

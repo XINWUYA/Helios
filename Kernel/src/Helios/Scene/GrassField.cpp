@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "GrassField.h"
+#include "TerrainField.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "Components.h"
 #include "Helios/Renderer/Renderer.h"
@@ -63,7 +64,8 @@ namespace Helios
 		return g_IndirectDrawEnabled;
 	}
 
-	void GrassField::Rebuild(const GrassComponent& component, const glm::mat4& world)
+	void GrassField::Rebuild(const GrassComponent& component, const glm::mat4& world,
+		const TerrainField* ground)
 	{
 		PROFILE_FUNCTION();
 
@@ -85,12 +87,18 @@ namespace Helios
 			mix(&value, sizeof(value));
 		}
 		mix(&component.m_Seed, sizeof(component.m_Seed));
+		mix(&component.m_SurfaceAlign, sizeof(component.m_SurfaceAlign));
+		mix(&component.m_MaxSlope, sizeof(component.m_MaxSlope));
 		mix(&g_GpuPlacementEnabled, sizeof(g_GpuPlacementEnabled));
 		mix(glm::value_ptr(world), sizeof(glm::mat4));
+		/* 地形换了一份或重建过：贴地高度要重新采样 */
+		const uint64_t ground_key = ground != nullptr ? ground->GetRevision() : 0ull;
+		mix(&ground_key, sizeof(ground_key));
 
 		if (key == m_BuildKey && m_InstanceBuffer != nullptr)
 			return;
 		m_BuildKey = key;
+		m_Ground = ground;
 
 		m_Chunks.clear();
 		m_InstanceCount = 0;
@@ -115,6 +123,8 @@ namespace Helios
 		const float density = std::max(0.0f, component.m_Density);
 		m_Height = std::max(0.0f, component.m_Height);
 		m_Width = std::max(0.0f, component.m_Width);
+		m_SurfaceAlign = std::clamp(component.m_SurfaceAlign, 0.0f, 1.0f);
+		m_MaxSlope = std::max(0.0f, component.m_MaxSlope);
 		m_LodDistance = component.m_LodDistance;
 		m_CullDistance = component.m_CullDistance;
 		m_MinDensityScale = component.m_MinDensityScale;
@@ -161,13 +171,40 @@ namespace Helios
 			{
 				const uint32_t chunk_index = cz * m_ChunksX + cx;
 				Chunk chunk;
-				chunk.Center = m_Origin
+
+				const glm::vec3 chunk_xz = m_Origin
 					+ m_Right * (-m_HalfX + (static_cast<float>(cx) + 0.5f) * m_ChunkWidth)
-					+ m_Forward * (-m_HalfZ + (static_cast<float>(cz) + 0.5f) * m_ChunkDepth)
-					+ glm::vec3(0.0f, m_Height * m_ScaleY * 0.5f, 0.0f);
+					+ m_Forward * (-m_HalfZ + (static_cast<float>(cz) + 0.5f) * m_ChunkDepth);
+
+				/* 贴合地形时包围盒按这一块下面的地形高度范围算：只按叶高算，
+				 * 山坡上的草会被整块剔掉；按整张地形的范围算又太松，剔除不起作用 */
+				float base_y = m_Origin.y;
+				float top_y = m_Origin.y + m_Height * m_ScaleY;
+				if (m_Ground != nullptr)
+				{
+					/* 块可能被旋转过，用包含它的轴对齐方形去查（块不大，误差可忽略） */
+					const float half_span = (m_ChunkWidth + m_ChunkDepth) * 0.5f;
+					const glm::vec2 xz_min(chunk_xz.x - half_span, chunk_xz.z - half_span);
+					const glm::vec2 xz_max(chunk_xz.x + half_span, chunk_xz.z + half_span);
+
+					float ground_lo = 0.0f;
+					float ground_hi = 0.0f;
+					if (m_Ground->GetHeightRange(xz_min, xz_max, ground_lo, ground_hi))
+					{
+						base_y = ground_lo;
+						top_y = ground_hi + m_Height * m_ScaleY;
+					}
+					else
+					{
+						base_y = m_Ground->GetMinWorldHeight();
+						top_y = m_Ground->GetMaxWorldHeight() + m_Height * m_ScaleY;
+					}
+				}
+
+				chunk.Center = chunk_xz + glm::vec3(0.0f, (base_y + top_y) * 0.5f - m_Origin.y, 0.0f);
 				chunk.Extent = glm::vec3(
 					m_ChunkWidth * 0.5f + m_Width * m_ScaleX * 0.5f,
-					m_Height * m_ScaleY * 0.5f,
+					(top_y - base_y) * 0.5f,
 					m_ChunkDepth * 0.5f + m_Width * m_ScaleX * 0.5f);
 				chunk.First = chunk_index * per_chunk;
 				chunk.Count = per_chunk;
@@ -177,9 +214,11 @@ namespace Helios
 
 		/* 块底面：每块一张四边形，铺在叶根下面；颜色由块序号散出来，
 		 * 相邻块深浅略有差别，看起来不像一整块塑料 */
+		/* 贴着地形时不需要块底面：草底下就是地形本身，再铺一层草色方块会跟起伏打架 */
 		std::vector<GrassInstanceData> pads;
-		pads.reserve(m_Chunks.size());
-		for (size_t chunk_index = 0; chunk_index < m_Chunks.size(); ++chunk_index)
+		if (m_Ground == nullptr)
+			pads.reserve(m_Chunks.size());
+		for (size_t chunk_index = 0; m_Ground == nullptr && chunk_index < m_Chunks.size(); ++chunk_index)
 		{
 			const Chunk& chunk = m_Chunks[chunk_index];
 			GrassInstanceData pad;
@@ -192,8 +231,9 @@ namespace Helios
 			pad.Params = glm::vec4(-1.0f, 1.0f, HashUnit(pad_seed, 1u), HashUnit(pad_seed, 2u));
 			pads.push_back(pad);
 		}
-		m_PadBuffer = DeviceVertexBuffer::Create("GrassFieldPads", pads.data(),
-			static_cast<uint32_t>(pads.size() * sizeof(GrassInstanceData)));
+		m_PadBuffer = pads.empty() ? nullptr
+			: DeviceVertexBuffer::Create("GrassFieldPads", pads.data(),
+				static_cast<uint32_t>(pads.size() * sizeof(GrassInstanceData)));
 
 		/* 脚印图：覆盖整片草地的世界包围盒（旋转过的草地也按包围盒算，分辨率略降） */
 		if (m_TrampleTexture == nullptr)
@@ -236,7 +276,8 @@ namespace Helios
 		}
 
 		const bool shared_ok = m_InstanceStorage != nullptr && m_GpuVertexView != nullptr;
-		const bool gpu_path = g_GpuPlacementEnabled && shared_ok
+		/* GPU 放置暂时不贴地（计算里还读不到高度图），有地形时先走 CPU 路径 */
+		const bool gpu_path = m_Ground == nullptr && g_GpuPlacementEnabled && shared_ok
 			&& Renderer::GetRenderAPI() != nullptr && Renderer::GetRenderAPI()->SupportsCompute();
 		m_UsingGpuPlacement = gpu_path;
 		if (gpu_path)
@@ -285,21 +326,76 @@ namespace Helios
 					const float height = m_Height * m_ScaleY * (0.7f + 0.55f * HashUnit(base, 4u));
 					const float width = m_Width * m_ScaleX * (0.75f + 0.5f * HashUnit(base, 5u));
 
+					glm::vec3 position = m_Origin + m_Right * local_x + m_Forward * local_z;
+
+					/* 贴地：叶根落到地形表面；点不在地形范围内就留在原平面 */
+					glm::vec3 ground_normal(0.0f, 1.0f, 0.0f);
+					float growth = 1.0f;
+					if (m_Ground != nullptr)
+					{
+						const glm::vec2 world_xz(position.x, position.z);
+						float ground_y = position.y;
+						if (m_Ground->SampleHeightWorld(world_xz, ground_y))
+						{
+							position.y = ground_y;
+
+							/* 坡度过滤：太陡的地方把草退化掉。不跳过是故意的 ——
+							 * 每块株数固定，GPU 侧才能用序号反推块号 */
+							glm::vec3 normal(0.0f, 1.0f, 0.0f);
+							if (m_Ground->SampleNormalWorld(world_xz, normal))
+							{
+								ground_normal = normal;
+								if (m_MaxSlope > 0.0f && m_MaxSlope < 90.0f
+									&& ground_normal.y < std::cos(glm::radians(m_MaxSlope)))
+								{
+									growth = 0.0f;
+								}
+							}
+						}
+					}
+
+					/* 叶面姿态：按坡面法线整体旋转，SurfaceAlign 控制贴合程度（0 = 始终竖直） */
+					glm::quat align = glm::identity<glm::quat>();
+					if (m_Ground != nullptr && m_SurfaceAlign > 0.0f)
+					{
+						const glm::quat target = glm::rotation(glm::vec3(0.0f, 1.0f, 0.0f), ground_normal);
+						align = glm::slerp(glm::identity<glm::quat>(), target, m_SurfaceAlign);
+					}
+
 					/* 叶片朝向决定倒向哪边；宽高已经折进基向量，着色器直接加就行 */
-					const glm::vec3 dir_right = m_Right * std::cos(yaw) + m_Forward * std::sin(yaw);
-					const glm::vec3 dir_face = -m_Right * std::sin(yaw) + m_Forward * std::cos(yaw);
-					const glm::vec3 position = m_Origin + m_Right * local_x + m_Forward * local_z;
+					const glm::vec3 dir_right = align * (m_Right * std::cos(yaw) + m_Forward * std::sin(yaw));
+					const glm::vec3 dir_face = align * (-m_Right * std::sin(yaw) + m_Forward * std::cos(yaw));
+					const glm::vec3 up_axis = align * glm::vec3(0.0f, 1.0f, 0.0f);
 
 					GrassInstanceData& instance = instances[first + i];
 					instance.Basis = glm::mat4(
-						glm::vec4(dir_right * width, 0.0f),
-						glm::vec4(0.0f, height, 0.0f, 0.0f),
-						glm::vec4(dir_face * width, 0.0f),
+						glm::vec4(dir_right * (width * growth), 0.0f),
+						glm::vec4(up_axis * (height * growth), 0.0f),
+						glm::vec4(dir_face * (width * growth), 0.0f),
 						glm::vec4(position, 1.0f));
 					instance.Params = glm::vec4(-1.0f, m_ReceiveShadow ? 1.0f : 0.0f,
 						HashUnit(base, 6u), HashUnit(base, 7u));
 				}
 			}
+		}
+
+		/* 叶根高度范围、坡度退化数：贴地检查与调试用 */
+		m_SlopeCulledCount = 0;
+		m_InstanceMinY = std::numeric_limits<float>::max();
+		m_InstanceMaxY = -std::numeric_limits<float>::max();
+		for (const GrassInstanceData& instance : instances)
+		{
+			const float y = instance.Basis[3].y;
+			m_InstanceMinY = std::min(m_InstanceMinY, y);
+			m_InstanceMaxY = std::max(m_InstanceMaxY, y);
+			/* 退化株的三个基向量长度都是 0 */
+			if (glm::dot(instance.Basis[1], instance.Basis[1]) < 1e-8f)
+				++m_SlopeCulledCount;
+		}
+		if (instances.empty())
+		{
+			m_InstanceMinY = 0.0f;
+			m_InstanceMaxY = 0.0f;
 		}
 
 		const uint32_t bytes = static_cast<uint32_t>(instances.size() * sizeof(GrassInstanceData));

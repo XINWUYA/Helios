@@ -535,7 +535,25 @@ namespace Helios
 			if (grass_component.m_Field == nullptr)
 				grass_component.m_Field = CreateSharedPtr<GrassField>();
 
-			grass_component.m_Field->Rebuild(grass_component, FrameWorldTransform(entity));
+			/* 贴地：找覆盖这片草地的地形（按草地中心判定），找到就把叶根压到地形表面 */
+			const glm::mat4 grass_world = FrameWorldTransform(entity);
+			const TerrainField* ground = nullptr;
+			if (grass_component.m_ConformToTerrain)
+			{
+				const glm::vec2 grass_center(grass_world[3].x, grass_world[3].z);
+				for (auto [terrain_entity, terrain_component] : m_Registry.view<TerrainComponent>().each())
+				{
+					(void)terrain_entity;
+					if (terrain_component.m_Field != nullptr
+						&& terrain_component.m_Field->ContainsPoint(grass_center))
+					{
+						ground = terrain_component.m_Field.get();
+						break;
+					}
+				}
+			}
+
+			grass_component.m_Field->Rebuild(grass_component, grass_world, ground);
 			grass_component.m_Field->TickBend(delta_time, grass_component.m_BendRecover);
 			grass_component.m_Field->EnsurePlaced();
 		}

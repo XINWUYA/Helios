@@ -10,6 +10,7 @@
 namespace Helios
 {
 	struct GrassComponent;
+	struct TerrainField;
 	class DeviceVertexBuffer;
 	class DeviceStorageBuffer;
 	class DeviceTexture;
@@ -60,8 +61,10 @@ namespace Helios
 		/* 压实后的实例数据（顶点视图），画的时候用它 */
 		[[nodiscard]] const SharedPtr<DeviceVertexBuffer>& GetIndirectDrawBuffer() const { return m_IndirectDrawView; }
 
-		/* 重建实例数据（参数与变换都没变时直接返回） */
-		void Rebuild(const GrassComponent& component, const glm::mat4& world);
+		/* 重建实例数据（参数与变换都没变时直接返回）。ground 非空时叶片贴到地形表面，
+		 * 块底面不再生成（草下就是地形） */
+		void Rebuild(const GrassComponent& component, const glm::mat4& world,
+			const TerrainField* ground = nullptr);
 
 		/* GPU 放置且还没算过时派发一次计算。场景每帧调一次，赶在开始画之前 */
 		void EnsurePlaced();
@@ -80,6 +83,11 @@ namespace Helios
 
 		[[nodiscard]] const std::vector<Chunk>& GetChunks() const { return m_Chunks; }
 		[[nodiscard]] uint32_t GetInstanceCount() const { return m_InstanceCount; }
+		/* 最近一次生成时叶根的世界高度范围：贴地检查用 */
+		[[nodiscard]] float GetInstanceMinY() const { return m_InstanceMinY; }
+		[[nodiscard]] float GetInstanceMaxY() const { return m_InstanceMaxY; }
+		/* 最近一次生成时被坡度过滤退化掉的株数 */
+		[[nodiscard]] uint32_t GetSlopeCulledCount() const { return m_SlopeCulledCount; }
 		[[nodiscard]] bool IsEmpty() const { return m_InstanceCount == 0; }
 		[[nodiscard]] bool UsesGpuPlacement() const { return m_UsingGpuPlacement; }
 
@@ -112,6 +120,9 @@ namespace Helios
 
 		std::vector<Chunk> m_Chunks;
 
+		/* 贴合的地形：非空时叶片高度取地形采样，块底面不生成 */
+		const TerrainField* m_Ground{ nullptr };
+
 		/* 重建时算好、GPU 放置与脚印都要用的现场数据 */
 		glm::vec3 m_Origin{ 0.0f };
 		glm::vec3 m_Right{ 1.0f, 0.0f, 0.0f };
@@ -125,6 +136,8 @@ namespace Helios
 		float m_Width{ 0.0f };
 		float m_ScaleX{ 1.0f };
 		float m_ScaleY{ 1.0f };
+		float m_SurfaceAlign{ 1.0f };
+		float m_MaxSlope{ 42.0f };
 		float m_LodDistance{ 25.0f };
 		float m_CullDistance{ 90.0f };
 		float m_MinDensityScale{ 0.1f };
@@ -133,6 +146,9 @@ namespace Helios
 		uint32_t m_PerChunk{ 0 };
 		uint32_t m_Seed{ 0 };
 		uint32_t m_InstanceCount{ 0 };
+		float m_InstanceMinY{ 0.0f };
+		float m_InstanceMaxY{ 0.0f };
+		uint32_t m_SlopeCulledCount{ 0 };
 		uint32_t m_CapacityBytes{ 0 };
 		bool m_ReceiveShadow{ true };
 		bool m_GpuDirty{ false };

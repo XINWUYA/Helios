@@ -43,6 +43,23 @@ namespace Helios
 		[[nodiscard]] float GetHeightScale() const { return m_HeightScale; }
 		[[nodiscard]] bool IsEmpty() const { return m_HeightMap == nullptr; }
 
+		/* 世界高度采样（CPU 侧）：草地与其它物体贴地时用。
+		 * 点不在地形范围内返回 false，out_height 不动 */
+		bool SampleHeightWorld(const glm::vec2& world_xz, float& out_height) const;
+		/* 表面法线（CPU 侧，与着色器的邻居差分同口径）：坡度过滤与贴面对齐用 */
+		bool SampleNormalWorld(const glm::vec2& world_xz, glm::vec3& out_normal) const;
+		/* 世界 xz 是否落在地形覆盖范围内（不管高度） */
+		[[nodiscard]] bool ContainsPoint(const glm::vec2& world_xz) const;
+		/* 地形表面的世界高度范围（含实体位置的 y） */
+		[[nodiscard]] float GetMinWorldHeight() const;
+		[[nodiscard]] float GetMaxWorldHeight() const;
+		/* 一块 XZ 矩形内的表面高度范围：贴地对象的包围盒按它算，比整张地形的范围紧
+		 * （矩形完全在地形外返回 false） */
+		bool GetHeightRange(const glm::vec2& min_xz, const glm::vec2& max_xz,
+			float& out_min, float& out_max) const;
+		/* 高度重建的版本号：贴地对象据此判断要不要重新采样 */
+		[[nodiscard]] uint64_t GetRevision() const { return m_BuildKey; }
+
 		/* 模板网格：33×33 顶点，顶点只有 UV（0..1）。所有地形共用一份。 */
 		static const MeshPrimitive& GetPatchPrimitive();
 		/* 实例数据布局，与 Terrain.glsl 的 location 5/6 对应 */
@@ -57,6 +74,8 @@ namespace Helios
 			float size, uint32_t lod, std::vector<TerrainPatch>& out) const;
 
 		SharedPtr<DeviceTexture> m_HeightMap;
+		/* 高度图的 CPU 副本（归一化 0..1）：贴地查询用，GPU 放置后续也读它 */
+		std::vector<float> m_Heights;
 		glm::vec3 m_Origin{ 0.0f };
 		glm::vec2 m_Extent{ 512.0f, 512.0f }; /* 半宽半长 */
 		uint32_t m_Resolution{ 512 };

@@ -164,6 +164,131 @@ namespace Helios
 		pixel_desc.Format = PixelFormat::R;
 		pixel_desc.Type = PixelType::Float;
 		m_HeightMap->SetData(heights.data(), pixel_desc);
+
+		/* 留一份 CPU 副本：草地 / 物件贴地时按世界坐标双线性采样 */
+		m_Heights = std::move(heights);
+	}
+
+	bool TerrainField::ContainsPoint(const glm::vec2& world_xz) const
+	{
+		if (m_Extent.x <= 0.0f || m_Extent.y <= 0.0f)
+			return false;
+
+		const glm::vec2 uv = (world_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
+		return uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
+	}
+
+	bool TerrainField::SampleHeightWorld(const glm::vec2& world_xz, float& out_height) const
+	{
+		const uint32_t resolution = m_Resolution;
+		if (m_Heights.size() < static_cast<size_t>(resolution) * resolution || m_Extent.x <= 0.0f)
+			return false;
+		if (!ContainsPoint(world_xz))
+			return false;
+
+		const glm::vec2 uv = (world_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
+		const float max_index = static_cast<float>(resolution - 1);
+		const float fx = std::clamp(uv.x * max_index, 0.0f, max_index);
+		const float fz = std::clamp(uv.y * max_index, 0.0f, max_index);
+
+		const uint32_t x0 = static_cast<uint32_t>(fx);
+		const uint32_t z0 = static_cast<uint32_t>(fz);
+		const uint32_t x1 = std::min(x0 + 1, resolution - 1);
+		const uint32_t z1 = std::min(z0 + 1, resolution - 1);
+		const float tx = fx - static_cast<float>(x0);
+		const float tz = fz - static_cast<float>(z0);
+
+		const auto at = [this, resolution](uint32_t x, uint32_t z)
+		{
+			return m_Heights[static_cast<size_t>(z) * resolution + x];
+		};
+
+		const float h = glm::mix(glm::mix(at(x0, z0), at(x1, z0), tx),
+			glm::mix(at(x0, z1), at(x1, z1), tx), tz);
+		out_height = m_Origin.y + (h - 0.5f) * m_HeightScale;
+		return true;
+	}
+
+	bool TerrainField::SampleNormalWorld(const glm::vec2& world_xz, glm::vec3& out_normal) const
+	{
+		if (!ContainsPoint(world_xz))
+			return false;
+
+		/* 差分步长取两个纹素：太小的步长会被高度图的高频细节抖成麻点 */
+		const float texel = (m_Extent.x * 2.0f) / static_cast<float>(std::max(1u, m_Resolution - 1));
+		const float step = std::max(texel * 2.0f, 0.01f);
+
+		float hl = 0.0f;
+		float hr = 0.0f;
+		float hd = 0.0f;
+		float hu = 0.0f;
+		if (!SampleHeightWorld(world_xz - glm::vec2(step, 0.0f), hl)
+			|| !SampleHeightWorld(world_xz + glm::vec2(step, 0.0f), hr)
+			|| !SampleHeightWorld(world_xz - glm::vec2(0.0f, step), hd)
+			|| !SampleHeightWorld(world_xz + glm::vec2(0.0f, step), hu))
+		{
+			return false;
+		}
+
+		out_normal = glm::normalize(glm::vec3(hl - hr, 2.0f * step, hd - hu));
+		return true;
+	}
+
+	float TerrainField::GetMinWorldHeight() const
+	{
+		if (m_Heights.empty())
+			return m_Origin.y - m_HeightScale * 0.5f;
+		return m_Origin.y + (*std::min_element(m_Heights.begin(), m_Heights.end()) - 0.5f) * m_HeightScale;
+	}
+
+	float TerrainField::GetMaxWorldHeight() const
+	{
+		if (m_Heights.empty())
+			return m_Origin.y + m_HeightScale * 0.5f;
+		return m_Origin.y + (*std::max_element(m_Heights.begin(), m_Heights.end()) - 0.5f) * m_HeightScale;
+	}
+
+	bool TerrainField::GetHeightRange(const glm::vec2& min_xz, const glm::vec2& max_xz,
+		float& out_min, float& out_max) const
+	{
+		const uint32_t resolution = m_Resolution;
+		if (m_Heights.size() < static_cast<size_t>(resolution) * resolution || m_Extent.x <= 0.0f)
+			return false;
+
+		/* 世界 xz → 纹素矩形，超出地形的部分夹到边界 */
+		const auto to_texel = [this, resolution](const glm::vec2& world_xz)
+		{
+			const glm::vec2 uv = (world_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
+			const float max_index = static_cast<float>(resolution - 1);
+			return glm::ivec2(static_cast<int>(std::clamp(uv.x * max_index, 0.0f, max_index)),
+				static_cast<int>(std::clamp(uv.y * max_index, 0.0f, max_index)));
+		};
+
+		const glm::vec2 uv_min = (min_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
+		const glm::vec2 uv_max = (max_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
+		if (uv_max.x < 0.0f || uv_max.y < 0.0f || uv_min.x > 1.0f || uv_min.y > 1.0f)
+			return false;
+
+		const glm::ivec2 texel_min = to_texel(min_xz);
+		const glm::ivec2 texel_max = to_texel(max_xz);
+
+		float lo = std::numeric_limits<float>::max();
+		float hi = -std::numeric_limits<float>::max();
+		for (int z = texel_min.y; z <= texel_max.y; ++z)
+		{
+			for (int x = texel_min.x; x <= texel_max.x; ++x)
+			{
+				const float h = m_Heights[static_cast<size_t>(z) * resolution + static_cast<uint32_t>(x)];
+				lo = std::min(lo, h);
+				hi = std::max(hi, h);
+			}
+		}
+
+		if (lo > hi)
+			return false;
+		out_min = m_Origin.y + (lo - 0.5f) * m_HeightScale;
+		out_max = m_Origin.y + (hi - 0.5f) * m_HeightScale;
+		return true;
 	}
 
 	void TerrainField::BuildPatches(const Frustum& frustum, const glm::vec3& eye,

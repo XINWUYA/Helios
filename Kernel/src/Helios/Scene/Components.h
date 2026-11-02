@@ -421,6 +421,13 @@ namespace Helios
 		float m_BendRecover{ 6.0f };
 		int m_Seed{ 7 };
 
+		/* 贴合地形：打开后叶根落到覆盖本片草地的地形表面，块底面也随之停画 */
+		bool m_ConformToTerrain{ true };
+		/* 叶片姿态对齐坡面的程度：0 = 始终竖直，1 = 完全垂直于坡面 */
+		float m_SurfaceAlign{ 1.0f };
+		/* 长草的最大坡度（度）：超过它的地方退化不画，0 = 不限 */
+		float m_MaxSlope{ 42.0f };
+
 		/* 材质槽：pMaterial 是生效材质；IsInstance / SourceAssetPath 的含义与模型槽一致 ——
 		 * 面板上改参数时从资产克隆一份，改动只落在这片草地上，Reset 回资产 */
 		GrassMaterialSlot m_MaterialSlot;
