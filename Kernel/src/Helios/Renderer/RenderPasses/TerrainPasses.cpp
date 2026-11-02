@@ -101,11 +101,11 @@ namespace Helios::TerrainDraw
 			return material;
 		}
 
-		/* 高度图与覆盖范围：材质本身多块地形共用，逐地形的差异全走 per-draw 覆盖 */
+		/* 高度图与覆盖范围：材质本身多块地形共用，逐地形的差异全走 per-draw 覆盖。
+		 * 调用方给的 per_draw 要是空的；要跟材质的参数叠加时先抄材质再调这里，地形数据后写覆盖 */
 		void AddTerrainOverrides(const TerrainField& field, DrawParams& per_draw)
 		{
 			per_draw.FillMissing = MaterialFill::Values | MaterialFill::Textures;
-			per_draw.Overrides.clear();
 			per_draw.Overrides.push_back(Material::MakeTextureParam("u_HeightMap", field.GetHeightMap()));
 			/* 几何在局部空间，世界位置与法线靠这三个矩阵 */
 			per_draw.Overrides.emplace_back(ParamType::Mat4, "u_TerrainModel", field.GetWorldTransform());
@@ -286,13 +286,14 @@ namespace Helios::TerrainDraw
 			return material;
 		}
 
-		/* 源材质的数值参数整份抄进 per-draw：页烘焙要跟可见着色用同一套外观 */
-		void CopyNumericParams(const Material& source, DrawParams& per_draw)
+		/* 源材质的参数整份抄进 per-draw：页烘焙要跟可见着色用同一套外观（含层贴图）。
+		 * 只抄烘焙着色器声明过的 —— 反射不到的参数会被兜到槽位 0，把高度图挤掉 */
+		void CopyMaterialParams(const Material& source, const DeviceShader& shader, DrawParams& per_draw)
 		{
 			for (const auto& [key, info] : source.GetAllParameters())
 			{
 				(void)key;
-				if (info.Type == ParamType::Texture)
+				if (info.Type == ParamType::Texture && shader.GetUniformBinding(info.Name) < 0)
 					continue;
 				per_draw.Overrides.push_back(info);
 			}
@@ -417,9 +418,11 @@ namespace Helios::TerrainDraw
 				frame_buffer->Bind(FrameBufferBindInfo::ToColorLayer(0, static_cast<uint16_t>(page.z), 0));
 
 				DrawParams per_draw;
-				AddTerrainOverrides(*batch.Field, per_draw);
+				/* 先把材质的外观参数抄过来（层颜色 / 层贴图），再写地形自己的数据：
+				 * 后写的覆盖先写的，高度图与矩阵不会被材质里的旧值顶掉 */
 				if (batch.Component->GetMaterial() != nullptr)
-					CopyNumericParams(*batch.Component->GetMaterial(), per_draw);
+					CopyMaterialParams(*batch.Component->GetMaterial(), *material->GetShader(), per_draw);
+				AddTerrainOverrides(*batch.Field, per_draw);
 
 				const glm::vec2 page_min = min_corner
 					+ glm::vec2(static_cast<float>(page.x), static_cast<float>(page.y))

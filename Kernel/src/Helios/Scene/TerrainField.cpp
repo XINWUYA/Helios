@@ -151,6 +151,16 @@ namespace Helios
 			m_Origin = glm::vec3(world[3]);
 		}
 
+		/* 材质参数变了（层颜色 / 层贴图 / 阈值）：页池里烘的颜色已经过期，
+		 * 页表整张作废，下一帧按需重烘。几何不动，不用重建高度图 */
+		const uint32_t material_revision = component.GetMaterial() != nullptr
+			? component.GetMaterial()->GetRevision() : 0u;
+		if (material_revision != m_MaterialRevision)
+		{
+			m_MaterialRevision = material_revision;
+			m_VirtualTexture.Reset();
+		}
+
 		/* 绑了资产就从资产取高度；取不到退回程序化，场景不至于整块消失 */
 		std::filesystem::file_time_type asset_write_time{};
 		const TerrainAsset::Data* asset = component.m_AssetPath.empty()

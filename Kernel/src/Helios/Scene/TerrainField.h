@@ -145,6 +145,8 @@ namespace Helios
 		/* 本次高度图的来源（资产路径；程序化时为空） */
 		std::string m_AssetPath;
 		TerrainVirtualTexture m_VirtualTexture;
+		/* 上一次烘页时的材质版本：改了层颜色 / 层贴图就把页表作废 */
+		uint32_t m_MaterialRevision{ 0 };
 		/* 节点边长（米）与相机距离的比值，小于它才继续细分。8 表示最近处一个节点约 8 个节点宽 */
 		float m_LodRatio{ 6.0f };
 		uint32_t m_MinNodeSize{ 64 };

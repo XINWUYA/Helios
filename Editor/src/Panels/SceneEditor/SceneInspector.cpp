@@ -464,7 +464,7 @@ namespace Helios
 			return fallback;
 		}
 
-		/* 一行的颜色块 + 十六进制：层信息只有颜色，没有贴图 */
+		/* 一行的颜色块 + 十六进制 */
 		void DrawColorChipRow(const std::string& label, const glm::vec4& color)
 		{
 			ImGuiExt::BeginPropertyRow(label.c_str());
@@ -827,7 +827,7 @@ namespace Helios
 			}
 		}
 
-		/* 地形资产：高度图缩略图 + 三层混色（层只有颜色，没有贴图） */
+		/* 地形资产：高度图缩略图 + 四层混色 */
 		else if (entry.Kind == AssetFileKind::Terrain)
 		{
 			if (m_AssetTerrain.HeightTexture != nullptr)
@@ -1189,8 +1189,7 @@ namespace Helios
 		}
 		else if (entry.Kind == AssetFileKind::Terrain)
 		{
-			/* 地形资产：高度图规格 + 高度范围 + 材质里的三层混色。
-			 * 层只有颜色没有贴图，所以"层信息"就是这三档颜色与坡度阈值 */
+			/* 地形资产：高度图规格 + 高度范围 + 材质里的四层混色。 */
 			TerrainAsset::Data data;
 			if (!TerrainAsset::Read(PathToUtf8(absolute_path), data))
 			{
@@ -1232,19 +1231,38 @@ namespace Helios
 			if (material != nullptr && material->GetShader() != nullptr)
 				m_AssetDetailRows.emplace_back("Shader", RELATIVE_PATH(material->GetShader()->GetPath()));
 
-			/* 三层：低处草色、陡坡岩色、高处砂色；坡度阈值决定草岩怎么分 */
-			m_AssetDetailRows.emplace_back("Layers", "3 (height + slope blend)");
+			/* 四层：低处草、陡坡岩、低洼砂、高处雪；坡度与两条高度线决定怎么混 */
+			m_AssetDetailRows.emplace_back("Layers", "4 (height + slope blend)");
 			char slope_text[32];
 			std::snprintf(slope_text, sizeof(slope_text), "%.2f", ReadMaterialFloat(material, "u_RockSlope", 0.45f));
+			char sand_text[32];
+			std::snprintf(sand_text, sizeof(sand_text), "%.2f", ReadMaterialFloat(material, "u_SandHeight", 0.06f));
+			char snow_text[32];
+			std::snprintf(snow_text, sizeof(snow_text), "%.2f", ReadMaterialFloat(material, "u_SnowHeight", 0.62f));
 			char roughness_text[32];
 			std::snprintf(roughness_text, sizeof(roughness_text), "%.2f", ReadMaterialFloat(material, "u_Roughness", 0.85f));
 			m_AssetDetailRows.emplace_back("Rock slope", slope_text);
+			m_AssetDetailRows.emplace_back("Sand / snow line", std::string(sand_text) + " / " + snow_text);
 			m_AssetDetailRows.emplace_back("Roughness", roughness_text);
 
+			/* 层贴图是可选的：配了的层才有纹理，其余按颜色平涂 */
+			uint32_t textured_layers = 0;
+			for (int layer = 0; layer < 4; ++layer)
+			{
+				char map_name[32];
+				std::snprintf(map_name, sizeof(map_name), "u_Layer%dAlbedo", layer);
+				MaterialParamInfo info;
+				if (TryReadMaterialParam(material, map_name, info) && info.Type == ParamType::Texture)
+					++textured_layers;
+			}
+			m_AssetDetailRows.emplace_back("Layer maps",
+				std::to_string(textured_layers) + " / 4 textured");
+
 			m_AssetTerrain.LayerColors = {
-				{ "Grass", ReadMaterialColor(material, "u_GrassColor", glm::vec3(0.26f, 0.36f, 0.16f)) },
-				{ "Rock", ReadMaterialColor(material, "u_RockColor", glm::vec3(0.32f, 0.30f, 0.27f)) },
-				{ "High", ReadMaterialColor(material, "u_HighColor", glm::vec3(0.55f, 0.47f, 0.34f)) },
+				{ "Grass", ReadMaterialColor(material, "u_Layer0Color", glm::vec3(0.26f, 0.36f, 0.16f)) },
+				{ "Rock", ReadMaterialColor(material, "u_Layer1Color", glm::vec3(0.32f, 0.30f, 0.27f)) },
+				{ "Sand", ReadMaterialColor(material, "u_Layer2Color", glm::vec3(0.55f, 0.47f, 0.34f)) },
+				{ "Snow", ReadMaterialColor(material, "u_Layer3Color", glm::vec3(0.86f, 0.88f, 0.92f)) },
 			};
 			m_AssetTerrain.HeightTexture = BuildTerrainPreviewTexture(
 				PathToUtf8(absolute_path.filename()) + "_HeightPreview", data);
