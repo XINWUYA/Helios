@@ -1,5 +1,7 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -102,6 +104,50 @@ namespace Helios
 		static const MeshPrimitive& GetPadPrimitive();
 
 	private:
+		/* 生成实例所需的全部输入：同步路径与后台任务共用一份值拷贝，
+		 * 后台任务不持有 GrassField 与 TerrainField 的指针 */
+		struct BuildParams
+		{
+			glm::vec3 Origin{ 0.0f };
+			glm::vec3 Right{ 1.0f, 0.0f, 0.0f };
+			glm::vec3 Forward{ 0.0f, 0.0f, 1.0f };
+			float HalfX{ 0.0f };
+			float HalfZ{ 0.0f };
+			float ChunkWidth{ 0.0f };
+			float ChunkDepth{ 0.0f };
+			float Height{ 0.0f };
+			float Width{ 0.0f };
+			float ScaleX{ 1.0f };
+			float ScaleY{ 1.0f };
+			float SurfaceAlign{ 1.0f };
+			float MaxSlope{ 42.0f };
+			uint32_t ChunksX{ 0 };
+			uint32_t ChunksZ{ 0 };
+			uint32_t PerChunk{ 0 };
+			uint32_t InstanceCount{ 0 };
+			uint32_t Seed{ 0 };
+			bool ReceiveShadow{ true };
+
+			bool HasGround{ false };
+			glm::vec3 GroundOrigin{ 0.0f };
+			glm::vec2 GroundExtent{ 0.0f };
+			uint32_t GroundResolution{ 0 };
+			float GroundHeightScale{ 0.0f };
+			std::vector<float> GroundHeights;
+		};
+
+		/* 后台重建的中间状态：后台算完置 Done，主线程下一帧取走 */
+		struct AsyncBuild
+		{
+			uint64_t Key{ 0 };
+			std::atomic<bool> Done{ false };
+			std::vector<GrassInstanceData> Instances;
+		};
+
+		[[nodiscard]] BuildParams CaptureBuildParams() const;
+		static std::vector<GrassInstanceData> GenerateInstances(const BuildParams& params);
+		void UploadInstances(std::vector<GrassInstanceData>& instances,
+			const SharedPtr<DeviceStorageBuffer>& storage);
 		void BuildCpuInstances(const SharedPtr<DeviceStorageBuffer>& storage);
 		void UploadTrample();
 
@@ -150,6 +196,9 @@ namespace Helios
 		float m_InstanceMinY{ 0.0f };
 		float m_InstanceMaxY{ 0.0f };
 		uint32_t m_SlopeCulledCount{ 0 };
+		/* 后台重建：同 key 只起一个任务，结果在主线程上传 */
+		std::shared_ptr<AsyncBuild> m_AsyncBuild;
+		uint64_t m_AsyncKey{ 0 };
 		uint32_t m_CapacityBytes{ 0 };
 		bool m_ReceiveShadow{ true };
 		bool m_GpuDirty{ false };

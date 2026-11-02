@@ -1,6 +1,8 @@
 ﻿#include "Pch.h"
 #include "GrassField.h"
 #include "TerrainField.h"
+#include "TerrainSampling.h"
+#include "Helios/Core/Jobs.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "Components.h"
 #include "Helios/Renderer/Renderer.h"
@@ -96,6 +98,19 @@ namespace Helios
 		/* 地形换了一份或重建过：贴地高度要重新采样 */
 		const uint64_t ground_key = ground != nullptr ? ground->GetRevision() : 0ull;
 		mix(&ground_key, sizeof(ground_key));
+
+		/* 后台重建的结果先收：key 还对得上才用，对不上说明参数又变了，直接丢 */
+		if (m_AsyncBuild != nullptr && m_AsyncBuild->Done.load(std::memory_order_acquire))
+		{
+			std::vector<GrassInstanceData> instances = std::move(m_AsyncBuild->Instances);
+			m_AsyncBuild.reset();
+			if (m_AsyncKey == m_BuildKey && m_InstanceStorage != nullptr)
+			{
+				UploadInstances(instances, m_InstanceStorage);
+				m_InstanceBuffer = m_GpuVertexView;
+				m_CapacityBytes = static_cast<uint32_t>(instances.size() * sizeof(GrassInstanceData));
+			}
+		}
 
 		if (key == m_BuildKey && m_InstanceBuffer != nullptr)
 			return;
@@ -304,6 +319,32 @@ namespace Helios
 		}
 		else if (shared_ok)
 		{
+			/* 株数多的时候把生成丢后台：拖地形笔刷会反复触发重建，同步算会卡主线程。
+			 * 算完之前不画草（旧缓冲长度对不上新株数，留着会越界） */
+			constexpr uint32_t kAsyncThreshold = 20000;
+			if (m_InstanceCount >= kAsyncThreshold && Jobs::IsInitialized() && m_AsyncBuild == nullptr)
+			{
+				auto state = CreateSharedPtr<AsyncBuild>();
+				state->Key = m_BuildKey;
+				m_AsyncKey = m_BuildKey;
+				m_AsyncBuild = state;
+
+				const BuildParams params = CaptureBuildParams();
+				Jobs::RunBackground([state, params]()
+				{
+					std::vector<GrassInstanceData> instances = GenerateInstances(params);
+					if (Jobs::IsCancelled())
+						return;
+					state->Instances = std::move(instances);
+					state->Done.store(true, std::memory_order_release);
+				});
+
+				m_InstanceBuffer = nullptr;
+				m_CapacityBytes = 0;
+				UploadTrample();
+				return;
+			}
+
 			BuildCpuInstances(m_InstanceStorage);
 			m_InstanceBuffer = m_GpuVertexView;
 			m_CapacityBytes = bytes;
@@ -319,50 +360,94 @@ namespace Helios
 		UploadTrample();
 	}
 
-	void GrassField::BuildCpuInstances(const SharedPtr<DeviceStorageBuffer>& storage)
+	GrassField::BuildParams GrassField::CaptureBuildParams() const
 	{
-		std::vector<GrassInstanceData> instances(m_InstanceCount);
-		for (uint32_t cz = 0; cz < m_ChunksZ; ++cz)
+		BuildParams params;
+		params.Origin = m_Origin;
+		params.Right = m_Right;
+		params.Forward = m_Forward;
+		params.HalfX = m_HalfX;
+		params.HalfZ = m_HalfZ;
+		params.ChunkWidth = m_ChunkWidth;
+		params.ChunkDepth = m_ChunkDepth;
+		params.Height = m_Height;
+		params.Width = m_Width;
+		params.ScaleX = m_ScaleX;
+		params.ScaleY = m_ScaleY;
+		params.SurfaceAlign = m_SurfaceAlign;
+		params.MaxSlope = m_MaxSlope;
+		params.ChunksX = m_ChunksX;
+		params.ChunksZ = m_ChunksZ;
+		params.PerChunk = m_PerChunk;
+		params.InstanceCount = m_InstanceCount;
+		params.Seed = m_Seed;
+		params.ReceiveShadow = m_ReceiveShadow;
+
+		if (m_Ground != nullptr)
 		{
-			for (uint32_t cx = 0; cx < m_ChunksX; ++cx)
+			params.HasGround = true;
+			params.GroundOrigin = m_Ground->GetOrigin();
+			params.GroundExtent = m_Ground->GetExtent();
+			params.GroundResolution = m_Ground->GetResolution();
+			params.GroundHeightScale = m_Ground->GetHeightScale();
+			/* 拷一份高度数据：后台任务不能持有地形指针（地形可能被重建或销毁） */
+			params.GroundHeights = m_Ground->CopyHeights();
+		}
+		return params;
+	}
+
+	std::vector<GrassInstanceData> GrassField::GenerateInstances(const BuildParams& params)
+	{
+		PROFILE_FUNCTION();
+
+		std::vector<GrassInstanceData> instances(params.InstanceCount);
+		const float* heights = params.GroundHeights.empty() ? nullptr : params.GroundHeights.data();
+
+		for (uint32_t cz = 0; cz < params.ChunksZ; ++cz)
+		{
+			for (uint32_t cx = 0; cx < params.ChunksX; ++cx)
 			{
-				const uint32_t first = (cz * m_ChunksX + cx) * m_PerChunk;
-				for (uint32_t i = 0; i < m_PerChunk; ++i)
+				const uint32_t first = (cz * params.ChunksX + cx) * params.PerChunk;
+				for (uint32_t i = 0; i < params.PerChunk; ++i)
 				{
 					/* 每株一个基值：块坐标与序号一起混进去，同样的输入每次给同样的结果。
 					 * 计算着色器里是同一套公式，两边必须一字不差 */
-					const uint32_t base = MixHash(i ^ MixHash(cx ^ MixHash(cz ^ MixHash(m_Seed))));
+					const uint32_t base = MixHash(i ^ MixHash(cx ^ MixHash(cz ^ MixHash(params.Seed))));
 
-					const float local_x = -m_HalfX
-						+ (static_cast<float>(cx) + HashUnit(base, 1u)) * m_ChunkWidth;
-					const float local_z = -m_HalfZ
-						+ (static_cast<float>(cz) + HashUnit(base, 2u)) * m_ChunkDepth;
+					const float local_x = -params.HalfX
+						+ (static_cast<float>(cx) + HashUnit(base, 1u)) * params.ChunkWidth;
+					const float local_z = -params.HalfZ
+						+ (static_cast<float>(cz) + HashUnit(base, 2u)) * params.ChunkDepth;
 
 					const float yaw = HashUnit(base, 3u) * kTwoPi;
-					const float height = m_Height * m_ScaleY * (0.7f + 0.55f * HashUnit(base, 4u));
-					const float width = m_Width * m_ScaleX * (0.75f + 0.5f * HashUnit(base, 5u));
+					const float height = params.Height * params.ScaleY * (0.7f + 0.55f * HashUnit(base, 4u));
+					const float width = params.Width * params.ScaleX * (0.75f + 0.5f * HashUnit(base, 5u));
 
-					glm::vec3 position = m_Origin + m_Right * local_x + m_Forward * local_z;
+					glm::vec3 position = params.Origin + params.Right * local_x + params.Forward * local_z;
 
 					/* 贴地：叶根落到地形表面；点不在地形范围内就留在原平面 */
 					glm::vec3 ground_normal(0.0f, 1.0f, 0.0f);
 					float growth = 1.0f;
-					if (m_Ground != nullptr)
+					if (params.HasGround)
 					{
 						const glm::vec2 world_xz(position.x, position.z);
 						float ground_y = position.y;
-						if (m_Ground->SampleHeightWorld(world_xz, ground_y))
+						if (TerrainSampling::SampleHeight(heights, params.GroundResolution,
+							params.GroundOrigin, params.GroundExtent, params.GroundHeightScale,
+							world_xz, ground_y))
 						{
 							position.y = ground_y;
 
 							/* 坡度过滤：太陡的地方把草退化掉。不跳过是故意的 ——
 							 * 每块株数固定，GPU 侧才能用序号反推块号 */
 							glm::vec3 normal(0.0f, 1.0f, 0.0f);
-							if (m_Ground->SampleNormalWorld(world_xz, normal))
+							if (TerrainSampling::SampleNormal(heights, params.GroundResolution,
+								params.GroundOrigin, params.GroundExtent, params.GroundHeightScale,
+								world_xz, normal))
 							{
 								ground_normal = normal;
-								if (m_MaxSlope > 0.0f && m_MaxSlope < 90.0f
-									&& ground_normal.y < std::cos(glm::radians(m_MaxSlope)))
+								if (params.MaxSlope > 0.0f && params.MaxSlope < 90.0f
+									&& ground_normal.y < std::cos(glm::radians(params.MaxSlope)))
 								{
 									growth = 0.0f;
 								}
@@ -373,8 +458,8 @@ namespace Helios
 					/* 叶面姿态：up 向坡面法线插值，右/前向对 up 正交化。
 					 * 这套公式在 GrassPlacement.glsl 里一字不差，两条路径才长得一样 */
 					const glm::vec3 up_axis = glm::normalize(glm::mix(glm::vec3(0.0f, 1.0f, 0.0f),
-						ground_normal, m_SurfaceAlign));
-					glm::vec3 dir_right = m_Right * std::cos(yaw) + m_Forward * std::sin(yaw);
+						ground_normal, params.SurfaceAlign));
+					glm::vec3 dir_right = params.Right * std::cos(yaw) + params.Forward * std::sin(yaw);
 					dir_right = glm::normalize(dir_right - up_axis * glm::dot(dir_right, up_axis));
 					const glm::vec3 dir_face = glm::cross(dir_right, up_axis);
 
@@ -384,12 +469,17 @@ namespace Helios
 						glm::vec4(up_axis * (height * growth), 0.0f),
 						glm::vec4(dir_face * (width * growth), 0.0f),
 						glm::vec4(position, 1.0f));
-					instance.Params = glm::vec4(-1.0f, m_ReceiveShadow ? 1.0f : 0.0f,
+					instance.Params = glm::vec4(-1.0f, params.ReceiveShadow ? 1.0f : 0.0f,
 						HashUnit(base, 6u), HashUnit(base, 7u));
 				}
 			}
 		}
+		return instances;
+	}
 
+	void GrassField::UploadInstances(std::vector<GrassInstanceData>& instances,
+		const SharedPtr<DeviceStorageBuffer>& storage)
+	{
 		/* 叶根高度范围、坡度退化数：贴地检查与调试用 */
 		m_SlopeCulledCount = 0;
 		m_InstanceMinY = std::numeric_limits<float>::max();
@@ -399,7 +489,7 @@ namespace Helios
 			const float y = instance.Basis[3].y;
 			m_InstanceMinY = std::min(m_InstanceMinY, y);
 			m_InstanceMaxY = std::max(m_InstanceMaxY, y);
-			/* 退化株的三个基向量长度都是 0 */
+			/* 退化株的基向量长度都是 0 */
 			if (glm::dot(instance.Basis[1], instance.Basis[1]) < 1e-8f)
 				++m_SlopeCulledCount;
 		}
@@ -419,6 +509,13 @@ namespace Helios
 			m_InstanceBuffer = DeviceVertexBuffer::Create("GrassFieldInstances", instances.data(), bytes);
 		}
 		m_CapacityBytes = bytes;
+	}
+
+	void GrassField::BuildCpuInstances(const SharedPtr<DeviceStorageBuffer>& storage)
+	{
+		const BuildParams params = CaptureBuildParams();
+		std::vector<GrassInstanceData> instances = GenerateInstances(params);
+		UploadInstances(instances, storage);
 	}
 
 	void GrassField::EnsurePlaced()

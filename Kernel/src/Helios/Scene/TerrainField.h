@@ -59,6 +59,8 @@ namespace Helios
 			float& out_min, float& out_max) const;
 		/* 最细节点边长（米）：草地块网格跟它对齐时用 */
 		[[nodiscard]] uint32_t GetMinNodeSize() const { return m_MinNodeSize; }
+		/* 高度数组的拷贝：后台重建任务拿一份快照，不跟地形共用指针 */
+		[[nodiscard]] std::vector<float> CopyHeights() const { return m_Heights; }
 		/* 高度重建的版本号：贴地对象据此判断要不要重新采样 */
 		[[nodiscard]] uint64_t GetRevision() const { return m_BuildKey; }
 

@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "TerrainField.h"
+#include "TerrainSampling.h"
 
 #include <algorithm>
 #include <glm/gtc/type_ptr.hpp>
@@ -183,67 +184,20 @@ namespace Helios
 
 	bool TerrainField::ContainsPoint(const glm::vec2& world_xz) const
 	{
-		if (m_Extent.x <= 0.0f || m_Extent.y <= 0.0f)
-			return false;
-
-		const glm::vec2 uv = (world_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
-		return uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
+		return TerrainSampling::Contains(m_Heights.empty() ? nullptr : m_Heights.data(),
+			m_Resolution, m_Origin, m_Extent, world_xz);
 	}
 
 	bool TerrainField::SampleHeightWorld(const glm::vec2& world_xz, float& out_height) const
 	{
-		const uint32_t resolution = m_Resolution;
-		if (m_Heights.size() < static_cast<size_t>(resolution) * resolution || m_Extent.x <= 0.0f)
-			return false;
-		if (!ContainsPoint(world_xz))
-			return false;
-
-		const glm::vec2 uv = (world_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
-		const float max_index = static_cast<float>(resolution - 1);
-		const float fx = std::clamp(uv.x * max_index, 0.0f, max_index);
-		const float fz = std::clamp(uv.y * max_index, 0.0f, max_index);
-
-		const uint32_t x0 = static_cast<uint32_t>(fx);
-		const uint32_t z0 = static_cast<uint32_t>(fz);
-		const uint32_t x1 = std::min(x0 + 1, resolution - 1);
-		const uint32_t z1 = std::min(z0 + 1, resolution - 1);
-		const float tx = fx - static_cast<float>(x0);
-		const float tz = fz - static_cast<float>(z0);
-
-		const auto at = [this, resolution](uint32_t x, uint32_t z)
-		{
-			return m_Heights[static_cast<size_t>(z) * resolution + x];
-		};
-
-		const float h = glm::mix(glm::mix(at(x0, z0), at(x1, z0), tx),
-			glm::mix(at(x0, z1), at(x1, z1), tx), tz);
-		out_height = m_Origin.y + (h - 0.5f) * m_HeightScale;
-		return true;
+		return TerrainSampling::SampleHeight(m_Heights.empty() ? nullptr : m_Heights.data(),
+			m_Resolution, m_Origin, m_Extent, m_HeightScale, world_xz, out_height);
 	}
 
 	bool TerrainField::SampleNormalWorld(const glm::vec2& world_xz, glm::vec3& out_normal) const
 	{
-		if (!ContainsPoint(world_xz))
-			return false;
-
-		/* 差分步长取两个纹素：太小的步长会被高度图的高频细节抖成麻点 */
-		const float texel = (m_Extent.x * 2.0f) / static_cast<float>(std::max(1u, m_Resolution - 1));
-		const float step = std::max(texel * 2.0f, 0.01f);
-
-		float hl = 0.0f;
-		float hr = 0.0f;
-		float hd = 0.0f;
-		float hu = 0.0f;
-		if (!SampleHeightWorld(world_xz - glm::vec2(step, 0.0f), hl)
-			|| !SampleHeightWorld(world_xz + glm::vec2(step, 0.0f), hr)
-			|| !SampleHeightWorld(world_xz - glm::vec2(0.0f, step), hd)
-			|| !SampleHeightWorld(world_xz + glm::vec2(0.0f, step), hu))
-		{
-			return false;
-		}
-
-		out_normal = glm::normalize(glm::vec3(hl - hr, 2.0f * step, hd - hu));
-		return true;
+		return TerrainSampling::SampleNormal(m_Heights.empty() ? nullptr : m_Heights.data(),
+			m_Resolution, m_Origin, m_Extent, m_HeightScale, world_xz, out_normal);
 	}
 
 	float TerrainField::GetMinWorldHeight() const
