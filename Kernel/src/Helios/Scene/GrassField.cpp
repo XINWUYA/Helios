@@ -496,10 +496,12 @@ namespace Helios
 		if (m_Ground != nullptr)
 		{
 			params.HasGround = true;
-			params.GroundOrigin = m_Ground->GetOrigin();
 			params.GroundExtent = m_Ground->GetExtent();
 			params.GroundResolution = m_Ground->GetResolution();
 			params.GroundHeightScale = m_Ground->GetHeightScale();
+			params.GroundWorld = m_Ground->GetWorldTransform();
+			params.GroundInverse = m_Ground->GetWorldInverse();
+			params.GroundNormalMatrix = m_Ground->GetNormalMatrix();
 			/* 拷一份高度数据：后台任务不能持有地形指针（地形可能被重建或销毁） */
 			params.GroundHeights = m_Ground->CopyHeights();
 		}
@@ -549,25 +551,45 @@ namespace Helios
 					if (params.HasGround)
 					{
 						const glm::vec2 world_xz(position.x, position.z);
-						float ground_y = position.y;
-						if (TerrainSampling::SampleHeight(heights, params.GroundResolution,
-							params.GroundOrigin, params.GroundExtent, params.GroundHeightScale,
-							world_xz, ground_y))
-						{
-							position.y = ground_y;
 
-							/* 坡度过滤：太陡的地方把草退化掉。不跳过是故意的 ——
-							 * 每块株数固定，GPU 侧才能用序号反推块号 */
-							glm::vec3 normal(0.0f, 1.0f, 0.0f);
-							if (TerrainSampling::SampleNormal(heights, params.GroundResolution,
-								params.GroundOrigin, params.GroundExtent, params.GroundHeightScale,
-								world_xz, normal))
+						/* 世界 → 地形局部。带俯仰时高度会反过来影响局部 xz，
+						 * 先按当前高度算一遍，再用采到的地表高度修正 */
+						const auto to_local = [&params](const glm::vec2& world, float world_y)
+						{
+							const glm::vec4 local = params.GroundInverse
+								* glm::vec4(world.x, world_y, world.y, 1.0f);
+							return glm::vec2(local.x, local.z);
+						};
+
+						glm::vec2 local_xz = to_local(world_xz, position.y);
+						float local_height = 0.0f;
+						if (TerrainSampling::SampleHeight(heights, params.GroundResolution,
+							params.GroundExtent, params.GroundHeightScale, local_xz, local_height))
+						{
+							/* 采到的是局部高度，换回世界再反查一次局部 xz */
+							float world_y = (params.GroundWorld
+								* glm::vec4(local_xz.x, local_height, local_xz.y, 1.0f)).y;
+							local_xz = to_local(world_xz, world_y);
+							if (TerrainSampling::SampleHeight(heights, params.GroundResolution,
+								params.GroundExtent, params.GroundHeightScale, local_xz, local_height))
 							{
-								ground_normal = normal;
-								if (params.MaxSlope > 0.0f && params.MaxSlope < 90.0f
-									&& ground_normal.y < std::cos(glm::radians(params.MaxSlope)))
+								world_y = (params.GroundWorld
+									* glm::vec4(local_xz.x, local_height, local_xz.y, 1.0f)).y;
+								position.y = world_y;
+
+								/* 坡度过滤：太陡的地方把草退化掉。不跳过是故意的 ——
+								 * 每块株数固定，GPU 侧才能用序号反推块号 */
+								glm::vec3 local_normal(0.0f, 1.0f, 0.0f);
+								if (TerrainSampling::SampleNormal(heights, params.GroundResolution,
+									params.GroundExtent, params.GroundHeightScale, local_xz, local_normal))
 								{
-									growth = 0.0f;
+									ground_normal = glm::normalize(glm::vec3(params.GroundNormalMatrix
+										* glm::vec4(local_normal, 0.0f)));
+									if (params.MaxSlope > 0.0f && params.MaxSlope < 90.0f
+										&& ground_normal.y < std::cos(glm::radians(params.MaxSlope)))
+									{
+										growth = 0.0f;
+									}
 								}
 							}
 						}
@@ -654,6 +676,9 @@ namespace Helios
 			glm::vec4 Terrain{ 0.0f };       /* xyz 地形中心、w 起伏总高差 */
 			glm::vec4 TerrainShape{ 0.0f };  /* x 半宽、y 半长、z 分辨率、w 是否有地形 */
 			glm::vec4 GrassShape{ 0.0f };    /* x 贴面程度、y cos(最大坡度)、z 启用坡度过滤 */
+			glm::mat4 TerrainModel{ 1.0f };  /* 地形局部 → 世界 */
+			glm::mat4 TerrainInverse{ 1.0f };
+			glm::mat4 TerrainNormalMatrix{ 1.0f };
 		};
 
 		PlacementParams params;
@@ -674,6 +699,9 @@ namespace Helios
 			params.Terrain = glm::vec4(m_Ground->GetOrigin(), m_Ground->GetHeightScale());
 			params.TerrainShape = glm::vec4(m_Ground->GetExtent().x, m_Ground->GetExtent().y,
 				static_cast<float>(m_Ground->GetResolution()), 1.0f);
+			params.TerrainModel = m_Ground->GetWorldTransform();
+			params.TerrainInverse = m_Ground->GetWorldInverse();
+			params.TerrainNormalMatrix = m_Ground->GetNormalMatrix();
 			const bool slope_filter = m_MaxSlope > 0.0f && m_MaxSlope < 90.0f;
 			params.GrassShape = glm::vec4(m_SurfaceAlign,
 				slope_filter ? std::cos(glm::radians(m_MaxSlope)) : -1.0f,

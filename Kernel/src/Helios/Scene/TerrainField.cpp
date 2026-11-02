@@ -4,6 +4,7 @@
 #include "TerrainSampling.h"
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -138,12 +139,24 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
+		/* 变换每帧都要跟上，但不参与高度图的重建判断：
+		 * 拖 gizmo 只更新矩阵，不再重新生成整张高度图 */
+		if (std::memcmp(glm::value_ptr(world), glm::value_ptr(m_World), sizeof(glm::mat4)) != 0)
+		{
+			m_World = world;
+			m_WorldInverse = glm::inverse(world);
+			m_NormalMatrix = glm::transpose(m_WorldInverse);
+			m_WorldScale = glm::vec3(glm::length(glm::vec3(world[0])),
+				glm::length(glm::vec3(world[1])), glm::length(glm::vec3(world[2])));
+			m_Origin = glm::vec3(world[3]);
+		}
+
 		/* 绑了资产就从资产取高度；取不到退回程序化，场景不至于整块消失 */
 		std::filesystem::file_time_type asset_write_time{};
 		const TerrainAsset::Data* asset = component.m_AssetPath.empty()
 			? nullptr : LoadAssetCached(component.m_AssetPath, asset_write_time);
 
-		/* 构建键：参数、变换与资产都算进来，没变就整段跳过 */
+		/* 构建键：只算局部参数与资产，变换不影响高度数据 */
 		uint64_t key = 0xcbf29ce484222325ull;
 		const auto mix = [&key](const void* data, size_t size)
 		{
@@ -160,7 +173,6 @@ namespace Helios
 		mix(&component.m_Seed, sizeof(component.m_Seed));
 		mix(&component.m_LodRatio, sizeof(component.m_LodRatio));
 		mix(&component.m_MinNodeSize, sizeof(component.m_MinNodeSize));
-		mix(glm::value_ptr(world), sizeof(glm::mat4));
 
 		/* 资产内容换了（重新导出 / 外部编辑）也要重建，时间戳就是它的版本号 */
 		const bool from_asset = asset != nullptr;
@@ -174,22 +186,12 @@ namespace Helios
 			return;
 		m_BuildKey = key;
 
-		/* 范围按世界尺度展开：组件的局部半宽半长乘实体缩放 */
-		const glm::vec3 axis_x(world[0]);
-		const glm::vec3 axis_y(world[1]);
-		const glm::vec3 axis_z(world[2]);
-		const float scale_x = glm::length(axis_x);
-		const float scale_y = glm::length(axis_y);
-		const float scale_z = glm::length(axis_z);
-		m_Origin = glm::vec3(world[3]);
-
 		if (from_asset)
 		{
 			/* 数据以资产为准：组件上的分辨率 / 范围 / 起伏只在程序化模式下起作用 */
-			m_Extent = glm::vec2(std::max(0.0f, asset->Extent.x * scale_x),
-				std::max(0.0f, asset->Extent.y * scale_z));
+			m_Extent = glm::vec2(std::max(0.0f, asset->Extent.x), std::max(0.0f, asset->Extent.y));
 			m_Resolution = std::clamp(asset->Resolution, 16u, 4096u);
-			m_HeightScale = std::max(0.0f, asset->HeightScale * scale_y);
+			m_HeightScale = std::max(0.0f, asset->HeightScale);
 			m_LodRatio = std::max(0.5f, component.m_LodRatio);
 			m_MinNodeSize = std::max(1u, component.m_MinNodeSize);
 			m_AssetPath = component.m_AssetPath;
@@ -197,10 +199,9 @@ namespace Helios
 		}
 		else
 		{
-			m_Extent = glm::vec2(std::max(0.0f, component.m_Extent.x * scale_x),
-				std::max(0.0f, component.m_Extent.y * scale_z));
+			m_Extent = glm::vec2(std::max(0.0f, component.m_Extent.x), std::max(0.0f, component.m_Extent.y));
 			m_Resolution = std::clamp(component.m_Resolution, 16u, 4096u);
-			m_HeightScale = std::max(0.0f, component.m_HeightScale * scale_y);
+			m_HeightScale = std::max(0.0f, component.m_HeightScale);
 			m_LodRatio = std::max(0.5f, component.m_LodRatio);
 			m_MinNodeSize = std::max(1u, component.m_MinNodeSize);
 			m_AssetPath.clear();
@@ -226,22 +227,21 @@ namespace Helios
 		const uint32_t resolution = m_Resolution;
 		std::vector<float> heights(static_cast<size_t>(resolution) * resolution, 0.0f);
 
-		const glm::vec2 size = m_Extent * 2.0f;
 		const uint32_t seed = static_cast<uint32_t>(component.m_Seed);
 
-		/* 三层不同尺度的 fbm 叠出大起伏 + 中景丘陵 + 细节，再抬一次方压出山谷 */
+		/* 三层不同尺度的 fbm 叠出大起伏 + 中景丘陵 + 细节，再抬一次方压出山谷。
+		 * 噪声按局部坐标采样：平移或旋转实体时山形跟着整体走，不会被重新生成 */
 		for (uint32_t z = 0; z < resolution; ++z)
 		{
 			for (uint32_t x = 0; x < resolution; ++x)
 			{
 				const glm::vec2 uv(static_cast<float>(x) / static_cast<float>(resolution - 1),
 					static_cast<float>(z) / static_cast<float>(resolution - 1));
-				const glm::vec2 world_xz = glm::vec2(m_Origin.x, m_Origin.z)
-					+ (uv * 2.0f - 1.0f) * m_Extent;
+				const glm::vec2 local_xz = (uv * 2.0f - 1.0f) * m_Extent;
 
-				float h = 0.62f * Fbm(world_xz * 0.0025f, seed, 4);
-				h += 0.28f * Fbm(world_xz * 0.012f, seed + 17u, 5);
-				h += 0.10f * Fbm(world_xz * 0.05f, seed + 31u, 3);
+				float h = 0.62f * Fbm(local_xz * 0.0025f, seed, 4);
+				h += 0.28f * Fbm(local_xz * 0.012f, seed + 17u, 5);
+				h += 0.10f * Fbm(local_xz * 0.05f, seed + 31u, 3);
 				h = std::clamp(h, 0.0f, 1.0f);
 				h = std::pow(h, 1.35f);
 
@@ -308,36 +308,107 @@ namespace Helios
 		return m_HeightStorage;
 	}
 
+	glm::vec2 TerrainField::GetWorldHalfExtent() const
+	{
+		/* 局部矩形经世界矩阵变换后在 xz 上的轴对齐半范围：
+		 * 转 45 度时比直接乘轴长要大，页表与阴影要用这个才不会在角上留空 */
+		return glm::vec2(std::abs(m_World[0][0]) * m_Extent.x + std::abs(m_World[2][0]) * m_Extent.y,
+			std::abs(m_World[0][2]) * m_Extent.x + std::abs(m_World[2][2]) * m_Extent.y);
+	}
+
+	glm::vec2 TerrainField::WorldToLocal(const glm::vec2& world_xz, float world_y) const
+	{
+		const glm::vec4 local = m_WorldInverse * glm::vec4(world_xz.x, world_y, world_xz.y, 1.0f);
+		return glm::vec2(local.x, local.z);
+	}
+
+	glm::vec2 TerrainField::ToLocalXZ(const glm::vec2& world_xz, float world_y) const
+	{
+		/* 俯仰旋转时高度会反过来影响局部 xz：初值按 world_y 算一次，再用采到的高度修正。
+		 * 绕 Y 轴的地形第一遍就是精确解 */
+		glm::vec2 local = WorldToLocal(world_xz, world_y);
+		float height = 0.0f;
+		if (TerrainSampling::SampleHeight(m_Heights.empty() ? nullptr : m_Heights.data(),
+			m_Resolution, m_Extent, m_HeightScale, local, height))
+		{
+			/* 用采到的地表高度再算一遍：俯仰旋转时第二遍才落到真正的局部点上 */
+			const float surface_y = (m_World * glm::vec4(local.x, height, local.y, 1.0f)).y;
+			local = WorldToLocal(world_xz, surface_y);
+		}
+		return local;
+	}
+
+	glm::vec3 TerrainField::ToWorld(const glm::vec2& local_xz, float local_height) const
+	{
+		return glm::vec3(m_World * glm::vec4(local_xz.x, local_height, local_xz.y, 1.0f));
+	}
+
 	bool TerrainField::ContainsPoint(const glm::vec2& world_xz) const
 	{
 		return TerrainSampling::Contains(m_Heights.empty() ? nullptr : m_Heights.data(),
-			m_Resolution, m_Origin, m_Extent, world_xz);
+			m_Resolution, m_Extent, ToLocalXZ(world_xz));
 	}
 
 	bool TerrainField::SampleHeightWorld(const glm::vec2& world_xz, float& out_height) const
 	{
-		return TerrainSampling::SampleHeight(m_Heights.empty() ? nullptr : m_Heights.data(),
-			m_Resolution, m_Origin, m_Extent, m_HeightScale, world_xz, out_height);
+		const glm::vec2 local_xz = ToLocalXZ(world_xz);
+		float local_height = 0.0f;
+		if (!TerrainSampling::SampleHeight(m_Heights.empty() ? nullptr : m_Heights.data(),
+			m_Resolution, m_Extent, m_HeightScale, local_xz, local_height))
+			return false;
+
+		out_height = ToWorld(local_xz, local_height).y;
+		return true;
 	}
 
 	bool TerrainField::SampleNormalWorld(const glm::vec2& world_xz, glm::vec3& out_normal) const
 	{
-		return TerrainSampling::SampleNormal(m_Heights.empty() ? nullptr : m_Heights.data(),
-			m_Resolution, m_Origin, m_Extent, m_HeightScale, world_xz, out_normal);
+		const glm::vec2 local_xz = ToLocalXZ(world_xz);
+		glm::vec3 local_normal(0.0f);
+		if (!TerrainSampling::SampleNormal(m_Heights.empty() ? nullptr : m_Heights.data(),
+			m_Resolution, m_Extent, m_HeightScale, local_xz, local_normal))
+			return false;
+
+		out_normal = glm::normalize(glm::vec3(m_NormalMatrix * glm::vec4(local_normal, 0.0f)));
+		return true;
+	}
+
+	void TerrainField::GetWorldHeightBounds(float& out_min, float& out_max) const
+	{
+		out_min = std::numeric_limits<float>::max();
+		out_max = -std::numeric_limits<float>::max();
+		for (int corner = 0; corner < 8; ++corner)
+		{
+			const glm::vec3 local((corner & 1) ? m_Extent.x : -m_Extent.x,
+				(corner & 2) ? m_HeightScale : 0.0f,
+				(corner & 4) ? m_Extent.y : -m_Extent.y);
+			const float y = (m_World * glm::vec4(local, 1.0f)).y;
+			out_min = std::min(out_min, y);
+			out_max = std::max(out_max, y);
+		}
 	}
 
 	float TerrainField::GetMinWorldHeight() const
 	{
 		if (m_Heights.empty())
-			return m_Origin.y;
-		return m_Origin.y + *std::min_element(m_Heights.begin(), m_Heights.end()) * m_HeightScale;
+			return GetOrigin().y;
+
+		/* 高度数据最低是 0，取局部盒子下沿的世界 y；实体位置不会比它更高 */
+		float lo = 0.0f;
+		float hi = 0.0f;
+		GetWorldHeightBounds(lo, hi);
+		return std::min(lo, GetOrigin().y);
 	}
 
 	float TerrainField::GetMaxWorldHeight() const
 	{
 		if (m_Heights.empty())
-			return m_Origin.y + m_HeightScale;
-		return m_Origin.y + *std::max_element(m_Heights.begin(), m_Heights.end()) * m_HeightScale;
+			return GetOrigin().y + m_HeightScale;
+
+		float lo = 0.0f;
+		float hi = 0.0f;
+		GetWorldHeightBounds(lo, hi);
+		return hi;
 	}
 
 	bool TerrainField::GetHeightRange(const glm::vec2& min_xz, const glm::vec2& max_xz,
@@ -347,22 +418,35 @@ namespace Helios
 		if (m_Heights.size() < static_cast<size_t>(resolution) * resolution || m_Extent.x <= 0.0f)
 			return false;
 
-		/* 世界 xz → 纹素矩形，超出地形的部分夹到边界 */
-		const auto to_texel = [this, resolution](const glm::vec2& world_xz)
+		/* 世界矩形 → 局部矩形。带旋转时矩形四角变换后取包围盒，比实际范围略大，
+		 * 但阴影级联的深度板只要盖住就行，不能漏 */
+		glm::vec2 local_min(std::numeric_limits<float>::max());
+		glm::vec2 local_max(-std::numeric_limits<float>::max());
+		for (int corner = 0; corner < 4; ++corner)
 		{
-			const glm::vec2 uv = (world_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
+			const glm::vec2 world_corner((corner & 1) ? max_xz.x : min_xz.x,
+				(corner & 2) ? max_xz.y : min_xz.y);
+			const glm::vec2 local = WorldToLocal(world_corner);
+			local_min = glm::min(local_min, local);
+			local_max = glm::max(local_max, local);
+		}
+
+		/* 世界矩形完全在局部范围外 */
+		if (local_max.x < -m_Extent.x || local_max.y < -m_Extent.y
+			|| local_min.x > m_Extent.x || local_min.y > m_Extent.y)
+			return false;
+
+		/* 局部 xz → 纹素矩形，超出地形的部分夹到边界 */
+		const auto to_texel = [this, resolution](const glm::vec2& local_xz)
+		{
+			const glm::vec2 uv = local_xz / (m_Extent * 2.0f) + 0.5f;
 			const float max_index = static_cast<float>(resolution - 1);
 			return glm::ivec2(static_cast<int>(std::clamp(uv.x * max_index, 0.0f, max_index)),
 				static_cast<int>(std::clamp(uv.y * max_index, 0.0f, max_index)));
 		};
 
-		const glm::vec2 uv_min = (min_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
-		const glm::vec2 uv_max = (max_xz - glm::vec2(m_Origin.x, m_Origin.z)) / (m_Extent * 2.0f) + 0.5f;
-		if (uv_max.x < 0.0f || uv_max.y < 0.0f || uv_min.x > 1.0f || uv_min.y > 1.0f)
-			return false;
-
-		const glm::ivec2 texel_min = to_texel(min_xz);
-		const glm::ivec2 texel_max = to_texel(max_xz);
+		const glm::ivec2 texel_min = to_texel(local_min);
+		const glm::ivec2 texel_max = to_texel(local_max);
 
 		/* 范围估计（级联深度板）不必逐纹素扫：按每轴的最大采样数定步长 */
 		int step = 1;
@@ -402,8 +486,21 @@ namespace Helios
 		}
 		if (lo > hi)
 			return false;
-		out_min = m_Origin.y + lo * m_HeightScale;
-		out_max = m_Origin.y + hi * m_HeightScale;
+
+		/* 局部高度区间压到世界 y：上下界各取一遍，旋转时 z 也会贡献到 y */
+		float world_lo = std::numeric_limits<float>::max();
+		float world_hi = -std::numeric_limits<float>::max();
+		for (int corner = 0; corner < 4; ++corner)
+		{
+			const glm::vec2 local_local((corner & 1) ? local_max.x : local_min.x,
+				(corner & 2) ? local_max.y : local_min.y);
+			const float y_lo = ToWorld(local_local, lo * m_HeightScale).y;
+			const float y_hi = ToWorld(local_local, hi * m_HeightScale).y;
+			world_lo = std::min(world_lo, std::min(y_lo, y_hi));
+			world_hi = std::max(world_hi, std::max(y_lo, y_hi));
+		}
+		out_min = world_lo;
+		out_max = world_hi;
 		return true;
 	}
 
@@ -413,14 +510,13 @@ namespace Helios
 		if (m_HeightMap == nullptr)
 			return;
 
-		/* 根节点盖住整块地形，从它往下一层层细分 */
+		/* 根节点盖住整块地形（局部空间），从它往下一层层细分 */
 		const float root_size = std::max(m_Extent.x, m_Extent.y) * 2.0f;
 		if (root_size <= 0.0f)
 			return;
 
-		/* 根节点的包围盒盖住 0..HeightScale 这段：中心抬半高 */
-		const glm::vec3 root_center(m_Origin.x, m_Origin.y + m_HeightScale * 0.5f, m_Origin.z);
-		CollectNodes(&frustum, eye, 0.0f, root_center, root_size, 0, out);
+		/* 根节点在局部空间居中；视锥与距离都按世界中心算 */
+		CollectNodes(&frustum, eye, 0.0f, glm::vec2(0.0f), root_size, 0, out);
 		BalancePatches(out);
 		MarkMorphPatches(out);
 	}
@@ -435,47 +531,57 @@ namespace Helios
 		if (root_size <= 0.0f)
 			return;
 
-		const glm::vec3 root_center(m_Origin.x, m_Origin.y + m_HeightScale * 0.5f, m_Origin.z);
-		CollectNodes(nullptr, center, radius, root_center, root_size, 0, out);
+		CollectNodes(nullptr, center, radius, glm::vec2(0.0f), root_size, 0, out);
 		BalancePatches(out);
 		MarkMorphPatches(out);
 	}
 
 	void TerrainField::CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
-		const glm::vec3& center, float size, uint32_t lod, std::vector<TerrainPatch>& out) const
+		const glm::vec2& local_center, float local_size, uint32_t lod,
+		std::vector<TerrainPatch>& out) const
 	{
 		if (out.size() >= kMaxPatches)
 			return;
 
+		/* 节点中心的世界位置与半径：缩放取三轴最大值，旋转后也盖得住 */
+		const glm::vec3 world_center = glm::vec3(m_World
+			* glm::vec4(local_center.x, 0.0f, local_center.y, 1.0f));
+		const float max_scale = std::max(m_WorldScale.x, std::max(m_WorldScale.y, m_WorldScale.z));
+		const float world_size = local_size * max_scale;
+
 		/* 剔除：包围盒含高度范围，只按 XZ 矩形判会把山体切掉 */
-		const glm::vec3 extent(size * 0.5f, std::max(m_HeightScale * 0.5f, 0.01f), size * 0.5f);
-		if (frustum != nullptr && frustum->IsOutside(center, extent))
+		const glm::vec3 extent(world_size * 0.5f,
+			std::max(m_HeightScale * m_WorldScale.y * 0.5f, 0.01f), world_size * 0.5f);
+		if (frustum != nullptr && frustum->IsOutside(world_center, extent))
 			return;
 
-		const float distance = glm::length(eye - center);
+		const float distance = glm::length(eye - world_center);
 		/* 球范围（探针捕获）：节点自己的半对角线算进去，边角节点的叶子可能还伸进范围里 */
-		if (max_distance > 0.0f && distance - size * 0.7072f > max_distance)
+		if (max_distance > 0.0f && distance - world_size * 0.7072f > max_distance)
 			return;
 
-		const bool can_split = size > static_cast<float>(m_MinNodeSize) * 1.01f;
-		if (can_split && distance < size * m_LodRatio)
+		/* 最细节点边长与 LOD 半径都是局部米：放大后的地形在同样的世界距离下更细 */
+		const bool can_split = local_size > static_cast<float>(m_MinNodeSize) * 1.01f;
+		if (can_split && distance < world_size * m_LodRatio)
 		{
-			const float child_size = size * 0.5f;
-			const float offset = size * 0.25f;
+			const float child_size = local_size * 0.5f;
+			const float offset = local_size * 0.25f;
 			for (int quadrant = 0; quadrant < 4; ++quadrant)
 			{
 				const float dx = (quadrant & 1) ? offset : -offset;
 				const float dz = (quadrant & 2) ? offset : -offset;
-				CollectNodes(frustum, eye, max_distance, center + glm::vec3(dx, 0.0f, dz),
+				CollectNodes(frustum, eye, max_distance, local_center + glm::vec2(dx, dz),
 					child_size, lod + 1, out);
 			}
 			return;
 		}
 
 		TerrainPatch patch;
-		patch.Info = glm::vec4(center.x - size * 0.5f, 0.0f, center.z - size * 0.5f, size);
+		patch.Info = glm::vec4(local_center.x - local_size * 0.5f, 0.0f,
+			local_center.y - local_size * 0.5f, local_size);
 		/* 采样步长：节点边长除以 32 段，粗 LOD 下让法线重建也跟着放粗 */
-		patch.Lod = glm::vec4(static_cast<float>(lod), size / static_cast<float>(kPatchQuads), 0.0f, 0.0f);
+		patch.Lod = glm::vec4(static_cast<float>(lod), local_size / static_cast<float>(kPatchQuads),
+			0.0f, 0.0f);
 		out.push_back(patch);
 	}
 

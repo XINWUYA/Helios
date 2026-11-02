@@ -443,11 +443,11 @@ namespace Helios
 						continue;
 
 					const glm::vec3 origin = terrain.m_Field->GetOrigin();
-					const glm::vec2 extent = terrain.m_Field->GetExtent();
+					const glm::vec2 half = terrain.m_Field->GetWorldHalfExtent();
 					const glm::vec2 lo = glm::max(rect_min,
-						glm::vec2(origin.x - extent.x, origin.z - extent.y));
+						glm::vec2(origin.x - half.x, origin.z - half.y));
 					const glm::vec2 hi = glm::min(rect_max,
-						glm::vec2(origin.x + extent.x, origin.z + extent.y));
+						glm::vec2(origin.x + half.x, origin.z + half.y));
 					if (lo.x >= hi.x || lo.y >= hi.y)
 						continue;
 

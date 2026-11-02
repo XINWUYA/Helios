@@ -122,8 +122,9 @@ namespace Helios
 		if (!EnsureResources())
 			return;
 
-		const glm::vec2 extent = field.GetExtent();
-		const glm::vec2 grid = glm::clamp(glm::ceil(extent * 2.0f / kPageWorldSize),
+		/* 页按世界空间切：旋转后取整个地形的轴对齐包围盒 */
+		const glm::vec2 world_half = field.GetWorldHalfExtent();
+		const glm::vec2 grid = glm::clamp(glm::ceil(world_half * 2.0f / kPageWorldSize),
 			glm::vec2(1.0f), glm::vec2(static_cast<float>(kMaxGrid)));
 		const glm::vec2 grid_size(static_cast<float>(static_cast<uint32_t>(grid.x)),
 			static_cast<float>(static_cast<uint32_t>(grid.y)));
@@ -156,12 +157,27 @@ namespace Helios
 		static std::vector<uint8_t> needed;
 		needed.assign(m_Table.size(), 0);
 
-		const glm::vec2 min_corner = glm::vec2(field.GetOrigin().x, field.GetOrigin().z) - extent;
+		const glm::vec2 min_corner = glm::vec2(field.GetOrigin().x, field.GetOrigin().z) - world_half;
 		for (size_t patch_index = 0; patch_index < patch_count; ++patch_index)
 		{
 			const TerrainPatch& patch = patches[patch_index];
-			const glm::vec2 page_min = (glm::vec2(patch.Info.x, patch.Info.z) - min_corner) / kPageWorldSize;
-			const glm::vec2 page_max = page_min + patch.Info.w / kPageWorldSize;
+
+			/* patch 是局部矩形：四角变换到世界后取包围盒，页按世界切 */
+			const glm::vec2 local_min(patch.Info.x, patch.Info.z);
+			const glm::vec2 local_max = local_min + patch.Info.w;
+			glm::vec2 world_min(std::numeric_limits<float>::max());
+			glm::vec2 world_max(-std::numeric_limits<float>::max());
+			for (int corner = 0; corner < 4; ++corner)
+			{
+				const glm::vec2 local((corner & 1) ? local_max.x : local_min.x,
+					(corner & 2) ? local_max.y : local_min.y);
+				const glm::vec3 world = field.ToWorld(local, 0.0f);
+				world_min = glm::min(world_min, glm::vec2(world.x, world.z));
+				world_max = glm::max(world_max, glm::vec2(world.x, world.z));
+			}
+
+			const glm::vec2 page_min = (world_min - min_corner) / kPageWorldSize;
+			const glm::vec2 page_max = (world_max - min_corner) / kPageWorldSize;
 			const int x0 = std::clamp(static_cast<int>(std::floor(page_min.x)), 0, static_cast<int>(grid_w) - 1);
 			const int x1 = std::clamp(static_cast<int>(std::floor(page_max.x - 1e-4f)), 0, static_cast<int>(grid_w) - 1);
 			const int z0 = std::clamp(static_cast<int>(std::floor(page_min.y)), 0, static_cast<int>(grid_h) - 1);

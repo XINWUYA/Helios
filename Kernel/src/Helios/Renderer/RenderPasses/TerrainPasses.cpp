@@ -25,6 +25,7 @@ namespace Helios::TerrainDraw
 		{
 			const TerrainComponent* Component{ nullptr };
 			const TerrainField* Field{ nullptr };
+			int EntityId{ -1 };
 			uint32_t First{ 0 };
 			uint32_t Count{ 0 };
 		};
@@ -106,8 +107,14 @@ namespace Helios::TerrainDraw
 			per_draw.FillMissing = MaterialFill::Values | MaterialFill::Textures;
 			per_draw.Overrides.clear();
 			per_draw.Overrides.push_back(Material::MakeTextureParam("u_HeightMap", field.GetHeightMap()));
-			per_draw.Overrides.emplace_back(ParamType::Vec3, "u_TerrainOrigin", field.GetOrigin());
+			/* 几何在局部空间，世界位置与法线靠这三个矩阵 */
+			per_draw.Overrides.emplace_back(ParamType::Mat4, "u_TerrainModel", field.GetWorldTransform());
+			per_draw.Overrides.emplace_back(ParamType::Mat4, "u_TerrainInverse", field.GetWorldInverse());
+			per_draw.Overrides.emplace_back(ParamType::Mat4, "u_TerrainNormalMatrix", field.GetNormalMatrix());
 			per_draw.Overrides.emplace_back(ParamType::Vec2, "u_TerrainExtent", field.GetExtent());
+			per_draw.Overrides.emplace_back(ParamType::Vec2, "u_TerrainWorldExtent",
+				field.GetWorldHalfExtent());
+			per_draw.Overrides.emplace_back(ParamType::Vec3, "u_TerrainOrigin", field.GetOrigin());
 			per_draw.Overrides.emplace_back(ParamType::Vec2, "u_HeightmapSize",
 				glm::vec2(static_cast<float>(field.GetResolution())));
 			per_draw.Overrides.emplace_back(ParamType::Float, "u_HeightScale", field.GetHeightScale());
@@ -143,13 +150,15 @@ namespace Helios::TerrainDraw
 				vt_ready ? virtual_texture.GetGrid() : glm::vec2(0.0f));
 		}
 
-		/* 可见着色的逐绘制参数：是否接收阴影 + 虚拟纹理。只有声明了这些参数的着色器才能用，
-		 * 名字反射不到时 ApplyParam 会回退到槽位 0，把高度图挤掉 */
-		void BuildDrawParams(const TerrainField& field, const TerrainComponent& component, DrawParams& per_draw)
+		/* 可见着色的逐绘制参数：是否接收阴影 + 虚拟纹理 + 拾取 id。只有声明了这些参数的
+		 * 着色器才能用，名字反射不到时 ApplyParam 会回退到槽位 0，把高度图挤掉 */
+		void BuildDrawParams(const TerrainField& field, const TerrainComponent& component,
+			int entity_id, DrawParams& per_draw)
 		{
 			AddTerrainOverrides(field, per_draw);
 			per_draw.Overrides.emplace_back(ParamType::Float, "u_TerrainReceiveShadow",
 				component.m_ReceiveShadow ? 1.0f : 0.0f);
+			per_draw.Overrides.emplace_back(ParamType::Int, "u_TerrainObjectId", entity_id);
 			AddVirtualTextureParams(field.GetVirtualTexture(), per_draw);
 		}
 
@@ -182,8 +191,8 @@ namespace Helios::TerrainDraw
 				if (patches.size() == first)
 					continue;
 
-				batches.push_back(TerrainBatch{ &component, component.m_Field.get(), first,
-					static_cast<uint32_t>(patches.size()) - first });
+				batches.push_back(TerrainBatch{ &component, component.m_Field.get(),
+					static_cast<int>(entity), first, static_cast<uint32_t>(patches.size()) - first });
 			}
 
 			if (batches.empty())
@@ -235,7 +244,7 @@ namespace Helios::TerrainDraw
 					continue;
 
 				DrawParams per_draw;
-				BuildDrawParams(*batch.Field, *batch.Component, per_draw);
+				BuildDrawParams(*batch.Field, *batch.Component, batch.EntityId, per_draw);
 
 				/* 前向的读数由材质自己出；延迟的 Surface / Shadow 档读 G-Buffer，不用管 */
 				if (forward && debug_view != DebugViewMode::None)
@@ -398,8 +407,9 @@ namespace Helios::TerrainDraw
 				continue;
 
 			const glm::vec3 origin = batch.Field->GetOrigin();
-			const glm::vec2 extent = batch.Field->GetExtent();
-			const glm::vec2 min_corner(origin.x - extent.x, origin.z - extent.y);
+			/* 页按世界空间切（与 TerrainVirtualTexture::Prepare 同一份范围） */
+			const glm::vec2 world_half = batch.Field->GetWorldHalfExtent();
+			const glm::vec2 min_corner(origin.x - world_half.x, origin.z - world_half.y);
 
 			for (const glm::uvec3& page : virtual_texture.GetPending())
 			{
@@ -562,8 +572,8 @@ namespace Helios::TerrainDraw
 			if (patches.size() == first)
 				continue;
 
-			batches.push_back(TerrainBatch{ &component, component.m_Field.get(), first,
-				static_cast<uint32_t>(patches.size()) - first });
+			batches.push_back(TerrainBatch{ &component, component.m_Field.get(),
+				static_cast<int>(entity), first, static_cast<uint32_t>(patches.size()) - first });
 		}
 
 		if (batches.empty())
@@ -585,7 +595,7 @@ namespace Helios::TerrainDraw
 				continue;
 
 			DrawParams per_draw;
-			BuildDrawParams(*batch.Field, *batch.Component, per_draw);
+			BuildDrawParams(*batch.Field, *batch.Component, batch.EntityId, per_draw);
 
 			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), range.Buffer,
 				range.FirstInstance + batch.First, batch.Count, &per_draw, 0,

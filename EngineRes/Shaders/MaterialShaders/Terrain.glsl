@@ -5,7 +5,7 @@
  * 高度在顶点着色器里采样高度图 —— 顶点数据完全不落地。 */
 layout(location = 0) in vec2 a_Uv;
 /* 实例数据：每 patch 一条 */
-layout(location = 5) in vec4 a_PatchInfo; /* xyz = 左下角世界坐标，w = 边长 */
+layout(location = 5) in vec4 a_PatchInfo; /* xyz = 左下角局部坐标，w = 边长 */
 layout(location = 6) in vec4 a_PatchLod;  /* x = LOD 级数，y = 采样步长 */
 
 #include "TerrainCommon.glsl"
@@ -14,6 +14,7 @@ layout(location = 6) in vec4 a_PatchLod;  /* x = LOD 级数，y = 采样步长 *
 struct SVextex2Frag
 {
 	vec3 WorldPosition;
+	vec2 LocalXZ;
 	float Step;
 	float ReceiveShadow;
 	vec4 CurClip;
@@ -23,17 +24,21 @@ struct SVextex2Frag
 out SVextex2Frag vert2frag;
 
 uniform float u_TerrainReceiveShadow = 1.0f;
+/* 地块实体的 id：实例化绘制一次一块地形，按 per-draw 传 */
+uniform int u_TerrainObjectId = -1;
 
 void main()
 {
 	float morph = 1.0f;
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph);
+	vec2 local_xz;
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph, local_xz);
 
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.CurClip = u_VelocityViewProjectionMat * vec4(world, 1.0f);
 	/* 地形是静态的：上一帧的同一个世界点用上一帧的视图投影，位移只来自相机 */
 	vert2frag.PrevClip = u_PrevVelocityViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.WorldPosition = world;
+	vert2frag.LocalXZ = local_xz;
 	/* 法线固定按本 patch 的步长差分：跟着 morph 放粗会让坡度的混色沿边界切出色带 */
 	vert2frag.Step = max(a_PatchLod.y, 0.05f);
 	vert2frag.ReceiveShadow = u_TerrainReceiveShadow;
@@ -57,10 +62,13 @@ layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
 layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition; a: 接受阴影 */
 layout(location = 6) out float ObjectId;
 layout(location = 7) out vec2 Velocity;
+/* 地块实体的 id（per-draw） */
+uniform int u_TerrainObjectId = -1;
 
 struct SVextex2Frag
 {
 	vec3 WorldPosition;
+	vec2 LocalXZ;
 	float Step;
 	float ReceiveShadow;
 	vec4 CurClip;
@@ -71,7 +79,7 @@ in SVextex2Frag vert2frag;
 
 void main()
 {
-	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz);
+	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.LocalXZ);
 
 	/* 页驻留就采页池（粗糙度也一起回来），不驻留就用刚算出来的值。
 	 * 两条路混色公式同源，开关只差采样密度 */
@@ -90,7 +98,7 @@ void main()
 	GBufferTexture4 = vec4(0.0f);
 	GBufferTexture5 = vec4(vert2frag.WorldPosition, vert2frag.ReceiveShadow);
 
-	/* 地形不参与拾取：与空像素同口径 */
-	ObjectId = -1.0f;
+	/* 地形可以按像素拾取：写实体 id，跟模型走同一套 */
+	ObjectId = float(u_TerrainObjectId);
 	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);
 }

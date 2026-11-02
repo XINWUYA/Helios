@@ -13,6 +13,7 @@ layout(location = 6) in vec4 a_PatchLod;
 struct SVextex2Frag
 {
 	vec3 WorldPosition;
+	vec2 LocalXZ;
 	float Step;
 };
 
@@ -21,10 +22,11 @@ out SVextex2Frag vert2frag;
 void main()
 {
 	float morph = 1.0f;
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph);
+	vec2 local_xz;
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph, local_xz);
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.WorldPosition = world;
-
+	vert2frag.LocalXZ = local_xz;
 	vert2frag.Step = max(a_PatchLod.y, 0.05f);
 }
 
@@ -40,6 +42,7 @@ void main()
 struct SVextex2Frag
 {
 	vec3 WorldPosition;
+	vec2 LocalXZ;
 	float Step;
 };
 
@@ -64,7 +67,7 @@ void main()
 		return;
 	}
 
-	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz);
+	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.LocalXZ);
 
 	/* 调试读数要跟正常着色同源：页驻留时取页池里的颜色 */
 	vec4 page_albedo;

@@ -21,9 +21,13 @@ layout(std140, binding = 4) uniform GrassPlacementBlock
 	vec4 u_Shape;         /* x 半宽、y 半长、z 块宽、w 块深 */
 	vec4 u_Blade;         /* x 叶高、y 叶宽、z 接受阴影、w 总株数 */
 	/* ---- 贴地：有地形时叶片落到地形表面、姿态对齐坡面 ---- */
-	vec4 u_Terrain;       /* xyz 地形中心世界坐标、w 起伏总高差 */
-	vec4 u_TerrainShape;  /* x 半宽、y 半长、z 高度图分辨率、w 是否有地形 */
+	vec4 u_Terrain;       /* xyz 地形中心世界坐标（定位用）、w 局部起伏幅度 */
+	vec4 u_TerrainShape;  /* x 局部半宽、y 局部半长、z 高度图分辨率、w 是否有地形 */
 	vec4 u_GrassShape;    /* x 贴面程度、y cos(最大坡度)、z 是否启用坡度过滤 */
+	/* 地形几何在局部空间：世界点先拉到局部采样，法线再变换回世界 */
+	mat4 u_TerrainModel;
+	mat4 u_TerrainInverse;
+	mat4 u_TerrainNormalMatrix;
 };
 
 /* 地形高度数据：与 TerrainField 的 CPU 副本同一份，归一化 0..1 */
@@ -45,14 +49,20 @@ layout(std430, binding = 1) writeonly buffer GrassInstanceBuffer
 
 const float kTwoPi = 6.2831853f;
 
-/* 双线性采样地形高度（世界单位），与 C++ 侧 SampleHeightWorld 同口径 */
-float TerrainHeightAt(vec2 world_xz)
+/* 世界 xz 反查地形局部：俯仰时高度会参与，先按给定高度算，再用地表高度修一次 */
+vec2 TerrainLocalXZ(vec2 world_xz, float world_y)
+{
+	return (u_TerrainInverse * vec4(world_xz.x, world_y, world_xz.y, 1.0f)).xz;
+}
+
+/* 双线性采样地形局部高度，与 C++ 侧 TerrainSampling::SampleHeight 同口径 */
+float TerrainHeightAt(vec2 local_xz)
 {
 	if (u_TerrainShape.w < 0.5f)
-		return u_Terrain.y;
+		return 0.0f;
 
 	const vec2 half_extent = max(u_TerrainShape.xy, vec2(1e-3f));
-	vec2 uv = clamp((world_xz - u_Terrain.xz) / (half_extent * 2.0f) + 0.5f, vec2(0.0f), vec2(1.0f));
+	vec2 uv = clamp(local_xz / (half_extent * 2.0f) + 0.5f, vec2(0.0f), vec2(1.0f));
 
 	const int width = max(int(u_TerrainShape.z), 2);
 	const float max_index = float(width - 1);
@@ -67,18 +77,18 @@ float TerrainHeightAt(vec2 world_xz)
 	const float h01 = u_Heights[i1.y * width + i0.x];
 	const float h11 = u_Heights[i1.y * width + i1.x];
 	const float h = mix(mix(h00, h10, frac.x), mix(h01, h11, frac.x), frac.y);
-	return u_Terrain.y + h * u_Terrain.w;
+	return h * u_Terrain.w;
 }
 
-/* 坡面法线：邻居差分，步长取两个纹素 */
-vec3 TerrainNormalAt(vec2 world_xz)
+/* 坡面法线（局部）：邻居差分，步长取两个纹素 */
+vec3 TerrainNormalLocal(vec2 local_xz)
 {
 	const float texel = (u_TerrainShape.x * 2.0f) / max(u_TerrainShape.z - 1.0f, 1.0f);
 	const float step = max(texel * 2.0f, 0.01f);
-	const float hl = TerrainHeightAt(world_xz - vec2(step, 0.0f));
-	const float hr = TerrainHeightAt(world_xz + vec2(step, 0.0f));
-	const float hd = TerrainHeightAt(world_xz - vec2(0.0f, step));
-	const float hu = TerrainHeightAt(world_xz + vec2(0.0f, step));
+	const float hl = TerrainHeightAt(local_xz - vec2(step, 0.0f));
+	const float hr = TerrainHeightAt(local_xz + vec2(step, 0.0f));
+	const float hd = TerrainHeightAt(local_xz - vec2(0.0f, step));
+	const float hu = TerrainHeightAt(local_xz + vec2(0.0f, step));
 	return normalize(vec3(hl - hr, 2.0f * step, hd - hu));
 }
 
@@ -131,8 +141,14 @@ void main()
 	float growth = 1.0f;
 	if (u_TerrainShape.w > 0.5f)
 	{
-		position.y = TerrainHeightAt(position.xz);
-		ground_normal = TerrainNormalAt(position.xz);
+		/* 世界点 → 局部 → 采样高度 → 换回世界，再反查一次局部（俯仰时才需要第二遍） */
+		vec2 local_xz = TerrainLocalXZ(position.xz, position.y);
+		float local_h = TerrainHeightAt(local_xz);
+		float world_y = (u_TerrainModel * vec4(local_xz.x, local_h, local_xz.y, 1.0f)).y;
+		local_xz = TerrainLocalXZ(position.xz, world_y);
+		local_h = TerrainHeightAt(local_xz);
+		position.y = (u_TerrainModel * vec4(local_xz.x, local_h, local_xz.y, 1.0f)).y;
+		ground_normal = normalize((u_TerrainNormalMatrix * vec4(TerrainNormalLocal(local_xz), 0.0f)).xyz);
 		if (u_GrassShape.z > 0.5f && ground_normal.y < u_GrassShape.y)
 			growth = 0.0f;
 	}

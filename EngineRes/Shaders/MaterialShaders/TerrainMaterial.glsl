@@ -22,17 +22,20 @@ struct STerrainSurface
 	vec3 Normal;
 };
 
-STerrainSurface EvaluateTerrainSurface(vec2 world_xz)
+STerrainSurface EvaluateTerrainSurface(vec2 local_xz)
 {
 	STerrainSurface surface;
-	surface.Normal = TerrainNormal(world_xz, max(u_TerrainNormalStep, 0.01f));
+	const float step = max(u_TerrainNormalStep, 0.01f);
+	const vec3 local_normal = TerrainNormalLocal(local_xz, step);
+	surface.Normal = TerrainNormal(local_xz, step);
 
-	/* 坡度 = 1 - N.y：陡的地方露岩，缓的地方长草 */
-	const float slope = clamp(1.0f - surface.Normal.y, 0.0f, 1.0f);
+	/* 坡度 = 1 - N.y：陡的地方露岩，缓的地方长草。按局部法线算，
+	 * 旋转地形只改朝向，不会把整片坡面判成岩色 */
+	const float slope = clamp(1.0f - local_normal.y, 0.0f, 1.0f);
 	surface.Albedo = mix(u_GrassColor, u_RockColor, smoothstep(u_RockSlope * 0.5f, u_RockSlope, slope));
 
 	/* 高处混一点砂色，远山才有层次 */
-	const float height_t = clamp(TerrainHeight(world_xz) / max(u_HeightScale, 1.0f), 0.0f, 1.0f);
+	const float height_t = clamp(TerrainHeight(local_xz) / max(u_HeightScale, 1.0f), 0.0f, 1.0f);
 	surface.Albedo = mix(surface.Albedo, u_HighColor, smoothstep(0.55f, 0.9f, height_t) * 0.65f);
 
 	surface.Roughness = u_Roughness;

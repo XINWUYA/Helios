@@ -13,6 +13,7 @@ layout(location = 6) in vec4 a_PatchLod;
 struct SVextex2Frag
 {
 	vec3 WorldPosition;
+	vec2 LocalXZ;
 	float Step;
 	float ReceiveShadow;
 };
@@ -20,14 +21,18 @@ struct SVextex2Frag
 out SVextex2Frag vert2frag;
 
 uniform float u_TerrainReceiveShadow = 1.0f;
+/* 地块实体的 id：实例化绘制一次一块地形，按 per-draw 传 */
+uniform int u_TerrainObjectId = -1;
 
 void main()
 {
 	float morph = 1.0f;
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph);
+	vec2 local_xz;
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph, local_xz);
 
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.WorldPosition = world;
+	vert2frag.LocalXZ = local_xz;
 	vert2frag.Step = max(a_PatchLod.y, 0.05f);
 	vert2frag.ReceiveShadow = u_TerrainReceiveShadow;
 }
@@ -47,6 +52,7 @@ void main()
 struct SVextex2Frag
 {
 	vec3 WorldPosition;
+	vec2 LocalXZ;
 	float Step;
 	float ReceiveShadow;
 };
@@ -54,12 +60,13 @@ struct SVextex2Frag
 in SVextex2Frag vert2frag;
 
 layout(location = 0) out vec4 OutFragColor;
-/* 地形不参与拾取 */
 layout(location = 1) out float ObjectId;
+/* 地块实体的 id（per-draw） */
+uniform int u_TerrainObjectId = -1;
 
 void main()
 {
-	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz);
+	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.LocalXZ);
 
 	/* 页驻留就采页池，不驻留用刚算的那份 —— 与延迟管线同一套判断 */
 	vec4 page_albedo;
@@ -84,7 +91,7 @@ void main()
 	const vec3 direct = albedo * ndl * INV_PI * LightFactor(attenuation, shadow);
 	const vec3 ambient = ComposeFallbackAmbient(vec3(1.0f), albedo, 1.0f) * 0.5f;
 
-	ObjectId = -1.0f;
+	ObjectId = float(u_TerrainObjectId);
 
 	/* 调试分流：读数取自本笔实际着色用的量，与正常着色同源 */
 	if (u_DebugView != 0)

@@ -28,7 +28,9 @@ uniform vec4 u_VTPageRect = vec4(0.0f, 0.0f, 64.0f, 0.0f);
 void main()
 {
 	const vec2 world_xz = u_VTPageRect.xz + v_Uv * u_VTPageRect.z;
+	/* 页是按世界矩形切的（与可见着色的查表同一套），算外观前拉回地形局部 */
+	const vec2 local_xz = (u_TerrainInverse * vec4(world_xz.x, u_TerrainOrigin.y, world_xz.y, 1.0f)).xz;
 
-	const STerrainSurface surface = EvaluateTerrainSurface(world_xz);
+	const STerrainSurface surface = EvaluateTerrainSurface(local_xz);
 	OutAlbedo = vec4(surface.Albedo, surface.Roughness);
 }

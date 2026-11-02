@@ -16,21 +16,22 @@ namespace Helios
 	struct Frustum;
 	class DeviceTexture;
 
-	/* 地形 patch：所有 patch 共用同一个 33×33 模板网格，世界位置与 LOD 由实例属性给出，
-	 * 高度在顶点着色器里采样高度图。结构与 Terrain.glsl 的 location 5/6 逐字节对应。 */
+	/* 地形 patch：所有 patch 共用同一个 33×33 模板网格，位置与 LOD 由实例属性给出，
+	 * 高度在顶点着色器里采样高度图。结构与 Terrain.glsl 的 location 5/6 逐字节对应。
+	 * 坐标是地形自己的局部空间（原点在地形中心、xz 平面），世界位置由 u_TerrainModel 变换。 */
 	struct TerrainPatch
 	{
-		glm::vec4 Info{ 0.0f }; /* xyz = 左下角世界坐标，w = 覆盖边长（米） */
+		glm::vec4 Info{ 0.0f }; /* xyz = 左下角局部坐标，w = 覆盖边长（米） */
 		glm::vec4 Lod{ 0.0f };  /* x = 级数（0 最细），y = 采样步长，zw 保留 */
 	};
 
 	/* 一块地形的高度数据与 patch 划分。
-	 * 高度图按程序化噪声生成（M1 不做资产导入），顶点不落地：
-	 * 换参数或换变换才重建，静止地形不产生每帧开销。 */
+	 * 高度图在局部空间生成，只跟参数与资产有关：换变换只更新矩阵，
+	 * 高度图不动，拖 gizmo 不会重生成整座山。 */
 	class HELIOS_API TerrainField
 	{
 	public:
-		/* 重建高度图（参数与变换没变时直接返回） */
+		/* 参数没变只更新矩阵；换参数 / 资产才重建高度图 */
 		void Rebuild(const TerrainComponent& component, const glm::mat4& world);
 
 		/* 按视锥生成 patch 列表：从根节点递归细分，节点边长与距离的比值够了就停。
@@ -42,10 +43,22 @@ namespace Helios
 			std::vector<TerrainPatch>& out) const;
 
 		[[nodiscard]] const SharedPtr<DeviceTexture>& GetHeightMap() const { return m_HeightMap; }
+		/* 地形中心的世界坐标（实体位置） */
 		[[nodiscard]] glm::vec3 GetOrigin() const { return m_Origin; }
+		/* 局部空间半宽半长（米），不含实体缩放 */
 		[[nodiscard]] glm::vec2 GetExtent() const { return m_Extent; }
 		[[nodiscard]] uint32_t GetResolution() const { return m_Resolution; }
+		/* 局部空间的起伏幅度（米），不含实体缩放 */
 		[[nodiscard]] float GetHeightScale() const { return m_HeightScale; }
+		/* 实体到世界的变换与逆矩阵：patch 顶点走它，世界点反查局部也走它 */
+		[[nodiscard]] const glm::mat4& GetWorldTransform() const { return m_World; }
+		[[nodiscard]] const glm::mat4& GetWorldInverse() const { return m_WorldInverse; }
+		/* 法线的变换矩阵（逆转置，顶点着色器按 3×3 用） */
+		[[nodiscard]] const glm::mat4& GetNormalMatrix() const { return m_NormalMatrix; }
+		/* 三个轴的世界长度：世界包围盒估算用 */
+		[[nodiscard]] glm::vec3 GetWorldScale() const { return m_WorldScale; }
+		/* 地形在世界 xz 平面上的半宽半长（轴对齐包围盒，含旋转） */
+		[[nodiscard]] glm::vec2 GetWorldHalfExtent() const;
 		[[nodiscard]] bool IsEmpty() const { return m_HeightMap == nullptr; }
 		/* 高度数据来自 .terrain 资产时给出资产路径，程序化生成时为空 */
 		[[nodiscard]] bool IsFromAsset() const { return !m_AssetPath.empty(); }
@@ -58,6 +71,10 @@ namespace Helios
 		bool SampleNormalWorld(const glm::vec2& world_xz, glm::vec3& out_normal) const;
 		/* 世界 xz 是否落在地形覆盖范围内（不管高度） */
 		[[nodiscard]] bool ContainsPoint(const glm::vec2& world_xz) const;
+		/* 世界坐标反查局部 xz：绕 Y 轴的地形是精确的，带俯仰时按当前高度迭代几次 */
+		[[nodiscard]] glm::vec2 ToLocalXZ(const glm::vec2& world_xz, float world_y = 0.0f) const;
+		/* 局部 xz 与高度 → 世界坐标 */
+		[[nodiscard]] glm::vec3 ToWorld(const glm::vec2& local_xz, float local_height) const;
 		/* 地形表面的世界高度范围（含实体位置的 y） */
 		[[nodiscard]] float GetMinWorldHeight() const;
 		[[nodiscard]] float GetMaxWorldHeight() const;
@@ -106,14 +123,23 @@ namespace Helios
 		static void BalancePatches(std::vector<TerrainPatch>& patches);
 
 		void CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
-			const glm::vec3& center, float size, uint32_t lod, std::vector<TerrainPatch>& out) const;
+			const glm::vec2& local_center, float local_size, uint32_t lod,
+			std::vector<TerrainPatch>& out) const;
+		/* 世界 xz → 局部 xz：带旋转时高度会参与，按给定世界高度算一遍 */
+		[[nodiscard]] glm::vec2 WorldToLocal(const glm::vec2& world_xz, float world_y = 0.0f) const;
+		/* 地形局部包围盒（8 角点）变换到世界后的 y 范围 */
+		void GetWorldHeightBounds(float& out_min, float& out_max) const;
 
 		SharedPtr<DeviceTexture> m_HeightMap;
 		/* 高度图的 CPU 副本（归一化 0..1）：贴地查询用，GPU 放置后续也读它 */
 		std::vector<float> m_Heights;
 		mutable SharedPtr<class DeviceStorageBuffer> m_HeightStorage;
 		glm::vec3 m_Origin{ 0.0f };
-		glm::vec2 m_Extent{ 512.0f, 512.0f }; /* 半宽半长 */
+		glm::mat4 m_World{ 1.0f };
+		glm::mat4 m_WorldInverse{ 1.0f };
+		glm::mat4 m_NormalMatrix{ 1.0f };
+		glm::vec3 m_WorldScale{ 1.0f };
+		glm::vec2 m_Extent{ 512.0f, 512.0f }; /* 局部半宽半长 */
 		uint32_t m_Resolution{ 512 };
 		float m_HeightScale{ 40.0f };
 		/* 本次高度图的来源（资产路径；程序化时为空） */

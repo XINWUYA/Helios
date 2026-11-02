@@ -144,10 +144,13 @@ namespace Helios
 			std::vector<glm::uvec2> ChunkRanges;
 
 			bool HasGround{ false };
-			glm::vec3 GroundOrigin{ 0.0f };
 			glm::vec2 GroundExtent{ 0.0f };
 			uint32_t GroundResolution{ 0 };
 			float GroundHeightScale{ 0.0f };
+			/* 地形几何在局部空间：贴地采样要把世界点拉回去，法线再变换到世界 */
+			glm::mat4 GroundWorld{ 1.0f };
+			glm::mat4 GroundInverse{ 1.0f };
+			glm::mat4 GroundNormalMatrix{ 1.0f };
 			std::vector<float> GroundHeights;
 		};
 

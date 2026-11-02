@@ -14,7 +14,7 @@ bool TerrainVirtualTextureLookup(vec2 world_xz, out vec4 out_albedo)
 	if (u_VTGrid.x < 1.0f)
 		return false;
 
-	const vec2 min_corner = u_TerrainOrigin.xz - u_TerrainExtent;
+	const vec2 min_corner = u_TerrainOrigin.xz - u_TerrainWorldExtent;
 	const vec2 local = (world_xz - min_corner) / 64.0f;
 	const vec2 cell = floor(local);
 
