@@ -13,7 +13,7 @@
 namespace Helios
 {
 	struct GrassComponent;
-	struct TerrainField;
+	class TerrainField;
 	class DeviceVertexBuffer;
 	class DeviceStorageBuffer;
 	class DeviceTexture;
@@ -27,7 +27,10 @@ namespace Helios
 	 * 叶片位置有两种生成方式，由全局开关选：
 	 *   CPU —— 逐株算好写进实例缓冲（默认，两个后端都能跑）；
 	 *   GPU —— 计算着色器按同样的哈希生成，CPU 只算块划分（要计算着色器支持）。
-	 * 两条路径的公式一字不差，切换前后草地长得完全一样。 */
+	 * 两条路径的公式一字不差，切换前后草地长得完全一样。
+	 *
+	 * 块号通过一张「压实块号 → 网格块号」的表还原：按观察范围裁剪之后，
+	 * 有效块在网格里不再连续，只靠「序号 ÷ 每块株数」推不回块坐标。 */
 	class HELIOS_API GrassField
 	{
 	public:
@@ -174,14 +177,19 @@ namespace Helios
 		std::vector<uint8_t> m_Trample;
 
 		std::vector<Chunk> m_Chunks;
+		/* 压实块号 → 网格块号：裁剪后块号不连续，GPU 放置靠它还原块坐标 */
+		std::vector<uint32_t> m_PackedChunkIndices;
+		SharedPtr<DeviceStorageBuffer> m_ChunkIndexBuffer;
+		/* 压实块号 → 块包围球（xyz 中心、w 半径）：GPU 剔除靠它，
+		 * 中心带地形高度，不能按草地平面现推 —— 贴地时两者差几十米 */
+		std::vector<glm::vec4> m_PackedChunkBounds;
+		SharedPtr<DeviceStorageBuffer> m_ChunkBoundsBuffer;
 
 		/* 贴合的地形：非空时叶片高度取地形采样，块底面不生成 */
 		const TerrainField* m_Ground{ nullptr };
-		/* 观察点范围（多相机取并集）与是否做了按距离裁剪
-		 * （裁剪时 GPU 放置走不了：块号不再是连续的） */
+		/* 观察点范围（多相机取并集）：只对范围内的块生成实例 */
 		glm::vec2 m_FocusMin{ 0.0f };
 		glm::vec2 m_FocusMax{ 0.0f };
-		bool m_CroppedToFocus{ false };
 
 		/* 重建时算好、GPU 放置与脚印都要用的现场数据 */
 		glm::vec3 m_Origin{ 0.0f };

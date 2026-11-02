@@ -141,6 +141,8 @@ namespace Helios
 		m_FocusMax = focus_max;
 
 		m_Chunks.clear();
+		m_PackedChunkIndices.clear();
+		m_PackedChunkBounds.clear();
 		m_InstanceCount = 0;
 		m_GpuDirty = false;
 		/* 实例数变了，压实缓冲的大小要重来 */
@@ -235,7 +237,6 @@ namespace Helios
 				}
 			}
 		}
-		m_CroppedToFocus = active_count < total_chunks;
 
 		/* 每块株数：先按密度算，再按「有效块数」分摊预算 —— 只被视野内的块分，
 		 * 近处的密度才不会因为整片地形太大而被摊薄 */
@@ -294,6 +295,9 @@ namespace Helios
 					chunk.First = next_first;
 					chunk.Count = per_chunk;
 					next_first += per_chunk;
+					/* 区间是按有效块顺序排的，压实块号就是这两张表的下标 */
+					m_PackedChunkIndices.push_back(chunk_index);
+					m_PackedChunkBounds.emplace_back(chunk.Center, glm::length(chunk.Extent));
 				}
 				else
 				{
@@ -313,6 +317,23 @@ namespace Helios
 			m_PadBuffer = nullptr;
 			return;
 		}
+
+		/* 块映射表：GPU 放置靠它把压实块号还原成网格坐标；
+		 * 块包围球表给 GPU 剔除用，中心已经带了地形高度。
+		 * 两张表都很小（一块 4 / 16 字节），重建时整张重传比按区间打补丁更简单 */
+		const uint32_t table_bytes = static_cast<uint32_t>(
+			m_PackedChunkIndices.size() * sizeof(uint32_t));
+		if (m_ChunkIndexBuffer == nullptr || m_ChunkIndexBuffer->GetDataSize() < table_bytes)
+			m_ChunkIndexBuffer = DeviceStorageBuffer::Create("GrassChunkIndices", table_bytes);
+		if (m_ChunkIndexBuffer != nullptr)
+			m_ChunkIndexBuffer->SetData(m_PackedChunkIndices.data(), table_bytes);
+
+		const uint32_t bounds_bytes = static_cast<uint32_t>(
+			m_PackedChunkBounds.size() * sizeof(glm::vec4));
+		if (m_ChunkBoundsBuffer == nullptr || m_ChunkBoundsBuffer->GetDataSize() < bounds_bytes)
+			m_ChunkBoundsBuffer = DeviceStorageBuffer::Create("GrassChunkBounds", bounds_bytes);
+		if (m_ChunkBoundsBuffer != nullptr)
+			m_ChunkBoundsBuffer->SetData(m_PackedChunkBounds.data(), bounds_bytes);
 
 		/* 块底面：每块一张四边形，铺在叶根下面；颜色由块序号散出来，
 		 * 相邻块深浅略有差别，看起来不像一整块塑料 */
@@ -380,8 +401,8 @@ namespace Helios
 		const bool shared_ok = m_InstanceStorage != nullptr && m_GpuVertexView != nullptr;
 		/* 贴地时把地形高度上传成 storage buffer；建不出来就退回 CPU 路径 */
 		const bool ground_ready = m_Ground == nullptr || m_Ground->GetHeightStorage() != nullptr;
-		/* 按观察点裁剪后块号不再连续，GPU 放置的「序号 ÷ 每块株数」会推错块，改走 CPU */
-		const bool gpu_path = ground_ready && !m_CroppedToFocus && g_GpuPlacementEnabled && shared_ok
+		const bool gpu_path = ground_ready && g_GpuPlacementEnabled && shared_ok
+			&& m_ChunkIndexBuffer != nullptr
 			&& Renderer::GetRenderAPI() != nullptr && Renderer::GetRenderAPI()->SupportsCompute();
 		m_UsingGpuPlacement = gpu_path;
 		if (gpu_path)
@@ -648,14 +669,15 @@ namespace Helios
 		}
 
 		if (Renderer::DispatchGrassPlacement(m_InstanceStorage, &params, sizeof(params), m_InstanceCount,
-			terrain_heights))
+			terrain_heights, m_ChunkIndexBuffer))
 			m_GpuDirty = false;
 	}
 
 	void GrassField::PrepareIndirect(const glm::vec4* planes, const glm::vec3& eye)
 	{
 		m_IndirectPrepared = false;
-		if (!g_IndirectDrawEnabled || planes == nullptr || m_InstanceCount == 0 || m_InstanceStorage == nullptr)
+		if (!g_IndirectDrawEnabled || planes == nullptr || m_InstanceCount == 0
+			|| m_InstanceStorage == nullptr || m_ChunkBoundsBuffer == nullptr)
 			return;
 		if (Renderer::GetRenderAPI() == nullptr || !Renderer::GetRenderAPI()->SupportsCompute())
 			return;
@@ -676,36 +698,28 @@ namespace Helios
 			}
 		}
 
-		/* 参数块与 GrassIndirectCull.glsl 的 std140 布局逐字节对应 */
+		/* 参数块与 GrassIndirectCull.glsl 的 std140 布局逐字节对应。
+		 * 块的包围球不在这里：它带地形高度，随重建一起进块包围球表 */
 		struct alignas(16) CullParams
 		{
 			glm::vec4 Planes[6]{};
-			glm::vec4 Origin{ 0.0f };
-			glm::vec4 Right{ 0.0f };
-			glm::vec4 Forward{ 0.0f };
-			glm::vec4 Grid{ 0.0f };
-			glm::vec4 Counts{ 0.0f };
-			glm::vec4 Extra{ 0.0f };
+			glm::vec4 Counts{ 0.0f };   /* x 每块株数、y 总株数、z 抽稀起点、w 剔除距离 */
+			glm::vec4 Extra{ 0.0f };    /* x 最小密度比例 */
 			glm::vec4 Camera{ 0.0f };
 		};
 
 		CullParams params;
 		for (int index = 0; index < 6; ++index)
 			params.Planes[index] = planes[index];
-		params.Origin = glm::vec4(m_Origin, 0.0f);
-		params.Right = glm::vec4(m_Right, m_HalfX);
-		params.Forward = glm::vec4(m_Forward, m_HalfZ);
-		params.Grid = glm::vec4(m_ChunkWidth, m_ChunkDepth,
-			static_cast<float>(m_PerChunk), static_cast<float>(m_InstanceCount));
-		params.Counts = glm::vec4(static_cast<float>(m_ChunksX), static_cast<float>(m_ChunksZ),
+		params.Counts = glm::vec4(static_cast<float>(m_PerChunk), static_cast<float>(m_InstanceCount),
 			m_LodDistance, m_CullDistance);
-		params.Extra = glm::vec4(m_MinDensityScale, m_Height * m_ScaleY, 0.0f, 0.0f);
+		params.Extra = glm::vec4(m_MinDensityScale, 0.0f, 0.0f, 0.0f);
 		params.Camera = glm::vec4(eye, 0.0f);
 
 		if (!Renderer::DispatchGrassArgsReset(m_IndirectArgs, kBladeIndexCount))
 			return;
 		m_IndirectPrepared = Renderer::DispatchGrassCull(m_InstanceStorage, m_IndirectDrawBuffer,
-			m_IndirectArgs, &params, sizeof(params), m_InstanceCount);
+			m_IndirectArgs, m_ChunkBoundsBuffer, &params, sizeof(params), m_InstanceCount);
 	}
 
 	void GrassField::StampBend(const glm::vec3& world_position, float radius)

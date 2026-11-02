@@ -5,7 +5,8 @@
  * 公式与 GrassField::BuildCpuInstances 一字不差（同一个 PCG 散列、同一套分布），
  * 所以开关切到 CPU 路径时草地长得完全一样。
  *
- * 块内株数是固定的，所以「总序号 ÷ 每块株数」直接就是块号，不用查表。
+ * 块内株数是固定的，所以「总序号 ÷ 每块株数」就是压实块号；压实块号再到
+ * 块映射表里换成网格块号 —— 按观察范围裁剪之后，有效块在网格里是跳着的。
  * 实例数据按 ObjectInstanceData 排：矩阵 4 列 + 参数，共 5 个 vec4。 */
 
 layout(local_size_x = 64) in;
@@ -29,6 +30,12 @@ layout(std140, binding = 4) uniform GrassPlacementBlock
 layout(std430, binding = 2) readonly buffer TerrainHeights
 {
 	float u_Heights[];
+};
+
+/* 压实块号 → 网格块号（cz * 块数 x + cx）。裁剪过的块集合靠它还原块坐标 */
+layout(std430, binding = 3) readonly buffer ChunkIndices
+{
+	uint u_ChunkIndices[];
 };
 
 layout(std430, binding = 1) writeonly buffer GrassInstanceBuffer
@@ -96,8 +103,9 @@ void main()
 
 	const uint per_chunk = uint(u_Grid.z);
 	const uint chunks_x = uint(u_Grid.x);
-	const uint chunk_index = instance / per_chunk;
-	const uint blade_index = instance - chunk_index * per_chunk;
+	const uint packed_chunk = instance / per_chunk;
+	const uint blade_index = instance - packed_chunk * per_chunk;
+	const uint chunk_index = u_ChunkIndices[packed_chunk];
 	const uint cx = chunk_index % chunks_x;
 	const uint cz = chunk_index / chunks_x;
 	const uint seed = uint(u_Grid.w);

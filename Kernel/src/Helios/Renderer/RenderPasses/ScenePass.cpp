@@ -262,9 +262,9 @@ namespace Helios
 							continue;
 
 						/* 按块到相机的最近距离判剔除：用块中心的话，大块在相机身边也会
-						 * 因为中心远而被整块砍掉，画面就是"身边的草没了" */
-						const float chunk_radius =
-							glm::length(glm::vec2(chunk.Extent.x, chunk.Extent.z));
+						 * 因为中心远而被整块砍掉，画面就是"身边的草没了"。
+						 * 半径取包围盒对角线，与 GPU 剔除的块包围球同一口径 */
+						const float chunk_radius = glm::length(chunk.Extent);
 						const float distance = glm::distance(view_position, chunk.Center) - chunk_radius;
 						if (distance >= grass.m_CullDistance)
 							continue;

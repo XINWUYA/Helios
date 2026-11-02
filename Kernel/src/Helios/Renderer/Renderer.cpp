@@ -644,18 +644,20 @@ namespace Helios
 
 	bool Renderer::DispatchGrassCull(const SharedPtr<DeviceStorageBuffer>& source,
 		const SharedPtr<DeviceStorageBuffer>& target, const SharedPtr<DeviceStorageBuffer>& args,
+		const SharedPtr<DeviceStorageBuffer>& chunk_bounds,
 		const void* param_data, uint32_t param_size, uint32_t instance_count)
 	{
 		if (m_pRenderAPI == nullptr || source == nullptr || target == nullptr || args == nullptr
-			|| instance_count == 0 || !m_pRenderAPI->SupportsCompute())
+			|| chunk_bounds == nullptr || instance_count == 0 || !m_pRenderAPI->SupportsCompute())
 			return false;
 
 		const SharedPtr<DeviceShader> shader = s_GrassCullShader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
 
+		/* 5 号是块包围球表：4 号留给参数块，1-3 已分给源、目标与间接参数 */
 		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
-			{ 1, source }, { 2, target }, { 3, args },
+			{ 1, source }, { 2, target }, { 3, args }, { 5, chunk_bounds },
 		};
 		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
 		const uint32_t group_count = (instance_count + group_size - 1) / group_size;
@@ -664,25 +666,27 @@ namespace Helios
 
 	bool Renderer::DispatchGrassPlacement(const SharedPtr<DeviceStorageBuffer>& instances,
 		const void* param_data, uint32_t param_size, uint32_t instance_count,
-		const SharedPtr<DeviceStorageBuffer>& terrain_heights)
+		const SharedPtr<DeviceStorageBuffer>& terrain_heights,
+		const SharedPtr<DeviceStorageBuffer>& chunk_indices)
 	{
 		if (m_pRenderAPI == nullptr || instances == nullptr || instance_count == 0
-			|| !m_pRenderAPI->SupportsCompute())
+			|| chunk_indices == nullptr || !m_pRenderAPI->SupportsCompute())
 			return false;
 
 		const SharedPtr<DeviceShader> shader = s_GrassPlacementShader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
 
-		/* 绑定点跟 GrassPlacement.glsl 对齐：1 号是实例数据、2 号是地形高度，参数块在 4 号。
-		 * 着色器声明了 2 号就必须有绑定，没地形时用引擎的哑缓冲顶上（Metal 缺绑定直接断言） */
+		/* 绑定点跟 GrassPlacement.glsl 对齐：1 号是实例数据、2 号是地形高度、3 号是块映射表，
+		 * 参数块在 4 号。着色器声明了 2 号就必须有绑定，没地形时用引擎的哑缓冲顶上
+		 * （Metal 缺绑定直接断言） */
 		const SharedPtr<DeviceStorageBuffer> heights =
 			(terrain_heights != nullptr) ? terrain_heights : DeviceStorageBuffer::Dummy();
 		if (heights == nullptr)
 			return false;
 
 		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers =
-			{ { 1, instances }, { 2, heights } };
+			{ { 1, instances }, { 2, heights }, { 3, chunk_indices } };
 		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
 		const uint32_t group_count = (instance_count + group_size - 1) / group_size;
 		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);

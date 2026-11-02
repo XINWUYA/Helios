@@ -44,16 +44,20 @@ namespace Helios
 
 		/* 草地间接绘制：先把参数块重置成「N 个索引 / 0 实例」，再由剔除那一步累加实例数 */
 		static bool DispatchGrassArgsReset(const SharedPtr<class DeviceStorageBuffer>& args, uint32_t index_count);
-		/* 草地 GPU 剔除 + 实例压实：可见叶片抄进目标缓冲，实例数写进参数块 */
+		/* 草地 GPU 剔除 + 实例压实：可见叶片抄进目标缓冲，实例数写进参数块。
+		 * chunk_bounds 是「压实块号 → 块包围球」（xyz 中心 + w 半径），贴地时中心带地形高度 */
 		static bool DispatchGrassCull(const SharedPtr<class DeviceStorageBuffer>& source,
 			const SharedPtr<class DeviceStorageBuffer>& target, const SharedPtr<class DeviceStorageBuffer>& args,
+			const SharedPtr<class DeviceStorageBuffer>& chunk_bounds,
 			const void* param_data, uint32_t param_size, uint32_t instance_count);
 
 		/* 草地 GPU 放置：一次派发把整片草地的叶片实例算出来。运行期不支持计算着色器时返回 false */
-		/* terrain_heights 非空时绑到 2 号：计算里按世界坐标采样地形高度做贴地 */
+		/* terrain_heights 非空时绑到 2 号：计算里按世界坐标采样地形高度做贴地；
+		 * chunk_indices 绑到 3 号，把压实块号还原成网格块坐标 */
 		static bool DispatchGrassPlacement(const SharedPtr<class DeviceStorageBuffer>& instances,
 			const void* param_data, uint32_t param_size, uint32_t instance_count,
-			const SharedPtr<class DeviceStorageBuffer>& terrain_heights = nullptr);
+			const SharedPtr<class DeviceStorageBuffer>& terrain_heights,
+			const SharedPtr<class DeviceStorageBuffer>& chunk_indices);
 
 		/* per_draw：单次绘制的覆盖参数（IBL 这类"每次绘制不同"的绑定）。
 	 * 只写当前绑定的 Shader 与纹理、不落材质对象 —— 共享材质因此保持只读。 */
