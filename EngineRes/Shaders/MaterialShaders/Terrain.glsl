@@ -27,16 +27,15 @@ uniform float u_TerrainReceiveShadow = 1.0f;
 void main()
 {
 	float morph = 1.0f;
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod.y, morph);
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph);
 
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.CurClip = u_VelocityViewProjectionMat * vec4(world, 1.0f);
 	/* 地形是静态的：上一帧的同一个世界点用上一帧的视图投影，位移只来自相机 */
 	vert2frag.PrevClip = u_PrevVelocityViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.WorldPosition = world;
-	/* 法线跟着几何走：边缘用粗一档的差分，接缝两侧的明暗才对得上 */
-	const float step = max(a_PatchLod.y, 0.05f);
-	vert2frag.Step = mix(step * 2.0f, step, morph);
+	/* 法线固定按本 patch 的步长差分：跟着 morph 放粗会让坡度的混色沿边界切出色带 */
+	vert2frag.Step = max(a_PatchLod.y, 0.05f);
 	vert2frag.ReceiveShadow = u_TerrainReceiveShadow;
 }
 
@@ -72,7 +71,7 @@ in SVextex2Frag vert2frag;
 
 void main()
 {
-	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz, vert2frag.Step);
+	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz);
 
 	/* 页驻留就采页池（粗糙度也一起回来），不驻留就用刚算出来的值。
 	 * 两条路混色公式同源，开关只差采样密度 */

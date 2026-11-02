@@ -21,12 +21,11 @@ out SVextex2Frag vert2frag;
 void main()
 {
 	float morph = 1.0f;
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod.y, morph);
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph);
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.WorldPosition = world;
 
-	const float step = max(a_PatchLod.y, 0.05f);
-	vert2frag.Step = mix(step * 2.0f, step, morph);
+	vert2frag.Step = max(a_PatchLod.y, 0.05f);
 }
 
 
@@ -65,7 +64,7 @@ void main()
 		return;
 	}
 
-	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz, vert2frag.Step);
+	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz);
 
 	/* 调试读数要跟正常着色同源：页驻留时取页池里的颜色 */
 	vec4 page_albedo;

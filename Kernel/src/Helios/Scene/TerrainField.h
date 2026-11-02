@@ -99,6 +99,12 @@ namespace Helios
 		/* 高度图上传：纹理 + CPU 副本，两种来源共用 */
 		void UploadHeightMap(std::vector<float> heights);
 		/* frustum 为空表示不做视锥剔除；max_distance 为 0 表示不限距离 */
+		/* 标记哪些 patch 需要 morph：只有挨着更细节点的才做。
+		 * 相邻两侧都往各自父级收敛会收敛到不同精度的表面，反而裂开 */
+		static void MarkMorphPatches(std::vector<TerrainPatch>& patches);
+		/* 2:1 平衡：相邻叶子最多差一档，否则 morph 对不上 */
+		static void BalancePatches(std::vector<TerrainPatch>& patches);
+
 		void CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
 			const glm::vec3& center, float size, uint32_t lod, std::vector<TerrainPatch>& out) const;
 

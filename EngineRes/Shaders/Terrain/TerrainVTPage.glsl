@@ -29,7 +29,6 @@ void main()
 {
 	const vec2 world_xz = u_VTPageRect.xz + v_Uv * u_VTPageRect.z;
 
-	/* 差分用页纹素的跨度：页是固定分辨率，跟屏幕上的 LOD 无关 */
-	const STerrainSurface surface = EvaluateTerrainSurface(world_xz, u_VTPageRect.z / 256.0f);
+	const STerrainSurface surface = EvaluateTerrainSurface(world_xz);
 	OutAlbedo = vec4(surface.Albedo, surface.Roughness);
 }

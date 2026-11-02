@@ -73,9 +73,9 @@ float TerrainHeightCoarse(vec2 world_xz, float step)
  * 内部（morph = 1）用细表面 —— LOD 切换是连续的，不再靠裙边遮。
  * 模板网格比 patch 多一圈顶点（UV 从 -1/32 到 33/32），那一圈仍拉成裙边兜底：
  * 四叉树没有 2:1 平衡，相邻节点可能差两档，morph 只保证差一档的情况。 */
-vec3 TerrainVertexWorld(vec2 patch_uv, vec4 patch_info, float lod_step, out float morph)
+vec3 TerrainVertexWorld(vec2 patch_uv, vec4 patch_info, vec4 patch_lod, out float morph)
 {
-	const float step = max(lod_step, 0.05f);
+	const float step = max(patch_lod.y, 0.05f);
 	vec3 world = patch_info.xyz + vec3(patch_uv.x, 0.0f, patch_uv.y) * patch_info.w;
 
 	const bool outside = patch_uv.x < 0.0f || patch_uv.x > 1.0f
@@ -90,18 +90,29 @@ vec3 TerrainVertexWorld(vec2 patch_uv, vec4 patch_info, float lod_step, out floa
 
 	const float height = TerrainHeight(world.xz);
 
-	/* 到 patch 边界的世界距离，往内一个 morph 带宽（边长的四分之一）过渡到细表面 */
+	/* 逐条边 morph：只有挨着更粗邻居的那几条边才往父级表面收敛（patch_lod.z 的位掩码，
+	 * 位序 1 = -X、2 = +X、4 = -Z、8 = +Z）。同层邻居两边都不收，细表面本来就一模一样 */
+	const int side_mask = int(patch_lod.z + 0.5f);
 	const float band = patch_info.w * 0.25f * u_TerrainMorphScale;
-	if (band <= step)
+	if (side_mask == 0 || band <= step || patch_lod.x < 0.5f)
 	{
-		/* 缩到没有带宽 = 关掉 morph（检查程序拿它做对照），接缝全靠裙边 */
+		/* 没有更粗的邻居 / 关掉 morph（检查程序拿它做对照）：整片用细表面 */
 		morph = 1.0f;
 		world.y = height;
 		return world;
 	}
 
-	const vec2 edge = min(patch_uv, vec2(1.0f) - patch_uv) * patch_info.w;
-	const float t = clamp(min(edge.x, edge.y) / band, 0.0f, 1.0f);
+	float edge_distance = 1.0e6f;
+	if ((side_mask & 1) != 0)
+		edge_distance = min(edge_distance, patch_uv.x * patch_info.w);
+	if ((side_mask & 2) != 0)
+		edge_distance = min(edge_distance, (1.0f - patch_uv.x) * patch_info.w);
+	if ((side_mask & 4) != 0)
+		edge_distance = min(edge_distance, patch_uv.y * patch_info.w);
+	if ((side_mask & 8) != 0)
+		edge_distance = min(edge_distance, (1.0f - patch_uv.y) * patch_info.w);
+
+	const float t = clamp(edge_distance / band, 0.0f, 1.0f);
 	morph = t * t * (3.0f - 2.0f * t);
 
 	world.y = morph < 0.999f

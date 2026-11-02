@@ -24,12 +24,11 @@ uniform float u_TerrainReceiveShadow = 1.0f;
 void main()
 {
 	float morph = 1.0f;
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod.y, morph);
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph);
 
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.WorldPosition = world;
-	const float step = max(a_PatchLod.y, 0.05f);
-	vert2frag.Step = mix(step * 2.0f, step, morph);
+	vert2frag.Step = max(a_PatchLod.y, 0.05f);
 	vert2frag.ReceiveShadow = u_TerrainReceiveShadow;
 }
 
@@ -60,7 +59,7 @@ layout(location = 1) out float ObjectId;
 
 void main()
 {
-	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz, vert2frag.Step);
+	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.WorldPosition.xz);
 
 	/* 页驻留就采页池，不驻留用刚算的那份 —— 与延迟管线同一套判断 */
 	vec4 page_albedo;

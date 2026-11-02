@@ -14,7 +14,7 @@ uniform int u_CascadeIndex = 0;
 void main()
 {
 	float morph = 1.0f;
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod.y, morph);
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph);
 	gl_Position = u_LightViewProjectionMat[u_CascadeIndex] * vec4(world, 1.0f);
 }
 

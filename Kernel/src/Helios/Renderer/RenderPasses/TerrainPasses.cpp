@@ -112,6 +112,13 @@ namespace Helios::TerrainDraw
 				glm::vec2(static_cast<float>(field.GetResolution())));
 			per_draw.Overrides.emplace_back(ParamType::Float, "u_HeightScale", field.GetHeightScale());
 
+			/* 法线差分步长按高度图纹素推（两个纹素），所有 LOD 共用：
+			 * 每块 patch 各用各的话，坡度的混色会沿 LOD 交界切出一条直带 */
+			const float texel = (field.GetExtent().x * 2.0f)
+				/ static_cast<float>(std::max(field.GetResolution(), 2u) - 1u);
+			per_draw.Overrides.emplace_back(ParamType::Float, "u_TerrainNormalStep",
+				std::max(texel * 2.0f, 0.05f));
+
 			/* morph 开关（检查程序对照用）：默认 1，不改就沿用着色器里的值 */
 			const float morph_scale = TerrainField::GetGlobalMorphScale();
 			if (morph_scale != 1.0f)

@@ -11,6 +11,9 @@ uniform vec3 u_RockColor = vec3(0.32f, 0.30f, 0.27f);   // @property @type(color
 uniform vec3 u_HighColor = vec3(0.55f, 0.47f, 0.34f);   // @property @type(color)
 uniform float u_Roughness = 0.85f;                       // @property @range(0.05, 1.0)
 uniform float u_RockSlope = 0.45f;                       // @property @range(0.0, 1.0)
+/* 法线差分的固定步长（米）：由高度图纹素跨度推，所有 LOD 用同一个。
+ * 跟着 patch 走的话，粗 patch 与细 patch 交界的坡度会算得不同，混色切出一条直带 */
+uniform float u_TerrainNormalStep = 1.0f;
 
 struct STerrainSurface
 {
@@ -19,10 +22,10 @@ struct STerrainSurface
 	vec3 Normal;
 };
 
-STerrainSurface EvaluateTerrainSurface(vec2 world_xz, float step)
+STerrainSurface EvaluateTerrainSurface(vec2 world_xz)
 {
 	STerrainSurface surface;
-	surface.Normal = TerrainNormal(world_xz, step);
+	surface.Normal = TerrainNormal(world_xz, max(u_TerrainNormalStep, 0.01f));
 
 	/* 坡度 = 1 - N.y：陡的地方露岩，缓的地方长草 */
 	const float slope = clamp(1.0f - surface.Normal.y, 0.0f, 1.0f);

@@ -15,7 +15,7 @@ out vec4 v_PrevClip;
 void main()
 {
 	float morph = 1.0f;
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod.y, morph);
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph);
 	v_CurClip = u_VelocityViewProjectionMat * vec4(world, 1.0f);
 	v_PrevClip = u_PrevVelocityViewProjectionMat * vec4(world, 1.0f);
 	/* 光栅化照旧用带抖动的矩阵，深度才跟场景写的那张对得上 */

@@ -405,6 +405,8 @@ namespace Helios
 		/* 根节点的包围盒盖住 0..HeightScale 这段：中心抬半高 */
 		const glm::vec3 root_center(m_Origin.x, m_Origin.y + m_HeightScale * 0.5f, m_Origin.z);
 		CollectNodes(&frustum, eye, 0.0f, root_center, root_size, 0, out);
+		BalancePatches(out);
+		MarkMorphPatches(out);
 	}
 
 	void TerrainField::BuildPatchesAround(const glm::vec3& center, float radius,
@@ -419,6 +421,8 @@ namespace Helios
 
 		const glm::vec3 root_center(m_Origin.x, m_Origin.y + m_HeightScale * 0.5f, m_Origin.z);
 		CollectNodes(nullptr, center, radius, root_center, root_size, 0, out);
+		BalancePatches(out);
+		MarkMorphPatches(out);
 	}
 
 	void TerrainField::CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
@@ -457,6 +461,128 @@ namespace Helios
 		/* 采样步长：节点边长除以 32 段，粗 LOD 下让法线重建也跟着放粗 */
 		patch.Lod = glm::vec4(static_cast<float>(lod), size / static_cast<float>(kPatchQuads), 0.0f, 0.0f);
 		out.push_back(patch);
+	}
+
+	/* 四叉树没有 2:1 平衡：相邻叶子可能差两档以上，morph 只能对上差一档的情况。
+	 * 这里做一遍平衡——邻居比自己细两档以上就把它拆一层，循环到稳定为止。 */
+	void TerrainField::BalancePatches(std::vector<TerrainPatch>& patches)
+	{
+		const auto contains = [](const TerrainPatch& patch, const glm::vec2& point)
+		{
+			const glm::vec2 min(patch.Info.x, patch.Info.z);
+			const glm::vec2 max = min + patch.Info.w;
+			return point.x >= min.x && point.x < max.x && point.y >= min.y && point.y < max.y;
+		};
+
+		const auto split = [](const TerrainPatch& patch, std::vector<TerrainPatch>& out)
+		{
+			const float child = patch.Info.w * 0.5f;
+			const glm::vec2 min(patch.Info.x, patch.Info.z);
+			for (int quadrant = 0; quadrant < 4; ++quadrant)
+			{
+				TerrainPatch child_patch;
+				const float x0 = min.x + ((quadrant & 1) ? child : 0.0f);
+				const float z0 = min.y + ((quadrant & 2) ? child : 0.0f);
+				child_patch.Info = glm::vec4(x0, 0.0f, z0, child);
+				child_patch.Lod = glm::vec4(patch.Lod.x + 1.0f, child / static_cast<float>(kPatchQuads), 0.0f, 0.0f);
+				out.push_back(child_patch);
+			}
+		};
+
+		constexpr float kProbe = 0.01f;
+		constexpr int kMaxIterations = 8;
+		for (int iteration = 0; iteration < kMaxIterations; ++iteration)
+		{
+			int split_index = -1;
+			for (size_t index = 0; index < patches.size() && split_index < 0; ++index)
+			{
+				const TerrainPatch& patch = patches[index];
+				const glm::vec2 min(patch.Info.x, patch.Info.z);
+				const glm::vec2 max = min + patch.Info.w;
+				const float mid_x = (min.x + max.x) * 0.5f;
+				const float mid_z = (min.y + max.y) * 0.5f;
+				const glm::vec2 probes[4] = {
+					{ min.x - kProbe, mid_z }, { max.x + kProbe, mid_z },
+					{ mid_x, min.y - kProbe }, { mid_x, max.y + kProbe },
+				};
+
+				for (const glm::vec2& probe : probes)
+				{
+					for (size_t other = 0; other < patches.size(); ++other)
+					{
+						if (other == index)
+							continue;
+						/* 邻居比自己细两档以上：拆邻居，而不是拆自己（保持细节分布） */
+						if (patches[other].Info.w > patch.Info.w * 2.01f && contains(patches[other], probe))
+						{
+							split_index = static_cast<int>(other);
+							break;
+						}
+					}
+					if (split_index >= 0)
+						break;
+				}
+			}
+
+			if (split_index < 0)
+				break;
+
+			const TerrainPatch victim = patches[static_cast<size_t>(split_index)];
+			patches.erase(patches.begin() + split_index);
+			split(victim, patches);
+		}
+	}
+
+	/* 逐条边标记：哪一侧挨着**更粗**的邻居，那一条边就 morch 到父级表面。
+	 * 同层邻居两边都不 morph（细表面本来就一模一样），只有细的一侧收敛 —— 两边都收
+	 * 会收敛到不同精度的表面，交界反而裂成一道墙。邻居少时两两比对，太多时放弃（同层一致）。 */
+	void TerrainField::MarkMorphPatches(std::vector<TerrainPatch>& patches)
+	{
+		constexpr size_t kMaxPatchForPairing = 1024;
+		if (patches.size() > kMaxPatchForPairing)
+			return;
+
+		const auto contains = [](const TerrainPatch& patch, const glm::vec2& point)
+		{
+			const glm::vec2 min(patch.Info.x, patch.Info.z);
+			const glm::vec2 max = min + patch.Info.w;
+			return point.x >= min.x && point.x < max.x && point.y >= min.y && point.y < max.y;
+		};
+
+		constexpr float kProbe = 0.01f;
+		for (TerrainPatch& patch : patches)
+		{
+			patch.Lod.z = 0.0f;
+			if (patch.Lod.x < 0.5f)
+				continue;	/* 根节点没有父级 */
+
+			const glm::vec2 min(patch.Info.x, patch.Info.z);
+			const glm::vec2 max = min + patch.Info.w;
+			const float mid_x = (min.x + max.x) * 0.5f;
+			const float mid_z = (min.y + max.y) * 0.5f;
+			/* 位序与 TerrainCommon.glsl 一致：1 = -X，2 = +X，4 = -Z，8 = +Z */
+			const glm::vec2 probes[4] = {
+				{ min.x - kProbe, mid_z }, { max.x + kProbe, mid_z },
+				{ mid_x, min.y - kProbe }, { mid_x, max.y + kProbe },
+			};
+
+			int mask = 0;
+			for (int side = 0; side < 4; ++side)
+			{
+				for (const TerrainPatch& other : patches)
+				{
+					if (&other == &patch || other.Lod.x >= patch.Lod.x)
+						continue;
+					if (contains(other, probes[side]))
+					{
+						mask |= 1 << side;
+						break;
+					}
+				}
+			}
+
+			patch.Lod.z = static_cast<float>(mask);
+		}
 	}
 
 	void TerrainField::SetGlobalMorphScale(float scale)
