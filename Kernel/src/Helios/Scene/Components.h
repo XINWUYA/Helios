@@ -17,6 +17,7 @@
 #include "ReflectionProbe.h"
 #include "AnimationClip.h"
 #include "GrassField.h"
+#include "TerrainField.h"
 
 namespace Helios
 {
@@ -449,6 +450,39 @@ namespace Helios
 		GrassBendComponent& operator=(const GrassBendComponent&) = default;
 	};
 
+	/* 地形组件：一块高度场地形。高度由程序化噪声生成，顶点不落地 ——
+	 * 所有 patch 共用同一个 33×33 模板网格，位置与 LOD 走实例属性，高度在顶点着色器里采样。
+	 * 外观（草色 / 岩色 / 粗糙度）由材质决定，这里只管范围、起伏与 LOD。 */
+	struct HELIOS_API TerrainComponent : ComponentBase
+	{
+		glm::vec2 m_Extent{ 512.0f, 512.0f }; /* 局部空间半宽半长（米） */
+		uint32_t m_Resolution{ 512 };          /* 高度图边长（纹素） */
+		float m_HeightScale{ 60.0f };          /* 高度幅度（米） */
+		int m_Seed{ 1337 };
+
+		/* 节点边长与相机距离的比值：小于它就继续细分，越大越激进 */
+		float m_LodRatio{ 6.0f };
+		/* 最细节点边长（米）：应不小于高度图 32 个纹素的跨度 */
+		uint32_t m_MinNodeSize{ 64 };
+
+		bool m_ReceiveShadow{ true };
+		bool m_CastShadow{ true };
+
+		/* 材质槽：与模型 / 草地同一套三态语义（覆盖 / 实例 / 默认） */
+		MaterialSlotOverride m_MaterialSlot;
+		SharedPtr<TerrainField> m_Field{ nullptr };
+
+		[[nodiscard]] const SharedPtr<Material>& GetMaterial() const { return m_MaterialSlot.pMaterial; }
+
+		/* 缺材质时的内建外观：面板新加组件落到这里，否则组件在、地形不在 */
+		[[nodiscard]] static SharedPtr<Material> GetDefaultMaterial();
+		void OnAdded(const Scene& scene, Entity& entity) override;
+
+		TerrainComponent() = default;
+		TerrainComponent(const TerrainComponent&) = default;
+		TerrainComponent& operator=(const TerrainComponent&) = default;
+	};
+
 	/* 天空与昼夜（Time of Day）：场景级配置，挂在哪个实体上无所谓（与后处理对象同层语义）。
 	 * 每帧由场景换算成 SkyState 推给各视图；场景里的方向光按实体顺序绑定 ——
 	 * 第一个当太阳、第二个当月亮，方向 / 颜色 / 强度都由这里驱动。 */
@@ -496,6 +530,7 @@ namespace Helios
 		ScriptComponent,
 		GrassComponent,
 		GrassBendComponent,
+		TerrainComponent,
 		SkyComponent
 	>;
 }

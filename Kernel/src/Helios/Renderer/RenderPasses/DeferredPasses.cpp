@@ -4,6 +4,7 @@
 #include "DebugViewPasses.h"
 #include "ObjectSorting.h"
 #include "ScenePass.h"
+#include "TerrainPasses.h"
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/PostProcess/PostProcessPasses.h>
@@ -304,6 +305,10 @@ namespace Helios
 									Renderer::SubmitInstanced(batch.Material, MeshPrimitive{ batch.VertexArray, batch.Type },
 										range.Buffer, range.FirstInstance + batch.First, batch.Count, &per_draw);
 							}
+
+							/* 地形不是 MeshSegment，进不了上面那批；在同一套附件上补一趟 */
+							if (const auto terrain_scene = render_view.GetOwnerScene())
+								TerrainDraw::SubmitGBuffer(render_view, *terrain_scene);
 						}
 						render_pass_info->Unbind();
 						Renderer::GetRenderAPI()->Flush();

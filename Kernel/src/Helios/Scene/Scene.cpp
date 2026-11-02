@@ -512,6 +512,17 @@ namespace Helios
 		}
 		m_MeshIndex.EndSync();
 
+		/* 地形：高度图只在参数或变换变了才重建（内部有键短路），静止地形不产生每帧开销 */
+		for (auto [entity, terrain_component] : m_Registry.view<TerrainComponent>().each())
+		{
+			if (terrain_component.GetMaterial() == nullptr)
+				continue;
+
+			if (terrain_component.m_Field == nullptr)
+				terrain_component.m_Field = CreateSharedPtr<TerrainField>();
+			terrain_component.m_Field->Rebuild(terrain_component, FrameWorldTransform(entity));
+		}
+
 		/* 草地：风场时间整场累加；叶片实例只在参数或变换变了才重建，
 		 * GPU 放置时在这里派发计算（还没开始画，命令缓冲借帧头那一份） */
 		m_PrevGrassWindTime = m_GrassWindTime;

@@ -85,8 +85,10 @@ namespace Helios
 			SharedPtr<DeviceVertexBuffer> Buffer;
 			uint32_t FirstInstance{ 0 };
 		};
-		/* 把一批实例数据追加进本帧的实例缓冲，各 Pass 共用，不再每次新建缓冲 */
+		/* 把一批实例数据追加进本帧的实例缓冲，各 Pass 共用，不再每次新建缓冲。
+		 * 步长由调用方给：地形 patch（32 字节）与场景对象（144 字节）共用同一条环 */
 		static InstanceRange UploadObjectInstances(const ObjectInstanceData* instances, uint32_t count);
+		static InstanceRange UploadInstances(const void* data, uint32_t count, uint32_t stride);
 
 		/* 间接提交：实例数与索引数从 args 缓冲里读（GPU 剔除的产物），一笔画完 */
 		static void SubmitIndirect(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,

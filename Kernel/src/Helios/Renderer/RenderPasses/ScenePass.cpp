@@ -3,6 +3,7 @@
 #include "DebugViewPasses.h"
 #include "GrassDrawParams.h"
 #include "ObjectSorting.h"
+#include "TerrainPasses.h"
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/PostProcess/PostProcessPasses.h>
@@ -546,6 +547,8 @@ namespace Helios
 				SubmitParams params;
 				params.DebugView = debug_view;
 				SubmitForwardObjects(render_view, scene, false, params);
+				/* 地形不在可见对象表里，不透明批画完之后补一趟；草之后、透明之前 */
+				TerrainDraw::SubmitForward(render_view, scene);
 				SubmitGrassFields(render_view, scene, debug_view);
 				if (debug_view == DebugViewMode::None && view_mode != DebugViewMode::Shadow)
 					SubmitForwardObjects(render_view, scene, true, SubmitParams{});

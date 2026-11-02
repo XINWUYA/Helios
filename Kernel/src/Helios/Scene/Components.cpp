@@ -53,4 +53,25 @@ namespace Helios
 		if (m_MaterialSlot.pMaterial == nullptr)
 			m_MaterialSlot.pMaterial = GetDefaultMaterial();
 	}
+
+	SharedPtr<Material> TerrainComponent::GetDefaultMaterial()
+	{
+		static const SharedPtr<Material> s_Default = []()
+		{
+			const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+				ABSOLUTE_PATH("Shaders/MaterialShaders/Terrain.glsl"));
+			return shader != nullptr ? Material::Create(shader) : nullptr;
+		}();
+		return s_Default;
+	}
+
+	void TerrainComponent::OnAdded(const Scene& scene, Entity& entity)
+	{
+		(void)scene;
+		(void)entity;
+
+		/* 与草地同口径：没有材质来源时给内建外观 */
+		if (m_MaterialSlot.pMaterial == nullptr)
+			m_MaterialSlot.pMaterial = GetDefaultMaterial();
+	}
 }

@@ -365,6 +365,11 @@ namespace Helios
 
 	Renderer::InstanceRange Renderer::UploadObjectInstances(const ObjectInstanceData* instances, uint32_t count)
 	{
+		return UploadInstances(instances, count, static_cast<uint32_t>(sizeof(ObjectInstanceData)));
+	}
+
+	Renderer::InstanceRange Renderer::UploadInstances(const void* data, uint32_t count, uint32_t stride)
+	{
 		PROFILE_FUNCTION();
 
 		InstanceRing& ring = s_RenderData.Instances;
@@ -376,23 +381,31 @@ namespace Helios
 		}
 
 		const uint32_t slot = frame % kInstanceRingFrames;
-		const uint32_t bytes = count * static_cast<uint32_t>(sizeof(ObjectInstanceData));
+		const uint32_t bytes = count * stride;
 		SharedPtr<DeviceVertexBuffer>& buffer = ring.Buffers[slot];
 		uint32_t& capacity = ring.Capacity[slot];
 
+		/* 起点对齐到本条步长的整数倍：同一帧里 144 字节的场景对象与 32 字节的地形 patch
+		 * 共用这条环，不对齐的话换算出来的实例下标会指到上一段的中间 */
+		const uint32_t aligned = (ring.Cursor + stride - 1) / std::max(stride, 1u) * stride;
+
 		/* 装不下就换一块翻倍的，本帧已录的绘制还引用旧块，由命令缓冲或驱动持有到用完 */
-		if (buffer == nullptr || ring.Cursor + bytes > capacity)
+		if (buffer == nullptr || aligned + bytes > capacity)
 		{
 			capacity = std::max({ kInstanceRingInitialBytes, capacity * 2, bytes });
 			buffer = DeviceVertexBuffer::Create("ObjectInstances", capacity);
 			ring.Cursor = 0;
 		}
+		else
+		{
+			ring.Cursor = aligned;
+		}
 
 		if (count > 0)
-			buffer->SetData(instances, bytes, ring.Cursor);
+			buffer->SetData(data, bytes, ring.Cursor);
 
 		/* 每段都从实例步长的整数倍起，起点换算成实例下标后 SubmitInstanced 直接用 */
-		InstanceRange range{ buffer, ring.Cursor / static_cast<uint32_t>(sizeof(ObjectInstanceData)) };
+		InstanceRange range{ buffer, ring.Cursor / std::max(stride, 1u) };
 		ring.Cursor += bytes;
 		return range;
 	}
