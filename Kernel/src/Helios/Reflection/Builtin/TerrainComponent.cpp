@@ -90,7 +90,7 @@ namespace Helios
 			.Range(1.0f, 32.0f)
 			.Slider()
 			.Field(&TerrainComponent::m_MinNodeSize, "MinNodeSize", FieldType::Int, 1.0f)
-			.Range(8.0f, 512.0f)
+			.Range(8.0f, 128.0f)
 			.Slider()
 			.Field(&TerrainComponent::m_ReceiveShadow, "ReceiveShadow", FieldType::Bool)
 			.Field(&TerrainComponent::m_CastShadow, "CastShadow", FieldType::Bool)

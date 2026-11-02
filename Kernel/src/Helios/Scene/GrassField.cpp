@@ -67,7 +67,7 @@ namespace Helios
 	}
 
 	void GrassField::Rebuild(const GrassComponent& component, const glm::mat4& world,
-		const TerrainField* ground)
+		const TerrainField* ground, const glm::vec2& focus_min, const glm::vec2& focus_max)
 	{
 		PROFILE_FUNCTION();
 
@@ -98,6 +98,11 @@ namespace Helios
 		/* 地形换了一份或重建过：贴地高度要重新采样 */
 		const uint64_t ground_key = ground != nullptr ? ground->GetRevision() : 0ull;
 		mix(&ground_key, sizeof(ground_key));
+		/* 观察范围按 32 米量化：相机小范围移动不触发重建，跨格了才重铺 */
+		const glm::vec2 focus_min_key(std::floor(focus_min.x / 32.0f), std::floor(focus_min.y / 32.0f));
+		const glm::vec2 focus_max_key(std::floor(focus_max.x / 32.0f), std::floor(focus_max.y / 32.0f));
+		mix(&focus_min_key, sizeof(focus_min_key));
+		mix(&focus_max_key, sizeof(focus_max_key));
 
 		/* 后台重建的结果先收：key 还对得上才用，对不上说明参数又变了，直接丢 */
 		if (m_AsyncBuild != nullptr && m_AsyncBuild->Done.load(std::memory_order_acquire))
@@ -116,6 +121,8 @@ namespace Helios
 			return;
 		m_BuildKey = key;
 		m_Ground = ground;
+		m_FocusMin = focus_min;
+		m_FocusMax = focus_max;
 
 		m_Chunks.clear();
 		m_InstanceCount = 0;
@@ -177,24 +184,53 @@ namespace Helios
 		m_ChunkWidth = m_HalfX * 2.0f / static_cast<float>(m_ChunksX);
 		m_ChunkDepth = m_HalfZ * 2.0f / static_cast<float>(m_ChunksZ);
 
-		/* 每块株数固定：GPU 侧才能用「总序号 ÷ 每块株数」反推块号，不用查表 */
+		const uint32_t total_chunks = m_ChunksX * m_ChunksZ;
+		const float chunk_radius = 0.5f * glm::length(glm::vec2(m_ChunkWidth, m_ChunkDepth));
+		const float cull_radius = std::max(component.m_CullDistance, m_ChunkWidth) + chunk_radius;
+
+		/* 有效块：观察点周围 CullDistance 内的块。全地形均匀铺满在 1km² 上放不下预算，
+		 * 远处本来也会被剔除距离砍掉，干脆不生成。
+		 * 只在跟随地形时裁剪：矩形草地范围本来就小，没必要跟着相机反复重建 */
+		const bool crop_to_focus = component.m_FollowTerrain && m_Ground != nullptr;
+		std::vector<uint8_t> active(total_chunks, 0);
+		uint32_t active_count = 0;
+		const auto chunk_center_xz = [this](uint32_t cx, uint32_t cz)
+		{
+			return m_Origin
+				+ m_Right * (-m_HalfX + (static_cast<float>(cx) + 0.5f) * m_ChunkWidth)
+				+ m_Forward * (-m_HalfZ + (static_cast<float>(cz) + 0.5f) * m_ChunkDepth);
+		};
+		for (uint32_t cz = 0; cz < m_ChunksZ; ++cz)
+		{
+			for (uint32_t cx = 0; cx < m_ChunksX; ++cx)
+			{
+				const glm::vec3 center = chunk_center_xz(cx, cz);
+				const glm::vec2 center_xz(center.x, center.z);
+				/* 到观察范围（多相机并集的矩形）的距离：范围内算 0 */
+				const glm::vec2 closest = glm::clamp(center_xz, m_FocusMin, m_FocusMax);
+				const bool inside = !crop_to_focus
+					|| glm::length(center_xz - closest) <= cull_radius;
+				if (inside)
+				{
+					active[cz * m_ChunksX + cx] = 1;
+					++active_count;
+				}
+			}
+		}
+		m_CroppedToFocus = active_count < total_chunks;
+
+		/* 每块株数：先按密度算，再按「有效块数」分摊预算 —— 只被视野内的块分，
+		 * 近处的密度才不会因为整片地形太大而被摊薄 */
 		uint32_t per_chunk = static_cast<uint32_t>(
 			std::max(0.0f, std::round(density * m_ChunkWidth * m_ChunkDepth)));
-		const uint32_t chunk_count = m_ChunksX * m_ChunksZ;
 		const uint32_t budget = std::min(kMaxInstances, std::max(1024u, component.m_MaxInstances));
-		while (per_chunk > 0 && per_chunk * chunk_count > budget)
+		const uint32_t share = std::max(1u, active_count);
+		while (per_chunk > 0 && per_chunk * share > budget)
 			--per_chunk;
 		m_PerChunk = per_chunk;
-		m_InstanceCount = per_chunk * chunk_count;
-		if (m_InstanceCount == 0)
-		{
-			m_InstanceBuffer = nullptr;
-			m_InstanceStorage = nullptr;
-			m_GpuVertexView = nullptr;
-			m_PadBuffer = nullptr;
-			return;
-		}
 
+		/* 只给有效块分配实例区间：块表仍按整片地形建（剔除要用），远处的 Count = 0 */
+		uint32_t next_first = 0;
 		for (uint32_t cz = 0; cz < m_ChunksZ; ++cz)
 		{
 			for (uint32_t cx = 0; cx < m_ChunksX; ++cx)
@@ -202,9 +238,7 @@ namespace Helios
 				const uint32_t chunk_index = cz * m_ChunksX + cx;
 				Chunk chunk;
 
-				const glm::vec3 chunk_xz = m_Origin
-					+ m_Right * (-m_HalfX + (static_cast<float>(cx) + 0.5f) * m_ChunkWidth)
-					+ m_Forward * (-m_HalfZ + (static_cast<float>(cz) + 0.5f) * m_ChunkDepth);
+				const glm::vec3 chunk_xz = chunk_center_xz(cx, cz);
 
 				/* 贴合地形时包围盒按这一块下面的地形高度范围算：只按叶高算，
 				 * 山坡上的草会被整块剔掉；按整张地形的范围算又太松，剔除不起作用 */
@@ -236,10 +270,30 @@ namespace Helios
 					m_ChunkWidth * 0.5f + m_Width * m_ScaleX * 0.5f,
 					(top_y - base_y) * 0.5f,
 					m_ChunkDepth * 0.5f + m_Width * m_ScaleX * 0.5f);
-				chunk.First = chunk_index * per_chunk;
-				chunk.Count = per_chunk;
+
+				if (active[chunk_index] != 0 && per_chunk > 0)
+				{
+					chunk.First = next_first;
+					chunk.Count = per_chunk;
+					next_first += per_chunk;
+				}
+				else
+				{
+					chunk.First = 0;
+					chunk.Count = 0;
+				}
 				m_Chunks.push_back(chunk);
 			}
+		}
+
+		m_InstanceCount = next_first;
+		if (m_InstanceCount == 0)
+		{
+			m_InstanceBuffer = nullptr;
+			m_InstanceStorage = nullptr;
+			m_GpuVertexView = nullptr;
+			m_PadBuffer = nullptr;
+			return;
 		}
 
 		/* 块底面：每块一张四边形，铺在叶根下面；颜色由块序号散出来，
@@ -308,7 +362,8 @@ namespace Helios
 		const bool shared_ok = m_InstanceStorage != nullptr && m_GpuVertexView != nullptr;
 		/* 贴地时把地形高度上传成 storage buffer；建不出来就退回 CPU 路径 */
 		const bool ground_ready = m_Ground == nullptr || m_Ground->GetHeightStorage() != nullptr;
-		const bool gpu_path = ground_ready && g_GpuPlacementEnabled && shared_ok
+		/* 按观察点裁剪后块号不再连续，GPU 放置的「序号 ÷ 每块株数」会推错块，改走 CPU */
+		const bool gpu_path = ground_ready && !m_CroppedToFocus && g_GpuPlacementEnabled && shared_ok
 			&& Renderer::GetRenderAPI() != nullptr && Renderer::GetRenderAPI()->SupportsCompute();
 		m_UsingGpuPlacement = gpu_path;
 		if (gpu_path)
@@ -382,6 +437,9 @@ namespace Helios
 		params.InstanceCount = m_InstanceCount;
 		params.Seed = m_Seed;
 		params.ReceiveShadow = m_ReceiveShadow;
+		params.ChunkRanges.reserve(m_Chunks.size());
+		for (const Chunk& chunk : m_Chunks)
+			params.ChunkRanges.emplace_back(chunk.First, chunk.Count);
 
 		if (m_Ground != nullptr)
 		{
@@ -403,12 +461,16 @@ namespace Helios
 		std::vector<GrassInstanceData> instances(params.InstanceCount);
 		const float* heights = params.GroundHeights.empty() ? nullptr : params.GroundHeights.data();
 
-		for (uint32_t cz = 0; cz < params.ChunksZ; ++cz)
+		for (uint32_t chunk_index = 0; chunk_index < params.ChunkRanges.size(); ++chunk_index)
 		{
-			for (uint32_t cx = 0; cx < params.ChunksX; ++cx)
+			const glm::uvec2 range = params.ChunkRanges[chunk_index];
+			if (range.y == 0)
+				continue;
+
+			const uint32_t cx = chunk_index % params.ChunksX;
+			const uint32_t cz = chunk_index / params.ChunksX;
+			for (uint32_t i = 0; i < range.y; ++i)
 			{
-				const uint32_t first = (cz * params.ChunksX + cx) * params.PerChunk;
-				for (uint32_t i = 0; i < params.PerChunk; ++i)
 				{
 					/* 每株一个基值：块坐标与序号一起混进去，同样的输入每次给同样的结果。
 					 * 计算着色器里是同一套公式，两边必须一字不差 */
@@ -463,7 +525,7 @@ namespace Helios
 					dir_right = glm::normalize(dir_right - up_axis * glm::dot(dir_right, up_axis));
 					const glm::vec3 dir_face = glm::cross(dir_right, up_axis);
 
-					GrassInstanceData& instance = instances[first + i];
+					GrassInstanceData& instance = instances[range.x + i];
 					instance.Basis = glm::mat4(
 						glm::vec4(dir_right * (width * growth), 0.0f),
 						glm::vec4(up_axis * (height * growth), 0.0f),

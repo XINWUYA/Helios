@@ -564,7 +564,23 @@ namespace Helios
 				grass_component.m_WarnedMissingTerrain = true;
 			}
 
-			grass_component.m_Field->Rebuild(grass_component, grass_world, ground);
+			/* 观察范围：所有相机的并集。只取一个的话，另一个相机（比如编辑器相机）
+			 * 看到的地方会没有草 */
+			glm::vec2 focus_min(grass_world[3].x, grass_world[3].z);
+			glm::vec2 focus_max = focus_min;
+			for (RenderView* view : m_RenderViews)
+			{
+				/* 关掉渲染的视图不参与：它看到的画面不存在，不该撑大生成范围 */
+				const Camera* camera = (view != nullptr && view->IsEnableRender())
+					? view->GetCullingCamera() : nullptr;
+				if (camera == nullptr)
+					continue;
+				const glm::vec3 position = camera->GetPosition();
+				focus_min = glm::min(focus_min, glm::vec2(position.x, position.z));
+				focus_max = glm::max(focus_max, glm::vec2(position.x, position.z));
+			}
+
+			grass_component.m_Field->Rebuild(grass_component, grass_world, ground, focus_min, focus_max);
 			grass_component.m_Field->TickBend(delta_time, grass_component.m_BendRecover);
 			grass_component.m_Field->EnsurePlaced();
 		}

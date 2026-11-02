@@ -255,6 +255,9 @@ namespace Helios
 
 					for (const GrassField::Chunk& chunk : chunks)
 					{
+						/* 按观察点裁剪掉的块（Count = 0）不生成实例，也别画 */
+						if (chunk.Count == 0)
+							continue;
 						if (cull && frustum.IsOutside(chunk.Center, chunk.Extent))
 							continue;
 

@@ -64,9 +64,12 @@ namespace Helios
 		[[nodiscard]] const SharedPtr<DeviceVertexBuffer>& GetIndirectDrawBuffer() const { return m_IndirectDrawView; }
 
 		/* 重建实例数据（参数与变换都没变时直接返回）。ground 非空时叶片贴到地形表面，
-		 * 块底面不再生成（草下就是地形） */
+		 * 块底面不再生成（草下就是地形）。
+		 * focus 是观察点（相机 xz）：只对 CullDistance 范围内的块生成实例，相机移动超过
+		 * 一个网格再重建 —— 全地形均匀铺满在 1km² 上根本放不下预算，必须跟着视野走 */
 		void Rebuild(const GrassComponent& component, const glm::mat4& world,
-			const TerrainField* ground = nullptr);
+			const TerrainField* ground = nullptr,
+			const glm::vec2& focus_min = glm::vec2(0.0f), const glm::vec2& focus_max = glm::vec2(0.0f));
 
 		/* GPU 放置且还没算过时派发一次计算。场景每帧调一次，赶在开始画之前 */
 		void EnsurePlaced();
@@ -128,6 +131,9 @@ namespace Helios
 			uint32_t Seed{ 0 };
 			bool ReceiveShadow{ true };
 
+			/* 每块在实例缓冲里的区间（First, Count）：Count 为 0 的块不生成 */
+			std::vector<glm::uvec2> ChunkRanges;
+
 			bool HasGround{ false };
 			glm::vec3 GroundOrigin{ 0.0f };
 			glm::vec2 GroundExtent{ 0.0f };
@@ -168,6 +174,11 @@ namespace Helios
 
 		/* 贴合的地形：非空时叶片高度取地形采样，块底面不生成 */
 		const TerrainField* m_Ground{ nullptr };
+		/* 观察点范围（多相机取并集）与是否做了按距离裁剪
+		 * （裁剪时 GPU 放置走不了：块号不再是连续的） */
+		glm::vec2 m_FocusMin{ 0.0f };
+		glm::vec2 m_FocusMax{ 0.0f };
+		bool m_CroppedToFocus{ false };
 
 		/* 重建时算好、GPU 放置与脚印都要用的现场数据 */
 		glm::vec3 m_Origin{ 0.0f };
