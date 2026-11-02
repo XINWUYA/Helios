@@ -364,21 +364,19 @@ namespace Helios
 		inline float kAssetPreviewMaxWidth() { return Scaled(220.0f); }
 		inline float kAssetPreviewMaxHeight() { return Scaled(240.0f); }
 
-		/* .terrain 的高度图缩略图：灰度 + 一点明暗，只为认出形状。
-		 * 只取到 256²，去掉驱动上下文的差异也能画 */
-		SharedPtr<DeviceTexture> BuildTerrainPreviewTexture(const std::string& name, const TerrainAsset::Data& data)
+		/* 高度图缩略图：灰度 + 一点明暗，只为认出形状。资产详情与地形材质卡共用 */
+		SharedPtr<DeviceTexture> BuildHeightPreviewTexture(const std::string& name,
+			const std::vector<float>& heights, uint32_t resolution)
 		{
-			if (Renderer::GetRenderAPI() == nullptr || !data.IsValid())
+			if (Renderer::GetRenderAPI() == nullptr || heights.size() != static_cast<size_t>(resolution) * resolution)
 				return nullptr;
-
-			const uint32_t resolution = data.Resolution;
-			constexpr uint32_t kSide = 256;
-			const auto sample = [&data, resolution](uint32_t x, uint32_t z)
+			const auto sample = [&heights, resolution](uint32_t x, uint32_t z)
 			{
 				const uint32_t sx = std::min(x, resolution - 1);
 				const uint32_t sz = std::min(z, resolution - 1);
-				return data.Heights[static_cast<size_t>(sz) * resolution + sx];
+				return heights[static_cast<size_t>(sz) * resolution + sx];
 			};
+			constexpr uint32_t kSide = 256;
 
 			std::vector<uint8_t> pixels(static_cast<size_t>(kSide) * kSide * 4);
 			for (uint32_t y = 0; y < kSide; ++y)
@@ -388,7 +386,6 @@ namespace Helios
 					const uint32_t hx = x * resolution / kSide;
 					const uint32_t hz = y * resolution / kSide;
 					const float height = sample(hx, hz);
-					/* 邻居差分当坡向：左上亮、右下暗，起伏一眼看得出来 */
 					const float left = sample(hx > 0 ? hx - 1 : 0, hz);
 					const float up = sample(hx, hz > 0 ? hz - 1 : 0);
 					const float shade = glm::clamp(0.72f + (height - left) * 8.0f + (height - up) * 8.0f, 0.35f, 1.25f);
@@ -420,6 +417,14 @@ namespace Helios
 			pixel_desc.Type = PixelType::UnsignedByte;
 			texture->SetData(pixels.data(), pixel_desc);
 			return texture;
+		}
+
+		SharedPtr<DeviceTexture> BuildTerrainPreviewTexture(const std::string& name, const TerrainAsset::Data& data)
+		{
+			if (Renderer::GetRenderAPI() == nullptr || !data.IsValid())
+				return nullptr;
+
+			return BuildHeightPreviewTexture(name, data.Heights, data.Resolution);
 		}
 
 		/* 材质里的数值参数（层颜色 / 粗糙度）：读不到就用着色器默认值兜底 */
@@ -2103,7 +2108,8 @@ namespace Helios
 						entity, desc->Has, desc->Restore, std::move(before), std::move(after), desc->Name));
 				}
 			}
-		}
+
+				}
 
 		PanelChrome::EndCard(card);
 		ImGui::PopID();

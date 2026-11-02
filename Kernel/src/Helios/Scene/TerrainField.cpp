@@ -206,6 +206,19 @@ namespace Helios
 			m_AssetPath.clear();
 			BuildHeightMap(component);
 		}
+
+		/* 高度图与范围写进材质参数：属性面板里直接看到这块地形用的是哪张图。
+		 * 资产材质（不是实例）不写，免得改到别人共用的那份 */
+		const SharedPtr<Material>& material = component.m_MaterialSlot.pMaterial;
+		if (material != nullptr && (component.m_MaterialSlot.IsInstance
+			|| component.m_MaterialSlot.SourceAssetPath.empty()))
+		{
+			material->SetTexture("u_HeightMap", m_HeightMap);
+			material->SetParameters(ParamType::Vec2, "u_TerrainExtent", m_Extent);
+			material->SetParameters(ParamType::Vec2, "u_HeightmapSize",
+				glm::vec2(static_cast<float>(m_Resolution)));
+			material->SetParameters(ParamType::Float, "u_HeightScale", m_HeightScale);
+		}
 	}
 
 	void TerrainField::BuildHeightMap(const TerrainComponent& component)

@@ -5,11 +5,11 @@
 
 /* 地形的逐绘制参数：高度图与覆盖范围由 C++ 侧按地形实例给（per-draw 覆盖），
  * 不写进材质 —— 同一份材质可以由多块地形共用。 */
-uniform sampler2D u_HeightMap;
+uniform sampler2D u_HeightMap;    // @property
 uniform vec3 u_TerrainOrigin;  /* 地形中心的世界坐标 */
-uniform vec2 u_TerrainExtent;  /* 半宽半长（米） */
-uniform vec2 u_HeightmapSize;  /* 高度图边长（纹素） */
-uniform float u_HeightScale;   /* 高度幅度（米） */
+uniform vec2 u_TerrainExtent;  /* 半宽半长（米） */  // @property
+uniform vec2 u_HeightmapSize;  /* 高度图边长（纹素） */  // @property
+uniform float u_HeightScale;   /* 高度幅度（米） */  // @property
 /* morph 带宽的缩放：1 = 边长的四分之一，0 = 只剩一个顶点间距（检查程序用来对照"没有 morph"） */
 uniform float u_TerrainMorphScale = 1.0f;
 

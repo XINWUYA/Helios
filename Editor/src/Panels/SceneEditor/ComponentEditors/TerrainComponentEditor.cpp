@@ -36,8 +36,9 @@ namespace Helios
 			component.m_Resolution = data.Resolution;
 			component.m_HeightScale = data.HeightScale;
 
+			/* 没有来源路径就是内建那份（每块地形自己一份副本，比不了指针） */
 			const bool use_builtin_material = component.m_MaterialSlot.pMaterial == nullptr
-				|| component.m_MaterialSlot.pMaterial == TerrainComponent::GetDefaultMaterial();
+				|| component.m_MaterialSlot.SourceAssetPath.empty();
 			if (use_builtin_material)
 			{
 				const SharedPtr<Material> asset_material = data.MaterialPath.empty()

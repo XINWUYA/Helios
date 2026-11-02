@@ -70,8 +70,14 @@ namespace Helios
 		(void)scene;
 		(void)entity;
 
-		/* 与草地同口径：没有材质来源时给内建外观 */
-		if (m_MaterialSlot.pMaterial == nullptr)
-			m_MaterialSlot.pMaterial = GetDefaultMaterial();
+		/* 给一份自己的副本：高度图 / 范围这些参数是按地形来的，共用一份会互相覆盖 */
+		if (m_MaterialSlot.pMaterial == nullptr || m_MaterialSlot.pMaterial == GetDefaultMaterial())
+		{
+			const SharedPtr<Material> source = m_MaterialSlot.pMaterial != nullptr
+				? m_MaterialSlot.pMaterial : GetDefaultMaterial();
+			m_MaterialSlot.pMaterial = source != nullptr ? source->Clone() : nullptr;
+			m_MaterialSlot.SourceAssetPath.clear();
+			m_MaterialSlot.IsInstance = false;	/* 不写进场景，加载后由高度场重新填 */
+		}
 	}
 }
