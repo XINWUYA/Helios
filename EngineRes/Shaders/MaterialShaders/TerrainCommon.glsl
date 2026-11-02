@@ -34,9 +34,8 @@ float TerrainHeight(vec2 world_xz)
 	const float h01 = texelFetch(u_HeightMap, ivec2(i0.x, i1.y), 0).r;
 	const float h11 = texelFetch(u_HeightMap, ivec2(i1.x, i1.y), 0).r;
 
-	/* 高度图存 0..1，映射到以实体位置为中心的 ±HeightScale/2：
-	 * 实体在原点时地形上下各一半，场景里 y=0 的物体不会被整块埋掉 */
-	return (mix(mix(h00, h10, frac.x), mix(h01, h11, frac.x), frac.y) - 0.5f) * u_HeightScale;
+	/* 高度图存 0..1，直接映射到 0..HeightScale：最低点在实体位置，整体向上抬 */
+	return mix(mix(h00, h10, frac.x), mix(h01, h11, frac.x), frac.y) * u_HeightScale;
 }
 
 /* 世界空间法线：邻居差分重建，step 是这个 LOD 的采样半径（米）。

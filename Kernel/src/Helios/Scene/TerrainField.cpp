@@ -145,7 +145,16 @@ namespace Helios
 			}
 		}
 
-		/* 高度图存归一化值（0..1），世界高度 = 值 × HeightScale */
+		/* 整体下移到最低点为 0：实体位置就是地面最低处，物件摆在实体高度上不会浮空。
+		 * 只平移不缩放，起伏形态与幅度都不变 */
+		const auto lowest = std::min_element(heights.begin(), heights.end());
+		if (lowest != heights.end() && *lowest > 0.0f)
+		{
+			for (float& h : heights)
+				h -= *lowest;
+		}
+
+		/* 高度图存归一化值（0..1），世界高度 = 实体高度 + 值 × HeightScale */
 		TextureDesc desc;
 		desc.Width = resolution;
 		desc.Height = resolution;
@@ -203,15 +212,15 @@ namespace Helios
 	float TerrainField::GetMinWorldHeight() const
 	{
 		if (m_Heights.empty())
-			return m_Origin.y - m_HeightScale * 0.5f;
-		return m_Origin.y + (*std::min_element(m_Heights.begin(), m_Heights.end()) - 0.5f) * m_HeightScale;
+			return m_Origin.y;
+		return m_Origin.y + *std::min_element(m_Heights.begin(), m_Heights.end()) * m_HeightScale;
 	}
 
 	float TerrainField::GetMaxWorldHeight() const
 	{
 		if (m_Heights.empty())
-			return m_Origin.y + m_HeightScale * 0.5f;
-		return m_Origin.y + (*std::max_element(m_Heights.begin(), m_Heights.end()) - 0.5f) * m_HeightScale;
+			return m_Origin.y + m_HeightScale;
+		return m_Origin.y + *std::max_element(m_Heights.begin(), m_Heights.end()) * m_HeightScale;
 	}
 
 	bool TerrainField::GetHeightRange(const glm::vec2& min_xz, const glm::vec2& max_xz,
@@ -252,8 +261,8 @@ namespace Helios
 
 		if (lo > hi)
 			return false;
-		out_min = m_Origin.y + (lo - 0.5f) * m_HeightScale;
-		out_max = m_Origin.y + (hi - 0.5f) * m_HeightScale;
+		out_min = m_Origin.y + lo * m_HeightScale;
+		out_max = m_Origin.y + hi * m_HeightScale;
 		return true;
 	}
 
@@ -268,8 +277,8 @@ namespace Helios
 		if (root_size <= 0.0f)
 			return;
 
-		/* 根节点以实体位置为中心：高度是 ±HeightScale/2，上下各一半 */
-		const glm::vec3 root_center(m_Origin.x, m_Origin.y, m_Origin.z);
+		/* 根节点的包围盒盖住 0..HeightScale 这段：中心抬半高 */
+		const glm::vec3 root_center(m_Origin.x, m_Origin.y + m_HeightScale * 0.5f, m_Origin.z);
 		CollectNodes(frustum, eye, root_center, root_size, 0, out);
 	}
 

@@ -45,7 +45,7 @@ namespace Helios::TerrainSampling
 
 		const float h = glm::mix(glm::mix(at(x0, z0), at(x1, z0), tx),
 			glm::mix(at(x0, z1), at(x1, z1), tx), tz);
-		out_height = origin.y + (h - 0.5f) * height_scale;
+		out_height = origin.y + h * height_scale;
 		return true;
 	}
 

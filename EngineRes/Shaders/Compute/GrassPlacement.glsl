@@ -60,7 +60,7 @@ float TerrainHeightAt(vec2 world_xz)
 	const float h01 = u_Heights[i1.y * width + i0.x];
 	const float h11 = u_Heights[i1.y * width + i1.x];
 	const float h = mix(mix(h00, h10, frac.x), mix(h01, h11, frac.x), frac.y);
-	return u_Terrain.y + (h - 0.5f) * u_Terrain.w;
+	return u_Terrain.y + h * u_Terrain.w;
 }
 
 /* 坡面法线：邻居差分，步长取两个纹素 */
