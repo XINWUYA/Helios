@@ -76,6 +76,11 @@ namespace Helios
 		 * 第一次要的时候才建，CPU 侧不改高度就不会重建 */
 		const SharedPtr<class DeviceStorageBuffer>& GetHeightStorage() const;
 
+		/* morph 带宽缩放：1 = 默认（边长的四分之一），0 = 关掉。
+		 * 只给检查程序做开关对照，正常渲染别动它 */
+		static void SetGlobalMorphScale(float scale);
+		[[nodiscard]] static float GetGlobalMorphScale();
+
 		/* 模板网格：33×33 顶点，顶点只有 UV（0..1）。所有地形共用一份。 */
 		static const MeshPrimitive& GetPatchPrimitive();
 		/* 实例数据布局，与 Terrain.glsl 的 location 5/6 对应 */

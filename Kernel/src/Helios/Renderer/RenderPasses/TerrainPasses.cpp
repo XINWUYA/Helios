@@ -110,6 +110,11 @@ namespace Helios::TerrainDraw
 			per_draw.Overrides.emplace_back(ParamType::Vec2, "u_HeightmapSize",
 				glm::vec2(static_cast<float>(field.GetResolution())));
 			per_draw.Overrides.emplace_back(ParamType::Float, "u_HeightScale", field.GetHeightScale());
+
+			/* morph 开关（检查程序对照用）：默认 1，不改就沿用着色器里的值 */
+			const float morph_scale = TerrainField::GetGlobalMorphScale();
+			if (morph_scale != 1.0f)
+				per_draw.Overrides.emplace_back(ParamType::Float, "u_TerrainMorphScale", morph_scale);
 		}
 
 		/* 可见着色的逐绘制参数：多一个是否接收阴影 */

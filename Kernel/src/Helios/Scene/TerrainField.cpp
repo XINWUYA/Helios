@@ -20,6 +20,9 @@ namespace Helios
 		/* 单块地形的 patch 上限：参数填炸了也不至于把提交列表撑爆 */
 		constexpr uint32_t kMaxPatches = 8192;
 
+		/* morph 带宽缩放（见 TerrainField::SetGlobalMorphScale） */
+		float s_MorphScale = 1.0f;
+
 		/* PCG 散列：值噪声的格点随机值靠它，相邻格点才不会连成一片 */
 		uint32_t MixHash(uint32_t value)
 		{
@@ -451,6 +454,16 @@ namespace Helios
 		/* 采样步长：节点边长除以 32 段，粗 LOD 下让法线重建也跟着放粗 */
 		patch.Lod = glm::vec4(static_cast<float>(lod), size / static_cast<float>(kPatchQuads), 0.0f, 0.0f);
 		out.push_back(patch);
+	}
+
+	void TerrainField::SetGlobalMorphScale(float scale)
+	{
+		s_MorphScale = std::max(0.0f, scale);
+	}
+
+	float TerrainField::GetGlobalMorphScale()
+	{
+		return s_MorphScale;
 	}
 
 	const MeshPrimitive& TerrainField::GetPatchPrimitive()

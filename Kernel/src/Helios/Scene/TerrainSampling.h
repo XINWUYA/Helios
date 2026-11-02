@@ -49,6 +49,39 @@ namespace Helios::TerrainSampling
 		return true;
 	}
 
+	/* morph 的粗表面：在 2×step 的网格上取样再线性插值，网格锚在地形原点上。
+	 * 与 TerrainCommon.glsl 的 TerrainHeightCoarse 同一套（改一处要同步）。 */
+	inline bool SampleHeightCoarse(const float* heights, uint32_t resolution, const glm::vec3& origin,
+		const glm::vec2& extent, float height_scale, const glm::vec2& world_xz, float step,
+		float& out_height)
+	{
+		if (heights == nullptr || step <= 0.0f)
+			return false;
+		if (!Contains(heights, resolution, origin, extent, world_xz))
+			return false;
+
+		const glm::vec2 anchor(origin.x, origin.z);
+		const glm::vec2 local = (world_xz - anchor) / step;
+		const glm::vec2 cell = glm::floor(local);
+		const glm::vec2 frac = local - cell;
+		const glm::vec2 base = anchor + cell * step;
+
+		float h00 = 0.0f;
+		float h10 = 0.0f;
+		float h01 = 0.0f;
+		float h11 = 0.0f;
+		if (!SampleHeight(heights, resolution, origin, extent, height_scale, base, h00)
+			|| !SampleHeight(heights, resolution, origin, extent, height_scale, base + glm::vec2(step, 0.0f), h10)
+			|| !SampleHeight(heights, resolution, origin, extent, height_scale, base + glm::vec2(0.0f, step), h01)
+			|| !SampleHeight(heights, resolution, origin, extent, height_scale, base + glm::vec2(step), h11))
+		{
+			return false;
+		}
+
+		out_height = glm::mix(glm::mix(h00, h10, frac.x), glm::mix(h01, h11, frac.x), frac.y);
+		return true;
+	}
+
 	inline bool SampleNormal(const float* heights, uint32_t resolution, const glm::vec3& origin,
 		const glm::vec2& extent, float height_scale, const glm::vec2& world_xz, glm::vec3& out_normal)
 	{

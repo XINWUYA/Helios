@@ -26,14 +26,17 @@ uniform float u_TerrainReceiveShadow = 1.0f;
 
 void main()
 {
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo);
+	float morph = 1.0f;
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod.y, morph);
 
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.CurClip = u_VelocityViewProjectionMat * vec4(world, 1.0f);
 	/* 地形是静态的：上一帧的同一个世界点用上一帧的视图投影，位移只来自相机 */
 	vert2frag.PrevClip = u_PrevVelocityViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.WorldPosition = world;
-	vert2frag.Step = max(a_PatchLod.y, 0.05f);
+	/* 法线跟着几何走：边缘用粗一档的差分，接缝两侧的明暗才对得上 */
+	const float step = max(a_PatchLod.y, 0.05f);
+	vert2frag.Step = mix(step * 2.0f, step, morph);
 	vert2frag.ReceiveShadow = u_TerrainReceiveShadow;
 }
 

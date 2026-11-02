@@ -20,10 +20,13 @@ out SVextex2Frag vert2frag;
 
 void main()
 {
-	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo);
+	float morph = 1.0f;
+	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod.y, morph);
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
 	vert2frag.WorldPosition = world;
-	vert2frag.Step = max(a_PatchLod.y, 0.05f);
+
+	const float step = max(a_PatchLod.y, 0.05f);
+	vert2frag.Step = mix(step * 2.0f, step, morph);
 }
 
 
