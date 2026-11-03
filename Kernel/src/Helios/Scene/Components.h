@@ -435,6 +435,8 @@ namespace Helios
 		bool m_FollowTerrain{ false };
 		/* 总株数预算：跟随地形时按块数分摊，避免范围一大就炸 */
 		uint32_t m_MaxInstances{ 500000 };
+		/* 叶片下面每块垫一张草色平面，叶子稀的地方不露底；贴着地形时本来就不画 */
+		bool m_DrawFlatUnderlay{ true };
 
 		/* 运行期：已经提示过"开了贴地但没找到地形"，避免每帧刷日志（不序列化） */
 		bool m_WarnedMissingTerrain{ false };

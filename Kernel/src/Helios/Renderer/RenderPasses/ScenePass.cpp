@@ -233,7 +233,7 @@ namespace Helios
 					 * 也不会从叶缝里看到裸地。每块一张四边形，代价可以忽略 */
 					const auto& chunks = grass.m_Field->GetChunks();
 					const auto& pad_buffer = grass.m_Field->GetPadBuffer();
-					if (pad_buffer != nullptr && !chunks.empty())
+					if (grass.m_DrawFlatUnderlay && pad_buffer != nullptr && !chunks.empty())
 					{
 						per_draw.Overrides[flat_pad_index].Value = 1;
 						Renderer::SubmitInstanced(material, GrassField::GetPadPrimitive(), pad_buffer,
