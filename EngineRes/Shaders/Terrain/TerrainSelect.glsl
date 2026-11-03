@@ -14,12 +14,12 @@ layout(std140, binding = 4) uniform SelectBlock
 	vec4 u_Planes[6];  /* 视锥六个平面（未归一化，按支撑函数判） */
 	vec4 u_Eye;        /* xyz 相机位置，w 节点总数 */
 	vec4 u_Counts;     /* x 根节点边长、y 最细节点边长、z LOD 比例、w 世界缩放 */
-	vec4 u_Extra;      /* x 高度半高（世界）、y 最大级数、zw 保留 */
+	vec4 u_Extra;      /* y 最大级数，其余保留 */
 };
 
 layout(std430, binding = 1) readonly buffer NodeTable
 {
-	vec4 u_Nodes[];    /* xy 局部中心、z 边长、w 级数 */
+	vec4 u_Nodes[];    /* 每节点两条：xy 局部中心、z 边长、w 级数；xy 局部高度上下界 */
 };
 
 layout(std430, binding = 2) writeonly buffer PatchInstances
@@ -40,16 +40,19 @@ uint TerrainNodeIndex(int level, ivec2 block)
 	return offset + uint(block.y) * side + uint(block.x);
 }
 
-/* 节点在世界空间的中心与边长，顺便按包围盒判视锥。包围盒要带高度：
- * 只按 xz 矩形判会把山体切掉 */
+/* 节点在世界空间的中心与边长，顺便按包围盒判视锥。盒子取节点自己的高度范围，
+ * 局部盒过实体矩阵取轴对齐范围，与 TerrainField::GetNodeWorldBounds 同一套 */
 bool TerrainNodeInside(uint index, out vec3 world_center, out float world_size)
 {
-	const vec4 node = u_Nodes[index];
-	/* node.xy 是局部的 (x, z)，高度取 0：世界位置要把 z 放回第三个分量 */
-	world_center = (u_Model * vec4(node.x, 0.0, node.y, 1.0)).xyz;
+	const vec4 node = u_Nodes[index * 2u];
+	const vec4 heights = u_Nodes[index * 2u + 1u];
+	/* node.xy 是局部的 (x, z)：世界位置要把 z 放回第三个分量 */
+	world_center = (u_Model * vec4(node.x, (heights.x + heights.y) * 0.5, node.y, 1.0)).xyz;
 	world_size = node.z * u_Counts.w;
 
-	const vec3 extent = vec3(world_size * 0.5, u_Extra.x, world_size * 0.5);
+	const vec3 local_extent = vec3(node.z * 0.5, max((heights.y - heights.x) * 0.5, 0.01), node.z * 0.5);
+	const vec3 extent = abs(u_Model[0].xyz) * local_extent.x + abs(u_Model[1].xyz) * local_extent.y
+		+ abs(u_Model[2].xyz) * local_extent.z;
 	for (int plane = 0; plane < 6; ++plane)
 	{
 		const vec3 normal = u_Planes[plane].xyz;
@@ -68,8 +71,8 @@ bool TerrainNodeSplits(uint index)
 	if (!TerrainNodeInside(index, center, size))
 		return false;
 
-	const vec4 node = u_Nodes[index];
-	const bool can_split = node.z > u_Counts.y * 1.01;
+	/* 最细一档就是节点表的最后一层：两边都按层数判，表封顶时也对得上 */
+	const bool can_split = u_Nodes[index * 2u].w + 0.5 < u_Extra.y;
 	return can_split && distance(u_Eye.xyz, center) < size * u_Counts.z;
 }
 
@@ -78,7 +81,7 @@ bool TerrainNodeSplits(uint index)
  * 视锥外的节点即使父节点在细分也不画，跟 CPU 直接返回一致 */
 bool TerrainNodeEmitted(uint index, out vec3 world_center, out float world_size, out int level)
 {
-	const vec4 node = u_Nodes[index];
+	const vec4 node = u_Nodes[index * 2u];
 	level = int(node.w + 0.5);
 
 	if (!TerrainNodeInside(index, world_center, world_size))
@@ -138,7 +141,7 @@ void main()
 	if (!TerrainNodeEmitted(index, world_center, world_size, level))
 		return;
 
-	const vec4 node = u_Nodes[index];
+	const vec4 node = u_Nodes[index * 2u];
 	const vec2 min_corner = node.xy - node.z * 0.5;
 
 	/* 每条边探一格：邻居更粗就往父级表面 morph。位序 1 = -X、2 = +X、4 = -Z、8 = +Z */

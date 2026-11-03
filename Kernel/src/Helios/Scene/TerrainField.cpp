@@ -38,7 +38,7 @@ namespace Helios
 			glm::vec4 Planes[6]{};
 			glm::vec4 Eye{ 0.0f };     /* xyz 相机位置，w 节点总数 */
 			glm::vec4 Counts{ 0.0f };  /* x 根边长、y 最细边长、z LOD 比例、w 世界缩放 */
-			glm::vec4 Extra{ 0.0f };   /* x 高度半高、y 最大级数 */
+			glm::vec4 Extra{ 0.0f };   /* y 最大级数 */
 		};
 
 		/* PCG 散列：值噪声的格点随机值靠它，相邻格点才不会连成一片 */
@@ -321,16 +321,16 @@ namespace Helios
 
 		/* 换了高度数据，页池里的旧页全作废（页池本身留着，下一帧重烘） */
 		m_VirtualTexture.Reset();
-		/* 节点表只跟范围与最细边长有关，跟高度数据一起在这条路上重建 */
-		BuildNodeTable();
 
 		/* 留一份 CPU 副本：草地 / 物件贴地时按世界坐标双线性采样 */
 		m_Heights = std::move(heights);
+		/* 节点的高度范围要读 CPU 副本，放在它后面建 */
+		BuildNodeTable();
 		/* 重新建了高度图，GPU 副本作废，下次要的时候重传 */
 		m_HeightStorage = nullptr;
 	}
 
-	void TerrainField::RefreshHeightMap()
+	void TerrainField::RefreshHeightMap(const glm::uvec2& texel_min, const glm::uvec2& texel_max)
 	{
 		if (m_HeightMap == nullptr || m_Heights.empty())
 			return;
@@ -339,6 +339,7 @@ namespace Helios
 		pixel_desc.Format = PixelFormat::R;
 		pixel_desc.Type = PixelType::Float;
 		m_HeightMap->SetData(m_Heights.data(), pixel_desc);
+		UpdateNodeHeights(texel_min, texel_max);
 
 		/* 高度变了：页池里的颜色与烘焙用的高度都过期，GPU 副本下次要的时候重传 */
 		m_VirtualTexture.Reset();
@@ -415,7 +416,7 @@ namespace Helios
 		if (!any)
 			return false;
 
-		RefreshHeightMap();
+		RefreshHeightMap(glm::uvec2(min_x, min_z), glm::uvec2(max_x, max_z));
 		out_min = glm::uvec2(min_x, min_z);
 		out_max = glm::uvec2(max_x, max_z);
 		return true;
@@ -504,7 +505,7 @@ namespace Helios
 				m_Heights.begin() + static_cast<size_t>(z0 + z) * m_Resolution + x0);
 		}
 
-		RefreshHeightMap();
+		RefreshHeightMap(glm::uvec2(x0, z0), glm::uvec2(x1, z1));
 	}
 
 	bool TerrainField::ExportAsset(const std::string& path, const std::string& material_path) const
@@ -895,13 +896,11 @@ namespace Helios
 		if (m_HeightMap == nullptr)
 			return;
 
-		/* 根节点盖住整块地形（局部空间），从它往下一层层细分 */
-		const float root_size = std::max(m_Extent.x, m_Extent.y) * 2.0f;
-		if (root_size <= 0.0f)
+		if (m_NodeTable.empty())
 			return;
 
-		/* 根节点在局部空间居中；视锥与距离都按世界中心算 */
-		CollectNodes(&frustum, eye, 0.0f, glm::vec2(0.0f), root_size, 0, out);
+		/* 根节点盖住整块地形（局部空间），从它往下一层层细分 */
+		CollectNodes(&frustum, eye, 0.0f, 0, glm::uvec2(0), out);
 		BalancePatches(out);
 		MarkMorphPatches(out);
 	}
@@ -909,14 +908,10 @@ namespace Helios
 	void TerrainField::BuildPatchesAround(const glm::vec3& center, float radius,
 		std::vector<TerrainPatch>& out) const
 	{
-		if (m_HeightMap == nullptr || radius <= 0.0f)
+		if (m_HeightMap == nullptr || radius <= 0.0f || m_NodeTable.empty())
 			return;
 
-		const float root_size = std::max(m_Extent.x, m_Extent.y) * 2.0f;
-		if (root_size <= 0.0f)
-			return;
-
-		CollectNodes(nullptr, center, radius, glm::vec2(0.0f), root_size, 0, out);
+		CollectNodes(nullptr, center, radius, 0, glm::uvec2(0), out);
 		BalancePatches(out);
 		MarkMorphPatches(out);
 	}
@@ -946,8 +941,9 @@ namespace Helios
 				{
 					const glm::vec2 center(-half_root + (static_cast<float>(x) + 0.5f) * node_size,
 						-half_root + (static_cast<float>(z) + 0.5f) * node_size);
-					m_NodeTable.push_back(glm::vec4(center.x, center.y, node_size,
-						static_cast<float>(level)));
+					TerrainNode node;
+					node.Rect = glm::vec4(center.x, center.y, node_size, static_cast<float>(level));
+					m_NodeTable.push_back(node);
 				}
 			}
 
@@ -956,10 +952,110 @@ namespace Helios
 				break;
 		}
 
+		UpdateNodeHeights(glm::uvec2(0), glm::uvec2(m_Resolution - 1));
+
 		/* 表换了，显存那份下一帧重建 */
-		++m_NodeTableRevision;
 		m_NodeStorage = nullptr;
 		m_NodeUploadedRevision = 0;
+	}
+
+	uint32_t TerrainField::NodeIndex(uint32_t level, const glm::uvec2& block)
+	{
+		const uint32_t side = 1u << level;
+		const uint32_t offset = ((1u << (2u * level)) - 1u) / 3u;
+		return offset + block.y * side + block.x;
+	}
+
+	void TerrainField::UpdateNodeHeights(const glm::uvec2& texel_min, const glm::uvec2& texel_max)
+	{
+		if (m_NodeTable.empty() || m_Heights.empty() || m_Resolution < 2)
+			return;
+
+		const float root_size = m_NodeTable[0].Rect.z;
+		const float half_root = root_size * 0.5f;
+		const float max_index = static_cast<float>(m_Resolution - 1);
+		const glm::vec2 texel_size = m_Extent * 2.0f / max_index;
+
+		/* 节点矩形 → 纹素范围：双线性会碰到外侧一格，取 floor / ceil */
+		const auto scan = [&](const glm::vec4& rect)
+		{
+			const glm::vec2 half(rect.z * 0.5f);
+			const glm::vec2 uv0 = glm::clamp((glm::vec2(rect) - half) / (m_Extent * 2.0f) + 0.5f, 0.0f, 1.0f);
+			const glm::vec2 uv1 = glm::clamp((glm::vec2(rect) + half) / (m_Extent * 2.0f) + 0.5f, 0.0f, 1.0f);
+			const glm::uvec2 t0(glm::floor(uv0 * max_index));
+			const glm::uvec2 t1(glm::ceil(uv1 * max_index));
+
+			float lo = std::numeric_limits<float>::max();
+			float hi = -std::numeric_limits<float>::max();
+			for (uint32_t z = t0.y; z <= t1.y; ++z)
+			{
+				for (uint32_t x = t0.x; x <= t1.x; ++x)
+				{
+					const float h = m_Heights[static_cast<size_t>(z) * m_Resolution + x];
+					lo = std::min(lo, h);
+					hi = std::max(hi, h);
+				}
+			}
+			return glm::vec4(lo * m_HeightScale, hi * m_HeightScale, 0.0f, 0.0f);
+		};
+
+		/* 改动矩形落到最细一层的块范围，往外各扩一块兜住边上的取样 */
+		const int side = 1 << m_MaxNodeLevel;
+		const float node_size = root_size / static_cast<float>(side);
+		const auto to_block = [&](const glm::uvec2& texel, int margin)
+		{
+			const glm::vec2 local = -m_Extent + glm::vec2(texel) * texel_size;
+			const glm::ivec2 block(glm::floor((local + half_root) / node_size));
+			return glm::clamp(block + margin, glm::ivec2(0), glm::ivec2(side - 1));
+		};
+		glm::ivec2 block_min = to_block(texel_min, -1);
+		glm::ivec2 block_max = to_block(texel_max, 1);
+
+		for (int z = block_min.y; z <= block_max.y; ++z)
+		{
+			for (int x = block_min.x; x <= block_max.x; ++x)
+			{
+				TerrainNode& node = m_NodeTable[NodeIndex(m_MaxNodeLevel, glm::uvec2(x, z))];
+				node.Heights = scan(node.Rect);
+			}
+		}
+
+		/* 往上逐层合并：父节点的范围是四个子节点的并 */
+		for (uint32_t level = m_MaxNodeLevel; level > 0; --level)
+		{
+			block_min >>= 1;
+			block_max >>= 1;
+			for (int z = block_min.y; z <= block_max.y; ++z)
+			{
+				for (int x = block_min.x; x <= block_max.x; ++x)
+				{
+					glm::vec2 range(std::numeric_limits<float>::max(), -std::numeric_limits<float>::max());
+					for (int child = 0; child < 4; ++child)
+					{
+						const glm::uvec2 child_block(x * 2 + (child & 1), z * 2 + (child >> 1));
+						const glm::vec4& heights = m_NodeTable[NodeIndex(level, child_block)].Heights;
+						range = glm::vec2(std::min(range.x, heights.x), std::max(range.y, heights.y));
+					}
+					m_NodeTable[NodeIndex(level - 1, glm::uvec2(x, z))].Heights = glm::vec4(range, 0.0f, 0.0f);
+				}
+			}
+		}
+
+		++m_NodeTableRevision;
+	}
+
+	void TerrainField::GetNodeWorldBounds(const TerrainNode& node, glm::vec3& out_center,
+		glm::vec3& out_extent) const
+	{
+		const glm::vec3 local_center(node.Rect.x, (node.Heights.x + node.Heights.y) * 0.5f, node.Rect.y);
+		const glm::vec3 local_extent(node.Rect.z * 0.5f,
+			std::max((node.Heights.y - node.Heights.x) * 0.5f, 0.01f), node.Rect.z * 0.5f);
+
+		/* 世界半范围 = 各轴列向量取绝对值按局部半范围加权 */
+		out_center = glm::vec3(m_World * glm::vec4(local_center, 1.0f));
+		out_extent = glm::abs(glm::vec3(m_World[0])) * local_extent.x
+			+ glm::abs(glm::vec3(m_World[1])) * local_extent.y
+			+ glm::abs(glm::vec3(m_World[2])) * local_extent.z;
 	}
 
 	TerrainField::SelectionSlot* TerrainField::FindSelection(const RenderView* view)
@@ -1002,7 +1098,7 @@ namespace Helios
 		if (api == nullptr || !api->SupportsCompute())
 			return false;
 
-		const uint32_t node_bytes = static_cast<uint32_t>(m_NodeTable.size() * sizeof(glm::vec4));
+		const uint32_t node_bytes = static_cast<uint32_t>(m_NodeTable.size() * sizeof(TerrainNode));
 		if (m_NodeStorage == nullptr)
 			m_NodeStorage = DeviceStorageBuffer::Create("TerrainNodes", node_bytes);
 
@@ -1046,23 +1142,8 @@ namespace Helios
 
 		const float world_scale = std::max(m_WorldScale.x, std::max(m_WorldScale.y, m_WorldScale.z));
 		params.Eye = glm::vec4(eye, static_cast<float>(m_NodeTable.size()));
-		params.Counts = glm::vec4(std::max(m_Extent.x, m_Extent.y) * 2.0f,
-			static_cast<float>(m_MinNodeSize), m_LodRatio, world_scale);
-		params.Extra = glm::vec4(std::max(m_HeightScale * m_WorldScale.y * 0.5f, 0.01f),
-			static_cast<float>(m_MaxNodeLevel), 0.0f, 0.0f);
-
-		{
-			static int s_DebugCount = 0;
-			if (s_DebugCount < 2)
-			{
-				++s_DebugCount;
-				std::printf("[terrain-select] nodes=%zu maxLevel=%u root=%.1f min=%.1f ratio=%.2f scale=%.2f "
-					"height=%.1f eye=(%.0f %.0f %.0f) node3=(%.0f %.0f %.1f %.1f)\n",
-					m_NodeTable.size(), m_MaxNodeLevel, params.Counts.x, params.Counts.y, params.Counts.z,
-					params.Counts.w, params.Extra.x, eye.x, eye.y, eye.z,
-					m_NodeTable[21].x, m_NodeTable[21].y, m_NodeTable[21].z, m_NodeTable[21].w);
-			}
-		}
+		params.Counts = glm::vec4(m_NodeTable[0].Rect.z, static_cast<float>(m_MinNodeSize), m_LodRatio, world_scale);
+		params.Extra = glm::vec4(0.0f, static_cast<float>(m_MaxNodeLevel), 0.0f, 0.0f);
 
 		const bool dispatched = Renderer::DispatchTerrainSelect(m_NodeStorage, slot->Storage,
 			slot->Args, &params, static_cast<uint32_t>(sizeof(params)),
@@ -1120,51 +1201,41 @@ namespace Helios
 	}
 
 	void TerrainField::CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
-		const glm::vec2& local_center, float local_size, uint32_t lod,
-		std::vector<TerrainPatch>& out) const
+		uint32_t level, const glm::uvec2& block, std::vector<TerrainPatch>& out) const
 	{
 		if (out.size() >= kMaxPatches)
 			return;
 
-		/* 节点中心的世界位置与半径：缩放取三轴最大值，旋转后也盖得住 */
-		const glm::vec3 world_center = glm::vec3(m_World
-			* glm::vec4(local_center.x, 0.0f, local_center.y, 1.0f));
-		const float max_scale = std::max(m_WorldScale.x, std::max(m_WorldScale.y, m_WorldScale.z));
-		const float world_size = local_size * max_scale;
-
-		/* 剔除：包围盒含高度范围，只按 XZ 矩形判会把山体切掉 */
-		const glm::vec3 extent(world_size * 0.5f,
-			std::max(m_HeightScale * m_WorldScale.y * 0.5f, 0.01f), world_size * 0.5f);
-		if (frustum != nullptr && frustum->IsOutside(world_center, extent))
+		/* 剔除盒按节点自己的高度范围：只按 xz 或整块起伏算，山顶会被切掉或剔不干净 */
+		const TerrainNode& node = m_NodeTable[NodeIndex(level, block)];
+		glm::vec3 world_center(0.0f);
+		glm::vec3 world_extent(0.0f);
+		GetNodeWorldBounds(node, world_center, world_extent);
+		if (frustum != nullptr && frustum->IsOutside(world_center, world_extent))
 			return;
 
+		/* 球范围（探针捕获）：盒子的半对角线算进去，边角节点的叶子可能还伸进范围里 */
 		const float distance = glm::length(eye - world_center);
-		/* 球范围（探针捕获）：节点自己的半对角线算进去，边角节点的叶子可能还伸进范围里 */
-		if (max_distance > 0.0f && distance - world_size * 0.7072f > max_distance)
+		if (max_distance > 0.0f && distance - glm::length(world_extent) > max_distance)
 			return;
 
-		/* 最细节点边长与 LOD 半径都是局部米：放大后的地形在同样的世界距离下更细 */
-		const bool can_split = local_size > static_cast<float>(m_MinNodeSize) * 1.01f;
-		if (can_split && distance < world_size * m_LodRatio)
+		/* LOD 半径是局部边长乘最大缩放：放大后的地形在同样的世界距离下更细 */
+		const float max_scale = std::max(m_WorldScale.x, std::max(m_WorldScale.y, m_WorldScale.z));
+		const float local_size = node.Rect.z;
+		if (level < m_MaxNodeLevel && distance < local_size * max_scale * m_LodRatio)
 		{
-			const float child_size = local_size * 0.5f;
-			const float offset = local_size * 0.25f;
-			for (int quadrant = 0; quadrant < 4; ++quadrant)
+			for (uint32_t child = 0; child < 4; ++child)
 			{
-				const float dx = (quadrant & 1) ? offset : -offset;
-				const float dz = (quadrant & 2) ? offset : -offset;
-				CollectNodes(frustum, eye, max_distance, local_center + glm::vec2(dx, dz),
-					child_size, lod + 1, out);
+				CollectNodes(frustum, eye, max_distance, level + 1,
+					block * 2u + glm::uvec2(child & 1u, child >> 1u), out);
 			}
 			return;
 		}
 
 		TerrainPatch patch;
-		patch.Info = glm::vec4(local_center.x - local_size * 0.5f, 0.0f,
-			local_center.y - local_size * 0.5f, local_size);
-		/* 采样步长：节点边长除以 32 段，粗 LOD 下让法线重建也跟着放粗 */
-		patch.Lod = glm::vec4(static_cast<float>(lod), local_size / static_cast<float>(kPatchQuads),
-			0.0f, 0.0f);
+		patch.Info = glm::vec4(node.Rect.x - local_size * 0.5f, 0.0f, node.Rect.y - local_size * 0.5f, local_size);
+		/* 采样步长：节点边长除以 32 段 */
+		patch.Lod = glm::vec4(static_cast<float>(level), local_size / static_cast<float>(kPatchQuads), 0.0f, 0.0f);
 		out.push_back(patch);
 	}
 

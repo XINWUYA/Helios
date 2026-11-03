@@ -178,20 +178,33 @@ namespace Helios
 
 	private:
 		void BuildHeightMap(const TerrainComponent& component);
-		/* 节点表：按层摊平的满四叉树，节点只跟范围与最细节点边长有关，重建时生成一次 */
+		/* 节点表：按层摊平的满四叉树，跟着高度数据一起重建 */
 		void BuildNodeTable();
 		/* 高度图上传：纹理 + CPU 副本，两种来源共用 */
 		void UploadHeightMap(std::vector<float> heights);
-		/* frustum 为空表示不做视锥剔除；max_distance 为 0 表示不限距离 */
 		/* 标记哪些 patch 需要 morph：只有挨着更细节点的才做。
 		 * 相邻两侧都往各自父级收敛会收敛到不同精度的表面，反而裂开 */
 		static void MarkMorphPatches(std::vector<TerrainPatch>& patches);
 		/* 2:1 平衡：相邻叶子最多差一档，否则 morph 对不上 */
 		static void BalancePatches(std::vector<TerrainPatch>& patches);
 
+		/* 节点表：按层摊平的满四叉树。Rect 是 xy 局部中心、z 边长、w 级数；
+		 * Heights.xy 是节点范围内的局部高度上下界，剔除盒与 LOD 距离都按它算 */
+		struct TerrainNode
+		{
+			glm::vec4 Rect{ 0.0f };
+			glm::vec4 Heights{ 0.0f };
+		};
+		/* 第 level 层第 block 块在表里的下标：前几层节点数是等比数列 */
+		[[nodiscard]] static uint32_t NodeIndex(uint32_t level, const glm::uvec2& block);
+		/* 按纹素矩形刷新节点高度范围（闭区间），笔刷改一小块只重算盖住它的节点 */
+		void UpdateNodeHeights(const glm::uvec2& texel_min, const glm::uvec2& texel_max);
+		/* 节点局部盒过实体矩阵后的世界轴对齐盒：旋转、俯仰、缩放都盖得住 */
+		void GetNodeWorldBounds(const TerrainNode& node, glm::vec3& out_center, glm::vec3& out_extent) const;
+
+		/* frustum 为空表示不做视锥剔除；max_distance 为 0 表示不限距离 */
 		void CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,
-			const glm::vec2& local_center, float local_size, uint32_t lod,
-			std::vector<TerrainPatch>& out) const;
+			uint32_t level, const glm::uvec2& block, std::vector<TerrainPatch>& out) const;
 		/* 世界 xz → 局部 xz：带旋转时高度会参与，按给定世界高度算一遍 */
 		[[nodiscard]] glm::vec2 WorldToLocal(const glm::vec2& world_xz, float world_y = 0.0f) const;
 		/* 地形局部包围盒（8 角点）变换到世界后的 y 范围 */
@@ -215,8 +228,8 @@ namespace Helios
 		/* 上一次烘页时的材质版本：改了层颜色 / 层贴图就把页表作废 */
 		uint32_t m_MaterialRevision{ 0 };
 
-		/* GPU 选择：节点表（xy 局部中心、z 边长、w 级数）与它对应的显存 */
-		std::vector<glm::vec4> m_NodeTable;
+		/* GPU 选择：节点表与它对应的显存，CPU 四叉树也查同一张表 */
+		std::vector<TerrainNode> m_NodeTable;
 		uint32_t m_MaxNodeLevel{ 0 };
 		mutable SharedPtr<class DeviceStorageBuffer> m_NodeStorage;
 		uint32_t m_NodeTableRevision{ 0 };
@@ -245,8 +258,8 @@ namespace Helios
 		/* 笔画快照：笔刷开始前的那份高度，结束时用它对出改动的矩形 */
 		std::vector<float> m_StrokeSnapshot;
 		bool m_StrokeActive{ false };
-		/* 高度数组变了之后重传高度图（页池作废、GPU 副本下次重建） */
-		void RefreshHeightMap();
+		/* 高度数组的这块纹素矩形变了：重传高度图、刷新节点高度，页池作废、GPU 副本下次重建 */
+		void RefreshHeightMap(const glm::uvec2& texel_min, const glm::uvec2& texel_max);
 
 		/* 远景底图：颜色图 + 烘它的离屏帧缓冲，以及烘完时记住的版本号。
 		 * 都是懒建的缓存（渲染通道拿到的是 const 地形），跟着高度与材质版本走 */
