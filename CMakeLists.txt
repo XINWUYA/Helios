@@ -197,6 +197,7 @@ if(BUILD_SAMPLES)
     add_subdirectory(Samples/Sample_SkyBox)
     add_subdirectory(Samples/Sample_CSM)
     add_subdirectory(Samples/Sample_IBL)
+    add_subdirectory(Samples/Sample_Scene)
 endif()
 
 # 项目脚本模板
