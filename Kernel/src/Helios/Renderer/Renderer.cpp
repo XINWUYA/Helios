@@ -262,6 +262,10 @@ namespace Helios
 		if (const auto grass_scene = view->GetOwnerScene(); grass_scene != nullptr)
 			grass_scene->PrepareGrassIndirect(*view);
 
+		/* 地形 GPU 选择：同一个理由，计算派发会把渲染编码器收掉，不能放在通道里 */
+		if (const auto terrain_scene = view->GetOwnerScene(); terrain_scene != nullptr)
+			terrain_scene->PrepareTerrainSelection(*view);
+
 		/* 草地的世界范围：地面材质靠它在远处接管草色 */
 		if (const auto grass_scene = view->GetOwnerScene(); grass_scene != nullptr)
 		{
@@ -661,6 +665,28 @@ namespace Helios
 		};
 		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
 		const uint32_t group_count = (instance_count + group_size - 1) / group_size;
+		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);
+	}
+
+	bool Renderer::DispatchTerrainSelect(const SharedPtr<DeviceStorageBuffer>& nodes,
+		const SharedPtr<DeviceStorageBuffer>& patches, const SharedPtr<DeviceStorageBuffer>& args,
+		const void* param_data, uint32_t param_size, uint32_t node_count)
+	{
+		if (m_pRenderAPI == nullptr || nodes == nullptr || patches == nullptr || args == nullptr
+			|| node_count == 0 || !m_pRenderAPI->SupportsCompute())
+			return false;
+
+		BuiltinAsset<DeviceShader> s_TerrainSelectShader("Shaders/Terrain/TerrainSelect.glsl");
+		const SharedPtr<DeviceShader> shader = s_TerrainSelectShader.Get();
+		if (shader == nullptr || !shader->IsCompute())
+			return false;
+
+		/* 1 号节点表、2 号压实后的实例、3 号间接参数，参数块在 4 号 */
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
+			{ 1, nodes }, { 2, patches }, { 3, args },
+		};
+		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
+		const uint32_t group_count = (node_count + group_size - 1) / group_size;
 		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);
 	}
 

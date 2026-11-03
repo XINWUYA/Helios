@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 #include <glm/glm.hpp>
@@ -15,6 +16,7 @@ namespace Helios
 	struct TerrainComponent;
 	struct Frustum;
 	class DeviceTexture;
+	class RenderView;
 
 	/* 地形 patch：所有 patch 共用同一个 33×33 模板网格，位置与 LOD 由实例属性给出，
 	 * 高度在顶点着色器里采样高度图。结构与 Terrain.glsl 的 location 5/6 逐字节对应。
@@ -94,6 +96,29 @@ namespace Helios
 		[[nodiscard]] TerrainVirtualTexture& GetVirtualTexture() { return m_VirtualTexture; }
 		[[nodiscard]] const TerrainVirtualTexture& GetVirtualTexture() const { return m_VirtualTexture; }
 
+		/* GPU 选择：计算着色器按同一套四叉树判据选 patch 并压实，顺带写好间接参数。
+		 * 要在视图开始画之前派发（计算编码器会把当前渲染编码器收掉）。
+		 * 一帧可能有多个视图（编辑器 / 游戏 / 工具相机），每块地形按视图各存一份结果，
+		 * 否则后画的视图会把先准备的覆盖掉。不支持计算或没开开关时返回 false */
+		bool PrepareSelection(const glm::vec4 (&planes)[6], const glm::vec3& eye, uint32_t frame,
+			const RenderView* view);
+		/* 这个视图的这一帧已经由 GPU 选过 patch，提交时直接走间接绘制 */
+		[[nodiscard]] bool HasSelection(uint32_t frame, const RenderView* view) const;
+		/* GPU 选完的实例缓冲与间接参数：找不到该视图的选择结果时为空 */
+		[[nodiscard]] const SharedPtr<class DeviceVertexBuffer>& GetSelectedInstances(
+			const RenderView* view) const;
+		[[nodiscard]] const SharedPtr<class DeviceStorageBuffer>& GetSelectedArgs(
+			const RenderView* view) const;
+		/* 上一帧选出的 patch 数：参数块是 CPU 可见的，读它不用等回读 */
+		[[nodiscard]] uint32_t GetSelectedPatchCount(const RenderView* view) const;
+		/* 压实后的 patch 实例（CPU 可见，排查用） */
+		[[nodiscard]] const SharedPtr<class DeviceStorageBuffer>& GetSelectedPatches(
+			const RenderView* view) const;
+
+		/* GPU 选择的开关：关掉走 CPU 四叉树；不支持计算的后端自动走 CPU */
+		static void SetGpuSelectionEnabled(bool enabled);
+		[[nodiscard]] static bool IsGpuSelectionEnabled();
+
 		/* 高度数据的 GPU 副本（float 数组，归一化 0..1）：计算着色器里的贴地采样用。
 		 * 第一次要的时候才建，CPU 侧不改高度就不会重建 */
 		const SharedPtr<class DeviceStorageBuffer>& GetHeightStorage() const;
@@ -107,12 +132,15 @@ namespace Helios
 		static const MeshPrimitive& GetPatchPrimitive();
 		/* 实例数据布局，与 Terrain.glsl 的 location 5/6 对应 */
 		static const VertexBufferLayout& GetInstanceLayout();
-		/* 模板网格的索引数：间接参数里用得上 */
+		/* 模板网格的索引数：32 段本体 + 外圈裙边，一共 34×34 个四边形。
+		 * 间接绘制的参数块按它填，漏掉裙边那圈就会在 LOD 交界露出裂缝 */
 		static constexpr uint32_t kPatchQuads = 32;
-		static constexpr uint32_t kPatchIndexCount = kPatchQuads * kPatchQuads * 6;
+		static constexpr uint32_t kPatchIndexCount = (kPatchQuads + 2) * (kPatchQuads + 2) * 6;
 
 	private:
 		void BuildHeightMap(const TerrainComponent& component);
+		/* 节点表：按层摊平的满四叉树，节点只跟范围与最细节点边长有关，重建时生成一次 */
+		void BuildNodeTable();
 		/* 高度图上传：纹理 + CPU 副本，两种来源共用 */
 		void UploadHeightMap(std::vector<float> heights);
 		/* frustum 为空表示不做视锥剔除；max_distance 为 0 表示不限距离 */
@@ -147,6 +175,28 @@ namespace Helios
 		TerrainVirtualTexture m_VirtualTexture;
 		/* 上一次烘页时的材质版本：改了层颜色 / 层贴图就把页表作废 */
 		uint32_t m_MaterialRevision{ 0 };
+
+		/* GPU 选择：节点表（xy 局部中心、z 边长、w 级数）与它对应的显存 */
+		std::vector<glm::vec4> m_NodeTable;
+		uint32_t m_MaxNodeLevel{ 0 };
+		mutable SharedPtr<class DeviceStorageBuffer> m_NodeStorage;
+		uint32_t m_NodeTableRevision{ 0 };
+		uint32_t m_NodeUploadedRevision{ 0 };
+
+		/* 每个视图一份选择结果：压实后的实例、间接参数，以及它是哪一帧选的 */
+		struct SelectionSlot
+		{
+			const RenderView* View{ nullptr };
+			uint32_t Frame{ std::numeric_limits<uint32_t>::max() };
+			SharedPtr<class DeviceStorageBuffer> Storage;
+			SharedPtr<class DeviceVertexBuffer> ViewBuffer;
+			SharedPtr<class DeviceStorageBuffer> Args;
+		};
+		/* 一个场景一帧里可能同时有游戏相机、编辑器相机与工具相机，留够 4 份 */
+		static constexpr uint32_t kSelectionSlots = 4;
+		SelectionSlot m_Selections[kSelectionSlots];
+		[[nodiscard]] SelectionSlot* FindSelection(const RenderView* view);
+		[[nodiscard]] const SelectionSlot* FindSelection(const RenderView* view) const;
 		/* 节点边长（米）与相机距离的比值，小于它才继续细分。8 表示最近处一个节点约 8 个节点宽 */
 		float m_LodRatio{ 6.0f };
 		uint32_t m_MinNodeSize{ 64 };

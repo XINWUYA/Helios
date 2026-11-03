@@ -28,6 +28,11 @@ namespace Helios::TerrainDraw
 			int EntityId{ -1 };
 			uint32_t First{ 0 };
 			uint32_t Count{ 0 };
+			/* patch 由 GPU 选出来：实例缓冲与间接参数按视图各自一份，
+			 * First / Count 不参与提交（数量在参数块里） */
+			bool Gpu{ false };
+			SharedPtr<DeviceVertexBuffer> GpuInstances;
+			SharedPtr<DeviceStorageBuffer> GpuArgs;
 		};
 
 		/* 一帧里 G-Buffer / 速度 / 前向要的是同一份 patch 列表（都按相机视锥选），
@@ -163,14 +168,17 @@ namespace Helios::TerrainDraw
 		}
 
 		/* 按给定视锥选 patch 并上传，返回本帧实例环里的位置。
-		 * batches 记录每块地形占的区间，调用方据此逐块提交 */
+		 * batches 记录每块地形占的区间，调用方据此逐块提交。
+		 * allow_gpu 为真时，已在视图开始前由 GPU 选过 patch 的地形不上实例环，
+		 * 提交时走它自己的间接绘参数 */
 		bool BuildAndUpload(Scene& scene, LayerMask culling_mask, const Frustum& frustum, const glm::vec3& eye,
-			std::vector<TerrainPatch>& patches, std::vector<TerrainBatch>& batches,
-			Renderer::InstanceRange& range)
+			bool allow_gpu, const RenderView* view, std::vector<TerrainPatch>& patches,
+			std::vector<TerrainBatch>& batches, Renderer::InstanceRange& range)
 		{
 			patches.clear();
 			batches.clear();
 
+			const uint32_t frame_index = scene.GetFrameIndex();
 			for (auto [entity, component] : scene.GetRegistry().view<TerrainComponent>().each())
 			{
 				if (component.GetMaterial() == nullptr)
@@ -186,18 +194,35 @@ namespace Helios::TerrainDraw
 				if (component.m_Field->IsEmpty())
 					continue;
 
+				/* GPU 这条路自己选自己画，patch 不回 CPU */
+				if (allow_gpu && view != nullptr && component.m_Field->HasSelection(frame_index, view))
+				{
+					TerrainBatch batch;
+					batch.Component = &component;
+					batch.Field = component.m_Field.get();
+					batch.EntityId = static_cast<int>(entity);
+					batch.Gpu = true;
+					batch.GpuInstances = component.m_Field->GetSelectedInstances(view);
+					batch.GpuArgs = component.m_Field->GetSelectedArgs(view);
+					batches.push_back(std::move(batch));
+					continue;
+				}
+
 				const uint32_t first = static_cast<uint32_t>(patches.size());
 				component.m_Field->BuildPatches(frustum, eye, patches);
 				if (patches.size() == first)
 					continue;
 
 				batches.push_back(TerrainBatch{ &component, component.m_Field.get(),
-					static_cast<int>(entity), first, static_cast<uint32_t>(patches.size()) - first });
+					static_cast<int>(entity), first, static_cast<uint32_t>(patches.size()) - first, false });
 			}
 
 			if (batches.empty())
 				return false;
 
+			/* 全走 GPU 时没有 CPU 侧 patch，实例环不用碰 */
+			if (patches.empty())
+				return true;
 
 			range = Renderer::UploadInstances(patches.data(), static_cast<uint32_t>(patches.size()),
 				static_cast<uint32_t>(sizeof(TerrainPatch)));
@@ -224,13 +249,33 @@ namespace Helios::TerrainDraw
 
 			const Frustum frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
 			BuildAndUpload(scene, view.GetCullingMask(), frustum, camera->GetPosition(),
-				cache.Patches, cache.Batches, cache.Range);
+				TerrainField::IsGpuSelectionEnabled(), &view, cache.Patches, cache.Batches, cache.Range);
 			return cache;
+		}
+
+		/* 一笔地形：GPU 选的走间接绘制，CPU 选的走实例环 */
+		void SubmitBatch(const SharedPtr<Material>& material, const FrameCache& frame,
+			const TerrainBatch& batch, const DrawParams& per_draw)
+		{
+			if (batch.Gpu)
+			{
+				Renderer::SubmitIndirect(material, TerrainField::GetPatchPrimitive(),
+					batch.GpuInstances, batch.GpuArgs, &per_draw,
+					&TerrainField::GetInstanceLayout());
+				return;
+			}
+
+			if (frame.Range.Buffer == nullptr)
+				return;
+
+			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), frame.Range.Buffer,
+				frame.Range.FirstInstance + batch.First, batch.Count, &per_draw, 0,
+				&TerrainField::GetInstanceLayout());
 		}
 
 		void SubmitVisibleBatch(const FrameCache& frame, bool forward, DebugViewMode debug_view)
 		{
-			if (frame.Range.Buffer == nullptr)
+			if (frame.Batches.empty())
 				return;
 
 			for (const TerrainBatch& batch : frame.Batches)
@@ -251,9 +296,7 @@ namespace Helios::TerrainDraw
 					per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView",
 						static_cast<int>(debug_view));
 
-				Renderer::SubmitInstanced(final_material, TerrainField::GetPatchPrimitive(), frame.Range.Buffer,
-					frame.Range.FirstInstance + batch.First, batch.Count, &per_draw, 0,
-					&TerrainField::GetInstanceLayout());
+				SubmitBatch(final_material, frame, batch, per_draw);
 			}
 		}
 
@@ -453,7 +496,7 @@ namespace Helios::TerrainDraw
 	void SubmitDebug(RenderView& view, Scene& scene, const SharedPtr<Material>& material)
 	{
 		const FrameCache& frame = EnsureVisibleFrame(view, scene);
-		if (frame.Range.Buffer == nullptr || material == nullptr)
+		if (frame.Batches.empty() || material == nullptr)
 			return;
 
 		for (const TerrainBatch& batch : frame.Batches)
@@ -475,9 +518,7 @@ namespace Helios::TerrainDraw
 				per_draw.Overrides.push_back(info);
 			}
 
-			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), frame.Range.Buffer,
-				frame.Range.FirstInstance + batch.First, batch.Count, &per_draw, 0,
-				&TerrainField::GetInstanceLayout());
+			SubmitBatch(material, frame, batch, per_draw);
 		}
 	}
 
@@ -488,7 +529,7 @@ namespace Helios::TerrainDraw
 			return;
 
 		const FrameCache& frame = EnsureVisibleFrame(view, scene);
-		if (frame.Range.Buffer == nullptr)
+		if (frame.Batches.empty())
 			return;
 
 		for (const TerrainBatch& batch : frame.Batches)
@@ -507,9 +548,7 @@ namespace Helios::TerrainDraw
 			state.DepthCompareFunc = CompareFunc::GreaterEqual;
 			per_draw.RasterStateOverride = state;
 
-			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), frame.Range.Buffer,
-				frame.Range.FirstInstance + batch.First, batch.Count, &per_draw, 0,
-				&TerrainField::GetInstanceLayout());
+			SubmitBatch(material, frame, batch, per_draw);
 		}
 	}
 
@@ -527,7 +566,7 @@ namespace Helios::TerrainDraw
 		std::vector<TerrainPatch> patches;
 		std::vector<TerrainBatch> batches;
 		Renderer::InstanceRange range;
-		if (!BuildAndUpload(scene, view.GetCullingMask(), frustum, camera->GetPosition(),
+		if (!BuildAndUpload(scene, view.GetCullingMask(), frustum, camera->GetPosition(), false, nullptr,
 			patches, batches, range))
 			return;
 		const SharedPtr<Material> material = GetShadowMaterial(cascade_id);
@@ -561,7 +600,7 @@ namespace Helios::TerrainDraw
 		{
 			if (component.GetMaterial() == nullptr)
 				continue;
-			if (!scene.IsEntityInView(entity, view.GetCullingMask()))
+			if (!scene.IsEntityInView(entity, culling_mask))
 				continue;
 
 			if (component.m_Field == nullptr)

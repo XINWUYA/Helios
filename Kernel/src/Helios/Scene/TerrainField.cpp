@@ -11,6 +11,8 @@
 #include "Components.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Renderer/Frustum.h"
+#include "Helios/Renderer/RenderAPI.h"
+#include "Helios/Renderer/Renderer.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 
@@ -23,6 +25,19 @@ namespace Helios
 
 		/* morph 带宽缩放（见 TerrainField::SetGlobalMorphScale） */
 		float s_MorphScale = 1.0f;
+
+		/* GPU 选择开关：默认开，后端不支持计算着色器时用不上这条路（PrepareSelection 会返回 false） */
+		bool s_GpuSelection = true;
+
+		/* GPU 选择的参数块：与 TerrainSelect.glsl 的 SelectBlock 逐字节对应 */
+		struct alignas(16) TerrainSelectParams
+		{
+			glm::mat4 Model{ 1.0f };
+			glm::vec4 Planes[6]{};
+			glm::vec4 Eye{ 0.0f };     /* xyz 相机位置，w 节点总数 */
+			glm::vec4 Counts{ 0.0f };  /* x 根边长、y 最细边长、z LOD 比例、w 世界缩放 */
+			glm::vec4 Extra{ 0.0f };   /* x 高度半高、y 最大级数 */
+		};
 
 		/* PCG 散列：值噪声的格点随机值靠它，相邻格点才不会连成一片 */
 		uint32_t MixHash(uint32_t value)
@@ -301,6 +316,8 @@ namespace Helios
 
 		/* 换了高度数据，页池里的旧页全作废（页池本身留着，下一帧重烘） */
 		m_VirtualTexture.Reset();
+		/* 节点表只跟范围与最细边长有关，跟高度数据一起在这条路上重建 */
+		BuildNodeTable();
 
 		/* 留一份 CPU 副本：草地 / 物件贴地时按世界坐标双线性采样 */
 		m_Heights = std::move(heights);
@@ -544,6 +561,204 @@ namespace Helios
 		CollectNodes(nullptr, center, radius, glm::vec2(0.0f), root_size, 0, out);
 		BalancePatches(out);
 		MarkMorphPatches(out);
+	}
+
+	void TerrainField::BuildNodeTable()
+	{
+		m_NodeTable.clear();
+		m_MaxNodeLevel = 0;
+
+		const float root_size = std::max(m_Extent.x, m_Extent.y) * 2.0f;
+		if (root_size <= 0.0f)
+			return;
+
+		/* 满四叉树按层摊平：第 L 层 4^L 个节点，边长 root / 2^L。
+		 * 最细一档取 MinNodeSize，跟 CPU 的 can_split 用同一条判据 */
+		const float min_node = std::max(1.0f, static_cast<float>(m_MinNodeSize));
+		constexpr uint32_t kMaxLevel = 10; /* 最细一档 1024² 个节点，够 4km 配 4 米 */
+		const float half_root = root_size * 0.5f;
+
+		for (uint32_t level = 0; level <= kMaxLevel; ++level)
+		{
+			const uint32_t side = 1u << level;
+			const float node_size = root_size / static_cast<float>(side);
+			for (uint32_t z = 0; z < side; ++z)
+			{
+				for (uint32_t x = 0; x < side; ++x)
+				{
+					const glm::vec2 center(-half_root + (static_cast<float>(x) + 0.5f) * node_size,
+						-half_root + (static_cast<float>(z) + 0.5f) * node_size);
+					m_NodeTable.push_back(glm::vec4(center.x, center.y, node_size,
+						static_cast<float>(level)));
+				}
+			}
+
+			m_MaxNodeLevel = level;
+			if (node_size <= min_node * 1.01f)
+				break;
+		}
+
+		/* 表换了，显存那份下一帧重建 */
+		++m_NodeTableRevision;
+		m_NodeStorage = nullptr;
+		m_NodeUploadedRevision = 0;
+	}
+
+	TerrainField::SelectionSlot* TerrainField::FindSelection(const RenderView* view)
+	{
+		for (SelectionSlot& slot : m_Selections)
+		{
+			if (slot.View == view)
+				return &slot;
+		}
+
+		/* 没见过这个视图：顶掉最久没用过的那一份（Frame 越大越旧，从没用过的是最大值） */
+		SelectionSlot* oldest = &m_Selections[0];
+		for (SelectionSlot& slot : m_Selections)
+		{
+			if (slot.Frame > oldest->Frame)
+				oldest = &slot;
+		}
+		oldest->View = view;
+		oldest->Frame = std::numeric_limits<uint32_t>::max();
+		return oldest;
+	}
+
+	const TerrainField::SelectionSlot* TerrainField::FindSelection(const RenderView* view) const
+	{
+		for (const SelectionSlot& slot : m_Selections)
+		{
+			if (slot.View == view)
+				return &slot;
+		}
+		return nullptr;
+	}
+
+	bool TerrainField::PrepareSelection(const glm::vec4 (&planes)[6], const glm::vec3& eye, uint32_t frame,
+		const RenderView* view)
+	{
+		if (!s_GpuSelection || view == nullptr || m_NodeTable.empty() || m_HeightMap == nullptr)
+			return false;
+
+		const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI();
+		if (api == nullptr || !api->SupportsCompute())
+			return false;
+
+		const uint32_t node_bytes = static_cast<uint32_t>(m_NodeTable.size() * sizeof(glm::vec4));
+		if (m_NodeStorage == nullptr)
+			m_NodeStorage = DeviceStorageBuffer::Create("TerrainNodes", node_bytes);
+
+		if (m_NodeStorage == nullptr)
+			return false;
+
+		if (m_NodeUploadedRevision != m_NodeTableRevision)
+		{
+			m_NodeStorage->SetData(m_NodeTable.data(), node_bytes);
+			m_NodeUploadedRevision = m_NodeTableRevision;
+		}
+
+		SelectionSlot* slot = FindSelection(view);
+		slot->Frame = std::numeric_limits<uint32_t>::max();
+
+		/* 压实缓冲按 patch 上限预分配，参数块每帧重置：实例数从这里往上累加 */
+		const uint32_t patch_bytes = kMaxPatches * static_cast<uint32_t>(sizeof(TerrainPatch));
+		if (slot->Storage == nullptr)
+		{
+			slot->Storage = DeviceStorageBuffer::Create("TerrainSelectedPatches", patch_bytes);
+			slot->ViewBuffer = slot->Storage != nullptr
+				? DeviceVertexBuffer::CreateShared("TerrainSelectedView", slot->Storage, patch_bytes)
+				: nullptr;
+			slot->Args = DeviceStorageBuffer::Create("TerrainSelectArgs", 5u * sizeof(uint32_t));
+			if (slot->Storage == nullptr || slot->ViewBuffer == nullptr || slot->Args == nullptr)
+			{
+				slot->Storage = nullptr;
+				slot->ViewBuffer = nullptr;
+				slot->Args = nullptr;
+				return false;
+			}
+		}
+
+		const uint32_t args[5] = { kPatchIndexCount, 0u, 0u, 0u, 0u };
+		slot->Args->SetData(args, sizeof(args));
+
+		TerrainSelectParams params;
+		params.Model = m_World;
+		for (int index = 0; index < 6; ++index)
+			params.Planes[index] = planes[index];
+
+		const float world_scale = std::max(m_WorldScale.x, std::max(m_WorldScale.y, m_WorldScale.z));
+		params.Eye = glm::vec4(eye, static_cast<float>(m_NodeTable.size()));
+		params.Counts = glm::vec4(std::max(m_Extent.x, m_Extent.y) * 2.0f,
+			static_cast<float>(m_MinNodeSize), m_LodRatio, world_scale);
+		params.Extra = glm::vec4(std::max(m_HeightScale * m_WorldScale.y * 0.5f, 0.01f),
+			static_cast<float>(m_MaxNodeLevel), 0.0f, 0.0f);
+
+		{
+			static int s_DebugCount = 0;
+			if (s_DebugCount < 2)
+			{
+				++s_DebugCount;
+				std::printf("[terrain-select] nodes=%zu maxLevel=%u root=%.1f min=%.1f ratio=%.2f scale=%.2f "
+					"height=%.1f eye=(%.0f %.0f %.0f) node3=(%.0f %.0f %.1f %.1f)\n",
+					m_NodeTable.size(), m_MaxNodeLevel, params.Counts.x, params.Counts.y, params.Counts.z,
+					params.Counts.w, params.Extra.x, eye.x, eye.y, eye.z,
+					m_NodeTable[21].x, m_NodeTable[21].y, m_NodeTable[21].z, m_NodeTable[21].w);
+			}
+		}
+
+		const bool dispatched = Renderer::DispatchTerrainSelect(m_NodeStorage, slot->Storage,
+			slot->Args, &params, static_cast<uint32_t>(sizeof(params)),
+			static_cast<uint32_t>(m_NodeTable.size()));
+		if (dispatched)
+			slot->Frame = frame;
+		return dispatched;
+	}
+
+	bool TerrainField::HasSelection(uint32_t frame, const RenderView* view) const
+	{
+		const SelectionSlot* slot = FindSelection(view);
+		return slot != nullptr && slot->Frame == frame && slot->ViewBuffer != nullptr;
+	}
+
+	const SharedPtr<DeviceVertexBuffer>& TerrainField::GetSelectedInstances(const RenderView* view) const
+	{
+		static const SharedPtr<DeviceVertexBuffer> s_Empty;
+		const SelectionSlot* slot = FindSelection(view);
+		return slot != nullptr ? slot->ViewBuffer : s_Empty;
+	}
+
+	const SharedPtr<DeviceStorageBuffer>& TerrainField::GetSelectedArgs(const RenderView* view) const
+	{
+		static const SharedPtr<DeviceStorageBuffer> s_Empty;
+		const SelectionSlot* slot = FindSelection(view);
+		return slot != nullptr ? slot->Args : s_Empty;
+	}
+
+	const SharedPtr<DeviceStorageBuffer>& TerrainField::GetSelectedPatches(const RenderView* view) const
+	{
+		static const SharedPtr<DeviceStorageBuffer> s_Empty;
+		const SelectionSlot* slot = FindSelection(view);
+		return slot != nullptr ? slot->Storage : s_Empty;
+	}
+
+	uint32_t TerrainField::GetSelectedPatchCount(const RenderView* view) const
+	{
+		const SelectionSlot* slot = FindSelection(view);
+		if (slot == nullptr || slot->Args == nullptr)
+			return 0;
+
+		const auto* data = static_cast<const uint32_t*>(slot->Args->GetMappedData());
+		return data != nullptr ? data[1] : 0;
+	}
+
+	void TerrainField::SetGpuSelectionEnabled(bool enabled)
+	{
+		s_GpuSelection = enabled;
+	}
+
+	bool TerrainField::IsGpuSelectionEnabled()
+	{
+		return s_GpuSelection;
 	}
 
 	void TerrainField::CollectNodes(const Frustum* frustum, const glm::vec3& eye, float max_distance,

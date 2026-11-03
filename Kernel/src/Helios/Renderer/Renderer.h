@@ -51,6 +51,13 @@ namespace Helios
 			const SharedPtr<class DeviceStorageBuffer>& chunk_bounds,
 			const void* param_data, uint32_t param_size, uint32_t instance_count);
 
+		/* 地形 patch 的 GPU 选择：节点表进、压实的 patch 实例与间接参数出。
+		 * 参数块与 TerrainSelect.glsl 的 SelectBlock 对应；运行期不支持计算着色器时返回 false */
+		static bool DispatchTerrainSelect(const SharedPtr<class DeviceStorageBuffer>& nodes,
+			const SharedPtr<class DeviceStorageBuffer>& patches,
+			const SharedPtr<class DeviceStorageBuffer>& args,
+			const void* param_data, uint32_t param_size, uint32_t node_count);
+
 		/* 草地 GPU 放置：一次派发把整片草地的叶片实例算出来。运行期不支持计算着色器时返回 false */
 		/* terrain_heights 非空时绑到 2 号：计算里按世界坐标采样地形高度做贴地；
 		 * chunk_indices 绑到 3 号，把压实块号还原成网格块坐标 */
