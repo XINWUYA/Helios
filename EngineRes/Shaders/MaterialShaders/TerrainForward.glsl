@@ -69,11 +69,15 @@ void main()
 	STerrainSurface surface = EvaluateTerrainSurface(vert2frag.LocalXZ);
 
 	/* 页驻留就采页池，不驻留用刚算的那份 —— 与延迟管线同一套判断 */
-	vec4 page_albedo;
-	if (TerrainVirtualTextureLookup(vert2frag.WorldPosition.xz, page_albedo))
+	/* 页驻留就采页池；页没驻留而像素足迹又比底图粗，采远景底图；都不行才用刚算出来的值 */
+	const vec2 cached_xz = vert2frag.WorldPosition.xz;
+	const float footprint = max(length(dFdx(cached_xz)), length(dFdy(cached_xz)));
+	vec4 cached_albedo;
+	if (TerrainVirtualTextureLookup(cached_xz, cached_albedo)
+		|| TerrainBasemapLookup(cached_xz, footprint, cached_albedo))
 	{
-		surface.Albedo = page_albedo.rgb;
-		surface.Roughness = page_albedo.a;
+		surface.Albedo = cached_albedo.rgb;
+		surface.Roughness = cached_albedo.a;
 	}
 
 	const vec3 N = surface.Normal;

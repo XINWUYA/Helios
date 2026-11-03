@@ -14,6 +14,7 @@ namespace Helios
 	{
 		bool s_Enabled = false;
 		uint32_t s_BakeBudget = 4;
+		uint32_t s_PageTexels = 256;
 	}
 
 	void TerrainVirtualTexture::SetEnabled(bool enabled)
@@ -28,7 +29,26 @@ namespace Helios
 
 	void TerrainVirtualTexture::SetBakeBudget(uint32_t pages_per_frame)
 	{
-		s_BakeBudget = std::clamp(pages_per_frame, 0u, kPoolLayers);
+		s_BakeBudget = std::clamp(pages_per_frame, 0u, GetPoolLayers());
+	}
+
+	void TerrainVirtualTexture::SetPageTexels(uint32_t texels)
+	{
+		/* 只收 2 的幂档位：页池与采样都按页边长算，别的值没有意义 */
+		if (texels != 128 && texels != 256 && texels != 512)
+			return;
+		s_PageTexels = texels;
+	}
+
+	uint32_t TerrainVirtualTexture::GetPageTexels()
+	{
+		return s_PageTexels;
+	}
+
+	uint32_t TerrainVirtualTexture::GetPoolLayers()
+	{
+		const uint32_t page_bytes = s_PageTexels * s_PageTexels * 4u;
+		return std::clamp(kPoolBudgetBytes / std::max(page_bytes, 1u), 16u, 256u);
 	}
 
 	uint32_t TerrainVirtualTexture::GetBakeBudget()
@@ -58,18 +78,32 @@ namespace Helios
 	{
 		if (!s_Enabled || Renderer::GetRenderAPI() == nullptr)
 			return false;
+
+		/* 档位换了：页池、页表、层映射一起重建，旧页一律作废 */
+		if (m_Pool != nullptr && (m_PoolTexels != s_PageTexels || m_PoolLayers != GetPoolLayers()))
+		{
+			m_Pool = nullptr;
+			m_BakeFrameBuffer = nullptr;
+			m_PageTable = nullptr;
+			m_Table.clear();
+			m_LayerPages.clear();
+			m_Grid = glm::vec2(0.0f);
+			m_NextLayer = 0;
+		}
 		if (m_Pool != nullptr)
 			return true;
 
 		TextureDesc desc;
-		desc.Width = kPageTexels;
-		desc.Height = kPageTexels;
-		desc.Depth = kPoolLayers;
+		desc.Width = s_PageTexels;
+		desc.Height = s_PageTexels;
+		desc.Depth = GetPoolLayers();
 		desc.MipLevels = 1;
 		desc.Format = TextureFormat::RGBA8;
 		desc.SamplerType = SamplerType::Sampler2DArray;
 		desc.Usage = TextureUsage::ColorAttachment | TextureUsage::Sampleable;
 		m_Pool = DeviceTexture::Create("TerrainVTPool", desc);
+		m_PoolTexels = s_PageTexels;
+		m_PoolLayers = GetPoolLayers();
 		return m_Pool != nullptr;
 	}
 
@@ -106,7 +140,7 @@ namespace Helios
 			FrameBufferDesc desc;
 			desc.Samples = 1;
 			desc.Usage = RenderBufferUsage::ColorDefault;
-			desc.ViewportRegion = ViewportRegion{ 0, 0, kPageTexels, kPageTexels };
+			desc.ViewportRegion = ViewportRegion{ 0, 0, s_PageTexels, s_PageTexels };
 			desc.ColorRenderBuffers.push_back(color_info);
 			m_BakeFrameBuffer = DeviceFrameBuffer::Create("TerrainVTPageFrameBuffer", desc);
 		}
@@ -133,7 +167,7 @@ namespace Helios
 		{
 			m_Grid = grid_size;
 			m_Table.assign(static_cast<size_t>(grid_size.x) * static_cast<size_t>(grid_size.y), 0.0f);
-			m_LayerPages.assign(kPoolLayers, glm::uvec2(0xFFFFFFFFu));
+			m_LayerPages.assign(GetPoolLayers(), glm::uvec2(0xFFFFFFFFu));
 			m_NextLayer = 0;
 
 			TextureDesc desc;
@@ -190,7 +224,7 @@ namespace Helios
 
 		for (uint32_t index = 0; index < budget; ++index)
 		{
-			const uint32_t layer = m_NextLayer % kPoolLayers;
+			const uint32_t layer = m_NextLayer % GetPoolLayers();
 			++m_NextLayer;
 
 			/* 层被别的页占着就先清掉它：那一页下一帧会当成缺页重烘 */

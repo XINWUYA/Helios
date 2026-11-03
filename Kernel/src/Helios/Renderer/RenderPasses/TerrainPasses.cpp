@@ -138,8 +138,10 @@ namespace Helios::TerrainDraw
 		}
 
 		/* 高度图与地形参数：所有地形着色器（可见 / 阴影 / 速度 / 页烘焙）都声明了这些 */
-		void AddVirtualTextureParams(const TerrainVirtualTexture& virtual_texture, DrawParams& per_draw)
+		void AddVirtualTextureParams(const TerrainField& field, DrawParams& per_draw)
 		{
+			const TerrainVirtualTexture& virtual_texture = field.GetVirtualTexture();
+
 			/* 页池是 2D 数组，没启用时也得绑数组（1×1×1 占位），绑 2D 白图会触发 Metal 校验断言 */
 			const SharedPtr<DeviceTexture>& fallback_atlas = TerrainVirtualTexture::GetFallbackAtlas();
 			const SharedPtr<DeviceTexture>& page_table = virtual_texture.GetPageTable();
@@ -153,6 +155,14 @@ namespace Helios::TerrainDraw
 				vt_ready ? page_pool : (fallback_atlas != nullptr ? fallback_atlas : DeviceTexture::White())));
 			per_draw.Overrides.emplace_back(ParamType::Vec2, "u_VTGrid",
 				vt_ready ? virtual_texture.GetGrid() : glm::vec2(0.0f));
+
+			/* 远景底图：没烘出来时矩形全 0，着色器直接跳过，采样器仍要有绑定。
+			 * 只在虚拟纹理开着时启用：关掉 VT 的基准就该是逐像素直接算 */
+			const SharedPtr<DeviceTexture>& basemap = field.GetBasemap();
+			per_draw.Overrides.push_back(Material::MakeTextureParam("u_Basemap",
+				basemap != nullptr ? basemap : DeviceTexture::White()));
+			per_draw.Overrides.emplace_back(ParamType::Vec4, "u_BasemapRect",
+				TerrainVirtualTexture::IsEnabled() ? field.GetBasemapRect() : glm::vec4(0.0f));
 		}
 
 		/* 可见着色的逐绘制参数：是否接收阴影 + 虚拟纹理 + 拾取 id。只有声明了这些参数的
@@ -164,7 +174,7 @@ namespace Helios::TerrainDraw
 			per_draw.Overrides.emplace_back(ParamType::Float, "u_TerrainReceiveShadow",
 				component.m_ReceiveShadow ? 1.0f : 0.0f);
 			per_draw.Overrides.emplace_back(ParamType::Int, "u_TerrainObjectId", entity_id);
-			AddVirtualTextureParams(field.GetVirtualTexture(), per_draw);
+			AddVirtualTextureParams(field, per_draw);
 		}
 
 		/* 按给定视锥选 patch 并上传，返回本帧实例环里的位置。
@@ -448,6 +458,32 @@ namespace Helios::TerrainDraw
 			if (!virtual_texture.EnsureResources())
 				continue;
 
+			/* 远景底图：整块地形烘一张，页没驻留的远处像素采它。
+			 * 与页共用同一个烘焙材质，只在矩形上换成整块地形 */
+			const uint32_t material_revision = batch.Component->GetMaterial() != nullptr
+				? batch.Component->GetMaterial()->GetRevision() : 0u;
+			if (batch.Field->EnsureBasemap() && batch.Field->NeedsBasemap(material_revision))
+			{
+				const SharedPtr<DeviceFrameBuffer>& basemap_frame = batch.Field->GetBasemapFrameBuffer();
+				if (basemap_frame != nullptr)
+				{
+					basemap_frame->Bind();
+
+					DrawParams basemap_draw;
+					if (batch.Component->GetMaterial() != nullptr)
+						CopyMaterialParams(*batch.Component->GetMaterial(), *material->GetShader(), basemap_draw);
+					AddTerrainOverrides(*batch.Field, basemap_draw);
+
+					/* 底图矩形按页烘焙着色器的约定给：x / z 是左下角，w 是边长 */
+					const glm::vec4 rect = batch.Field->GetBasemapRect();
+					basemap_draw.Overrides.emplace_back(ParamType::Vec4, "u_VTPageRect",
+						glm::vec4(rect.x, 0.0f, rect.y, rect.z));
+					Renderer::Submit(material, Renderer::GetFullScreenVertexArray(), &basemap_draw);
+					basemap_frame->Unbind();
+					batch.Field->MarkBasemapBaked(material_revision);
+				}
+			}
+
 			if (batch.Gpu)
 				virtual_texture.PrepareFrustum(*batch.Field, bake_frustum.Planes, eye);
 			else
@@ -516,7 +552,7 @@ namespace Helios::TerrainDraw
 
 			DrawParams per_draw;
 			AddTerrainOverrides(*batch.Field, per_draw);
-			AddVirtualTextureParams(batch.Field->GetVirtualTexture(), per_draw);
+			AddVirtualTextureParams(*batch.Field, per_draw);
 
 			/* 外观参数从源材质抄过来，读数才跟正常着色一致 */
 			for (const auto& [key, info] : source->GetAllParameters())

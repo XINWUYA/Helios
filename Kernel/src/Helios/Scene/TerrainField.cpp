@@ -14,6 +14,7 @@
 #include "Helios/Renderer/Frustum.h"
 #include "Helios/Renderer/RenderAPI.h"
 #include "Helios/Renderer/Renderer.h"
+#include "Helios/VirtualDevice/DeviceFrameBuffer.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 
@@ -518,6 +519,61 @@ namespace Helios
 		data.MaterialPath = material_path;
 		data.Heights = m_Heights;
 		return TerrainAsset::Write(path, data);
+	}
+
+	bool TerrainField::EnsureBasemap() const
+	{
+		if (m_Basemap != nullptr)
+			return m_BasemapFrameBuffer != nullptr;
+
+		TextureDesc desc;
+		desc.Width = kBasemapSize;
+		desc.Height = kBasemapSize;
+		desc.MipLevels = 1;
+		desc.Format = TextureFormat::RGBA8;
+		desc.SamplerType = SamplerType::Sampler2D;
+		desc.Usage = TextureUsage::ColorAttachment | TextureUsage::Sampleable;
+		m_Basemap = DeviceTexture::Create("TerrainBasemap", desc);
+		if (m_Basemap == nullptr)
+			return false;
+
+		RenderBufferInfo color_info;
+		color_info.RenderTarget = m_Basemap;
+
+		FrameBufferDesc frame_desc;
+		frame_desc.Samples = 1;
+		frame_desc.Usage = RenderBufferUsage::ColorDefault;
+		frame_desc.ViewportRegion = ViewportRegion{ 0, 0, kBasemapSize, kBasemapSize };
+		frame_desc.ColorRenderBuffers.push_back(color_info);
+		m_BasemapFrameBuffer = DeviceFrameBuffer::Create("TerrainBasemapFrameBuffer", frame_desc);
+		return m_BasemapFrameBuffer != nullptr;
+	}
+
+	glm::vec4 TerrainField::GetBasemapRect() const
+	{
+		if (m_Basemap == nullptr || m_HeightMap == nullptr)
+			return glm::vec4(0.0f);
+
+		/* 旋转过的地形按轴对齐包围盒盖住：底图是正方形，边长取两轴里大的那个 */
+		const glm::vec2 world_half = GetWorldHalfExtent();
+		const float half = std::max(world_half.x, world_half.y);
+		if (half <= 0.0f)
+			return glm::vec4(0.0f);
+
+		const glm::vec2 min_corner(m_Origin.x - half, m_Origin.z - half);
+		const float size = half * 2.0f;
+		return glm::vec4(min_corner.x, min_corner.y, size, size / static_cast<float>(kBasemapSize));
+	}
+
+	bool TerrainField::NeedsBasemap(uint32_t material_revision) const
+	{
+		return m_BasemapHeights != m_HeightsRevision || m_BasemapMaterial != material_revision;
+	}
+
+	void TerrainField::MarkBasemapBaked(uint32_t material_revision) const
+	{
+		m_BasemapHeights = m_HeightsRevision;
+		m_BasemapMaterial = material_revision;
 	}
 
 	bool TerrainField::Raycast(const glm::vec3& origin, const glm::vec3& direction,

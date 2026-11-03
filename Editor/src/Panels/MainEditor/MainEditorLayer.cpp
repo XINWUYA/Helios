@@ -616,6 +616,27 @@ namespace Helios
 					if (ImGui::IsItemHovered())
 						ImGui::SetTooltip("On: terrain color comes from a paged cache around the camera. Off: shaded per pixel. Both look the same up close to within a couple of levels");
 
+					/* 页池档位：页边长越大，单页越清晰、池里装得下的页越少 */
+					if (ImGui::BeginMenu("Terrain VT Page Size"))
+					{
+						const uint32_t sizes[] = { 128, 256, 512 };
+						for (const uint32_t size : sizes)
+						{
+							char label[32];
+							std::snprintf(label, sizeof(label), "%u px", size);
+							const bool selected = m_Settings.TerrainVirtualTextureTexels == size;
+							if (ImGui::MenuItem(label, nullptr, selected))
+							{
+								m_Settings.TerrainVirtualTextureTexels = size;
+								EditorSettings::Apply(m_Settings);
+								EditorSettings::Save(m_Settings);
+							}
+						}
+						ImGui::EndMenu();
+					}
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Page edge in texels. The pool keeps a fixed 32MB budget, so bigger pages mean fewer of them");
+
 					ImGui::Separator();
 
 					bool gpu_grass = m_Settings.GpuGrassPlacement;

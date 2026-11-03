@@ -21,11 +21,16 @@ namespace Helios
 	{
 	public:
 		static constexpr float kPageWorldSize = 64.0f;
-		static constexpr uint32_t kPageTexels = 256;
 		/* 页表上限 64×64 = 4km 见方；超出的部分不驻留，走直接算 */
 		static constexpr uint32_t kMaxGrid = 64;
-		/* 页池层数：256² × 128 层 RGBA8 = 32MB */
-		static constexpr uint32_t kPoolLayers = 128;
+		/* 页池总预算：档位只改页边长，页数按这个预算反推（32MB） */
+		static constexpr uint32_t kPoolBudgetBytes = 32u << 20;
+
+		/* 页边长（纹素）档位：128 / 256 / 512，改了会重建页池与页表 */
+		static void SetPageTexels(uint32_t texels);
+		[[nodiscard]] static uint32_t GetPageTexels();
+		/* 当前档位下页池有多少层（页数 × 页面积固定在一块预算内） */
+		[[nodiscard]] static uint32_t GetPoolLayers();
 
 		/* 全局开关与每帧烘焙预算（editor.cfg 与检查程序共用） */
 		static void SetEnabled(bool enabled);
@@ -79,6 +84,9 @@ namespace Helios
 		std::vector<glm::uvec2> m_LayerPages;   /* 层号 → 页坐标（覆盖时要把旧页的页表项清掉） */
 		glm::vec2 m_Grid{ 0.0f };
 		uint32_t m_NextLayer{ 0 };
+		/* 建页池时的档位：跟当前档位不一致就整份重建 */
+		uint32_t m_PoolTexels{ 0 };
+		uint32_t m_PoolLayers{ 0 };
 
 		/* 待烘队列：x = 页 x，y = 页 z，z = 目标层号 */
 		std::vector<glm::uvec3> m_Pending;

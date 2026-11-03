@@ -16,6 +16,7 @@ namespace Helios
 	struct TerrainComponent;
 	struct Frustum;
 	class DeviceTexture;
+	class DeviceFrameBuffer;
 	class RenderView;
 
 	/* 地形 patch：所有 patch 共用同一个 33×33 模板网格，位置与 LOD 由实例属性给出，
@@ -92,6 +93,18 @@ namespace Helios
 		/* 高度重建的版本号：贴地对象据此判断要不要重新采样。笔刷改高度也会推进它，
 		 * 跟构建键分开 —— 构建键一改就会按参数重生成，编辑结果会被抹掉 */
 		[[nodiscard]] uint64_t GetRevision() const { return m_HeightsRevision; }
+
+		/* 远景底图：整块地形烘一张 1024² 的颜色图，虚拟纹理页没驻留的远处像素采它。
+		 * 烘焙与页共用同一份混色函数，颜色对得上，只差采样密度 */
+		static constexpr uint32_t kBasemapSize = 1024;
+		bool EnsureBasemap() const;
+		[[nodiscard]] const SharedPtr<DeviceTexture>& GetBasemap() const { return m_Basemap; }
+		[[nodiscard]] const SharedPtr<DeviceFrameBuffer>& GetBasemapFrameBuffer() const { return m_BasemapFrameBuffer; }
+		/* 高度或材质变了就要重烘：两个版本号都对上才算新鲜 */
+		[[nodiscard]] bool NeedsBasemap(uint32_t material_revision) const;
+		void MarkBasemapBaked(uint32_t material_revision) const;
+		/* 底图在世界里的矩形：xy 左下角、z 边长、w 每个纹素多少米；没有底图时全 0 */
+		[[nodiscard]] glm::vec4 GetBasemapRect() const;
 
 		/* 笔刷：抬升 / 降低 / 抹平，圆心与半径都是地形局部米。
 		 * amount 对抬升 / 降低是每一下改多少米，对抹平是混向邻域均值的比例。
@@ -234,5 +247,12 @@ namespace Helios
 		bool m_StrokeActive{ false };
 		/* 高度数组变了之后重传高度图（页池作废、GPU 副本下次重建） */
 		void RefreshHeightMap();
+
+		/* 远景底图：颜色图 + 烘它的离屏帧缓冲，以及烘完时记住的版本号。
+		 * 都是懒建的缓存（渲染通道拿到的是 const 地形），跟着高度与材质版本走 */
+		mutable SharedPtr<DeviceTexture> m_Basemap;
+		mutable SharedPtr<DeviceFrameBuffer> m_BasemapFrameBuffer;
+		mutable uint64_t m_BasemapHeights{ 0 };
+		mutable uint32_t m_BasemapMaterial{ 0 };
 	};
 }

@@ -83,11 +83,15 @@ void main()
 
 	/* 页驻留就采页池（粗糙度也一起回来），不驻留就用刚算出来的值。
 	 * 两条路混色公式同源，开关只差采样密度 */
-	vec4 page_albedo;
-	if (TerrainVirtualTextureLookup(vert2frag.WorldPosition.xz, page_albedo))
+	/* 页驻留就采页池；页没驻留而像素足迹又比底图粗，采远景底图；都不行才用刚算出来的值 */
+	const vec2 cached_xz = vert2frag.WorldPosition.xz;
+	const float footprint = max(length(dFdx(cached_xz)), length(dFdy(cached_xz)));
+	vec4 cached_albedo;
+	if (TerrainVirtualTextureLookup(cached_xz, cached_albedo)
+		|| TerrainBasemapLookup(cached_xz, footprint, cached_albedo))
 	{
-		surface.Albedo = page_albedo.rgb;
-		surface.Roughness = page_albedo.a;
+		surface.Albedo = cached_albedo.rgb;
+		surface.Roughness = cached_albedo.a;
 	}
 
 	GBufferTexture0 = vec4(surface.Albedo, surface.Roughness);

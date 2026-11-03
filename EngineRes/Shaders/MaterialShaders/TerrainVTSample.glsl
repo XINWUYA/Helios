@@ -8,6 +8,11 @@ uniform sampler2DArray u_VTPageAtlas;
 /* x/y = 页表尺寸；0 表示没开虚拟纹理（采样器仍要绑，Metal 缺绑定会断言） */
 uniform vec2 u_VTGrid = vec2(0.0f);
 
+/* 远景底图：整块地形一张低分辨率颜色图。xy 是左下角、z 是边长、w 是每纹素多少米，
+ * z = 0 表示没有底图（采样器仍要绑，缺绑定会断言） */
+uniform sampler2D u_Basemap;
+uniform vec4 u_BasemapRect = vec4(0.0f);
+
 bool TerrainVirtualTextureLookup(vec2 world_xz, out vec4 out_albedo)
 {
 	out_albedo = vec4(0.0f);
@@ -31,6 +36,22 @@ bool TerrainVirtualTextureLookup(vec2 world_xz, out vec4 out_albedo)
 	const vec2 dx = dFdx(world_xz) / 64.0f;
 	const vec2 dy = dFdy(world_xz) / 64.0f;
 	out_albedo = textureGrad(u_VTPageAtlas, vec3(uv, layer - 1.0f), dx, dy);
+	return true;
+}
+
+/* 远景底图：页没驻留、而像素在地面上的足迹又比底图一个纹素还大时采它。
+ * 远处逐像素重算混色最贵，又看不出细节，底图正好够用 */
+bool TerrainBasemapLookup(vec2 world_xz, float footprint, out vec4 out_albedo)
+{
+	out_albedo = vec4(0.0f);
+	if (u_BasemapRect.z <= 0.0f || footprint < u_BasemapRect.w)
+		return false;
+
+	const vec2 uv = (world_xz - u_BasemapRect.xy) / u_BasemapRect.z;
+	if (uv.x < 0.0f || uv.y < 0.0f || uv.x > 1.0f || uv.y > 1.0f)
+		return false;
+
+	out_albedo = texture(u_Basemap, uv);
 	return true;
 }
 
