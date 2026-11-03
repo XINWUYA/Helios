@@ -188,6 +188,8 @@ namespace Helios
         MTL::CommandBuffer* m_LastSubmittedCommandBuffer{ nullptr };
         MTL::RenderCommandEncoder* m_CurrentRenderEncoder{ nullptr };
         CA::MetalDrawable* m_CurrentDrawable{ nullptr };
+        /* 本帧 drawable 是否已开过通道：只有第一次清屏，之后的通道接着画 */
+        bool m_DefaultTargetStarted{ false };
 
         /* 默认目标快照的常驻预览纹理（AcquireDefaultTargetSnapshot 用；随 drawable
          * 尺寸变化重建、跨帧复用）。行序 = drawable 行序（顶行在前） */

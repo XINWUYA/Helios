@@ -898,6 +898,7 @@ namespace Helios
 
         /* 上一帧的 drawable 已在 Present 中呈现，这里清空引用避免重复呈现 */
         m_CurrentDrawable = nullptr;
+        m_DefaultTargetStarted = false;
 
         /* 获取下一个可绘制对象 */
         m_CurrentDrawable = m_MetalLayer->nextDrawable();
@@ -1117,6 +1118,10 @@ namespace Helios
             CORE_LOG_ERROR("RenderPassDescriptor is not set for default render pass!");
             return;
         }
+
+        /* 渲染图里没声明附件的 Pass 都会开默认通道（如探针烘焙），排在场景之后再清一次就把画面抹掉了 */
+        preserve_content = preserve_content || m_DefaultTargetStarted;
+        m_DefaultTargetStarted = true;
 
         if (preserve_content)
         {
