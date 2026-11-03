@@ -13,8 +13,8 @@ layout(std140, binding = 4) uniform SelectBlock
 	mat4 u_Model;      /* 局部 → 世界 */
 	vec4 u_Planes[6];  /* 视锥六个平面（未归一化，按支撑函数判） */
 	vec4 u_Eye;        /* xyz 相机位置，w 节点总数 */
-	vec4 u_Counts;     /* x 根节点边长、y 最细节点边长、z LOD 比例、w 世界缩放 */
-	vec4 u_Extra;      /* y 最大级数，其余保留 */
+	vec4 u_Counts;     /* x 根节点边长、y 最细一层的节点边长、z LOD 比例、w 世界缩放 */
+	vec4 u_Extra;      /* y 最大级数、z 压实缓冲能放的 patch 数 */
 };
 
 layout(std430, binding = 1) readonly buffer NodeTable
@@ -103,6 +103,7 @@ bool TerrainNodeEmitted(uint index, out vec3 world_center, out float world_size,
 int TerrainCoveringLevel(vec2 local_xz, int fallback)
 {
 	const int max_level = int(u_Extra.y + 0.5);
+	/* 格宽取节点表最后一层的真实边长：根边长除以 MinNodeSize 不一定是 2 的幂 */
 	const float cell = max(u_Counts.y, 1e-3);
 	const vec2 half_root = vec2(u_Counts.x * 0.5);
 
@@ -163,8 +164,13 @@ void main()
 		}
 	}
 
-	/* 压实：原子计数器给出这一条在缓冲里的位置 */
+	/* 压实：原子计数器给出这一条在缓冲里的位置。超出缓冲的退回计数，实例数停在上限 */
 	const uint slot = atomicAdd(u_Args[1], 1u);
+	if (slot >= uint(u_Extra.z))
+	{
+		atomicAdd(u_Args[1], 0xFFFFFFFFu);
+		return;
+	}
 	const uint base = slot * 2u;
 	/* Info 是 xyz = 左下角（局部空间，y 恒为 0）+ w 边长，与 TerrainPatch 逐字节对应 */
 	u_Patches[base] = vec4(min_corner.x, 0.0, min_corner.y, node.z);

@@ -37,8 +37,8 @@ namespace Helios
 			glm::mat4 Model{ 1.0f };
 			glm::vec4 Planes[6]{};
 			glm::vec4 Eye{ 0.0f };     /* xyz 相机位置，w 节点总数 */
-			glm::vec4 Counts{ 0.0f };  /* x 根边长、y 最细边长、z LOD 比例、w 世界缩放 */
-			glm::vec4 Extra{ 0.0f };   /* y 最大级数 */
+			glm::vec4 Counts{ 0.0f };  /* x 根边长、y 最细一层边长、z LOD 比例、w 世界缩放 */
+			glm::vec4 Extra{ 0.0f };   /* y 最大级数、z patch 上限 */
 		};
 
 		/* PCG 散列：值噪声的格点随机值靠它，相邻格点才不会连成一片 */
@@ -1142,8 +1142,8 @@ namespace Helios
 
 		const float world_scale = std::max(m_WorldScale.x, std::max(m_WorldScale.y, m_WorldScale.z));
 		params.Eye = glm::vec4(eye, static_cast<float>(m_NodeTable.size()));
-		params.Counts = glm::vec4(m_NodeTable[0].Rect.z, static_cast<float>(m_MinNodeSize), m_LodRatio, world_scale);
-		params.Extra = glm::vec4(0.0f, static_cast<float>(m_MaxNodeLevel), 0.0f, 0.0f);
+		params.Counts = glm::vec4(m_NodeTable[0].Rect.z, m_NodeTable.back().Rect.z, m_LodRatio, world_scale);
+		params.Extra = glm::vec4(0.0f, static_cast<float>(m_MaxNodeLevel), static_cast<float>(kMaxPatches), 0.0f);
 
 		const bool dispatched = Renderer::DispatchTerrainSelect(m_NodeStorage, slot->Storage,
 			slot->Args, &params, static_cast<uint32_t>(sizeof(params)),
