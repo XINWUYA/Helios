@@ -8,6 +8,7 @@
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Components.h"
+#include "Helios/Scene/TerrainField.h"
 #include "Helios/Scene/TerrainAsset.h"
 
 namespace Helios
@@ -220,14 +221,16 @@ namespace Helios
 			}
 
 			ImGui::Spacing();
-			const bool procedural = component.m_AssetPath.empty();
 			if (ImGui::Button("Export as .terrain"))
 				TerrainSculpt::RequestExport();
 			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Write <project>/Terrains/<entity>.terrain and bind it to this terrain");
+				ImGui::SetTooltip("Write back to the bound .terrain, or create <project>/Terrains/<entity>.terrain.\n"
+					"Saving the scene does this for sculpted terrains too");
 
 			ImGui::SameLine();
-			ImGui::TextDisabled(procedural ? "Procedural heights" : "Already bound to an asset");
+			const bool edited = component.m_Field != nullptr && component.m_Field->HasUnsavedEdits();
+			ImGui::TextDisabled(edited ? "Unsaved sculpt edits"
+				: (component.m_AssetPath.empty() ? "Procedural heights" : "Bound to an asset"));
 		}
 
 		bool DrawTerrainBlock(void* raw)

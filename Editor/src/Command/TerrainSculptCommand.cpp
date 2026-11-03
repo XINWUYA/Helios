@@ -5,11 +5,12 @@
 
 namespace Helios
 {
-	TerrainSculptCommand::TerrainSculptCommand(SharedPtr<Scene> scene, Entity entity,
+	TerrainSculptCommand::TerrainSculptCommand(SharedPtr<Scene> scene, Entity entity, uint32_t resolution,
 		const glm::uvec2& min, const glm::uvec2& max,
 		std::vector<float> before, std::vector<float> after)
 		: m_Scene(std::move(scene))
 		, m_Entity(entity)
+		, m_Resolution(resolution)
 		, m_Min(min)
 		, m_Max(max)
 		, m_Before(std::move(before))
@@ -35,7 +36,7 @@ namespace Helios
 			return;
 
 		auto& terrain = m_Entity.GetComponent<TerrainComponent>();
-		if (terrain.m_Field == nullptr)
+		if (terrain.m_Field == nullptr || terrain.m_Field->GetResolution() != m_Resolution)
 			return;
 
 		terrain.m_Field->WriteHeightRect(m_Min, m_Max, values);

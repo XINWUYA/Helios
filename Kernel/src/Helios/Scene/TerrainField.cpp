@@ -330,6 +330,7 @@ namespace Helios
 
 		/* 留一份 CPU 副本：草地 / 物件贴地时按世界坐标双线性采样 */
 		m_Heights = std::move(heights);
+		m_HeightsEdited = false;
 		/* 节点的高度范围要读 CPU 副本，放在它后面建 */
 		BuildNodeTable();
 		/* 重新建了高度图，GPU 副本作废，下次要的时候重传 */
@@ -351,6 +352,7 @@ namespace Helios
 		m_VirtualTexture.Reset();
 		m_HeightStorage = nullptr;
 		++m_HeightsRevision;
+		m_HeightsEdited = true;
 	}
 
 	bool TerrainField::ApplyBrush(const glm::vec2& local_center, float local_radius, float amount,
@@ -514,7 +516,7 @@ namespace Helios
 		RefreshHeightMap(glm::uvec2(x0, z0), glm::uvec2(x1, z1));
 	}
 
-	bool TerrainField::ExportAsset(const std::string& path, const std::string& material_path) const
+	bool TerrainField::ExportAsset(const std::string& path, const std::string& material_path)
 	{
 		if (m_Heights.empty() || path.empty())
 			return false;
@@ -525,7 +527,11 @@ namespace Helios
 		data.HeightScale = m_HeightScale;
 		data.MaterialPath = material_path;
 		data.Heights = m_Heights;
-		return TerrainAsset::Write(path, data);
+		if (!TerrainAsset::Write(path, data))
+			return false;
+
+		m_HeightsEdited = false;
+		return true;
 	}
 
 	bool TerrainField::EnsureBasemap() const

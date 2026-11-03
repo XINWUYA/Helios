@@ -184,8 +184,11 @@ namespace Helios
 		void FinishSculptStroke();
 		/* 视口鼠标位置 → 世界射线（近平面起点 + 归一化方向） */
 		bool BuildViewportRay(glm::vec3& out_origin, glm::vec3& out_direction) const;
-		/* 把选中的地形导出成 .terrain 并绑上（卡片上的导出按钮走到这里） */
+		/* 把地形高度写进 .terrain 并绑上：已绑资产就写回原文件，否则新建一份不重名的 */
+		bool ExportTerrain(Entity entity);
 		void ExportSelectedTerrain();
+		/* 场景文件不存高度：保存场景前把笔刷改过的地形先写进资产 */
+		void SaveEditedTerrains();
 
 		/* F 键：把视角聚焦到选中实体 */
 		void FocusSelectedEntity();

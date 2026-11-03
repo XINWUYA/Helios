@@ -1053,6 +1053,7 @@ namespace Helios
 		if (m_ActiveScenePath.empty())
 			return;
 
+		SaveEditedTerrains();
 		m_pMainScene->Serializer(m_ActiveScenePath);
 
 		/* 场景内容与文件一致了：当前位置成为新的干净点 */
@@ -1074,6 +1075,7 @@ namespace Helios
 		if (file_path.empty())
 			return;
 
+		SaveEditedTerrains();
 		m_pMainScene->Serializer(file_path);
 
 		/* 保存成功后，当前场景路径切换为新路径 */
@@ -1676,7 +1678,7 @@ namespace Helios
 			return;
 
 		m_CommandStack.Execute(CreateUniquePtr<TerrainSculptCommand>(m_pMainScene, entity,
-			min, max, std::move(before), std::move(after)));
+			terrain.m_Field->GetResolution(), min, max, std::move(before), std::move(after)));
 	}
 
 	bool SceneEditorLayer::BuildViewportRay(glm::vec3& out_origin, glm::vec3& out_direction) const
@@ -1714,50 +1716,75 @@ namespace Helios
 		return true;
 	}
 
-	/* 导出选中地形：固定落到 <项目>/Terrains/<实体名>.terrain，导出后直接绑上，
-	 * 场景重新加载时以资产为准 */
-	void SceneEditorLayer::ExportSelectedTerrain()
+	/* 导出地形：已绑资产就写回那份文件；没绑就落到 <项目>/Terrains/<实体名>.terrain，
+	 * 同名文件已经有了就加序号，不覆盖别的地形 */
+	bool SceneEditorLayer::ExportTerrain(Entity entity)
 	{
-		const Entity entity = m_SceneHierarchy.GetSelectedEntity();
 		if (!entity || !entity.HasComponent<TerrainComponent>())
-			return;
+			return false;
 
 		auto& terrain = entity.GetComponent<TerrainComponent>();
 		if (terrain.m_Field == nullptr || terrain.m_Field->IsEmpty())
-			return;
+			return false;
 
-		std::string name = "Terrain";
-		if (entity.HasComponent<NameComponent>())
+		std::filesystem::path path = PathFromUtf8(terrain.m_AssetPath);
+		if (terrain.m_AssetPath.empty())
 		{
-			const std::string& entity_name = entity.GetComponent<NameComponent>().m_Name;
-			if (!entity_name.empty())
-				name = entity_name;
-		}
-		/* 实体名当文件名用：路径分隔符与非法字符换成下划线 */
-		for (char& character : name)
-		{
-			if (character == '/' || character == '\\' || character == ':' || character == '*'
-				|| character == '?' || character == '"' || character == '<' || character == '>'
-				|| character == '|')
-				character = '_';
+			std::string name = "Terrain";
+			if (entity.HasComponent<NameComponent>())
+			{
+				const std::string& entity_name = entity.GetComponent<NameComponent>().m_Name;
+				if (!entity_name.empty())
+					name = entity_name;
+			}
+			/* 实体名当文件名用：路径分隔符与非法字符换成下划线 */
+			for (char& character : name)
+			{
+				if (character == '/' || character == '\\' || character == ':' || character == '*'
+					|| character == '?' || character == '"' || character == '<' || character == '>'
+					|| character == '|')
+					character = '_';
+			}
+
+			const std::filesystem::path directory = g_ProjectPath / "Terrains";
+			std::error_code error;
+			std::filesystem::create_directories(directory, error);
+
+			path = directory / (name + ".terrain");
+			for (int suffix = 1; std::filesystem::exists(path, error); ++suffix)
+				path = directory / (name + "_" + std::to_string(suffix) + ".terrain");
 		}
 
-		const std::filesystem::path directory = g_ProjectPath / "Terrains";
-		std::error_code error;
-		std::filesystem::create_directories(directory, error);
-
-		const std::filesystem::path path = directory / (name + ".terrain");
 		const std::string material_path = terrain.m_MaterialSlot.SourceAssetPath.empty()
 			? std::string() : RELATIVE_PATH(terrain.m_MaterialSlot.SourceAssetPath);
-
 		if (!terrain.m_Field->ExportAsset(PathToUtf8(path), material_path))
 		{
 			EDITOR_LOG_WARN("Terrain export failed: {}", PathToUtf8(path));
-			return;
+			return false;
 		}
 
-		terrain.m_AssetPath = PathToUtf8(path);
+		/* 新绑了资产路径：场景里的引用变了，要提示保存 */
+		if (terrain.m_AssetPath != PathToUtf8(path))
+		{
+			terrain.m_AssetPath = PathToUtf8(path);
+			m_HasUnrecordedChange = true;
+		}
 		EDITOR_LOG_INFO("Terrain exported: {}", PathToUtf8(path));
+		return true;
+	}
+
+	void SceneEditorLayer::ExportSelectedTerrain()
+	{
+		ExportTerrain(m_SceneHierarchy.GetSelectedEntity());
+	}
+
+	void SceneEditorLayer::SaveEditedTerrains()
+	{
+		for (auto [handle, terrain] : m_pMainScene->GetRegistry().view<TerrainComponent>().each())
+		{
+			if (terrain.m_Field != nullptr && terrain.m_Field->HasUnsavedEdits())
+				ExportTerrain(Entity{ handle, m_pMainScene });
+		}
 	}
 
 	/* F 键：把轨道中心聚焦到选中实体 */

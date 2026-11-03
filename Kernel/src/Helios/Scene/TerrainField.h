@@ -123,8 +123,10 @@ namespace Helios
 			std::vector<float>& out_before, std::vector<float>& out_after);
 		/* 按矩形写回高度（撤销 / 重做），会重传高度图并作废页池 */
 		void WriteHeightRect(const glm::uvec2& min, const glm::uvec2& max, const std::vector<float>& values);
-		/* 导出成 .terrain 资产：当前高度 + 范围 + 起伏 + 材质路径 */
-		bool ExportAsset(const std::string& path, const std::string& material_path) const;
+		/* 导出成 .terrain 资产：当前高度 + 范围 + 起伏 + 材质路径，写成功后笔刷改动算已保存 */
+		bool ExportAsset(const std::string& path, const std::string& material_path);
+		/* 笔刷改过高度、还没导出：场景文件不存高度，保存场景时要先把它写进资产 */
+		[[nodiscard]] bool HasUnsavedEdits() const { return m_HeightsEdited; }
 
 		/* 射线与地表求交（编辑器笔刷定位用）：out_local 是命中点的局部 xz，
 		 * out_distance 是世界空间的射线长度。direction 需要归一化 */
@@ -262,6 +264,7 @@ namespace Helios
 		/* 笔画快照：笔刷开始前的那份高度，结束时用它对出改动的矩形 */
 		std::vector<float> m_StrokeSnapshot;
 		bool m_StrokeActive{ false };
+		bool m_HeightsEdited{ false };
 		/* 高度数组的这块纹素矩形变了：重传高度图、刷新节点高度，页池作废、GPU 副本下次重建 */
 		void RefreshHeightMap(const glm::uvec2& texel_min, const glm::uvec2& texel_max);
 
