@@ -91,6 +91,8 @@ vec3 TerrainVertexWorld(vec2 patch_uv, vec4 patch_info, vec4 patch_lod, out floa
 {
 	const float step = max(patch_lod.y, 0.05f);
 	vec3 local = patch_info.xyz + vec3(patch_uv.x, 0.0f, patch_uv.y) * patch_info.w;
+	/* 长方形地形的 patch 会伸出实际范围：多出来的顶点压到边上，三角形退化成零面积 */
+	local.xz = clamp(local.xz, -u_TerrainExtent, u_TerrainExtent);
 	local_xz = local.xz;
 
 	const bool outside = patch_uv.x < 0.0f || patch_uv.x > 1.0f

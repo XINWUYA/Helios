@@ -14,7 +14,7 @@ layout(std140, binding = 4) uniform SelectBlock
 	vec4 u_Planes[6];  /* 视锥六个平面（未归一化，按支撑函数判） */
 	vec4 u_Eye;        /* xyz 相机位置，w 节点总数 */
 	vec4 u_Counts;     /* x 根节点边长、y 最细一层的节点边长、z LOD 比例、w 世界缩放 */
-	vec4 u_Extra;      /* y 最大级数、z 压实缓冲能放的 patch 数 */
+	vec4 u_Extra;      /* x / w 局部半宽半长、y 最大级数、z 压实缓冲能放的 patch 数 */
 };
 
 layout(std430, binding = 1) readonly buffer NodeTable
@@ -46,9 +46,15 @@ bool TerrainNodeInside(uint index, out vec3 world_center, out float world_size)
 {
 	const vec4 node = u_Nodes[index * 2u];
 	const vec4 heights = u_Nodes[index * 2u + 1u];
+	world_center = vec3(0.0);
+	world_size = node.z * u_Counts.w;
+
+	/* 根节点按长边取正方形：落在实际矩形外的节点不出 */
+	if (abs(node.x) - node.z * 0.5 >= u_Extra.x || abs(node.y) - node.z * 0.5 >= u_Extra.w)
+		return false;
+
 	/* node.xy 是局部的 (x, z)：世界位置要把 z 放回第三个分量 */
 	world_center = (u_Model * vec4(node.x, (heights.x + heights.y) * 0.5, node.y, 1.0)).xyz;
-	world_size = node.z * u_Counts.w;
 
 	const vec3 local_extent = vec3(node.z * 0.5, max((heights.y - heights.x) * 0.5, 0.01), node.z * 0.5);
 	const vec3 extent = abs(u_Model[0].xyz) * local_extent.x + abs(u_Model[1].xyz) * local_extent.y

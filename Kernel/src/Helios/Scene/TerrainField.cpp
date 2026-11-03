@@ -38,7 +38,7 @@ namespace Helios
 			glm::vec4 Planes[6]{};
 			glm::vec4 Eye{ 0.0f };     /* xyz 相机位置，w 节点总数 */
 			glm::vec4 Counts{ 0.0f };  /* x 根边长、y 最细一层边长、z LOD 比例、w 世界缩放 */
-			glm::vec4 Extra{ 0.0f };   /* y 最大级数、z patch 上限 */
+			glm::vec4 Extra{ 0.0f };   /* x / w 局部半宽半长、y 最大级数、z patch 上限 */
 		};
 
 		/* PCG 散列：值噪声的格点随机值靠它，相邻格点才不会连成一片 */
@@ -1143,7 +1143,8 @@ namespace Helios
 		const float world_scale = std::max(m_WorldScale.x, std::max(m_WorldScale.y, m_WorldScale.z));
 		params.Eye = glm::vec4(eye, static_cast<float>(m_NodeTable.size()));
 		params.Counts = glm::vec4(m_NodeTable[0].Rect.z, m_NodeTable.back().Rect.z, m_LodRatio, world_scale);
-		params.Extra = glm::vec4(0.0f, static_cast<float>(m_MaxNodeLevel), static_cast<float>(kMaxPatches), 0.0f);
+		params.Extra = glm::vec4(m_Extent.x, static_cast<float>(m_MaxNodeLevel), static_cast<float>(kMaxPatches),
+			m_Extent.y);
 
 		const bool dispatched = Renderer::DispatchTerrainSelect(m_NodeStorage, slot->Storage,
 			slot->Args, &params, static_cast<uint32_t>(sizeof(params)),
@@ -1206,8 +1207,13 @@ namespace Helios
 		if (out.size() >= kMaxPatches)
 			return;
 
-		/* 剔除盒按节点自己的高度范围：只按 xz 或整块起伏算，山顶会被切掉或剔不干净 */
+		/* 根节点按长边取正方形：落在实际矩形外的节点不出，否则会画出一片拉伸的边缘 */
 		const TerrainNode& node = m_NodeTable[NodeIndex(level, block)];
+		if (std::fabs(node.Rect.x) - node.Rect.z * 0.5f >= m_Extent.x
+			|| std::fabs(node.Rect.y) - node.Rect.z * 0.5f >= m_Extent.y)
+			return;
+
+		/* 剔除盒按节点自己的高度范围：只按 xz 或整块起伏算，山顶会被切掉或剔不干净 */
 		glm::vec3 world_center(0.0f);
 		glm::vec3 world_extent(0.0f);
 		GetNodeWorldBounds(node, world_center, world_extent);
