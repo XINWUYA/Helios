@@ -82,18 +82,24 @@ namespace Helios::TerrainDraw
 		}
 
 		/* 前向材质：从组件的材质克隆一份换 shader。两个 shader 的参数名一致，
-		 * 换完直接沿用；源材质参数版本变了才重建 */
+		 * 换完直接沿用；源材质参数版本变了才重建。源材质释放后地址可能被新材质复用，
+		 * 所以记一份弱引用核对身份，顺手清掉已经释放的 */
 		SharedPtr<Material> GetForwardMaterial(const SharedPtr<Material>& source)
 		{
 			struct Entry
 			{
+				std::weak_ptr<Material> Source;
 				SharedPtr<Material> Material;
 				uint32_t Revision{ 0 };
 			};
 			static std::unordered_map<const Material*, Entry> s_Cache;
 
+			for (auto it = s_Cache.begin(); it != s_Cache.end();)
+				it = it->second.Source.expired() ? s_Cache.erase(it) : std::next(it);
+
 			Entry& entry = s_Cache[source.get()];
-			if (entry.Material != nullptr && entry.Revision == source->GetRevision())
+			if (entry.Material != nullptr && entry.Revision == source->GetRevision()
+				&& entry.Source.lock() == source)
 				return entry.Material;
 
 			const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
@@ -103,6 +109,7 @@ namespace Helios::TerrainDraw
 
 			auto material = source->Clone();
 			material->SetShader(shader);
+			entry.Source = source;
 			entry.Material = material;
 			entry.Revision = source->GetRevision();
 			return material;
@@ -554,18 +561,12 @@ namespace Helios::TerrainDraw
 			if (source == nullptr)
 				continue;
 
+			/* 外观参数（含层贴图）先从源材质抄过来，读数才跟正常着色一致；
+			 * 地形自己的高度图与范围后写，共用材质里的旧值顶不掉它 */
 			DrawParams per_draw;
+			CopyMaterialParams(*source, *material->GetShader(), per_draw);
 			AddTerrainOverrides(*batch.Field, per_draw);
 			AddVirtualTextureParams(*batch.Field, per_draw);
-
-			/* 外观参数从源材质抄过来，读数才跟正常着色一致 */
-			for (const auto& [key, info] : source->GetAllParameters())
-			{
-				(void)key;
-				if (info.Type == ParamType::Texture)
-					continue;
-				per_draw.Overrides.push_back(info);
-			}
 
 			SubmitBatch(material, frame, batch, per_draw);
 		}

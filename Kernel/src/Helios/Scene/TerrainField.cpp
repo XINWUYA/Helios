@@ -4,9 +4,11 @@
 #include "TerrainSampling.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <unordered_map>
 #include <glm/gtc/type_ptr.hpp>
 
 #include "Components.h"
@@ -95,12 +97,15 @@ namespace Helios
 			return total > 0.0f ? sum / total : 0.0f;
 		}
 
-		/* 资产读取缓存：Rebuild 每帧都被调，按写入时间判断要不要重读。
+		/* 资产读取缓存：Rebuild 一帧会被调十来次，按写入时间判断要不要重读。
+		 * 文件状态半秒查一次；十秒没人要的条目清掉，免得大资产一直占着内存。
 		 * 文件不存在也记一行，免得每帧都去开一次必然失败的文件 */
 		struct AssetEntry
 		{
 			std::string Path;
 			std::filesystem::file_time_type WriteTime{};
+			std::chrono::steady_clock::time_point CheckedAt{};
+			std::chrono::steady_clock::time_point UsedAt{};
 			TerrainAsset::Data Data;
 			bool Loaded{ false };
 		};
@@ -108,47 +113,50 @@ namespace Helios
 		const TerrainAsset::Data* LoadAssetCached(const std::string& path,
 			std::filesystem::file_time_type& out_write_time)
 		{
-			out_write_time = std::filesystem::file_time_type{};
-
-			std::filesystem::path file_path;
-			if (!TryPathFromUtf8(path, file_path))
-				return nullptr;
-
-			std::error_code error;
-			const std::filesystem::file_time_type write_time =
-				std::filesystem::last_write_time(file_path, error);
-			const bool exists = !error;
-			if (exists)
-				out_write_time = write_time;
+			using Clock = std::chrono::steady_clock;
+			constexpr auto kCheckInterval = std::chrono::milliseconds(500);
+			constexpr auto kKeepAlive = std::chrono::seconds(10);
 
 			static std::vector<AssetEntry> s_Cache;
-			AssetEntry* entry = nullptr;
-			for (AssetEntry& candidate : s_Cache)
+			const Clock::time_point now = Clock::now();
+			std::erase_if(s_Cache, [&](const AssetEntry& entry)
 			{
-				if (candidate.Path == path)
+				return entry.Path != path && now - entry.UsedAt > kKeepAlive;
+			});
+
+			auto found = std::find_if(s_Cache.begin(), s_Cache.end(),
+				[&path](const AssetEntry& entry) { return entry.Path == path; });
+			if (found == s_Cache.end())
+			{
+				s_Cache.push_back(AssetEntry{});
+				found = std::prev(s_Cache.end());
+				found->Path = path;
+				found->CheckedAt = now - kCheckInterval;
+			}
+			AssetEntry& entry = *found;
+			entry.UsedAt = now;
+
+			if (now - entry.CheckedAt >= kCheckInterval)
+			{
+				entry.CheckedAt = now;
+
+				std::filesystem::path file_path;
+				std::error_code error;
+				std::filesystem::file_time_type write_time{};
+				const bool exists = TryPathFromUtf8(path, file_path)
+					&& (write_time = std::filesystem::last_write_time(file_path, error), !error);
+				if (!exists)
+					write_time = std::filesystem::file_time_type{};
+
+				if (write_time != entry.WriteTime || !entry.Loaded)
 				{
-					entry = &candidate;
-					break;
+					entry.WriteTime = write_time;
+					entry.Loaded = exists && TerrainAsset::Read(path, entry.Data);
 				}
 			}
 
-			if (entry != nullptr && entry->WriteTime == out_write_time && entry->Loaded == exists)
-				return entry->Loaded ? &entry->Data : nullptr;
-
-			if (entry == nullptr)
-			{
-				s_Cache.push_back(AssetEntry{});
-				entry = &s_Cache.back();
-			}
-
-			entry->Path = path;
-			entry->WriteTime = out_write_time;
-			entry->Loaded = false;
-
-			if (exists && TerrainAsset::Read(path, entry->Data))
-				entry->Loaded = true;
-
-			return entry->Loaded ? &entry->Data : nullptr;
+			out_write_time = entry.WriteTime;
+			return entry.Loaded ? &entry.Data : nullptr;
 		}
 	}
 
@@ -1287,124 +1295,149 @@ namespace Helios
 		out.push_back(patch);
 	}
 
-	/* 四叉树没有 2:1 平衡：相邻叶子可能差两档以上，morph 只能对上差一档的情况。
-	 * 这里做一遍平衡——邻居比自己细两档以上就把它拆一层，循环到稳定为止。 */
-	void TerrainField::BalancePatches(std::vector<TerrainPatch>& patches)
+	namespace
 	{
-		const auto contains = [](const TerrainPatch& patch, const glm::vec2& point)
+		/* 叶子查找表：patch 都是四叉树节点，按（级数, 块号）建索引，
+		 * 「某点被哪块叶子盖着」从最细一层往上按块号查，不用两两比对 */
+		struct PatchLookup
 		{
-			const glm::vec2 min(patch.Info.x, patch.Info.z);
-			const glm::vec2 max = min + patch.Info.w;
-			return point.x >= min.x && point.x < max.x && point.y >= min.y && point.y < max.y;
-		};
+			float Root{ 0.0f };
+			int MaxLevel{ 0 };
+			std::unordered_map<uint64_t, size_t> Index;
 
-		const auto split = [](const TerrainPatch& patch, std::vector<TerrainPatch>& out)
-		{
-			const float child = patch.Info.w * 0.5f;
-			const glm::vec2 min(patch.Info.x, patch.Info.z);
-			for (int quadrant = 0; quadrant < 4; ++quadrant)
+			static uint64_t Key(int level, const glm::ivec2& block)
 			{
-				TerrainPatch child_patch;
-				const float x0 = min.x + ((quadrant & 1) ? child : 0.0f);
-				const float z0 = min.y + ((quadrant & 2) ? child : 0.0f);
-				child_patch.Info = glm::vec4(x0, 0.0f, z0, child);
-				child_patch.Lod = glm::vec4(patch.Lod.x + 1.0f, child / static_cast<float>(kPatchQuads), 0.0f, 0.0f);
-				out.push_back(child_patch);
+				return (static_cast<uint64_t>(level) << 48) | (static_cast<uint64_t>(static_cast<uint32_t>(block.x)) << 24)
+					| static_cast<uint64_t>(static_cast<uint32_t>(block.y));
 			}
-		};
 
-		constexpr float kProbe = 0.01f;
-		constexpr int kMaxIterations = 8;
-		for (int iteration = 0; iteration < kMaxIterations; ++iteration)
-		{
-			int split_index = -1;
-			for (size_t index = 0; index < patches.size() && split_index < 0; ++index)
+			void Build(const std::vector<TerrainPatch>& patches)
 			{
-				const TerrainPatch& patch = patches[index];
-				const glm::vec2 min(patch.Info.x, patch.Info.z);
-				const glm::vec2 max = min + patch.Info.w;
-				const float mid_x = (min.x + max.x) * 0.5f;
-				const float mid_z = (min.y + max.y) * 0.5f;
-				const glm::vec2 probes[4] = {
-					{ min.x - kProbe, mid_z }, { max.x + kProbe, mid_z },
-					{ mid_x, min.y - kProbe }, { mid_x, max.y + kProbe },
-				};
+				Index.clear();
+				MaxLevel = 0;
+				if (patches.empty())
+					return;
 
-				for (const glm::vec2& probe : probes)
+				const int first_level = static_cast<int>(patches[0].Lod.x + 0.5f);
+				Root = patches[0].Info.w * static_cast<float>(1 << first_level);
+				for (size_t index = 0; index < patches.size(); ++index)
 				{
-					for (size_t other = 0; other < patches.size(); ++other)
-					{
-						if (other == index)
-							continue;
-						/* 邻居比自己细两档以上：拆邻居，而不是拆自己（保持细节分布） */
-						if (patches[other].Info.w > patch.Info.w * 2.01f && contains(patches[other], probe))
-						{
-							split_index = static_cast<int>(other);
-							break;
-						}
-					}
-					if (split_index >= 0)
-						break;
+					const TerrainPatch& patch = patches[index];
+					const int level = static_cast<int>(patch.Lod.x + 0.5f);
+					const glm::vec2 corner(patch.Info.x, patch.Info.z);
+					const glm::ivec2 block(glm::round((corner + Root * 0.5f) / patch.Info.w));
+					Index[Key(level, block)] = index;
+					MaxLevel = std::max(MaxLevel, level);
 				}
 			}
 
-			if (split_index < 0)
-				break;
+			/* 盖住这个点的叶子下标，点在地形外或那一片没画时返回 -1 */
+			[[nodiscard]] int Find(const glm::vec2& point) const
+			{
+				const glm::vec2 offset = point + Root * 0.5f;
+				if (offset.x < 0.0f || offset.y < 0.0f || offset.x >= Root || offset.y >= Root)
+					return -1;
 
-			const TerrainPatch victim = patches[static_cast<size_t>(split_index)];
-			patches.erase(patches.begin() + split_index);
-			split(victim, patches);
+				for (int level = MaxLevel; level >= 0; --level)
+				{
+					const glm::ivec2 block(glm::floor(offset / (Root / static_cast<float>(1 << level))));
+					const auto found = Index.find(Key(level, block));
+					if (found != Index.end())
+						return static_cast<int>(found->second);
+				}
+				return -1;
+			}
+		};
+
+		/* 每条边往外探一格的探针，位序与 TerrainCommon.glsl 一致：1 = -X，2 = +X，4 = -Z，8 = +Z */
+		void EdgeProbes(const TerrainPatch& patch, glm::vec2 (&out)[4])
+		{
+			constexpr float kProbe = 0.01f;
+			const glm::vec2 min(patch.Info.x, patch.Info.z);
+			const glm::vec2 max = min + patch.Info.w;
+			const glm::vec2 mid = (min + max) * 0.5f;
+			out[0] = { min.x - kProbe, mid.y };
+			out[1] = { max.x + kProbe, mid.y };
+			out[2] = { mid.x, min.y - kProbe };
+			out[3] = { mid.x, max.y + kProbe };
 		}
 	}
 
-	/* 逐条边标记：哪一侧挨着**更粗**的邻居，那一条边就 morch 到父级表面。
-	 * 同层邻居两边都不 morph（细表面本来就一模一样），只有细的一侧收敛 —— 两边都收
-	 * 会收敛到不同精度的表面，交界反而裂成一道墙。邻居少时两两比对，太多时放弃（同层一致）。 */
-	void TerrainField::MarkMorphPatches(std::vector<TerrainPatch>& patches)
+	/* 四叉树没有 2:1 平衡：相邻叶子可能差两档以上，morph 只能对上差一档的情况。
+	 * 这里做一遍平衡——邻居比自己粗两档以上就把邻居拆一层，循环到稳定为止 */
+	void TerrainField::BalancePatches(std::vector<TerrainPatch>& patches)
 	{
-		constexpr size_t kMaxPatchForPairing = 1024;
-		if (patches.size() > kMaxPatchForPairing)
-			return;
-
-		const auto contains = [](const TerrainPatch& patch, const glm::vec2& point)
+		constexpr int kMaxIterations = 8;
+		PatchLookup lookup;
+		for (int iteration = 0; iteration < kMaxIterations; ++iteration)
 		{
-			const glm::vec2 min(patch.Info.x, patch.Info.z);
-			const glm::vec2 max = min + patch.Info.w;
-			return point.x >= min.x && point.x < max.x && point.y >= min.y && point.y < max.y;
-		};
-
-		constexpr float kProbe = 0.01f;
-		for (TerrainPatch& patch : patches)
-		{
-			patch.Lod.z = 0.0f;
-			if (patch.Lod.x < 0.5f)
-				continue;	/* 根节点没有父级 */
-
-			const glm::vec2 min(patch.Info.x, patch.Info.z);
-			const glm::vec2 max = min + patch.Info.w;
-			const float mid_x = (min.x + max.x) * 0.5f;
-			const float mid_z = (min.y + max.y) * 0.5f;
-			/* 位序与 TerrainCommon.glsl 一致：1 = -X，2 = +X，4 = -Z，8 = +Z */
-			const glm::vec2 probes[4] = {
-				{ min.x - kProbe, mid_z }, { max.x + kProbe, mid_z },
-				{ mid_x, min.y - kProbe }, { mid_x, max.y + kProbe },
-			};
-
-			int mask = 0;
-			for (int side = 0; side < 4; ++side)
+			lookup.Build(patches);
+			std::vector<uint8_t> victims(patches.size(), 0);
+			bool any = false;
+			for (const TerrainPatch& patch : patches)
 			{
-				for (const TerrainPatch& other : patches)
+				glm::vec2 probes[4];
+				EdgeProbes(patch, probes);
+				for (const glm::vec2& probe : probes)
 				{
-					if (&other == &patch || other.Lod.x >= patch.Lod.x)
-						continue;
-					if (contains(other, probes[side]))
+					const int other = lookup.Find(probe);
+					if (other >= 0 && patches[static_cast<size_t>(other)].Info.w > patch.Info.w * 2.01f)
 					{
-						mask |= 1 << side;
-						break;
+						victims[static_cast<size_t>(other)] = 1;
+						any = true;
 					}
 				}
 			}
+			if (!any)
+				break;
 
+			/* 拆邻居而不是拆自己：细节分布保持不变 */
+			std::vector<TerrainPatch> next;
+			next.reserve(patches.size() + 16);
+			for (size_t index = 0; index < patches.size(); ++index)
+			{
+				const TerrainPatch& patch = patches[index];
+				if (victims[index] == 0)
+				{
+					next.push_back(patch);
+					continue;
+				}
+
+				const float child = patch.Info.w * 0.5f;
+				for (int quadrant = 0; quadrant < 4; ++quadrant)
+				{
+					TerrainPatch child_patch;
+					child_patch.Info = glm::vec4(patch.Info.x + ((quadrant & 1) ? child : 0.0f), 0.0f,
+						patch.Info.z + ((quadrant & 2) ? child : 0.0f), child);
+					child_patch.Lod = glm::vec4(patch.Lod.x + 1.0f, child / static_cast<float>(kPatchQuads), 0.0f, 0.0f);
+					next.push_back(child_patch);
+				}
+			}
+			patches = std::move(next);
+		}
+	}
+
+	/* 逐条边标记：哪一侧挨着更粗的邻居，那一条边就 morph 到父级表面。
+	 * 同层邻居两边都不 morph（细表面本来就一模一样），只有细的一侧收敛 —— 两边都收
+	 * 会收敛到不同精度的表面，交界反而裂成一道墙 */
+	void TerrainField::MarkMorphPatches(std::vector<TerrainPatch>& patches)
+	{
+		PatchLookup lookup;
+		lookup.Build(patches);
+		for (TerrainPatch& patch : patches)
+		{
+			int mask = 0;
+			if (patch.Lod.x > 0.5f)
+			{
+				glm::vec2 probes[4];
+				EdgeProbes(patch, probes);
+				for (int side = 0; side < 4; ++side)
+				{
+					const int other = lookup.Find(probes[side]);
+					if (other >= 0 && patches[static_cast<size_t>(other)].Lod.x < patch.Lod.x)
+						mask |= 1 << side;
+				}
+			}
 			patch.Lod.z = static_cast<float>(mask);
 		}
 	}

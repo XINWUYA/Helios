@@ -149,22 +149,27 @@ namespace Helios
 				return true;
 			case MaterialSlotRow::Action::Clear:
 			{
-				/* 优先回资产自带的材质，没有再落到内建默认 */
-				SharedPtr<Material> fallback = TerrainComponent::GetDefaultMaterial();
+				/* 优先回资产自带的材质（按引用挂，地形数据走逐绘制覆盖）；
+				 * 没有再落到内建默认的副本 —— 高度图这些参数按地形写，共用会互相覆盖 */
+				slot.IsInstance = false;
 				if (!component.m_AssetPath.empty())
 				{
 					TerrainAsset::Data data;
 					if (TerrainAsset::Read(component.m_AssetPath, data) && !data.MaterialPath.empty())
 					{
-						if (const auto asset_material = AssetManager::Instance().GetOrLoad<Material>(
-							ABSOLUTE_PATH(data.MaterialPath)))
-							fallback = asset_material;
+						const std::string material_path = ABSOLUTE_PATH(data.MaterialPath);
+						if (auto asset_material = AssetManager::Instance().GetOrLoad<Material>(material_path))
+						{
+							slot.pMaterial = std::move(asset_material);
+							slot.SourceAssetPath = material_path;
+							return true;
+						}
 					}
 				}
 
-				slot.pMaterial = std::move(fallback);
+				const SharedPtr<Material> fallback = TerrainComponent::GetDefaultMaterial();
+				slot.pMaterial = fallback != nullptr ? fallback->Clone() : nullptr;
 				slot.SourceAssetPath.clear();
-				slot.IsInstance = false;
 				return true;
 			}
 			case MaterialSlotRow::Action::Reset:
