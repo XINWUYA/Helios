@@ -56,8 +56,10 @@ namespace Helios::TerrainDraw
 					return cache;
 			}
 
-			/* 没见过这个视图：顶掉最旧的一行 */
-			FrameCache& slot = (s_Caches[0].Frame <= s_Caches[1].Frame) ? s_Caches[0] : s_Caches[1];
+			/* 没见过这个视图：先用空行，再顶掉帧号小的那一行 */
+			FrameCache& slot = (s_Caches[0].View == nullptr
+				|| (s_Caches[1].View != nullptr && s_Caches[0].Frame <= s_Caches[1].Frame))
+				? s_Caches[0] : s_Caches[1];
 			slot.View = view;
 			slot.Frame = std::numeric_limits<uint32_t>::max();
 			return slot;

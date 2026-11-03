@@ -1066,11 +1066,16 @@ namespace Helios
 				return &slot;
 		}
 
-		/* 没见过这个视图：顶掉最久没用过的那一份（Frame 越大越旧，从没用过的是最大值） */
+		/* 没见过这个视图：先用空槽，再顶掉帧号最小的那一份（没选成功的帧号是最大值，也算空） */
+		const auto age = [](const SelectionSlot& slot)
+		{
+			const bool unused = slot.View == nullptr || slot.Frame == std::numeric_limits<uint32_t>::max();
+			return unused ? 0ull : static_cast<uint64_t>(slot.Frame) + 1ull;
+		};
 		SelectionSlot* oldest = &m_Selections[0];
 		for (SelectionSlot& slot : m_Selections)
 		{
-			if (slot.Frame > oldest->Frame)
+			if (age(slot) < age(*oldest))
 				oldest = &slot;
 		}
 		oldest->View = view;
@@ -1122,15 +1127,21 @@ namespace Helios
 			slot->ViewBuffer = slot->Storage != nullptr
 				? DeviceVertexBuffer::CreateShared("TerrainSelectedView", slot->Storage, patch_bytes)
 				: nullptr;
-			slot->Args = DeviceStorageBuffer::Create("TerrainSelectArgs", 5u * sizeof(uint32_t));
-			if (slot->Storage == nullptr || slot->ViewBuffer == nullptr || slot->Args == nullptr)
+			if (slot->Storage == nullptr || slot->ViewBuffer == nullptr)
 			{
 				slot->Storage = nullptr;
 				slot->ViewBuffer = nullptr;
-				slot->Args = nullptr;
 				return false;
 			}
 		}
+
+		SharedPtr<DeviceStorageBuffer>& args_buffer = m_ArgsRing[m_ArgsCursor];
+		if (args_buffer == nullptr)
+			args_buffer = DeviceStorageBuffer::Create("TerrainSelectArgs", 5u * sizeof(uint32_t));
+		if (args_buffer == nullptr)
+			return false;
+		m_ArgsCursor = (m_ArgsCursor + 1) % kArgsRing;
+		slot->Args = args_buffer;
 
 		const uint32_t args[5] = { kPatchIndexCount, 0u, 0u, 0u, 0u };
 		slot->Args->SetData(args, sizeof(args));

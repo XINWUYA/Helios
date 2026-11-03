@@ -247,6 +247,10 @@ namespace Helios
 		/* 一个场景一帧里可能同时有游戏相机、编辑器相机与工具相机，留够 4 份 */
 		static constexpr uint32_t kSelectionSlots = 4;
 		SelectionSlot m_Selections[kSelectionSlots];
+		/* 间接参数每次派发换一块：CPU 清零时 GPU 可能还在读前几次的（3 帧在途 × 4 视图） */
+		static constexpr uint32_t kArgsRing = 16;
+		SharedPtr<class DeviceStorageBuffer> m_ArgsRing[kArgsRing];
+		uint32_t m_ArgsCursor{ 0 };
 		[[nodiscard]] SelectionSlot* FindSelection(const RenderView* view);
 		[[nodiscard]] const SelectionSlot* FindSelection(const RenderView* view) const;
 		/* 节点边长（米）与相机距离的比值，小于它才继续细分。8 表示最近处一个节点约 8 个节点宽 */
