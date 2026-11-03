@@ -250,6 +250,27 @@ namespace Helios
 						continue;
 					}
 
+					/* 批表：连续块按实例预算合成一批，一笔画一批。
+					 * 批比块大，剔除会多放行几块，多出来的株由着色器的距离抽稀丢掉，画面不变 */
+					const auto& batches = grass.m_Field->GetBatches();
+					if (GrassField::IsGlobalBatchingEnabled() && !batches.empty())
+					{
+						for (const GrassField::Batch& batch : batches)
+						{
+							if (cull && frustum.IsOutside(batch.Center, batch.Extent))
+								continue;
+
+							const float batch_radius = glm::length(batch.Extent);
+							const float batch_distance = glm::distance(view_position, batch.Center) - batch_radius;
+							if (batch_distance >= grass.m_EndCullDistance)
+								continue;
+
+							Renderer::SubmitInstanced(material, blade, instance_buffer, batch.First, batch.Count,
+								&per_draw, 0, &Renderer::GetGrassInstanceLayout());
+						}
+						continue;
+					}
+
 					for (const GrassField::Chunk& chunk : chunks)
 					{
 						/* 按观察点裁剪掉的块（Count = 0）不生成实例，也别画 */

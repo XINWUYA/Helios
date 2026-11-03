@@ -42,6 +42,18 @@ namespace Helios
 			uint32_t Count{ 0 };
 		};
 
+		/* 一批：把连续的若干个块合成一次提交。
+		 * 块用来剔除，批用来画 —— 按实例预算切，块多批少，draw call 就下来了。
+		 * 批内块在实例缓冲里是连续的，所以一批就是一段区间 */
+		struct Batch
+		{
+			glm::vec3 Center{ 0.0f };
+			glm::vec3 Extent{ 0.0f };
+			uint32_t First{ 0 };
+			uint32_t Count{ 0 };
+			uint32_t ChunkCount{ 0 };   /* 这批合了几块 */
+		};
+
 		/* GPU 放置的全局开关：关掉就退回 CPU 逐株生成 */
 		static void SetGlobalGpuPlacementEnabled(bool enabled);
 		[[nodiscard]] static bool IsGlobalGpuPlacementEnabled();
@@ -55,6 +67,10 @@ namespace Helios
 		 * 需要计算着色器与可共享的存储缓冲，缺一样就自动退回逐块 */
 		static void SetGlobalIndirectDrawEnabled(bool enabled);
 		[[nodiscard]] static bool IsGlobalIndirectDrawEnabled();
+
+		/* 批表提交的全局开关：开 = 按批提交，关 = 逐块提交（对照组） */
+		static void SetGlobalBatchingEnabled(bool enabled);
+		[[nodiscard]] static bool IsGlobalBatchingEnabled();
 
 		/* 本片草地这次能不能走间接路径：资源齐了、并且这个视图已经剔除过。
 		 * 开关关掉时 PrepareIndirect 不会把标记置起来，所以这里不用再判开关；
@@ -96,6 +112,8 @@ namespace Helios
 		[[nodiscard]] const SharedPtr<DeviceVertexBuffer>& GetPadBuffer() const { return m_PadBuffer; }
 
 		[[nodiscard]] const std::vector<Chunk>& GetChunks() const { return m_Chunks; }
+		/* 批表：块按实例预算压实后的提交单位，间接路径之外都按它画 */
+		[[nodiscard]] const std::vector<Batch>& GetBatches() const { return m_Batches; }
 		[[nodiscard]] uint32_t GetInstanceCount() const { return m_InstanceCount; }
 		/* 最近一次生成时叶根的世界高度范围：贴地检查用 */
 		[[nodiscard]] float GetInstanceMinY() const { return m_InstanceMinY; }
@@ -163,6 +181,8 @@ namespace Helios
 		};
 
 		[[nodiscard]] BuildParams CaptureBuildParams() const;
+		/* 块表 → 批表：按实例预算合并连续块，块数远多于批数 */
+		void BuildBatches();
 		/* should_cancel 非空时每 64 块查一次：后台任务被取消后能立刻退出，不白占 CPU */
 		static std::vector<GrassInstanceData> GenerateInstances(const BuildParams& params,
 			const std::function<bool()>& should_cancel = {});
@@ -185,6 +205,7 @@ namespace Helios
 		std::vector<uint8_t> m_Trample;
 
 		std::vector<Chunk> m_Chunks;
+		std::vector<Batch> m_Batches;
 		/* 压实块号 → 网格块号：裁剪后块号不连续，GPU 放置靠它还原块坐标 */
 		std::vector<uint32_t> m_PackedChunkIndices;
 		SharedPtr<DeviceStorageBuffer> m_ChunkIndexBuffer;

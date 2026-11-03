@@ -21,8 +21,13 @@ namespace Helios
 		 * 一个 1.8 米的影响半径只盖住四五个格子，压下去看不出形状 */
 		constexpr uint32_t kTrampleSize = 256;
 
+		/* 一批的实例预算：8 千株 × 24 索引不到 20 万，一笔不至于把顶点吞吐压满。
+		 * 取小了批数接近块数，dc 降不下来 */
+		constexpr uint32_t kBatchInstanceBudget = 8192;
+
 		bool g_GpuPlacementEnabled = false;
 		bool g_IndirectDrawEnabled = false;
+		bool g_BatchingEnabled = true;
 		/* 画质档的全局密度系数：0 是全关，1 是各片草地自己的设置 */
 		float g_DensityScale = 1.0f;
 
@@ -76,6 +81,16 @@ namespace Helios
 	bool GrassField::IsGlobalIndirectDrawEnabled()
 	{
 		return g_IndirectDrawEnabled;
+	}
+
+	void GrassField::SetGlobalBatchingEnabled(bool enabled)
+	{
+		g_BatchingEnabled = enabled;
+	}
+
+	bool GrassField::IsGlobalBatchingEnabled()
+	{
+		return g_BatchingEnabled;
 	}
 
 	void GrassField::Rebuild(const GrassComponent& component, const glm::mat4& world,
@@ -153,6 +168,7 @@ namespace Helios
 		m_FocusMax = focus_max;
 
 		m_Chunks.clear();
+		m_Batches.clear();
 		m_PackedChunkIndices.clear();
 		m_PackedChunkBounds.clear();
 		m_InstanceCount = 0;
@@ -207,6 +223,7 @@ namespace Helios
 			m_TrampleTexture = nullptr;
 			m_Trample.clear();
 			m_CapacityBytes = 0;
+			m_Batches.clear();
 			return;
 		}
 
@@ -327,8 +344,11 @@ namespace Helios
 			m_InstanceStorage = nullptr;
 			m_GpuVertexView = nullptr;
 			m_PadBuffer = nullptr;
+			m_Batches.clear();
 			return;
 		}
+
+		BuildBatches();
 
 		/* 块映射表：GPU 放置靠它把压实块号还原成网格坐标；
 		 * 块包围球表给 GPU 剔除用，中心已经带了地形高度。
@@ -465,6 +485,57 @@ namespace Helios
 		}
 
 		UploadTrample();
+	}
+
+	void GrassField::BuildBatches()
+	{
+		m_Batches.clear();
+		if (m_Chunks.empty() || m_ChunksX == 0)
+			return;
+
+		const auto close = [this](Batch& batch)
+		{
+			if (batch.ChunkCount > 0)
+				m_Batches.push_back(batch);
+			batch = Batch{};
+		};
+
+		Batch batch;
+		uint32_t batch_row = 0;
+		for (size_t index = 0; index < m_Chunks.size(); ++index)
+		{
+			const Chunk& chunk = m_Chunks[index];
+			/* 观察范围外裁掉的块不占实例，也不进批 */
+			if (chunk.Count == 0)
+				continue;
+
+			/* 跨行就断开：同一行的块挨着，批的包围盒才紧，剔除不至于整片放行 */
+			const uint32_t row = static_cast<uint32_t>(index) / m_ChunksX;
+			if (batch.ChunkCount > 0
+				&& (row != batch_row || batch.Count + chunk.Count > kBatchInstanceBudget))
+			{
+				close(batch);
+			}
+
+			if (batch.ChunkCount == 0)
+			{
+				batch.First = chunk.First;
+				batch.Center = chunk.Center;
+				batch.Extent = chunk.Extent;
+				batch_row = row;
+			}
+			else
+			{
+				const glm::vec3 lo = glm::min(batch.Center - batch.Extent, chunk.Center - chunk.Extent);
+				const glm::vec3 hi = glm::max(batch.Center + batch.Extent, chunk.Center + chunk.Extent);
+				batch.Center = (lo + hi) * 0.5f;
+				batch.Extent = (hi - lo) * 0.5f;
+			}
+
+			batch.Count += chunk.Count;
+			batch.ChunkCount += 1;
+		}
+		close(batch);
 	}
 
 	GrassField::BuildParams GrassField::CaptureBuildParams() const
