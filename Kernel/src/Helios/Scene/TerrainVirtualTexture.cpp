@@ -113,14 +113,14 @@ namespace Helios
 		return m_BakeFrameBuffer;
 	}
 
-	void TerrainVirtualTexture::Prepare(const TerrainField& field, const TerrainPatch* patches,
-		size_t patch_count, const glm::vec3& eye)
+	bool TerrainVirtualTexture::BeginFrame(const TerrainField& field, glm::vec2& out_min_corner,
+		uint32_t& out_grid_w, uint32_t& out_grid_h)
 	{
 		m_Pending.clear();
-		if (!s_Enabled || field.IsEmpty() || patches == nullptr || patch_count == 0)
-			return;
+		if (!s_Enabled || field.IsEmpty())
+			return false;
 		if (!EnsureResources())
-			return;
+			return false;
 
 		/* 页按世界空间切：旋转后取整个地形的轴对齐包围盒 */
 		const glm::vec2 world_half = field.GetWorldHalfExtent();
@@ -148,47 +148,17 @@ namespace Helios
 		}
 
 		if (m_PageTable == nullptr)
-			return;
+			return false;
 
-		const uint32_t grid_w = static_cast<uint32_t>(grid_size.x);
-		const uint32_t grid_h = static_cast<uint32_t>(grid_size.y);
+		out_min_corner = glm::vec2(field.GetOrigin().x, field.GetOrigin().z) - world_half;
+		out_grid_w = static_cast<uint32_t>(grid_size.x);
+		out_grid_h = static_cast<uint32_t>(grid_size.y);
+		return true;
+	}
 
-		/* 本帧 patch 覆盖到的页：只需要标记，不重复入队 */
-		static std::vector<uint8_t> needed;
-		needed.assign(m_Table.size(), 0);
-
-		const glm::vec2 min_corner = glm::vec2(field.GetOrigin().x, field.GetOrigin().z) - world_half;
-		for (size_t patch_index = 0; patch_index < patch_count; ++patch_index)
-		{
-			const TerrainPatch& patch = patches[patch_index];
-
-			/* patch 是局部矩形：四角变换到世界后取包围盒，页按世界切 */
-			const glm::vec2 local_min(patch.Info.x, patch.Info.z);
-			const glm::vec2 local_max = local_min + patch.Info.w;
-			glm::vec2 world_min(std::numeric_limits<float>::max());
-			glm::vec2 world_max(-std::numeric_limits<float>::max());
-			for (int corner = 0; corner < 4; ++corner)
-			{
-				const glm::vec2 local((corner & 1) ? local_max.x : local_min.x,
-					(corner & 2) ? local_max.y : local_min.y);
-				const glm::vec3 world = field.ToWorld(local, 0.0f);
-				world_min = glm::min(world_min, glm::vec2(world.x, world.z));
-				world_max = glm::max(world_max, glm::vec2(world.x, world.z));
-			}
-
-			const glm::vec2 page_min = (world_min - min_corner) / kPageWorldSize;
-			const glm::vec2 page_max = (world_max - min_corner) / kPageWorldSize;
-			const int x0 = std::clamp(static_cast<int>(std::floor(page_min.x)), 0, static_cast<int>(grid_w) - 1);
-			const int x1 = std::clamp(static_cast<int>(std::floor(page_max.x - 1e-4f)), 0, static_cast<int>(grid_w) - 1);
-			const int z0 = std::clamp(static_cast<int>(std::floor(page_min.y)), 0, static_cast<int>(grid_h) - 1);
-			const int z1 = std::clamp(static_cast<int>(std::floor(page_max.y - 1e-4f)), 0, static_cast<int>(grid_h) - 1);
-			for (int z = z0; z <= z1; ++z)
-			{
-				for (int x = x0; x <= x1; ++x)
-					needed[static_cast<size_t>(z) * grid_w + static_cast<size_t>(x)] = 1;
-			}
-		}
-
+	void TerrainVirtualTexture::QueueMissing(const std::vector<uint8_t>& needed,
+		const glm::vec2& min_corner, uint32_t grid_w, uint32_t grid_h, const glm::vec3& eye)
+	{
 		struct Candidate
 		{
 			uint32_t X{ 0 };
@@ -230,6 +200,96 @@ namespace Helios
 
 			m_Pending.push_back(glm::uvec3(candidates[index].X, candidates[index].Z, layer));
 		}
+	}
+
+	void TerrainVirtualTexture::Prepare(const TerrainField& field, const TerrainPatch* patches,
+		size_t patch_count, const glm::vec3& eye)
+	{
+		glm::vec2 min_corner(0.0f);
+		uint32_t grid_w = 0;
+		uint32_t grid_h = 0;
+		if (!BeginFrame(field, min_corner, grid_w, grid_h))
+			return;
+		if (patches == nullptr || patch_count == 0)
+			return;
+
+		/* 本帧 patch 覆盖到的页：只需要标记，不重复入队 */
+		std::vector<uint8_t> needed(m_Table.size(), 0);
+		for (size_t patch_index = 0; patch_index < patch_count; ++patch_index)
+		{
+			const TerrainPatch& patch = patches[patch_index];
+
+			/* patch 是局部矩形：四角变换到世界后取包围盒，页按世界切 */
+			const glm::vec2 local_min(patch.Info.x, patch.Info.z);
+			const glm::vec2 local_max = local_min + patch.Info.w;
+			glm::vec2 world_min(std::numeric_limits<float>::max());
+			glm::vec2 world_max(-std::numeric_limits<float>::max());
+			for (int corner = 0; corner < 4; ++corner)
+			{
+				const glm::vec2 local((corner & 1) ? local_max.x : local_min.x,
+					(corner & 2) ? local_max.y : local_min.y);
+				const glm::vec3 world = field.ToWorld(local, 0.0f);
+				world_min = glm::min(world_min, glm::vec2(world.x, world.z));
+				world_max = glm::max(world_max, glm::vec2(world.x, world.z));
+			}
+
+			const glm::vec2 page_min = (world_min - min_corner) / kPageWorldSize;
+			const glm::vec2 page_max = (world_max - min_corner) / kPageWorldSize;
+			const int x0 = std::clamp(static_cast<int>(std::floor(page_min.x)), 0, static_cast<int>(grid_w) - 1);
+			const int x1 = std::clamp(static_cast<int>(std::floor(page_max.x - 1e-4f)), 0, static_cast<int>(grid_w) - 1);
+			const int z0 = std::clamp(static_cast<int>(std::floor(page_min.y)), 0, static_cast<int>(grid_h) - 1);
+			const int z1 = std::clamp(static_cast<int>(std::floor(page_max.y - 1e-4f)), 0, static_cast<int>(grid_h) - 1);
+			for (int z = z0; z <= z1; ++z)
+			{
+				for (int x = x0; x <= x1; ++x)
+					needed[static_cast<size_t>(z) * grid_w + static_cast<size_t>(x)] = 1;
+			}
+		}
+
+		QueueMissing(needed, min_corner, grid_w, grid_h, eye);
+	}
+
+	void TerrainVirtualTexture::PrepareFrustum(const TerrainField& field, const glm::vec4 (&planes)[6],
+		const glm::vec3& eye)
+	{
+		glm::vec2 min_corner(0.0f);
+		uint32_t grid_w = 0;
+		uint32_t grid_h = 0;
+		if (!BeginFrame(field, min_corner, grid_w, grid_h))
+			return;
+
+		/* patch 在 GPU 上选的时候拿不到覆盖列表：页盒与视锥求交，
+		 * 选出来的就是屏幕上可能用得到的那一片 */
+		const float height_min = field.GetMinWorldHeight();
+		const float height_max = field.GetMaxWorldHeight();
+		const glm::vec3 box_extent(kPageWorldSize * 0.5f,
+			std::max((height_max - height_min) * 0.5f, 0.5f), kPageWorldSize * 0.5f);
+
+		std::vector<uint8_t> needed(m_Table.size(), 0);
+		for (uint32_t z = 0; z < grid_h; ++z)
+		{
+			for (uint32_t x = 0; x < grid_w; ++x)
+			{
+				const glm::vec2 center = min_corner + (glm::vec2(x, z) + 0.5f) * kPageWorldSize;
+				const glm::vec3 box_center(center.x, (height_min + height_max) * 0.5f, center.y);
+
+				bool outside = false;
+				for (const glm::vec4& plane : planes)
+				{
+					const glm::vec3 normal(plane);
+					if (glm::dot(normal, box_center) + plane.w + glm::dot(glm::abs(normal), box_extent) < 0.0f)
+					{
+						outside = true;
+						break;
+					}
+				}
+
+				if (!outside)
+					needed[static_cast<size_t>(z) * grid_w + x] = 1;
+			}
+		}
+
+		QueueMissing(needed, min_corner, grid_w, grid_h, eye);
 	}
 
 	uint32_t TerrainVirtualTexture::GetResidentPages() const

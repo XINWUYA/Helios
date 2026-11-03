@@ -14,6 +14,8 @@
 #include "Panels/PanelWindow.h"
 #include "Command/AssetFileOps.h"
 #include "Command/TransformCommand.h"
+#include "Command/TerrainSculptCommand.h"
+#include "Panels/SceneEditor/TerrainSculpt.h"
 #include "Helios/Application/Application.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
@@ -21,6 +23,7 @@
 #include "Assets/ModelImporter.h"
 #include "Common/FileDialog.h"
 #include "Helios/Common/PathUtils.h"
+#include "Helios/Scene/TerrainField.h"
 #include "Common/ProjectConfig.h"
 #include "Helios/Script/ScriptRuntime.h"
 
@@ -383,6 +386,10 @@ namespace Helios
 
 		if (event->GetMouseButton() == Mouse::ButtonLeft)
 		{
+			/* 笔刷模式下左键是用来画的，不改选中 */
+			if (TerrainSculpt::GetSettings().Brush != TerrainSculpt::Mode::None && m_IsViewportHovered)
+				return false;
+
 			/* 这一击真落在场景视口上才拾取：指针不在视口上（如 Frame Graph 页签
 			 * 顶替视口时）、飞行 / Alt 轨道中、落在 Gizmo 或视图指示器上都不拾取 */
 			if (m_IsViewportHovered && !IsGizmoHovered() && !Input::IsKeyPressed(Key::LeftAlt)
@@ -1571,6 +1578,183 @@ namespace Helios
 		}
 	}
 
+	/* 地形笔刷：按住左键在选中地形上拖，抬起来算一笔。
+	 * 半径按世界米给，进地形前按实体缩放换成局部米，笔刷在屏幕上的大小才稳定 */
+	void SceneEditorLayer::UpdateTerrainSculpt(float delta_time)
+	{
+		PROFILE_FUNCTION();
+
+		const TerrainSculpt::Settings& settings = TerrainSculpt::GetSettings();
+		const bool painting = settings.Brush != TerrainSculpt::Mode::None
+			&& m_IsViewportHovered
+			&& Input::IsMouseButtonPressed(Mouse::ButtonLeft)
+			&& !IsGizmoHovered() && !ImGui::IsAnyItemHovered()
+			&& !Input::IsKeyPressed(Key::LeftAlt);
+
+		if (!painting)
+		{
+			FinishSculptStroke();
+			return;
+		}
+
+		const Entity entity = m_SceneHierarchy.GetSelectedEntity();
+		if (!entity || !entity.HasComponent<TerrainComponent>())
+			return;
+
+		auto& terrain = entity.GetComponent<TerrainComponent>();
+		if (terrain.m_Field == nullptr || terrain.m_Field->IsEmpty())
+			return;
+
+		glm::vec3 origin(0.0f);
+		glm::vec3 direction(0.0f);
+		if (!BuildViewportRay(origin, direction))
+			return;
+
+		glm::vec2 local(0.0f);
+		float distance = 0.0f;
+		if (!terrain.m_Field->Raycast(origin, direction, local, distance))
+			return;
+
+		const glm::vec3 world_scale = terrain.m_Field->GetWorldScale();
+		const float scale = std::max((world_scale.x + world_scale.y + world_scale.z) / 3.0f, 1e-3f);
+		const float radius = std::max(settings.Radius / scale, 0.05f);
+
+		if (!m_SculptActive)
+		{
+			terrain.m_Field->BeginBrushStroke();
+			m_SculptActive = true;
+			m_SculptTerrain = entity;
+		}
+
+		TerrainField::BrushMode mode = TerrainField::BrushMode::Raise;
+		float amount = settings.Strength * delta_time;
+		switch (settings.Brush)
+		{
+		case TerrainSculpt::Mode::Raise: mode = TerrainField::BrushMode::Raise; break;
+		case TerrainSculpt::Mode::Lower: mode = TerrainField::BrushMode::Lower; break;
+		case TerrainSculpt::Mode::Smooth:
+			mode = TerrainField::BrushMode::Smooth;
+			/* 抹平按比例混，一帧最多整份 */
+			amount = std::min(amount, 1.0f);
+			break;
+		default:
+			return;
+		}
+
+		glm::uvec2 min(0);
+		glm::uvec2 max(0);
+		terrain.m_Field->ApplyBrush(local, radius, amount, mode, min, max);
+	}
+
+	/* 一笔结束：把改动的矩形存成一条命令，撤销按它回填 */
+	void SceneEditorLayer::FinishSculptStroke()
+	{
+		if (!m_SculptActive)
+			return;
+
+		const Entity entity = m_SculptTerrain;
+		m_SculptActive = false;
+		m_SculptTerrain = {};
+
+		if (!entity || !entity.HasComponent<TerrainComponent>())
+			return;
+
+		auto& terrain = entity.GetComponent<TerrainComponent>();
+		if (terrain.m_Field == nullptr)
+			return;
+
+		glm::uvec2 min(0);
+		glm::uvec2 max(0);
+		std::vector<float> before;
+		std::vector<float> after;
+		if (!terrain.m_Field->EndBrushStroke(min, max, before, after))
+			return;
+
+		m_CommandStack.Execute(CreateUniquePtr<TerrainSculptCommand>(m_pMainScene, entity,
+			min, max, std::move(before), std::move(after)));
+	}
+
+	bool SceneEditorLayer::BuildViewportRay(glm::vec3& out_origin, glm::vec3& out_direction) const
+	{
+		if (m_pEditorCamera == nullptr || m_ViewportRegion.Width <= 0 || m_ViewportRegion.Height <= 0)
+			return false;
+
+		auto [mouse_x, mouse_y] = ImGui::GetMousePos();
+		const float local_x = mouse_x - static_cast<float>(m_ViewportRegion.MinX);
+		const float local_y = mouse_y - static_cast<float>(m_ViewportRegion.MinY);
+		const float width = static_cast<float>(m_ViewportRegion.Width);
+		const float height = static_cast<float>(m_ViewportRegion.Height);
+		if (local_x < 0.0f || local_y < 0.0f || local_x > width || local_y > height)
+			return false;
+
+		const float ndc_x = local_x / width * 2.0f - 1.0f;
+		const float ndc_y = 1.0f - local_y / height * 2.0f;
+
+		/* 深度约定是 ZO：近平面 z = 0、远平面 z = 1 */
+		const glm::mat4 inverse = glm::inverse(
+			m_pEditorCamera->GetProjectionMatrix() * m_pEditorCamera->GetViewMatrix());
+		const glm::vec4 near_clip = inverse * glm::vec4(ndc_x, ndc_y, 0.0f, 1.0f);
+		const glm::vec4 far_clip = inverse * glm::vec4(ndc_x, ndc_y, 1.0f, 1.0f);
+		if (std::fabs(near_clip.w) < 1e-6f || std::fabs(far_clip.w) < 1e-6f)
+			return false;
+
+		const glm::vec3 near_point = glm::vec3(near_clip) / near_clip.w;
+		const glm::vec3 far_point = glm::vec3(far_clip) / far_clip.w;
+		const glm::vec3 delta = far_point - near_point;
+		if (glm::length(delta) < 1e-6f)
+			return false;
+
+		out_origin = near_point;
+		out_direction = glm::normalize(delta);
+		return true;
+	}
+
+	/* 导出选中地形：固定落到 <项目>/Terrains/<实体名>.terrain，导出后直接绑上，
+	 * 场景重新加载时以资产为准 */
+	void SceneEditorLayer::ExportSelectedTerrain()
+	{
+		const Entity entity = m_SceneHierarchy.GetSelectedEntity();
+		if (!entity || !entity.HasComponent<TerrainComponent>())
+			return;
+
+		auto& terrain = entity.GetComponent<TerrainComponent>();
+		if (terrain.m_Field == nullptr || terrain.m_Field->IsEmpty())
+			return;
+
+		std::string name = "Terrain";
+		if (entity.HasComponent<NameComponent>())
+		{
+			const std::string& entity_name = entity.GetComponent<NameComponent>().m_Name;
+			if (!entity_name.empty())
+				name = entity_name;
+		}
+		/* 实体名当文件名用：路径分隔符与非法字符换成下划线 */
+		for (char& character : name)
+		{
+			if (character == '/' || character == '\\' || character == ':' || character == '*'
+				|| character == '?' || character == '"' || character == '<' || character == '>'
+				|| character == '|')
+				character = '_';
+		}
+
+		const std::filesystem::path directory = g_ProjectPath / "Terrains";
+		std::error_code error;
+		std::filesystem::create_directories(directory, error);
+
+		const std::filesystem::path path = directory / (name + ".terrain");
+		const std::string material_path = terrain.m_MaterialSlot.SourceAssetPath.empty()
+			? std::string() : RELATIVE_PATH(terrain.m_MaterialSlot.SourceAssetPath);
+
+		if (!terrain.m_Field->ExportAsset(PathToUtf8(path), material_path))
+		{
+			EDITOR_LOG_WARN("Terrain export failed: {}", PathToUtf8(path));
+			return;
+		}
+
+		terrain.m_AssetPath = PathToUtf8(path);
+		EDITOR_LOG_INFO("Terrain exported: {}", PathToUtf8(path));
+	}
+
 	/* F 键：把轨道中心聚焦到选中实体 */
 	void SceneEditorLayer::FocusSelectedEntity()
 	{
@@ -1642,6 +1826,9 @@ namespace Helios
 					m_IsViewportHovered && !IsGizmoDragging() && !ImGui::IsAnyItemHovered());
 				m_pEditorCamera->OnUpdate(delta_time);
 
+				/* 笔刷在场景更新之前改高度，这一帧的草地贴地就能跟上 */
+				UpdateTerrainSculpt(delta_time);
+
 				/* 更新场景中的实体 */
 				m_pMainScene->OnUpdate(delta_time);
 				break;
@@ -1650,6 +1837,10 @@ namespace Helios
 				m_pMainScene->OnUpdate(delta_time);
 				break;
 			}
+
+			/* 卡片上点了导出：这里才拿得到选中实体 */
+			if (TerrainSculpt::ConsumeExportRequest())
+				ExportSelectedTerrain();
 
 			/* 相机这一帧的姿态定下来了，顺手看看要不要落盘 */
 			UpdateViewStateAutosave(delta_time);

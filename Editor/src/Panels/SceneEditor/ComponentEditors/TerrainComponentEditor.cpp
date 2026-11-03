@@ -3,6 +3,7 @@
 #include "UI/ImGuiExtensions.h"
 #include "Common/TextMatch.h"
 #include "UI/MaterialSlotRow.h"
+#include "Panels/SceneEditor/TerrainSculpt.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Reflection/ComponentRegistry.h"
@@ -180,12 +181,62 @@ namespace Helios
 			}
 		}
 
+		/* 笔刷与导出：工具状态是编辑器级的（不进组件字段，也不进撤销），
+		 * 真正改高度的是视口那边，这里只切模式、调参、发导出请求 */
+		void DrawTerrainSculptBlock(const TerrainComponent& component)
+		{
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::TextUnformatted("Sculpt");
+
+			TerrainSculpt::Settings& settings = TerrainSculpt::GetSettings();
+			const char* labels[] = { "Off", "Raise", "Lower", "Smooth" };
+			for (int index = 0; index < 4; ++index)
+			{
+				if (index > 0)
+					ImGui::SameLine();
+
+				const bool selected = static_cast<int>(settings.Brush) == index;
+				if (selected)
+					ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+				if (ImGui::Button(labels[index]))
+					settings.Brush = static_cast<TerrainSculpt::Mode>(index);
+				if (selected)
+					ImGui::PopStyleColor();
+			}
+
+			const float value_width = ImGuiExt::BeginPropertyRow("Radius");
+			ImGui::SetNextItemWidth(value_width);
+			ImGui::DragFloat("##TerrainSculptRadius", &settings.Radius, 0.5f, 1.0f, 200.0f, "%.1f m");
+			ImGuiExt::EndPropertyRow();
+
+			ImGui::SetNextItemWidth(ImGuiExt::BeginPropertyRow("Strength"));
+			ImGui::DragFloat("##TerrainSculptStrength", &settings.Strength, 0.2f, 0.2f, 60.0f, "%.1f m/s");
+			ImGuiExt::EndPropertyRow();
+
+			if (settings.Brush != TerrainSculpt::Mode::None)
+			{
+				ImGui::TextDisabled("Drag in the viewport to paint the selected terrain");
+			}
+
+			ImGui::Spacing();
+			const bool procedural = component.m_AssetPath.empty();
+			if (ImGui::Button("Export as .terrain"))
+				TerrainSculpt::RequestExport();
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Write <project>/Terrains/<entity>.terrain and bind it to this terrain");
+
+			ImGui::SameLine();
+			ImGui::TextDisabled(procedural ? "Procedural heights" : "Already bound to an asset");
+		}
+
 		bool DrawTerrainBlock(void* raw)
 		{
 			auto& component = *static_cast<TerrainComponent*>(raw);
 
 			bool changed = DrawTerrainAssetRow(component);
 			changed |= DrawTerrainMaterialBlock(component);
+			DrawTerrainSculptBlock(component);
 			return changed;
 		}
 	}

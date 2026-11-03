@@ -89,8 +89,34 @@ namespace Helios
 		[[nodiscard]] uint32_t GetMinNodeSize() const { return m_MinNodeSize; }
 		/* 高度数组的拷贝：后台重建任务拿一份快照，不跟地形共用指针 */
 		[[nodiscard]] std::vector<float> CopyHeights() const { return m_Heights; }
-		/* 高度重建的版本号：贴地对象据此判断要不要重新采样 */
-		[[nodiscard]] uint64_t GetRevision() const { return m_BuildKey; }
+		/* 高度重建的版本号：贴地对象据此判断要不要重新采样。笔刷改高度也会推进它，
+		 * 跟构建键分开 —— 构建键一改就会按参数重生成，编辑结果会被抹掉 */
+		[[nodiscard]] uint64_t GetRevision() const { return m_HeightsRevision; }
+
+		/* 笔刷：抬升 / 降低 / 抹平，圆心与半径都是地形局部米。
+		 * amount 对抬升 / 降低是每一下改多少米，对抹平是混向邻域均值的比例。
+		 * 返回这次改到的纹素矩形（闭区间），没改到返回 false */
+		enum class BrushMode : uint8_t
+		{
+			Raise,
+			Lower,
+			Smooth,
+		};
+		bool ApplyBrush(const glm::vec2& local_center, float local_radius, float amount, BrushMode mode,
+			glm::uvec2& out_min, glm::uvec2& out_max);
+		/* 一笔的撤销数据：开始前留一份快照，结束时按改动的矩形给出前后两份归一化高度 */
+		void BeginBrushStroke();
+		bool EndBrushStroke(glm::uvec2& out_min, glm::uvec2& out_max,
+			std::vector<float>& out_before, std::vector<float>& out_after);
+		/* 按矩形写回高度（撤销 / 重做），会重传高度图并作废页池 */
+		void WriteHeightRect(const glm::uvec2& min, const glm::uvec2& max, const std::vector<float>& values);
+		/* 导出成 .terrain 资产：当前高度 + 范围 + 起伏 + 材质路径 */
+		bool ExportAsset(const std::string& path, const std::string& material_path) const;
+
+		/* 射线与地表求交（编辑器笔刷定位用）：out_local 是命中点的局部 xz，
+		 * out_distance 是世界空间的射线长度。direction 需要归一化 */
+		bool Raycast(const glm::vec3& origin, const glm::vec3& direction,
+			glm::vec2& out_local, float& out_distance) const;
 
 		/* 虚拟纹理：高度重建时页表作废，几何不动时每帧只补缺页 */
 		[[nodiscard]] TerrainVirtualTexture& GetVirtualTexture() { return m_VirtualTexture; }
@@ -201,5 +227,12 @@ namespace Helios
 		float m_LodRatio{ 6.0f };
 		uint32_t m_MinNodeSize{ 64 };
 		uint64_t m_BuildKey{ 0 };
+		/* 高度数据版本：重建与笔刷编辑都推进，贴地对象按它判断要不要重采样 */
+		uint64_t m_HeightsRevision{ 0 };
+		/* 笔画快照：笔刷开始前的那份高度，结束时用它对出改动的矩形 */
+		std::vector<float> m_StrokeSnapshot;
+		bool m_StrokeActive{ false };
+		/* 高度数组变了之后重传高度图（页池作废、GPU 副本下次重建） */
+		void RefreshHeightMap();
 	};
 }

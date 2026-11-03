@@ -40,6 +40,10 @@ namespace Helios
 		void Prepare(const TerrainField& field, const TerrainPatch* patches, size_t patch_count,
 			const glm::vec3& eye);
 
+		/* 按视锥挑页：patch 在 GPU 上选的时候 CPU 没有 patch 列表，
+		 * 改用页网格与视锥求交，覆盖范围与按 patch 挑是同一片可见区域 */
+		void PrepareFrustum(const TerrainField& field, const glm::vec4 (&planes)[6], const glm::vec3& eye);
+
 		/* 本帧已烘完：把层号写进页表（一次上传），清掉待烘队列 */
 		void Commit();
 
@@ -60,6 +64,12 @@ namespace Helios
 
 	private:
 		void ClearTable();
+		/* 页表 / 网格就绪，返回本帧的地形左下角与网格尺寸 */
+		bool BeginFrame(const TerrainField& field, glm::vec2& out_min_corner,
+			uint32_t& out_grid_w, uint32_t& out_grid_h);
+		/* 从标记好的缺页里按距离挑出预算内的，排进待烘队列 */
+		void QueueMissing(const std::vector<uint8_t>& needed, const glm::vec2& min_corner,
+			uint32_t grid_w, uint32_t grid_h, const glm::vec3& eye);
 
 		SharedPtr<DeviceTexture> m_Pool;
 		SharedPtr<DeviceTexture> m_PageTable;

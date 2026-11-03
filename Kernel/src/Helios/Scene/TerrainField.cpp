@@ -4,6 +4,7 @@
 #include "TerrainSampling.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <glm/gtc/type_ptr.hpp>
@@ -233,6 +234,9 @@ namespace Helios
 			BuildHeightMap(component);
 		}
 
+		/* 高度数据换了，贴地对象要重新采样；笔刷编辑只推进这一个版本号，不动构建键 */
+		m_HeightsRevision = m_BuildKey;
+
 		/* 高度图与范围写进材质参数：属性面板里直接看到这块地形用的是哪张图。
 		 * 资产材质（不是实例）不写，免得改到别人共用的那份 */
 		const SharedPtr<Material>& material = component.m_MaterialSlot.pMaterial;
@@ -323,6 +327,304 @@ namespace Helios
 		m_Heights = std::move(heights);
 		/* 重新建了高度图，GPU 副本作废，下次要的时候重传 */
 		m_HeightStorage = nullptr;
+	}
+
+	void TerrainField::RefreshHeightMap()
+	{
+		if (m_HeightMap == nullptr || m_Heights.empty())
+			return;
+
+		PixelDesc pixel_desc;
+		pixel_desc.Format = PixelFormat::R;
+		pixel_desc.Type = PixelType::Float;
+		m_HeightMap->SetData(m_Heights.data(), pixel_desc);
+
+		/* 高度变了：页池里的颜色与烘焙用的高度都过期，GPU 副本下次要的时候重传 */
+		m_VirtualTexture.Reset();
+		m_HeightStorage = nullptr;
+		++m_HeightsRevision;
+	}
+
+	bool TerrainField::ApplyBrush(const glm::vec2& local_center, float local_radius, float amount,
+		BrushMode mode, glm::uvec2& out_min, glm::uvec2& out_max)
+	{
+		if (m_Heights.empty() || m_Resolution < 2 || local_radius <= 0.0f || amount <= 0.0f)
+			return false;
+
+		const float extent_x = std::max(m_Extent.x, 1e-3f);
+		const float extent_y = std::max(m_Extent.y, 1e-3f);
+		const float texel_x = (extent_x * 2.0f) / static_cast<float>(m_Resolution - 1);
+		const float texel_y = (extent_y * 2.0f) / static_cast<float>(m_Resolution - 1);
+
+		const auto to_index = [](float local, float extent, float texel, uint32_t res)
+		{
+			const float index = (local + extent) / texel;
+			return static_cast<uint32_t>(std::clamp(index, 0.0f, static_cast<float>(res - 1)));
+		};
+
+		const uint32_t min_x = to_index(local_center.x - local_radius, extent_x, texel_x, m_Resolution);
+		const uint32_t max_x = to_index(local_center.x + local_radius, extent_x, texel_x, m_Resolution);
+		const uint32_t min_z = to_index(local_center.y - local_radius, extent_y, texel_y, m_Resolution);
+		const uint32_t max_z = to_index(local_center.y + local_radius, extent_y, texel_y, m_Resolution);
+
+		const float inv_radius = 1.0f / local_radius;
+		const float to_normalized = 1.0f / std::max(m_HeightScale, 1e-3f);
+		const float blend = std::clamp(amount, 0.0f, 1.0f);
+		bool any = false;
+
+		for (uint32_t z = min_z; z <= max_z; ++z)
+		{
+			for (uint32_t x = min_x; x <= max_x; ++x)
+			{
+				const glm::vec2 local(-extent_x + static_cast<float>(x) * texel_x,
+					-extent_y + static_cast<float>(z) * texel_y);
+				const float distance = glm::length(local - local_center);
+				if (distance >= local_radius)
+					continue;
+
+				/* 平滑收边：中心满、边缘归零，扫过去不留硬边 */
+				const float t = 1.0f - distance * inv_radius;
+				const float weight = t * t * (3.0f - 2.0f * t);
+
+				float& height = m_Heights[static_cast<size_t>(z) * m_Resolution + x];
+				if (mode == BrushMode::Smooth)
+				{
+					/* 抹平：混向四邻域均值，amount 是混合比例 */
+					const uint32_t left = x > 0 ? x - 1 : x;
+					const uint32_t right = x + 1 < m_Resolution ? x + 1 : x;
+					const uint32_t down = z > 0 ? z - 1 : z;
+					const uint32_t up = z + 1 < m_Resolution ? z + 1 : z;
+					const float average = 0.25f * (m_Heights[static_cast<size_t>(z) * m_Resolution + left]
+						+ m_Heights[static_cast<size_t>(z) * m_Resolution + right]
+						+ m_Heights[static_cast<size_t>(down) * m_Resolution + x]
+						+ m_Heights[static_cast<size_t>(up) * m_Resolution + x]);
+					height = glm::mix(height, average, blend * weight);
+				}
+				else
+				{
+					const float delta = amount * to_normalized * weight;
+					height += (mode == BrushMode::Raise) ? delta : -delta;
+				}
+
+				height = std::clamp(height, 0.0f, 1.0f);
+				any = true;
+			}
+		}
+
+		if (!any)
+			return false;
+
+		RefreshHeightMap();
+		out_min = glm::uvec2(min_x, min_z);
+		out_max = glm::uvec2(max_x, max_z);
+		return true;
+	}
+
+	void TerrainField::BeginBrushStroke()
+	{
+		m_StrokeSnapshot = m_Heights;
+		m_StrokeActive = !m_StrokeSnapshot.empty();
+	}
+
+	bool TerrainField::EndBrushStroke(glm::uvec2& out_min, glm::uvec2& out_max,
+		std::vector<float>& out_before, std::vector<float>& out_after)
+	{
+		const bool active = m_StrokeActive;
+		m_StrokeActive = false;
+		if (!active || m_StrokeSnapshot.size() != m_Heights.size())
+		{
+			m_StrokeSnapshot.clear();
+			return false;
+		}
+
+		/* 找出真正改动过的纹素矩形：撤销只存这一块，不存整张高度图 */
+		constexpr float kEpsilon = 1e-7f;
+		uint32_t min_x = m_Resolution;
+		uint32_t min_z = m_Resolution;
+		uint32_t max_x = 0;
+		uint32_t max_z = 0;
+		for (uint32_t z = 0; z < m_Resolution; ++z)
+		{
+			for (uint32_t x = 0; x < m_Resolution; ++x)
+			{
+				const size_t index = static_cast<size_t>(z) * m_Resolution + x;
+				if (std::fabs(m_Heights[index] - m_StrokeSnapshot[index]) <= kEpsilon)
+					continue;
+				min_x = std::min(min_x, x);
+				max_x = std::max(max_x, x);
+				min_z = std::min(min_z, z);
+				max_z = std::max(max_z, z);
+			}
+		}
+
+		if (min_x > max_x || min_z > max_z)
+		{
+			m_StrokeSnapshot.clear();
+			return false;
+		}
+
+		const uint32_t width = max_x - min_x + 1;
+		const uint32_t rows = max_z - min_z + 1;
+		out_before.resize(static_cast<size_t>(width) * rows);
+		out_after.resize(out_before.size());
+		for (uint32_t z = 0; z < rows; ++z)
+		{
+			const size_t dst = static_cast<size_t>(z) * width;
+			const size_t src = static_cast<size_t>(min_z + z) * m_Resolution + min_x;
+			std::copy_n(m_StrokeSnapshot.begin() + src, width, out_before.begin() + dst);
+			std::copy_n(m_Heights.begin() + src, width, out_after.begin() + dst);
+		}
+
+		m_StrokeSnapshot.clear();
+		out_min = glm::uvec2(min_x, min_z);
+		out_max = glm::uvec2(max_x, max_z);
+		return true;
+	}
+
+	void TerrainField::WriteHeightRect(const glm::uvec2& min, const glm::uvec2& max,
+		const std::vector<float>& values)
+	{
+		if (m_Heights.empty())
+			return;
+
+		const uint32_t x0 = std::min(std::min(min.x, max.x), m_Resolution - 1);
+		const uint32_t x1 = std::min(std::max(min.x, max.x), m_Resolution - 1);
+		const uint32_t z0 = std::min(std::min(min.y, max.y), m_Resolution - 1);
+		const uint32_t z1 = std::min(std::max(min.y, max.y), m_Resolution - 1);
+		const uint32_t width = x1 - x0 + 1;
+		const uint32_t rows = z1 - z0 + 1;
+		if (values.size() < static_cast<size_t>(width) * rows)
+			return;
+
+		for (uint32_t z = 0; z < rows; ++z)
+		{
+			const size_t src = static_cast<size_t>(z) * width;
+			std::copy_n(values.begin() + src, width,
+				m_Heights.begin() + static_cast<size_t>(z0 + z) * m_Resolution + x0);
+		}
+
+		RefreshHeightMap();
+	}
+
+	bool TerrainField::ExportAsset(const std::string& path, const std::string& material_path) const
+	{
+		if (m_Heights.empty() || path.empty())
+			return false;
+
+		TerrainAsset::Data data;
+		data.Resolution = m_Resolution;
+		data.Extent = m_Extent;
+		data.HeightScale = m_HeightScale;
+		data.MaterialPath = material_path;
+		data.Heights = m_Heights;
+		return TerrainAsset::Write(path, data);
+	}
+
+	bool TerrainField::Raycast(const glm::vec3& origin, const glm::vec3& direction,
+		glm::vec2& out_local, float& out_distance) const
+	{
+		if (m_Heights.empty() || m_HeightMap == nullptr)
+			return false;
+
+		/* 射线搬进局部空间：高度场、范围都在这一套坐标里 */
+		const glm::vec3 local_origin = glm::vec3(m_WorldInverse * glm::vec4(origin, 1.0f));
+		const glm::vec3 local_dir_raw = glm::vec3(m_WorldInverse * glm::vec4(direction, 0.0f));
+		const float dir_length = glm::length(local_dir_raw);
+		if (dir_length <= 1e-6f)
+			return false;
+		const glm::vec3 local_dir = local_dir_raw / dir_length;
+
+		/* 先跟包围盒求交，把步进限制在有地形的那一段 */
+		const glm::vec3 box_min(-m_Extent.x, 0.0f, -m_Extent.y);
+		const glm::vec3 box_max(m_Extent.x, std::max(m_HeightScale, 1e-3f), m_Extent.y);
+		float t_enter = 0.0f;
+		float t_exit = 1.0e9f;
+		for (int axis = 0; axis < 3; ++axis)
+		{
+			if (std::fabs(local_dir[axis]) < 1e-6f)
+			{
+				if (local_origin[axis] < box_min[axis] || local_origin[axis] > box_max[axis])
+					return false;
+				continue;
+			}
+
+			const float inverse = 1.0f / local_dir[axis];
+			float near_t = (box_min[axis] - local_origin[axis]) * inverse;
+			float far_t = (box_max[axis] - local_origin[axis]) * inverse;
+			if (near_t > far_t)
+				std::swap(near_t, far_t);
+			t_enter = std::max(t_enter, near_t);
+			t_exit = std::min(t_exit, far_t);
+			if (t_enter > t_exit)
+				return false;
+		}
+
+		/* 步进找第一次穿到地表以下，再在跨过的那一段里二分。
+		 * 离得越远步子越大：近处要贴住细节，远处只求命中 */
+		const float texel = (std::max(m_Extent.x, m_Extent.y) * 2.0f)
+			/ static_cast<float>(std::max(m_Resolution, 2u) - 1u);
+		const auto height_at = [this](const glm::vec3& point, float& out_height)
+		{
+			return TerrainSampling::SampleHeight(m_Heights.data(), m_Resolution, m_Extent,
+				m_HeightScale, glm::vec2(point.x, point.z), out_height);
+		};
+
+		/* 起点就在地下（相机贴地 / 站在山坡里）：直接算命中 */
+		{
+			const glm::vec3 point = local_origin + local_dir * t_enter;
+			float height = 0.0f;
+			if (height_at(point, height) && point.y <= height)
+			{
+				const glm::vec3 world_hit = glm::vec3(m_World * glm::vec4(point, 1.0f));
+				out_local = glm::vec2(point.x, point.z);
+				out_distance = glm::length(world_hit - origin);
+				return true;
+			}
+		}
+
+		float previous_t = t_enter;
+		bool has_previous = false;
+		for (float t = t_enter; t <= t_exit;)
+		{
+			const glm::vec3 point = local_origin + local_dir * t;
+			float height = 0.0f;
+			if (!height_at(point, height))
+			{
+				t += texel * 2.0f;
+				continue;
+			}
+
+			const float delta = point.y - height;
+			if (has_previous && delta <= 0.0f)
+			{
+				/* 上一段还在地表之上、这一段到地下了：二分到交点 */
+				float low = previous_t;
+				float high = t;
+				for (int step = 0; step < 16; ++step)
+				{
+					const float mid = (low + high) * 0.5f;
+					const glm::vec3 mid_point = local_origin + local_dir * mid;
+					float mid_height = 0.0f;
+					const bool inside = height_at(mid_point, mid_height);
+					if (!inside || mid_point.y - mid_height > 0.0f)
+						low = mid;
+					else
+						high = mid;
+				}
+
+				const glm::vec3 hit = local_origin + local_dir * high;
+				const glm::vec3 world_hit = glm::vec3(m_World * glm::vec4(hit, 1.0f));
+				out_local = glm::vec2(hit.x, hit.z);
+				out_distance = glm::length(world_hit - origin);
+				return true;
+			}
+
+			previous_t = t;
+			has_previous = true;
+			t += std::max(texel * 2.0f, t * 0.004f);
+		}
+
+		return false;
 	}
 
 	const SharedPtr<DeviceStorageBuffer>& TerrainField::GetHeightStorage() const

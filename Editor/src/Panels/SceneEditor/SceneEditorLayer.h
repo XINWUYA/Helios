@@ -179,6 +179,14 @@ namespace Helios
 		/* 鼠标选中Entity时的响应 */
 		void CheckMouseSelectEntity();
 
+		/* 地形笔刷：按当前工具与鼠标位置改选中地形的高度，一笔结束后入历史 */
+		void UpdateTerrainSculpt(float delta_time);
+		void FinishSculptStroke();
+		/* 视口鼠标位置 → 世界射线（近平面起点 + 归一化方向） */
+		bool BuildViewportRay(glm::vec3& out_origin, glm::vec3& out_direction) const;
+		/* 把选中的地形导出成 .terrain 并绑上（卡片上的导出按钮走到这里） */
+		void ExportSelectedTerrain();
+
 		/* F 键：把视角聚焦到选中实体 */
 		void FocusSelectedEntity();
 		/* 把视角聚焦到指定实体（按模型包围球取景）：F 键与层级树双击共用 */
@@ -203,6 +211,9 @@ namespace Helios
 		SceneHierarchy m_SceneHierarchy;
 		/* 编辑历史：所有改动经命令栈落地 */
 		CommandStack m_CommandStack;
+		/* 地形笔刷：一笔进行中的目标实体（松开鼠标时把这一笔入历史） */
+		Entity m_SculptTerrain{};
+		bool m_SculptActive{ false };
 		/* 上次保存（或加载）时的场景改动条数：与当前条数不一致即表示有未保存的改动。
 		 * 用条数而不是历史位置：资源操作（新建 / 重命名 / 删除）也入同一条历史，
 		 * 它们不改场景内容，按位置比对会被它们带出假的"未保存"（见 CommandStack::GetSceneEditCount）。 */

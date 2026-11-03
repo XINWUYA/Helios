@@ -429,20 +429,29 @@ namespace Helios::TerrainDraw
 			return;
 
 		const FrameCache& frame = EnsureVisibleFrame(view, scene);
-		if (frame.Batches.empty() || frame.Patches.empty())
+		/* patch 全在 GPU 上选的时候 CPU 列表是空的，别在这里挡掉 */
+		if (frame.Batches.empty())
 			return;
 
 		const glm::vec3 eye = camera->GetPosition();
+		/* patch 在 GPU 上选的时候 CPU 没有覆盖列表，页改按视锥挑 */
+		const Frustum bake_frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
 		for (const TerrainBatch& batch : frame.Batches)
 		{
-			if (batch.Component == nullptr || batch.Field == nullptr || batch.Count == 0)
+			if (batch.Component == nullptr || batch.Field == nullptr)
+				continue;
+			/* GPU 选的那批 patch 数量在参数块里，CPU 侧 Count 是 0 */
+			if (!batch.Gpu && batch.Count == 0)
 				continue;
 
 			TerrainVirtualTexture& virtual_texture = batch.Component->m_Field->GetVirtualTexture();
 			if (!virtual_texture.EnsureResources())
 				continue;
 
-			virtual_texture.Prepare(*batch.Field, frame.Patches.data() + batch.First, batch.Count, eye);
+			if (batch.Gpu)
+				virtual_texture.PrepareFrustum(*batch.Field, bake_frustum.Planes, eye);
+			else
+				virtual_texture.Prepare(*batch.Field, frame.Patches.data() + batch.First, batch.Count, eye);
 			if (!virtual_texture.HasPending())
 				continue;
 
