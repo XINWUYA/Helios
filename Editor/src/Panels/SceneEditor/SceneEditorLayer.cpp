@@ -570,6 +570,11 @@ namespace Helios
 
 		/* 层级面板的根节点就是当前场景名：路径改了必须同步，否则另存为之后显示的仍是旧名字 */
 		m_SceneHierarchy.SetScenePath(path);
+
+		/* 换场景就把笔刷关掉：工具状态是编辑器级的全局量，留着的话新场景里一按左键就开始画 */
+		TerrainSculpt::GetSettings().Brush = TerrainSculpt::Mode::None;
+		m_SculptActive = false;
+		m_SculptTerrain = {};
 	}
 
 	bool SceneEditorLayer::IsSceneDirty() const
