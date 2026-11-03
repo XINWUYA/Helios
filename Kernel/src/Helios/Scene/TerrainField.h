@@ -70,6 +70,8 @@ namespace Helios
 		/* 世界高度采样（CPU 侧）：草地与其它物体贴地时用。
 		 * 点不在地形范围内返回 false，out_height 不动 */
 		bool SampleHeightWorld(const glm::vec2& world_xz, float& out_height) const;
+		/* 局部 xz 处的局部高度（米）：笔刷预览贴着地表画圈用 */
+		bool SampleHeightLocal(const glm::vec2& local_xz, float& out_height) const;
 		/* 表面法线（CPU 侧，与着色器的邻居差分同口径）：坡度过滤与贴面对齐用 */
 		bool SampleNormalWorld(const glm::vec2& world_xz, glm::vec3& out_normal) const;
 		/* 世界 xz 是否落在地形覆盖范围内（不管高度） */
@@ -106,7 +108,7 @@ namespace Helios
 		/* 底图在世界里的矩形：xy 左下角、z 边长、w 每个纹素多少米；没有底图时全 0 */
 		[[nodiscard]] glm::vec4 GetBasemapRect() const;
 
-		/* 笔刷：抬升 / 降低 / 抹平，圆心与半径都是地形局部米。
+		/* 笔刷：抬升 / 降低 / 抹平，圆心与两轴半径都是地形局部米（非均匀缩放时两轴不同）。
 		 * amount 对抬升 / 降低是每一下改多少米，对抹平是混向邻域均值的比例。
 		 * 返回这次改到的纹素矩形（闭区间），没改到返回 false */
 		enum class BrushMode : uint8_t
@@ -115,7 +117,7 @@ namespace Helios
 			Lower,
 			Smooth,
 		};
-		bool ApplyBrush(const glm::vec2& local_center, float local_radius, float amount, BrushMode mode,
+		bool ApplyBrush(const glm::vec2& local_center, const glm::vec2& local_radius, float amount, BrushMode mode,
 			glm::uvec2& out_min, glm::uvec2& out_max);
 		/* 一笔的撤销数据：开始前留一份快照，结束时按改动的矩形给出前后两份归一化高度 */
 		void BeginBrushStroke();

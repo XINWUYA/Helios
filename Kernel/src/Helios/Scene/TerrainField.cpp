@@ -355,59 +355,70 @@ namespace Helios
 		m_HeightsEdited = true;
 	}
 
-	bool TerrainField::ApplyBrush(const glm::vec2& local_center, float local_radius, float amount,
+	bool TerrainField::ApplyBrush(const glm::vec2& local_center, const glm::vec2& local_radius, float amount,
 		BrushMode mode, glm::uvec2& out_min, glm::uvec2& out_max)
 	{
-		if (m_Heights.empty() || m_Resolution < 2 || local_radius <= 0.0f || amount <= 0.0f)
+		if (m_Heights.empty() || m_Resolution < 2 || local_radius.x <= 0.0f || local_radius.y <= 0.0f
+			|| amount <= 0.0f)
 			return false;
 
-		const float extent_x = std::max(m_Extent.x, 1e-3f);
-		const float extent_y = std::max(m_Extent.y, 1e-3f);
-		const float texel_x = (extent_x * 2.0f) / static_cast<float>(m_Resolution - 1);
-		const float texel_y = (extent_y * 2.0f) / static_cast<float>(m_Resolution - 1);
-
-		const auto to_index = [](float local, float extent, float texel, uint32_t res)
+		const glm::vec2 extent = glm::max(m_Extent, glm::vec2(1e-3f));
+		const glm::vec2 texel = extent * 2.0f / static_cast<float>(m_Resolution - 1);
+		const float max_index = static_cast<float>(m_Resolution - 1);
+		const auto to_index = [&](const glm::vec2& local)
 		{
-			const float index = (local + extent) / texel;
-			return static_cast<uint32_t>(std::clamp(index, 0.0f, static_cast<float>(res - 1)));
+			return glm::uvec2(glm::clamp((local + extent) / texel, glm::vec2(0.0f), glm::vec2(max_index)));
+		};
+		const glm::uvec2 lo = to_index(local_center - local_radius);
+		const glm::uvec2 hi = to_index(local_center + local_radius);
+
+		/* 抹平读改动前的那份：边读边写会让先扫到的格子拖着后面的走，抹出方向性 */
+		std::vector<float> source;
+		glm::uvec2 source_min(0);
+		uint32_t source_width = 0;
+		if (mode == BrushMode::Smooth)
+		{
+			source_min = glm::uvec2(lo.x > 0 ? lo.x - 1 : 0, lo.y > 0 ? lo.y - 1 : 0);
+			const glm::uvec2 source_max = glm::min(hi + 1u, glm::uvec2(m_Resolution - 1));
+			source_width = source_max.x - source_min.x + 1;
+			source.resize(static_cast<size_t>(source_width) * (source_max.y - source_min.y + 1));
+			for (uint32_t z = source_min.y; z <= source_max.y; ++z)
+			{
+				std::copy_n(m_Heights.begin() + static_cast<size_t>(z) * m_Resolution + source_min.x, source_width,
+					source.begin() + static_cast<size_t>(z - source_min.y) * source_width);
+			}
+		}
+		const auto source_at = [&](uint32_t x, uint32_t z)
+		{
+			return source[static_cast<size_t>(z - source_min.y) * source_width + (x - source_min.x)];
 		};
 
-		const uint32_t min_x = to_index(local_center.x - local_radius, extent_x, texel_x, m_Resolution);
-		const uint32_t max_x = to_index(local_center.x + local_radius, extent_x, texel_x, m_Resolution);
-		const uint32_t min_z = to_index(local_center.y - local_radius, extent_y, texel_y, m_Resolution);
-		const uint32_t max_z = to_index(local_center.y + local_radius, extent_y, texel_y, m_Resolution);
-
-		const float inv_radius = 1.0f / local_radius;
 		const float to_normalized = 1.0f / std::max(m_HeightScale, 1e-3f);
 		const float blend = std::clamp(amount, 0.0f, 1.0f);
 		bool any = false;
 
-		for (uint32_t z = min_z; z <= max_z; ++z)
+		for (uint32_t z = lo.y; z <= hi.y; ++z)
 		{
-			for (uint32_t x = min_x; x <= max_x; ++x)
+			for (uint32_t x = lo.x; x <= hi.x; ++x)
 			{
-				const glm::vec2 local(-extent_x + static_cast<float>(x) * texel_x,
-					-extent_y + static_cast<float>(z) * texel_y);
-				const float distance = glm::length(local - local_center);
-				if (distance >= local_radius)
+				/* 半径按两轴分开给：非均匀缩放的地形上笔刷在世界里仍是圆 */
+				const glm::vec2 local = -extent + glm::vec2(static_cast<float>(x), static_cast<float>(z)) * texel;
+				const float distance = glm::length((local - local_center) / local_radius);
+				if (distance >= 1.0f)
 					continue;
 
 				/* 平滑收边：中心满、边缘归零，扫过去不留硬边 */
-				const float t = 1.0f - distance * inv_radius;
+				const float t = 1.0f - distance;
 				const float weight = t * t * (3.0f - 2.0f * t);
 
 				float& height = m_Heights[static_cast<size_t>(z) * m_Resolution + x];
 				if (mode == BrushMode::Smooth)
 				{
 					/* 抹平：混向四邻域均值，amount 是混合比例 */
-					const uint32_t left = x > 0 ? x - 1 : x;
-					const uint32_t right = x + 1 < m_Resolution ? x + 1 : x;
-					const uint32_t down = z > 0 ? z - 1 : z;
-					const uint32_t up = z + 1 < m_Resolution ? z + 1 : z;
-					const float average = 0.25f * (m_Heights[static_cast<size_t>(z) * m_Resolution + left]
-						+ m_Heights[static_cast<size_t>(z) * m_Resolution + right]
-						+ m_Heights[static_cast<size_t>(down) * m_Resolution + x]
-						+ m_Heights[static_cast<size_t>(up) * m_Resolution + x]);
+					const float average = 0.25f * (source_at(x > 0 ? x - 1 : x, z)
+						+ source_at(x + 1 < m_Resolution ? x + 1 : x, z)
+						+ source_at(x, z > 0 ? z - 1 : z)
+						+ source_at(x, z + 1 < m_Resolution ? z + 1 : z));
 					height = glm::mix(height, average, blend * weight);
 				}
 				else
@@ -424,10 +435,16 @@ namespace Helios
 		if (!any)
 			return false;
 
-		RefreshHeightMap(glm::uvec2(min_x, min_z), glm::uvec2(max_x, max_z));
-		out_min = glm::uvec2(min_x, min_z);
-		out_max = glm::uvec2(max_x, max_z);
+		RefreshHeightMap(lo, hi);
+		out_min = lo;
+		out_max = hi;
 		return true;
+	}
+
+	bool TerrainField::SampleHeightLocal(const glm::vec2& local_xz, float& out_height) const
+	{
+		return TerrainSampling::SampleHeight(m_Heights.empty() ? nullptr : m_Heights.data(),
+			m_Resolution, m_Extent, m_HeightScale, local_xz, out_height);
 	}
 
 	void TerrainField::BeginBrushStroke()

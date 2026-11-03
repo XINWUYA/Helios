@@ -386,8 +386,10 @@ namespace Helios
 
 		if (event->GetMouseButton() == Mouse::ButtonLeft)
 		{
-			/* 笔刷模式下左键是用来画的，不改选中 */
-			if (TerrainSculpt::GetSettings().Brush != TerrainSculpt::Mode::None && m_IsViewportHovered)
+			/* 笔刷模式下、选中的是地形时左键是用来画的，不改选中；选中别的照常点选 */
+			const Entity selected = m_SceneHierarchy.GetSelectedEntity();
+			if (TerrainSculpt::GetSettings().Brush != TerrainSculpt::Mode::None && m_IsViewportHovered
+				&& selected && selected.HasComponent<TerrainComponent>())
 				return false;
 
 			/* 这一击真落在场景视口上才拾取：指针不在视口上（如 Frame Graph 页签
@@ -1155,6 +1157,9 @@ namespace Helios
 			/* 右上角视图指示器（点击 / 拖拽切换与旋转视角） */
 			ShowViewGizmoUI();
 
+			/* 地形笔刷落点 */
+			ShowTerrainBrushUI();
+
 			/* Gizmos */
 			ShowOperationGizmoUI();
 		}
@@ -1604,27 +1609,12 @@ namespace Helios
 			return;
 		}
 
-		const Entity entity = m_SceneHierarchy.GetSelectedEntity();
-		if (!entity || !entity.HasComponent<TerrainComponent>())
-			return;
-
-		auto& terrain = entity.GetComponent<TerrainComponent>();
-		if (terrain.m_Field == nullptr || terrain.m_Field->IsEmpty())
-			return;
-
-		glm::vec3 origin(0.0f);
-		glm::vec3 direction(0.0f);
-		if (!BuildViewportRay(origin, direction))
-			return;
-
+		Entity entity;
 		glm::vec2 local(0.0f);
-		float distance = 0.0f;
-		if (!terrain.m_Field->Raycast(origin, direction, local, distance))
+		glm::vec2 radius(0.0f);
+		if (!RaycastSculptTarget(entity, local, radius))
 			return;
-
-		const glm::vec3 world_scale = terrain.m_Field->GetWorldScale();
-		const float scale = std::max((world_scale.x + world_scale.y + world_scale.z) / 3.0f, 1e-3f);
-		const float radius = std::max(settings.Radius / scale, 0.05f);
+		auto& terrain = entity.GetComponent<TerrainComponent>();
 
 		if (!m_SculptActive)
 		{
@@ -1651,6 +1641,72 @@ namespace Helios
 		glm::uvec2 min(0);
 		glm::uvec2 max(0);
 		terrain.m_Field->ApplyBrush(local, radius, amount, mode, min, max);
+	}
+
+	bool SceneEditorLayer::RaycastSculptTarget(Entity& out_entity, glm::vec2& out_local, glm::vec2& out_radius) const
+	{
+		const Entity entity = m_SceneHierarchy.GetSelectedEntity();
+		if (!entity || !entity.HasComponent<TerrainComponent>())
+			return false;
+
+		const auto& terrain = entity.GetComponent<TerrainComponent>();
+		if (terrain.m_Field == nullptr || terrain.m_Field->IsEmpty())
+			return false;
+
+		glm::vec3 origin(0.0f);
+		glm::vec3 direction(0.0f);
+		float distance = 0.0f;
+		if (!BuildViewportRay(origin, direction)
+			|| !terrain.m_Field->Raycast(origin, direction, out_local, distance))
+			return false;
+
+		/* 世界米换成局部米：两轴各除各的缩放 */
+		const glm::vec3 world_scale = glm::max(terrain.m_Field->GetWorldScale(), glm::vec3(1e-3f));
+		out_radius = glm::max(glm::vec2(TerrainSculpt::GetSettings().Radius) / glm::vec2(world_scale.x, world_scale.z),
+			glm::vec2(0.05f));
+		out_entity = entity;
+		return true;
+	}
+
+	/* 笔刷预览：在落笔处沿地表画一圈，半径与真正改高度的范围一致 */
+	void SceneEditorLayer::ShowTerrainBrushUI()
+	{
+		if (TerrainSculpt::GetSettings().Brush == TerrainSculpt::Mode::None || !m_IsViewportHovered
+			|| m_ViewportRegion.Width == 0 || m_ViewportRegion.Height == 0)
+			return;
+
+		Entity entity;
+		glm::vec2 center(0.0f);
+		glm::vec2 radius(0.0f);
+		if (!RaycastSculptTarget(entity, center, radius))
+			return;
+
+		const TerrainField& field = *entity.GetComponent<TerrainComponent>().m_Field;
+		const glm::mat4 view_projection = m_pEditorCamera->GetProjectionMatrix() * m_pEditorCamera->GetViewMatrix();
+		const ImVec2 viewport_min(m_ViewportRegion.MinX, m_ViewportRegion.MinY);
+		const ImVec2 viewport_size(static_cast<float>(m_ViewportRegion.Width), static_cast<float>(m_ViewportRegion.Height));
+
+		constexpr int kSegments = 64;
+		ImVec2 points[kSegments];
+		int count = 0;
+		for (int index = 0; index < kSegments; ++index)
+		{
+			const float angle = 6.2831853f * static_cast<float>(index) / static_cast<float>(kSegments);
+			const glm::vec2 local = center + glm::vec2(std::cos(angle), std::sin(angle)) * radius;
+			float height = 0.0f;
+			if (!field.SampleHeightLocal(local, height))
+				continue;
+
+			const glm::vec4 clip = view_projection * glm::vec4(field.ToWorld(local, height), 1.0f);
+			if (clip.w <= 1.0e-4f)
+				continue;
+			points[count++] = ImVec2(viewport_min.x + (clip.x / clip.w * 0.5f + 0.5f) * viewport_size.x,
+				viewport_min.y + (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * viewport_size.y);
+		}
+
+		if (count > 2)
+			ImGui::GetWindowDrawList()->AddPolyline(points, count, IM_COL32(255, 158, 41, 255),
+				count == kSegments ? ImDrawFlags_Closed : ImDrawFlags_None, 1.5f);
 	}
 
 	/* 一笔结束：把改动的矩形存成一条命令，撤销按它回填 */

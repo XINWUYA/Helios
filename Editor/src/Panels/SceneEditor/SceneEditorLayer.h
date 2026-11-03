@@ -184,6 +184,9 @@ namespace Helios
 		void FinishSculptStroke();
 		/* 视口鼠标位置 → 世界射线（近平面起点 + 归一化方向） */
 		bool BuildViewportRay(glm::vec3& out_origin, glm::vec3& out_direction) const;
+		/* 鼠标射线打中选中的地形：给出落点（局部 xz）与按两轴缩放换算后的局部半径 */
+		bool RaycastSculptTarget(Entity& out_entity, glm::vec2& out_local, glm::vec2& out_radius) const;
+		void ShowTerrainBrushUI();
 		/* 把地形高度写进 .terrain 并绑上：已绑资产就写回原文件，否则新建一份不重名的 */
 		bool ExportTerrain(Entity entity);
 		void ExportSelectedTerrain();
