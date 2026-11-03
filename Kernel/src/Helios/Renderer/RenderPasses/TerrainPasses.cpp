@@ -486,10 +486,12 @@ namespace Helios::TerrainDraw
 				}
 			}
 
+			const uint32_t frame_index = scene.GetFrameIndex();
 			if (batch.Gpu)
-				virtual_texture.PrepareFrustum(*batch.Field, bake_frustum.Planes, eye);
+				virtual_texture.PrepareFrustum(*batch.Field, bake_frustum.Planes, eye, frame_index);
 			else
-				virtual_texture.Prepare(*batch.Field, frame.Patches.data() + batch.First, batch.Count, eye);
+				virtual_texture.Prepare(*batch.Field, frame.Patches.data() + batch.First, batch.Count, eye,
+					frame_index);
 			if (!virtual_texture.HasPending())
 				continue;
 

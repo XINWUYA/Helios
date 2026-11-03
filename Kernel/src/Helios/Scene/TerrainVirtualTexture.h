@@ -41,13 +41,15 @@ namespace Helios
 		/* 高度数据重建过：页表清空，页池不重建（下一帧重新烘） */
 		void Reset();
 
-		/* 按本帧 patch 覆盖挑页：缺页按相机距离从近到远排，取预算内的那批 */
+		/* 按本帧 patch 覆盖挑页：缺页按相机距离从近到远排，取预算内的那批。
+		 * frame 是场景帧号：同一帧里各视图用到的页都不会被挤掉 */
 		void Prepare(const TerrainField& field, const TerrainPatch* patches, size_t patch_count,
-			const glm::vec3& eye);
+			const glm::vec3& eye, uint32_t frame);
 
 		/* 按视锥挑页：patch 在 GPU 上选的时候 CPU 没有 patch 列表，
 		 * 改用页网格与视锥求交，覆盖范围与按 patch 挑是同一片可见区域 */
-		void PrepareFrustum(const TerrainField& field, const glm::vec4 (&planes)[6], const glm::vec3& eye);
+		void PrepareFrustum(const TerrainField& field, const glm::vec4 (&planes)[6], const glm::vec3& eye,
+			uint32_t frame);
 
 		/* 本帧已烘完：把层号写进页表（一次上传），清掉待烘队列 */
 		void Commit();
@@ -66,6 +68,8 @@ namespace Helios
 		[[nodiscard]] bool HasPending() const { return !m_Pending.empty(); }
 		/* 页表里已驻留的页数（检查程序与面板读数用） */
 		[[nodiscard]] uint32_t GetResidentPages() const;
+		/* 累计烘过多少页：页池装不下时看它还涨不涨，判断有没有来回换页 */
+		[[nodiscard]] uint64_t GetBakedPages() const { return m_BakedPages; }
 
 	private:
 		void ClearTable();
@@ -74,7 +78,7 @@ namespace Helios
 			uint32_t& out_grid_w, uint32_t& out_grid_h);
 		/* 从标记好的缺页里按距离挑出预算内的，排进待烘队列 */
 		void QueueMissing(const std::vector<uint8_t>& needed, const glm::vec2& min_corner,
-			uint32_t grid_w, uint32_t grid_h, const glm::vec3& eye);
+			uint32_t grid_w, uint32_t grid_h, const glm::vec3& eye, uint32_t frame);
 
 		SharedPtr<DeviceTexture> m_Pool;
 		SharedPtr<DeviceTexture> m_PageTable;
@@ -82,8 +86,18 @@ namespace Helios
 		/* 页表 CPU 副本：0 = 未驻留，否则层号 + 1 */
 		std::vector<float> m_Table;
 		std::vector<glm::uvec2> m_LayerPages;   /* 层号 → 页坐标（覆盖时要把旧页的页表项清掉） */
+		/* 每层的使用记录：Used 是最近用到它的帧号 + 1（0 = 空层），
+		 * Current / Previous 是这一帧与上一帧离最近视图的距离 */
+		static constexpr float kFarDistance = 1.0e30f;
+		struct LayerState
+		{
+			uint32_t Used{ 0 };
+			float Current{ kFarDistance };
+			float Previous{ kFarDistance };
+		};
+		std::vector<LayerState> m_Layers;
 		glm::vec2 m_Grid{ 0.0f };
-		uint32_t m_NextLayer{ 0 };
+		uint64_t m_BakedPages{ 0 };
 		/* 建页池时的档位：跟当前档位不一致就整份重建 */
 		uint32_t m_PoolTexels{ 0 };
 		uint32_t m_PoolLayers{ 0 };

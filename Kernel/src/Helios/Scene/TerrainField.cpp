@@ -160,6 +160,12 @@ namespace Helios
 		 * 拖 gizmo 只更新矩阵，不再重新生成整张高度图 */
 		if (std::memcmp(glm::value_ptr(world), glm::value_ptr(m_World), sizeof(glm::mat4)) != 0)
 		{
+			/* 页网格锚在地形原点上，平移时页跟着走；旋转缩放改了世界到局部的映射，页与底图要重烘 */
+			if (glm::mat3(world) != glm::mat3(m_World))
+			{
+				m_VirtualTexture.Reset();
+				++m_TransformRevision;
+			}
 			m_World = world;
 			m_WorldInverse = glm::inverse(world);
 			m_NormalMatrix = glm::transpose(m_WorldInverse);
@@ -568,13 +574,15 @@ namespace Helios
 
 	bool TerrainField::NeedsBasemap(uint32_t material_revision) const
 	{
-		return m_BasemapHeights != m_HeightsRevision || m_BasemapMaterial != material_revision;
+		return m_BasemapHeights != m_HeightsRevision || m_BasemapMaterial != material_revision
+			|| m_BasemapTransform != m_TransformRevision;
 	}
 
 	void TerrainField::MarkBasemapBaked(uint32_t material_revision) const
 	{
 		m_BasemapHeights = m_HeightsRevision;
 		m_BasemapMaterial = material_revision;
+		m_BasemapTransform = m_TransformRevision;
 	}
 
 	bool TerrainField::Raycast(const glm::vec3& origin, const glm::vec3& direction,

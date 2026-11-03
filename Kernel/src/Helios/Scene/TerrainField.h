@@ -100,7 +100,7 @@ namespace Helios
 		bool EnsureBasemap() const;
 		[[nodiscard]] const SharedPtr<DeviceTexture>& GetBasemap() const { return m_Basemap; }
 		[[nodiscard]] const SharedPtr<DeviceFrameBuffer>& GetBasemapFrameBuffer() const { return m_BasemapFrameBuffer; }
-		/* 高度或材质变了就要重烘：两个版本号都对上才算新鲜 */
+		/* 高度、材质或变换变了就要重烘：版本号都对上才算新鲜 */
 		[[nodiscard]] bool NeedsBasemap(uint32_t material_revision) const;
 		void MarkBasemapBaked(uint32_t material_revision) const;
 		/* 底图在世界里的矩形：xy 左下角、z 边长、w 每个纹素多少米；没有底图时全 0 */
@@ -266,10 +266,13 @@ namespace Helios
 		void RefreshHeightMap(const glm::uvec2& texel_min, const glm::uvec2& texel_max);
 
 		/* 远景底图：颜色图 + 烘它的离屏帧缓冲，以及烘完时记住的版本号。
-		 * 都是懒建的缓存（渲染通道拿到的是 const 地形），跟着高度与材质版本走 */
+		 * 都是懒建的缓存（渲染通道拿到的是 const 地形），跟着高度、材质与变换版本走 */
 		mutable SharedPtr<DeviceTexture> m_Basemap;
 		mutable SharedPtr<DeviceFrameBuffer> m_BasemapFrameBuffer;
 		mutable uint64_t m_BasemapHeights{ 0 };
 		mutable uint32_t m_BasemapMaterial{ 0 };
+		mutable uint64_t m_BasemapTransform{ 0 };
+		/* 变换版本：旋转或缩放每变一次加一，底图按它判断要不要重烘 */
+		uint64_t m_TransformRevision{ 0 };
 	};
 }
