@@ -66,12 +66,18 @@ namespace Helios
         }
     }
 
-    void ReflectionProbe::BakeEnvCubemap(RenderView* render_view)
+    void ReflectionProbe::BakeEnvCubemap(RenderView* render_view, int32_t face)
     {
         PROFILE_FUNCTION();
 
         const std::string label = GetDebugName() + "_BakeEnvCubemap";
         Renderer::GetRenderAPI()->PushDebugGroup(label.c_str());
+
+        /* face < 0：整轮 6 面（一次性烘焙 / 首轮 / 刚重烘焙）；否则只捕获这一面，
+         * 其余面沿用上一轮，实时探针每帧只付一张面的场景绘制成本 */
+        const bool single_face = face >= 0 && face < 6;
+        const uint32_t first_face = single_face ? static_cast<uint32_t>(face) : 0u;
+        const uint32_t face_end = single_face ? first_face + 1u : 6u;
 
         const uint32_t size = m_BakeConfig.EnvSize;
         if (!m_BakeResult.EnvColorCubemap || m_BakeResult.EnvColorCubemap->GetWidth() != size || m_BakeResult.EnvColorCubemap->GetHeight() != size)
@@ -98,12 +104,12 @@ namespace Helios
             material->SetTexture("u_EquirectangularMap", m_pSkyBoxTexture);
 
             auto capture_fb = MakeSceneCaptureFrameBuffer(m_BakeResult.EnvColorCubemap, nullptr, size);
-            for (int face = 0; face < 6; ++face)
+            for (uint32_t face_index = first_face; face_index < face_end; ++face_index)
             {
-                capture_fb->Bind(FrameBufferBindInfo::ToColorLayer(0, face, 0));
+                capture_fb->Bind(FrameBufferBindInfo::ToColorLayer(0, face_index, 0));
                 Renderer::Clear();
 
-                material->SetParameters(ParamType::Int, "u_FaceId", face);
+                material->SetParameters(ParamType::Int, "u_FaceId", static_cast<int>(face_index));
                 Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
             }
             capture_fb->Unbind();
@@ -145,12 +151,12 @@ namespace Helios
         submit_params.IgnoreProbes = true;
 
         auto capture_fb = MakeSceneCaptureFrameBuffer(m_BakeResult.EnvColorCubemap, m_BakeResult.EnvDepthCubemap, size);
-        for (uint32_t face = 0; face < 6; ++face)
+        for (uint32_t face_index = first_face; face_index < face_end; ++face_index)
         {
-            capture_fb->Bind(FrameBufferBindInfo::ToColorLayer(0, face, 0));
+            capture_fb->Bind(FrameBufferBindInfo::ToColorLayer(0, face_index, 0));
             Renderer::Clear();
 
-            const glm::mat4 view = GetCaptureViewMatrix(face);
+            const glm::mat4 view = GetCaptureViewMatrix(face_index);
             /* 捕获相机在探针位置：视图 = 朝向 × 平移(-探针位置)（标准 lookAt 约定
              * R·T(-eye)）——只给朝向矩阵会让捕获发生在世界原点，探针离原点越远、
              * 烘焙出的环境越离谱。 */

@@ -63,6 +63,11 @@ namespace Helios
         /* 设置每帧烘焙 */
         void SetRealtime(bool realtime) { m_IsRealtime = realtime; }
         bool IsRealtime() const { return m_IsRealtime; }
+
+        /* 实时捕获按面轮转：每帧只捕获一面，跟卷积同一个面号，六帧转一圈。
+         * 关掉就是每帧六面全烘，反射更新更及时，单帧成本约六倍。 */
+        void SetFaceRotation(bool rotate) { m_FaceRotation = rotate; }
+        [[nodiscard]] bool IsFaceRotation() const { return m_FaceRotation; }
         /* 每帧重烤只对场景捕获有意义：贴图烘焙的输入是静态图，换图走重烤请求 */
         [[nodiscard]] bool NeedsRealtimeBake() const { return m_IsRealtime && !m_BakeConfig.BakeFromSkyTexture; }
 
@@ -197,8 +202,9 @@ namespace Helios
     private:
         SharedPtr<DeviceFrameBuffer> MakeSceneCaptureFrameBuffer(const SharedPtr<DeviceTexture>& color_target, const SharedPtr<DeviceTexture>& depth_target, uint32_t size);
         /* 生成环境立方体贴图：BakeFromSkyTexture 时用 EquirectToCube 从源图生成；否则在探针位置用 6 个朝向的
-         * 相机实时捕获场景几何。返回的立方图供后续烘焙 IrradianceMap 和 PrefilterMap。 */
-        void BakeEnvCubemap(RenderView* render_view);
+         * 相机实时捕获场景几何。返回的立方图供后续烘焙 IrradianceMap 和 PrefilterMap。
+         * face < 0 表示整轮 6 面；否则只捕获这一面，其余面沿用上一轮（实时按面轮转）。 */
+        void BakeEnvCubemap(RenderView* render_view, int32_t face);
         /* 卷积的单面版本：实时烘焙每帧只算一面（六帧转一圈），一次性烘焙时由整轮版本循环调用 */
         void BakeIrradianceMapFace(uint32_t face);
         void BakePrefilterMapFace(uint32_t face);
@@ -224,7 +230,12 @@ namespace Helios
         BakeResult m_BakeResult{};
         bool m_IsRealtime{ false };
         bool m_BakeCompleted{ false };
-        /* 实时烘焙的卷积进度：只算这一面，算完 6 面转一圈（环境图仍每帧更新） */
+        /* 环境图是否已经整轮捕获过：没整轮填过时轮转会把空面喂给卷积，
+         * 所以首轮（含重烘焙）先整轮捕获一次 */
+        bool m_EnvComplete{ false };
+        /* 实时捕获是否按面轮转（每帧一面）；关掉 = 每帧六面全烘 */
+        bool m_FaceRotation{ true };
+        /* 实时烘焙的卷积进度：只算这一面，算完 6 面转一圈；环境图捕获跟它同一个面号 */
         uint32_t m_BakeConvolveFace{ 0 };
 
         /* IBL 应用参数（见上方 getter / setter 的说明） */

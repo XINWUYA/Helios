@@ -39,18 +39,26 @@ namespace Helios
         if (!need_bake)
             return;
 
+        /* 按面轮转：每帧只捕获一面，跟卷积用同一个面号，六帧转一圈。
+         * 环境图还没整轮填过（首轮 / 刚重烘焙）时整轮捕获一次，卷积不会读到空面。 */
+        const bool rotate_capture = realtime && m_FaceRotation && m_EnvComplete;
+        const int32_t capture_face = rotate_capture ? static_cast<int32_t>(m_BakeConvolveFace) : -1;
+
         /* 烘焙场景到立方体贴图 */
-        BakeEnvCubemap(render_view);
+        BakeEnvCubemap(render_view, capture_face);
         if (!m_BakeResult.EnvColorCubemap)
             return;
+
+        /* 走到这里至少有一轮完整捕获了，之后轮转只刷一面 */
+        m_EnvComplete = true;
 
         /* 立方图只渲染了 mip0：卷积需要采样更模糊的层级来近似"按立体角积分"，否则太阳这类极亮的
          * 小特征会被点采样成孤立超亮 texel。要用 RenderAPI 的版本（记录进当前帧命令流）——
          * GenerateMipmap 独立提交命令缓冲区会先执行、mip 全是 0。 */
         Renderer::GetRenderAPI()->GenerateMipmap(m_BakeResult.EnvColorCubemap);
 
-        /* 实时探针的卷积按面分帧：每帧只算一面，六帧转一圈。环境图仍然每帧更新，
-         * 落后的是低频的辐照度 / 预滤波，肉眼看不出；一次性烘焙照旧一轮做完。 */
+        /* 实时探针的卷积按面分帧：每帧只算一面，六帧转一圈。环境图同样按面轮转
+         * （见上），落后的是低频的辐照度 / 预滤波，肉眼看不出；一次性烘焙照旧一轮做完。 */
         if (realtime)
         {
             if (m_BakeConfig.BakeDiffuse)
@@ -86,6 +94,7 @@ namespace Helios
         m_BakeResult = BakeResult{};
         m_BakeCompleted = false;
         m_BakeConvolveFace = 0;
+        m_EnvComplete = false;
 
         /* 烘焙结果作废，预览随之作废：清空后由 UI 的按需请求在重新烘焙完成后重建 */
         for (auto& preview : m_BakePreviews)
