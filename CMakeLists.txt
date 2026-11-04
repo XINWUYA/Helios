@@ -138,6 +138,39 @@ elseif(UNIX)
     add_compile_definitions(PLATFORM_LINUX)
 endif()
 
+# macOS 把图标放进 .app 的 Resources，Windows 编进 exe 资源
+set(HELIOS_APP_ICON_DIR "${HELIOS_ENGINE_ROOT}/EngineRes/AppIcon")
+if(WIN32)
+    set(HELIOS_APP_ICON_ICO "${HELIOS_APP_ICON_DIR}/Helios.ico")
+    file(TO_CMAKE_PATH "${HELIOS_APP_ICON_ICO}" HELIOS_APP_ICON_ICO)
+    configure_file(
+        "${HELIOS_APP_ICON_DIR}/Helios.rc.in"
+        "${CMAKE_BINARY_DIR}/HeliosAppIcon.rc"
+        @ONLY
+    )
+endif()
+
+function(helios_set_app_icon target)
+    if(APPLE)
+        set_target_properties(${target} PROPERTIES MACOSX_BUNDLE_ICON_FILE "Helios.icns")
+        # 图标自己拷，CMake 自带的 bundle 拷贝排在签名之后，会把签名弄失效
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_BUNDLE_DIR:${target}>/Contents/Resources"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${HELIOS_APP_ICON_DIR}/Helios.icns"
+                    "$<TARGET_BUNDLE_DIR:${target}>/Contents/Resources/Helios.icns"
+            COMMENT "Copying Helios.icns into ${target}.app"
+            VERBATIM
+        )
+        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
+                     "${HELIOS_APP_ICON_DIR}/Helios.icns")
+    elseif(WIN32)
+        # GLFW 会读 exe 里叫 GLFW_ICON 的资源，窗口标题栏跟着一起换
+        target_sources(${target} PRIVATE "${CMAKE_BINARY_DIR}/HeliosAppIcon.rc")
+    endif()
+endfunction()
+
 # 资源根：引擎内置资源所有项目共享且只读；项目资源各自一份、可写。
 # 默认项目可用 -DHELIOS_PROJECT_DIR=... 换，运行期还能用 --project 覆盖。
 set(ENGINE_RES_PATH "${HELIOS_ENGINE_ROOT}/EngineRes")

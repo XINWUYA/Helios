@@ -79,6 +79,8 @@ set_target_properties(Editor PROPERTIES
     FOLDER "Applications"
 )
 
+helios_set_app_icon(Editor)
+
 # Platform-specific settings
 if(WIN32)
     target_compile_definitions(Editor PRIVATE PLATFORM_WINDOWS)

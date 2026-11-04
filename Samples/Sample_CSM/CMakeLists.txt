@@ -55,6 +55,8 @@ set_target_properties(Sample_CSM PROPERTIES
     FOLDER "Samples"
 )
 
+helios_set_app_icon(Sample_CSM)
+
 # Platform-specific settings
 if(WIN32)
     target_compile_definitions(Sample_CSM PRIVATE PLATFORM_WINDOWS)

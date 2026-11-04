@@ -55,6 +55,8 @@ set_target_properties(Sample_IBL PROPERTIES
     FOLDER "Samples"
 )
 
+helios_set_app_icon(Sample_IBL)
+
 # Platform-specific settings
 if(WIN32)
     target_compile_definitions(Sample_IBL PRIVATE PLATFORM_WINDOWS)

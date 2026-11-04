@@ -56,6 +56,8 @@ set_target_properties(Sample_SkyBox PROPERTIES
     FOLDER "Samples"
 )
 
+helios_set_app_icon(Sample_SkyBox)
+
 # Platform-specific settings
 if(WIN32)
     target_compile_definitions(Sample_SkyBox PRIVATE PLATFORM_WINDOWS)

@@ -52,6 +52,8 @@ set_target_properties(Sample_Scene PROPERTIES
     FOLDER "Samples"
 )
 
+helios_set_app_icon(Sample_Scene)
+
 # Platform-specific settings
 if(WIN32)
     target_compile_definitions(Sample_Scene PRIVATE PLATFORM_WINDOWS)
