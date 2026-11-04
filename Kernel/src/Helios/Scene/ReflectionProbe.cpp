@@ -95,6 +95,7 @@ namespace Helios
         m_BakeCompleted = false;
         m_BakeConvolveFace = 0;
         m_EnvComplete = false;
+        m_FramesSinceBake = 0;
 
         /* 烘焙结果作废，预览随之作废：清空后由 UI 的按需请求在重新烘焙完成后重建 */
         for (auto& preview : m_BakePreviews)
@@ -106,6 +107,22 @@ namespace Helios
     void ReflectionProbe::RequestRebake()
     {
         m_RebakeRequested = true;
+    }
+
+    bool ReflectionProbe::TickBakeInterval()
+    {
+        /* 还没烘出第一版（含刚重烘焙）不节流：先把结果赶出来，别让间隔拖住首帧 */
+        if (m_BakeInterval <= 1 || !m_BakeCompleted)
+        {
+            m_FramesSinceBake = 0;
+            return true;
+        }
+
+        if (++m_FramesSinceBake < m_BakeInterval)
+            return false;
+
+        m_FramesSinceBake = 0;
+        return true;
     }
 
     /* ==================== 烘焙结果缓存 ==================== */

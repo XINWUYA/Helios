@@ -68,6 +68,11 @@ namespace Helios
          * 关掉就是每帧六面全烘，反射更新更及时，单帧成本约六倍。 */
         void SetCaptureFacePerFrame(bool value) { m_CaptureFacePerFrame = value; }
         [[nodiscard]] bool IsCaptureFacePerFrame() const { return m_CaptureFacePerFrame; }
+
+        /* 烘焙间隔（帧）：实时探针每隔这么多帧才烘一次，0 或 1 表示每帧都烘。
+         * 第一版结果出来之前不节流，重烘焙也会立刻跑完一轮。 */
+        void SetBakeInterval(int frames) { m_BakeInterval = frames; }
+        [[nodiscard]] int GetBakeInterval() const { return m_BakeInterval; }
         /* 每帧重烤只对场景捕获有意义：贴图烘焙的输入是静态图，换图走重烤请求 */
         [[nodiscard]] bool NeedsRealtimeBake() const { return m_IsRealtime && !m_BakeConfig.BakeFromSkyTexture; }
 
@@ -82,6 +87,10 @@ namespace Helios
 
         /* 执行烘焙 */
         void Bake(RenderView* render_view);
+
+        /* 推进烘焙间隔计数（每帧一次，由 ReflectionProbeManager 在 Prepare 里调）：
+         * 返回 true 表示这一帧该烘了 */
+        bool TickBakeInterval();
 
         /* 探针关心的层：烘焙只捕获与它相交的层（剔除不想烘进去的物体），
          * 视图也只在与自身可见层相交时使用这份 IBL。默认全部层。 */
@@ -235,6 +244,10 @@ namespace Helios
         bool m_EnvComplete{ false };
         /* 实时捕获分帧：每帧只捕获一面；关掉 = 每帧六面全烘 */
         bool m_CaptureFacePerFrame{ true };
+        /* 烘焙间隔（帧）：0 / 1 = 每帧都烘 */
+        int m_BakeInterval{ 0 };
+        /* 距上次烘焙过了多少帧（间隔节流用） */
+        int m_FramesSinceBake{ 0 };
         /* 实时烘焙的卷积进度：只算这一面，算完 6 面转一圈；环境图捕获跟它同一个面号 */
         uint32_t m_BakeConvolveFace{ 0 };
 

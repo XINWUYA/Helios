@@ -181,7 +181,13 @@ namespace Helios
             probe->TickBakePreview();
 
             if (probe->NeedsRealtimeBake() || !probe->IsBaked())
+            {
+                /* 烘焙间隔：没到点的这一帧不挂 Pass，探针完全不进渲染图 */
+                if (!probe->TickBakeInterval())
+                    continue;
+
                 m_NeedBakeProbes.push_back(probe);
+            }
         }
     }
 

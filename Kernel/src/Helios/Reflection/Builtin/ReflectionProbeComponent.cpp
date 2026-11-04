@@ -88,6 +88,13 @@ namespace Helios
 					&ReflectionProbe::IsCaptureFacePerFrame, &ReflectionProbe::SetCaptureFacePerFrame>(),
 				"CaptureFacePerFrame", FieldType::Bool)
 			.When(MakePredicateCondition(&RealtimeSceneCapture))
+			/* 烘焙间隔：实时探针每隔这么多帧才烘一次，0 表示每帧都烘 */
+			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+					&ReflectionProbe::GetBakeInterval, &ReflectionProbe::SetBakeInterval>(),
+				"BakeInterval", FieldType::Int)
+			.Range(0.0f, 60.0f)
+			.Slider()
+			.When(MakePredicateCondition(&RealtimeSceneCapture))
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBoxSize, &ReflectionProbe::SetBoxSize>(),
 				"BoxSize", FieldType::Vec3, 0.1f, 10.0f)
