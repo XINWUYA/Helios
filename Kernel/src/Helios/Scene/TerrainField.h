@@ -109,6 +109,7 @@ namespace Helios
 		/* 高度重建的版本号：贴地对象据此判断要不要重新采样。笔刷改高度也会推进它，
 		 * 跟构建键分开 —— 构建键一改就会按参数重生成，编辑结果会被抹掉 */
 		[[nodiscard]] uint64_t GetRevision() const { return m_HeightsRevision; }
+		[[nodiscard]] const SharedPtr<Material>& GetMaterial() const { return m_MaterialIdentity; }
 
 		/* 远景底图：整块地形烘一张 1024² 的颜色图，虚拟纹理页没驻留的远处像素采它。
 		 * 烘焙与页共用同一份混色函数，颜色对得上，只差采样密度 */

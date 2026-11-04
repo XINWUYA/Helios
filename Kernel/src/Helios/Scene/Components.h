@@ -427,6 +427,8 @@ namespace Helios
 
 		/* 贴合地形：打开后叶根落到覆盖本片草地的地形表面，块底面也随之停画 */
 		bool m_ConformToTerrain{ true };
+		/* 按地表草层的混合权重决定哪里长草；旧场景默认保持原分布 */
+		bool m_UseTerrainGrowth{ false };
 		/* 叶片姿态对齐坡面的程度：0 = 始终竖直，1 = 完全垂直于坡面 */
 		float m_SurfaceAlign{ 1.0f };
 		/* 长草的最大坡度（度）：超过它的地方退化不画，0 = 不限 */

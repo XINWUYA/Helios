@@ -151,6 +151,8 @@ namespace Helios
 			float ScaleY{ 1.0f };
 			float SurfaceAlign{ 1.0f };
 			float MaxSlope{ 42.0f };
+			bool UseTerrainGrowth{ false };
+			glm::vec3 TerrainGrowth{ 0.45f, 0.06f, 0.62f };
 			uint32_t ChunksX{ 0 };
 			uint32_t ChunksZ{ 0 };
 			uint32_t PerChunk{ 0 };
@@ -236,6 +238,8 @@ namespace Helios
 		float m_ScaleY{ 1.0f };
 		float m_SurfaceAlign{ 1.0f };
 		float m_MaxSlope{ 42.0f };
+		bool m_UseTerrainGrowth{ false };
+		glm::vec3 m_TerrainGrowth{ 0.45f, 0.06f, 0.62f };
 		float m_StartCullDistance{ 25.0f };
 		float m_EndCullDistance{ 90.0f };
 		float m_MinDensityScale{ 0.1f };

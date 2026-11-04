@@ -23,7 +23,8 @@ layout(std140, binding = 4) uniform GrassPlacementBlock
 	/* ---- 贴地：有地形时叶片落到地形表面、姿态对齐坡面 ---- */
 	vec4 u_Terrain;       /* xyz 地形中心世界坐标（定位用）、w 局部起伏幅度 */
 	vec4 u_TerrainShape;  /* x 局部半宽、y 局部半长、z 高度图分辨率、w 是否有地形 */
-	vec4 u_GrassShape;    /* x 贴面程度、y cos(最大坡度)、z 是否启用坡度过滤 */
+	vec4 u_GrassShape;    /* x 贴面程度、y cos(最大坡度)、z 坡度过滤、w 生长权重 */
+	vec4 u_TerrainGrowth; /* xyz 岩坡、砂线、雪线 */
 	/* 地形几何在局部空间：世界点先拉到局部采样，法线再变换回世界 */
 	mat4 u_TerrainModel;
 	mat4 u_TerrainInverse;
@@ -84,7 +85,7 @@ float TerrainHeightAt(vec2 local_xz)
 vec3 TerrainNormalLocal(vec2 local_xz)
 {
 	const float texel = (u_TerrainShape.x * 2.0f) / max(u_TerrainShape.z - 1.0f, 1.0f);
-	const float step = max(texel * 2.0f, 0.01f);
+	const float step = max(texel * 2.0f, 0.05f);
 	const float hl = TerrainHeightAt(local_xz - vec2(step, 0.0f));
 	const float hr = TerrainHeightAt(local_xz + vec2(step, 0.0f));
 	const float hd = TerrainHeightAt(local_xz - vec2(0.0f, step));
@@ -103,6 +104,16 @@ uint MixHash(uint value)
 float HashUnit(uint base, uint channel)
 {
 	return float(MixHash(base + channel * 0x9e3779b9u) & 0xFFFFFFu) / float(0x1000000u);
+}
+
+float TerrainGrassWeight(float slope, float height_t)
+{
+	const float rock = smoothstep(u_TerrainGrowth.x * 0.5f,
+		max(u_TerrainGrowth.x, u_TerrainGrowth.x * 0.5f + 1e-6f), slope);
+	const float sand = 1.0f - smoothstep(u_TerrainGrowth.y, u_TerrainGrowth.y + 0.08f, height_t);
+	const float snow = smoothstep(u_TerrainGrowth.z, u_TerrainGrowth.z + 0.18f, height_t)
+		* (1.0f - 0.6f * smoothstep(0.25f, 0.7f, slope));
+	return (1.0f - sand) * (1.0f - rock) * (1.0f - snow);
 }
 
 void main()
@@ -143,14 +154,29 @@ void main()
 	{
 		/* 世界点 → 局部 → 采样高度 → 换回世界，再反查一次局部（俯仰时才需要第二遍） */
 		vec2 local_xz = TerrainLocalXZ(position.xz, position.y);
-		float local_h = TerrainHeightAt(local_xz);
-		float world_y = (u_TerrainModel * vec4(local_xz.x, local_h, local_xz.y, 1.0f)).y;
-		local_xz = TerrainLocalXZ(position.xz, world_y);
-		local_h = TerrainHeightAt(local_xz);
-		position.y = (u_TerrainModel * vec4(local_xz.x, local_h, local_xz.y, 1.0f)).y;
-		ground_normal = normalize((u_TerrainNormalMatrix * vec4(TerrainNormalLocal(local_xz), 0.0f)).xyz);
-		if (u_GrassShape.z > 0.5f && ground_normal.y < u_GrassShape.y)
-			growth = 0.0f;
+		const vec2 extent = u_TerrainShape.xy;
+		if (all(lessThanEqual(abs(local_xz), extent)))
+		{
+			float local_h = TerrainHeightAt(local_xz);
+			float world_y = (u_TerrainModel * vec4(local_xz.x, local_h, local_xz.y, 1.0f)).y;
+			local_xz = TerrainLocalXZ(position.xz, world_y);
+			if (all(lessThanEqual(abs(local_xz), extent)))
+			{
+				local_h = TerrainHeightAt(local_xz);
+				position.y = (u_TerrainModel * vec4(local_xz.x, local_h, local_xz.y, 1.0f)).y;
+				const vec3 local_normal = TerrainNormalLocal(local_xz);
+				ground_normal = normalize((u_TerrainNormalMatrix * vec4(local_normal, 0.0f)).xyz);
+				if (u_GrassShape.z > 0.5f && ground_normal.y < u_GrassShape.y)
+					growth = 0.0f;
+				if (u_GrassShape.w > 0.5f)
+				{
+					const float slope = clamp(1.0f - local_normal.y, 0.0f, 1.0f);
+					const float height_t = clamp(local_h / max(u_Terrain.w, 1.0f), 0.0f, 1.0f);
+					growth *= HashUnit(hash_base, 8u) < TerrainGrassWeight(slope, height_t)
+						? 1.0f : 0.0f;
+				}
+			}
+		}
 	}
 
 	/* 姿态对齐坡面：up 向法线插值，右/前向对 up 正交化（与 C++ 侧同一套公式） */

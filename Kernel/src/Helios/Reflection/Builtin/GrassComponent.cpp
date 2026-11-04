@@ -142,6 +142,8 @@ namespace Helios
 			.Field(&GrassComponent::m_MaxInstances, "MaxInstances", FieldType::Int, 1000.0f)
 			.Range(1000.0f, 4000000.0f)
 			.Field(&GrassComponent::m_DrawFlatUnderlay, "DrawFlatUnderlay", FieldType::Bool)
+			.Group("Terrain")
+			.Field(&GrassComponent::m_UseTerrainGrowth, "UseTerrainGrowth", FieldType::Bool)
 			.SaveExtra(&SaveGrassMaterial)
 			.LoadExtra(&LoadGrassMaterial)
 			.Register();

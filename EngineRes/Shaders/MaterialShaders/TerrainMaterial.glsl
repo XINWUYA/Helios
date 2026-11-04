@@ -64,7 +64,8 @@ STerrainSurface EvaluateTerrainSurface(vec2 local_xz)
 	const float slope = clamp(1.0f - local_normal.y, 0.0f, 1.0f);
 	const float height_t = clamp(TerrainHeight(local_xz) / max(u_HeightScale, 1.0f), 0.0f, 1.0f);
 
-	const float rock_weight = smoothstep(u_RockSlope * 0.5f, u_RockSlope, slope);
+	const float rock_weight = smoothstep(u_RockSlope * 0.5f,
+		max(u_RockSlope, u_RockSlope * 0.5f + 1e-6f), slope);
 	const float sand_weight = 1.0f - smoothstep(u_SandHeight, u_SandHeight + 0.08f, height_t);
 	/* 陡壁挂不住雪：坡度越大雪越薄 */
 	const float snow_weight = smoothstep(u_SnowHeight, u_SnowHeight + 0.18f, height_t)

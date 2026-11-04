@@ -89,20 +89,21 @@ namespace Helios::TerrainSampling
 
 		/* 差分步长取两个纹素：再小会被高度图的高频细节抖成麻点 */
 		const float texel = (extent.x * 2.0f) / static_cast<float>(std::max(1u, resolution - 1));
-		const float step = std::max(texel * 2.0f, 0.01f);
+		const float step = std::max(texel * 2.0f, 0.05f);
+		const auto sample_neighbor = [&](const glm::vec2& point, float& height)
+		{
+			return SampleHeight(heights, resolution, extent, height_scale,
+				glm::clamp(point, -extent, extent), height);
+		};
 
 		float hl = 0.0f;
 		float hr = 0.0f;
 		float hd = 0.0f;
 		float hu = 0.0f;
-		if (!SampleHeight(heights, resolution, extent, height_scale,
-				local_xz - glm::vec2(step, 0.0f), hl)
-			|| !SampleHeight(heights, resolution, extent, height_scale,
-				local_xz + glm::vec2(step, 0.0f), hr)
-			|| !SampleHeight(heights, resolution, extent, height_scale,
-				local_xz - glm::vec2(0.0f, step), hd)
-			|| !SampleHeight(heights, resolution, extent, height_scale,
-				local_xz + glm::vec2(0.0f, step), hu))
+		if (!sample_neighbor(local_xz - glm::vec2(step, 0.0f), hl)
+			|| !sample_neighbor(local_xz + glm::vec2(step, 0.0f), hr)
+			|| !sample_neighbor(local_xz - glm::vec2(0.0f, step), hd)
+			|| !sample_neighbor(local_xz + glm::vec2(0.0f, step), hu))
 		{
 			return false;
 		}

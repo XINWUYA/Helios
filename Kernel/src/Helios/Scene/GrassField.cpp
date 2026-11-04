@@ -3,6 +3,8 @@
 #include "TerrainField.h"
 #include "TerrainSampling.h"
 #include "Helios/Core/Jobs.h"
+#include "Helios/Scene/Material.h"
+#include "Helios/VirtualDevice/DeviceShader.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "Components.h"
 #include "Helios/Renderer/Renderer.h"
@@ -51,6 +53,44 @@ namespace Helios
 		}
 
 		constexpr float kTwoPi = 6.2831853f;
+
+		float TerrainMaterialFloat(const Material& material, const char* name, float fallback)
+		{
+			for (const auto& [_, param] : material.GetAllParameters())
+			{
+				if (param.Name == name && param.Type == ParamType::Float)
+				{
+					if (const float* value = std::any_cast<float>(&param.Value))
+						return *value;
+				}
+			}
+			if (material.GetShader() != nullptr)
+			{
+				const auto* reflected = material.GetShader()->GetReflectionData().FindMaterialParam(name);
+				if (reflected != nullptr && reflected->Type == ParamType::Float)
+				{
+					if (const float* value = std::any_cast<float>(&reflected->Default))
+						return *value;
+				}
+			}
+			return fallback;
+		}
+
+		float SmoothStep(float lo, float hi, float value)
+		{
+			const float t = std::clamp((value - lo) / std::max(hi - lo, 1e-6f), 0.0f, 1.0f);
+			return t * t * (3.0f - 2.0f * t);
+		}
+
+		float TerrainGrassWeight(float slope, float height, const glm::vec3& thresholds)
+		{
+			const float rock = SmoothStep(thresholds.x * 0.5f,
+				std::max(thresholds.x, thresholds.x * 0.5f + 1e-6f), slope);
+			const float sand = 1.0f - SmoothStep(thresholds.y, thresholds.y + 0.08f, height);
+			const float snow = SmoothStep(thresholds.z, thresholds.z + 0.18f, height)
+				* (1.0f - 0.6f * SmoothStep(0.25f, 0.7f, slope));
+			return (1.0f - sand) * (1.0f - rock) * (1.0f - snow);
+		}
 	}
 
 	void GrassField::SetGlobalGpuPlacementEnabled(bool enabled)
@@ -119,6 +159,7 @@ namespace Helios
 		mix(&component.m_SurfaceAlign, sizeof(component.m_SurfaceAlign));
 		mix(&component.m_MaxSlope, sizeof(component.m_MaxSlope));
 		mix(&component.m_FollowTerrain, sizeof(component.m_FollowTerrain));
+		mix(&component.m_UseTerrainGrowth, sizeof(component.m_UseTerrainGrowth));
 		mix(&component.m_MaxInstances, sizeof(component.m_MaxInstances));
 		/* 接受阴影写进实例参数，改了要重建才生效 */
 		mix(&component.m_ReceiveShadow, sizeof(component.m_ReceiveShadow));
@@ -128,6 +169,17 @@ namespace Helios
 		mix(&ground, sizeof(ground));
 		const uint64_t ground_revision = ground != nullptr ? ground->GetRevision() : 0ull;
 		mix(&ground_revision, sizeof(ground_revision));
+		glm::vec3 terrain_growth(0.45f, 0.06f, 0.62f);
+		if (ground != nullptr && component.m_UseTerrainGrowth && ground->GetMaterial() != nullptr)
+		{
+			const Material& material = *ground->GetMaterial();
+			terrain_growth = glm::vec3(
+				TerrainMaterialFloat(material, "u_RockSlope", terrain_growth.x),
+				TerrainMaterialFloat(material, "u_SandHeight", terrain_growth.y),
+				TerrainMaterialFloat(material, "u_SnowHeight", terrain_growth.z));
+			for (const float value : { terrain_growth.x, terrain_growth.y, terrain_growth.z })
+				mix(&value, sizeof(value));
+		}
 		/* 观察范围按块尺寸量化：相机缩放、平移动不到一个块就不重建。
 		 * 重建一次要重传几十兆实例数据，相机连续动起来卡顿全在这里 */
 		const float focus_quantum = std::clamp(component.m_EndCullDistance * 0.25f, 8.0f, 64.0f);
@@ -209,6 +261,8 @@ namespace Helios
 		m_Width = std::max(0.0f, component.m_Width);
 		m_SurfaceAlign = std::clamp(component.m_SurfaceAlign, 0.0f, 1.0f);
 		m_MaxSlope = std::max(0.0f, component.m_MaxSlope);
+		m_UseTerrainGrowth = component.m_UseTerrainGrowth;
+		m_TerrainGrowth = terrain_growth;
 		m_StartCullDistance = component.m_StartCullDistance;
 		m_EndCullDistance = component.m_EndCullDistance;
 		m_MinDensityScale = component.m_MinDensityScale;
@@ -564,6 +618,8 @@ namespace Helios
 		params.ScaleY = m_ScaleY;
 		params.SurfaceAlign = m_SurfaceAlign;
 		params.MaxSlope = m_MaxSlope;
+		params.UseTerrainGrowth = m_UseTerrainGrowth;
+		params.TerrainGrowth = m_TerrainGrowth;
 		params.ChunksX = m_ChunksX;
 		params.ChunksZ = m_ChunksZ;
 		params.PerChunk = m_PerChunk;
@@ -671,6 +727,14 @@ namespace Helios
 									{
 										growth = 0.0f;
 									}
+									if (params.UseTerrainGrowth)
+									{
+										const float slope = std::clamp(1.0f - local_normal.y, 0.0f, 1.0f);
+										const float height_t = std::clamp(local_height
+											/ std::max(params.GroundHeightScale, 1.0f), 0.0f, 1.0f);
+										growth *= HashUnit(base, 8u) < TerrainGrassWeight(slope,
+											height_t, params.TerrainGrowth) ? 1.0f : 0.0f;
+									}
 								}
 							}
 						}
@@ -756,7 +820,8 @@ namespace Helios
 			glm::vec4 Blade{ 0.0f };         /* x 叶高、y 叶宽、z 接受阴影、w 总株数 */
 			glm::vec4 Terrain{ 0.0f };       /* xyz 地形中心、w 起伏总高差 */
 			glm::vec4 TerrainShape{ 0.0f };  /* x 半宽、y 半长、z 分辨率、w 是否有地形 */
-			glm::vec4 GrassShape{ 0.0f };    /* x 贴面程度、y cos(最大坡度)、z 启用坡度过滤 */
+			glm::vec4 GrassShape{ 0.0f };    /* x 贴面程度、y cos(最大坡度)、z 坡度过滤、w 生长权重 */
+			glm::vec4 TerrainGrowth{ 0.0f }; /* xyz 岩坡、砂线、雪线 */
 			glm::mat4 TerrainModel{ 1.0f };  /* 地形局部 → 世界 */
 			glm::mat4 TerrainInverse{ 1.0f };
 			glm::mat4 TerrainNormalMatrix{ 1.0f };
@@ -786,7 +851,8 @@ namespace Helios
 			const bool slope_filter = m_MaxSlope > 0.0f && m_MaxSlope < 90.0f;
 			params.GrassShape = glm::vec4(m_SurfaceAlign,
 				slope_filter ? std::cos(glm::radians(m_MaxSlope)) : -1.0f,
-				slope_filter ? 1.0f : 0.0f, 0.0f);
+				slope_filter ? 1.0f : 0.0f, m_UseTerrainGrowth ? 1.0f : 0.0f);
+			params.TerrainGrowth = glm::vec4(m_TerrainGrowth, 0.0f);
 		}
 
 		if (Renderer::DispatchGrassPlacement(m_InstanceStorage, &params, sizeof(params), m_InstanceCount,
