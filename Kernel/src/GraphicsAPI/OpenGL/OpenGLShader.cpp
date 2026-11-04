@@ -569,6 +569,19 @@ namespace Helios
 			GLuint shader = glCreateShader(shader_type);
 			glShaderBinary(1, &shader, GL_SHADER_BINARY_FORMAT_SPIR_V, shader_data.data(), shader_data.size() * sizeof(uint32_t));
 			glSpecializeShader(shader, "main", 0, nullptr, nullptr);
+
+			/* specialization 失败时 shader 是无效的，挂上去只会在 link 阶段报一句看不懂的错 */
+			GLint specialized = 0;
+			glGetShaderiv(shader, GL_COMPILE_STATUS, &specialized);
+			if (specialized == GL_FALSE)
+			{
+				GLint log_length = 0;
+				glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &log_length);
+				std::vector<GLchar> info_log(static_cast<size_t>(log_length > 0 ? log_length : 1));
+				glGetShaderInfoLog(shader, log_length, &log_length, info_log.data());
+				CORE_LOG_ERROR("Shader specialization failed ({}):\n{}", m_Path, info_log.data());
+				m_CompileFailed = true;
+			}
 			glAttachShader(program, shader);
 #ifdef HELIOS_DEBUG
 			glObjectLabel(GL_SHADER, shader, -1, m_DebugName.c_str());

@@ -906,7 +906,14 @@ namespace Helios
                     return std::nullopt;
 
                 if (decl.Kind == SlotKind::LooseUniform)
-                    uniforms.Add(decl.Name, type_key(decl), decl.ArraySize, conflict);
+                {
+                    /* 一个 location 是一组 vec4：矩阵按列数占，数组再乘元素个数。
+                     * 少算会让后一个 uniform 落进矩阵的槽里，GL 链接直接报重叠 */
+                    uint32_t slot_count = 0;
+                    const uint32_t count = CountVaryingLocations(decl.Type, structs, slot_count)
+                        ? std::max(1u, slot_count) : 1u;
+                    uniforms.Add(decl.Name, type_key(decl), count * decl.ArraySize, conflict);
+                }
                 else if (decl.Kind == SlotKind::Sampler)
                     samplers.Add(decl.Name, type_key(decl), decl.ArraySize, conflict);
                 else if (is_varying(stage, decl))
