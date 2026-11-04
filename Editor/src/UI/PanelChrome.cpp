@@ -136,20 +136,27 @@ namespace Helios::PanelChrome
 			dot_radius, ImGui::GetColorU32(EditorTheme::Token::Text));
 	}
 
-	bool MenuItemWithIcon(Icons::Id icon, const char* label)
+	bool MenuItemWithIcon(Icons::Id icon, const char* label, const char* shortcut, bool enabled,
+		float row_height)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 		const float icon_size = ImGui::GetFontSize();
-		const float icon_gap = style.ItemInnerSpacing.x;
+		const float leading = (icon == Icons::Id::None) ? 0.0f : icon_size + style.ItemInnerSpacing.x;
 
 		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
-		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x;
+		const ImVec2 shortcut_size = (shortcut != nullptr)
+			? ImGui::CalcTextSize(shortcut, nullptr, true) : ImVec2(0.0f, 0.0f);
+		const float width = style.FramePadding.x * 2.0f + leading + label_size.x
+			+ ((shortcut != nullptr) ? shortcut_size.x + style.ItemInnerSpacing.x * 3.0f : 0.0f);
+
+		if (!enabled)
+			ImGui::BeginDisabled();
 
 		ImGui::PushID(label);
 		const bool clicked = ImGui::Selectable("##row", false,
 			ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover
 				| ImGuiSelectableFlags_SpanAvailWidth,
-			ImVec2(width, 0.0f));
+			ImVec2(width, row_height));
 		ImGui::PopID();
 
 		const ImVec2 min = ImGui::GetItemRectMin();
@@ -159,25 +166,37 @@ namespace Helios::PanelChrome
 		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
 
 		/* 图标与文字都画在 Selectable 之后：悬停底色已经落好，不会被盖住 */
-		Icons::Draw(draw_list, icon,
-			ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
-			icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
+		if (icon != Icons::Id::None)
+			Icons::Draw(draw_list, icon,
+				ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
+				icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
 
 		draw_list->AddText(
-			ImVec2(min.x + style.FramePadding.x + icon_size + icon_gap,
+			ImVec2(min.x + style.FramePadding.x + leading,
 				center_y - ImGui::GetFontSize() * 0.5f),
 			ImGui::GetColorU32(EditorTheme::Token::Text), label);
+
+		if (shortcut != nullptr)
+		{
+			draw_list->AddText(ImVec2(max.x - style.FramePadding.x - shortcut_size.x,
+				center_y - shortcut_size.y * 0.5f),
+				ImGui::GetColorU32(EditorTheme::Token::TextDim), shortcut);
+		}
+
+		if (!enabled)
+			ImGui::EndDisabled();
 
 		return clicked;
 	}
 
-	void PushMenuStyle()
+	void PushMenuStyle(bool use_toolbar_item_spacing)
 	{
+		const ImVec2 item_spacing = ImGui::GetStyle().ItemSpacing;
 		ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, EditorTheme::Scaled(6.0f));
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
 			ImVec2(EditorTheme::Scaled(8.0f), EditorTheme::Scaled(10.0f)));
 		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-			ImVec2(ImGui::GetStyle().ItemSpacing.x, EditorTheme::Scaled(4.0f)));
+			ImVec2(item_spacing.x, use_toolbar_item_spacing ? 0.0f : EditorTheme::Scaled(4.0f)));
 	}
 
 	bool MenuItemText(const char* label, const char* shortcut)
@@ -230,10 +249,10 @@ namespace Helios::PanelChrome
 		const ImGuiStyle& style = ImGui::GetStyle();
 		const float icon_size = ImGui::GetFontSize();
 		const float icon_gap = style.ItemInnerSpacing.x;
+		const float leading = (icon == Icons::Id::None) ? 0.0f : icon_size + icon_gap;
 
-		/* 与 MenuItemWithIcon 同一笔账，尾部再加一个图标宽的勾选格 */
 		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
-		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x
+		const float width = style.FramePadding.x * 2.0f + leading + label_size.x
 			+ icon_gap + icon_size;
 
 		ImGui::PushID(label);
@@ -249,13 +268,13 @@ namespace Helios::PanelChrome
 
 		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
 
-		/* 图标与文字都画在 Selectable 之后：悬停底色已经落好，不会被盖住 */
-		Icons::Draw(draw_list, icon,
-			ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
-			icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
+		if (icon != Icons::Id::None)
+			Icons::Draw(draw_list, icon,
+				ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
+				icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
 
 		draw_list->AddText(
-			ImVec2(min.x + style.FramePadding.x + icon_size + icon_gap,
+			ImVec2(min.x + style.FramePadding.x + leading,
 				center_y - ImGui::GetFontSize() * 0.5f),
 			ImGui::GetColorU32(EditorTheme::Token::Text), label);
 
@@ -348,9 +367,9 @@ namespace Helios::PanelChrome
 		const float icon_size = ImGui::GetFontSize();
 		const float icon_gap = style.ItemInnerSpacing.x;
 
-		/* 与 MenuItemToggleWithIcon 同一笔账，尾部再加一个图标宽的勾选格 */
+		const float leading = (icon == Icons::Id::None) ? 0.0f : icon_size + icon_gap;
 		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
-		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x
+		const float width = style.FramePadding.x * 2.0f + leading + label_size.x
 			+ icon_gap + icon_size;
 
 		if (!enabled)
@@ -369,13 +388,13 @@ namespace Helios::PanelChrome
 
 		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
 
-		/* 图标与文字都画在 Selectable 之后：悬停底色已经落好，不会被盖住 */
-		Icons::Draw(draw_list, icon,
-			ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
-			icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
+		if (icon != Icons::Id::None)
+			Icons::Draw(draw_list, icon,
+				ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
+				icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
 
 		draw_list->AddText(
-			ImVec2(min.x + style.FramePadding.x + icon_size + icon_gap,
+			ImVec2(min.x + style.FramePadding.x + leading,
 				center_y - ImGui::GetFontSize() * 0.5f),
 			ImGui::GetColorU32(EditorTheme::Token::Text), label);
 
@@ -392,26 +411,29 @@ namespace Helios::PanelChrome
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 		const ImVec2 min = ImGui::GetCursorScreenPos();
-		const float width = ImGui::GetContentRegionAvail().x;
 		const float height = ImGui::GetTextLineHeight() + style.FramePadding.y + style.ItemSpacing.y;
-		ImGui::Dummy(ImVec2(width, height));
+		ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, height));
 
-		ImDrawList* const draw_list = ImGui::GetWindowDrawList();
 		ImFont* const font = ImGui::GetFont();
 		const float font_size = ImGui::GetFontSize() * 0.85f;
 		const ImVec2 text_size = font->CalcTextSizeA(font_size, FLT_MAX, 0.0f, label);
-
-		draw_list->AddText(font, font_size,
+		ImGui::GetWindowDrawList()->AddText(font, font_size,
 			ImVec2(min.x, min.y + (height - text_size.y) * 0.5f),
-			ImGui::GetColorU32(EditorTheme::Token::TextDim), label);
-
-		const float line_y = min.y + height * 0.5f;
-		const float line_x = min.x + text_size.x + style.ItemInnerSpacing.x * 2.0f;
-		draw_list->AddLine(ImVec2(line_x, line_y), ImVec2(min.x + width, line_y),
-			ImGui::GetColorU32(EditorTheme::Token::Separator), 1.0f);
+			ImGui::GetColorU32(EditorTheme::MixRgb(EditorTheme::Token::TextDim,
+				EditorTheme::Token::Text, 0.20f)), label);
 	}
 
-	bool BeginMenuWithIcon(Icons::Id icon, const char* label)
+	void MenuStatusText(const char* text)
+	{
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float indent = style.FramePadding.x;
+
+		ImGui::Indent(indent);
+		ImGui::TextDisabled("%s", text);
+		ImGui::Unindent(indent);
+	}
+
+	bool BeginMenuWithIcon(Icons::Id icon, const char* label, float row_height)
 	{
 		ImGuiContext& g = *ImGui::GetCurrentContext();
 		ImGuiWindow* const window = g.CurrentWindow;
@@ -430,14 +452,15 @@ namespace Helios::PanelChrome
 		if (window->Flags & (ImGuiWindowFlags_Popup | ImGuiWindowFlags_ChildMenu))
 			flags |= ImGuiWindowFlags_ChildWindow;
 
-		/* ---- 行：整行命中（Selectable），图标 / 文本 / 箭头画在它之后 ----
+		/* ---- 行：整行命中（Selectable），文本与箭头画在它之后 ----
 		 * Selectable 用空 label：空串的 ID 就是 ID 栈顶 —— 恰是 GetID(label) 的值
 		 *（PushID(label) 把它压上来），于是行 id 与 popup id 同源、悬停判定对得上。 */
 		const float icon_size = ImGui::GetFontSize();
 		const float icon_gap = style.ItemInnerSpacing.x;
+		const float leading = (icon == Icons::Id::None) ? 0.0f : icon_size + icon_gap;
 		const ImVec2 label_size = ImGui::CalcTextSize(label, nullptr, true);
-		const float width = style.FramePadding.x * 2.0f + icon_size + icon_gap + label_size.x
-			+ icon_gap + icon_size;   /* 尾部留一个图标宽的箭头格 */
+		const float width = style.FramePadding.x * 2.0f + leading + label_size.x
+			+ icon_gap + icon_size;
 
 		const ImVec2 pos = window->DC.CursorPos;
 		const ImVec2 popup_pos(pos.x, pos.y - style.WindowPadding.y);
@@ -446,7 +469,7 @@ namespace Helios::PanelChrome
 		const bool pressed = ImGui::Selectable("", menu_is_open,
 			ImGuiSelectableFlags_NoHoldingActiveID | ImGuiSelectableFlags_SelectOnClick
 				| ImGuiSelectableFlags_DontClosePopups | ImGuiSelectableFlags_SpanAvailWidth,
-			ImVec2(width, 0.0f));
+			ImVec2(width, row_height));
 		ImGui::PopID();
 
 		const bool hovered = (g.HoveredId == id);
@@ -457,14 +480,14 @@ namespace Helios::PanelChrome
 			const float center_y = (min.y + max.y) * 0.5f;
 			ImDrawList* const draw_list = ImGui::GetWindowDrawList();
 
-			/* 图标与文本画在 Selectable 之后（悬停底色已经落好）——
-			 * 起点公式与 MenuItemWithIcon 一致，图标列 / 文本列自然对齐。 */
-			Icons::Draw(draw_list, icon,
-				ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
-				icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
+			/* 装饰在命中行之后绘制，文字与其它菜单行对齐。 */
+			if (icon != Icons::Id::None)
+				Icons::Draw(draw_list, icon,
+					ImVec2(min.x + style.FramePadding.x + icon_size * 0.5f, center_y),
+					icon_size, ImGui::GetColorU32(EditorTheme::Token::TextLabel));
 
 			draw_list->AddText(
-				ImVec2(min.x + style.FramePadding.x + icon_size + icon_gap,
+				ImVec2(min.x + style.FramePadding.x + leading,
 					center_y - ImGui::GetFontSize() * 0.5f),
 				ImGui::GetColorU32(EditorTheme::Token::Text), label);
 

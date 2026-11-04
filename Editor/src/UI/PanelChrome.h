@@ -75,13 +75,16 @@ namespace Helios::PanelChrome
 	/* ==================== 菜单行内容 ==================== */
 
 	/* 带图标的菜单行（下拉条目）：整行命中 / 悬停高亮 / 点击收起都跟 MenuItem 一样，
-	 * 只是文字前多一枚矢量图标；行宽要自己算（弹层是 AlwaysAutoResize，控件多宽弹层就多宽）。 */
-	bool MenuItemWithIcon(Icons::Id icon, const char* label);
+	 * 只是文字前多一枚矢量图标，右端可带快捷键；行宽要自己算（弹层是 AlwaysAutoResize，
+	 * 控件多宽弹层就多宽）。icon 传 None 时不留图标列；row_height 仅供顶栏菜单指定统一行高。 */
+	bool MenuItemWithIcon(Icons::Id icon, const char* label, const char* shortcut = nullptr,
+		bool enabled = true, float row_height = 0.0f);
 
-	/* 浮动菜单（右键 / 下拉）的统一版式：圆角 6、上下内边距 10、行距 4。
+	/* 浮动菜单（右键 / 下拉）的统一版式：圆角 6、上下内边距 10，默认行距 4。
+	 * 顶栏下拉沿用工具栏 Debug View 弹层的零纵向行距，其余浮层保持原有紧凑行距。
 	 * ⚠️ 必须压在 Begin* 之前 —— 窗口的圆角与内边距在本帧第一次 Begin 时就锁定了，
 	 * 压在窗口内部完全不生效（看起来像没改）。 */
-	void PushMenuStyle();
+	void PushMenuStyle(bool use_toolbar_item_spacing = false);
 
 	inline void PopMenuStyle()
 	{
@@ -112,14 +115,17 @@ namespace Helios::PanelChrome
 	 * 图标 / 文字 / 对勾跟着 BeginDisabled 一起变淡。 */
 	bool MenuItemSelectWithIcon(Icons::Id icon, const char* label, bool selected, bool enabled = true);
 
-	/* 菜单分区头（弹层里的分组标题）：不可点的小标题 —— 小一号大写字母 + 右侧一条细线。
-	 * 行宽取内容区右缘（auto-resize 弹层从第二帧起就稳定了）。 */
+	/* 菜单分区头：用低对比度小标题和留白分组，标题本身不画线。 */
 	void MenuSectionHeader(const char* label);
+
+	/* 菜单里的状态文字（脚本 / 着色器计数）：与无图标条目左侧对齐。 */
+	void MenuStatusText(const char* text);
 
 	/* 带图标的子菜单行（「新建」下拉里的分组行）：外观 = 菜单行 + 右缘一个右向箭头；
 	 * 行为照搬 ImGui BeginMenu 的垂直弹层路径（悬停展开、链式关闭、ChildMenu）。
-	 * 只给弹层菜单用；键盘导航略过（这些菜单的键盘入口是搜索框）。 */
-	bool BeginMenuWithIcon(Icons::Id icon, const char* label);
+	 * 只给弹层菜单用；键盘导航略过（这些菜单的键盘入口是搜索框）。
+	 * row_height 仅供顶栏菜单指定统一行高。 */
+	bool BeginMenuWithIcon(Icons::Id icon, const char* label, float row_height = 0.0f);
 
 	/* 配对收尾（= EndMenu 的 EndPopup 部分；键盘 nav 的 Left 关闭逻辑不参与，从略） */
 	inline void EndMenuWithIcon()
