@@ -144,6 +144,12 @@ namespace Helios
 			.Field(&GrassComponent::m_DrawFlatUnderlay, "DrawFlatUnderlay", FieldType::Bool)
 			.Group("Terrain")
 			.Field(&GrassComponent::m_UseTerrainGrowth, "UseTerrainGrowth", FieldType::Bool)
+			.Group("Blades")
+			.Field(&GrassComponent::m_ClumpSize, "ClumpSize", FieldType::Float, 0.1f)
+			.Range(0.25f, 8.0f)
+			.Field(&GrassComponent::m_ClumpStrength, "ClumpStrength", FieldType::Float, 0.01f)
+			.Range(0.0f, 1.0f)
+			.Slider()
 			.SaveExtra(&SaveGrassMaterial)
 			.LoadExtra(&LoadGrassMaterial)
 			.Register();

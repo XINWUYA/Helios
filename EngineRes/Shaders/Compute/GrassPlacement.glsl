@@ -25,6 +25,7 @@ layout(std140, binding = 4) uniform GrassPlacementBlock
 	vec4 u_TerrainShape;  /* x 局部半宽、y 局部半长、z 高度图分辨率、w 是否有地形 */
 	vec4 u_GrassShape;    /* x 贴面程度、y cos(最大坡度)、z 坡度过滤、w 生长权重 */
 	vec4 u_TerrainGrowth; /* xyz 岩坡、砂线、雪线 */
+	vec4 u_Clump;         /* x 簇宽、y 簇级相关强度 */
 	/* 地形几何在局部空间：世界点先拉到局部采样，法线再变换回世界 */
 	mat4 u_TerrainModel;
 	mat4 u_TerrainInverse;
@@ -106,6 +107,25 @@ float HashUnit(uint base, uint channel)
 	return float(MixHash(base + channel * 0x9e3779b9u) & 0xFFFFFFu) / float(0x1000000u);
 }
 
+vec3 ClumpCorner(ivec2 cell, uint seed)
+{
+	const uint base = MixHash(uint(cell.x)
+		^ MixHash(uint(cell.y) ^ MixHash(seed ^ 0xa511e9b3u)));
+	return vec3(HashUnit(base, 3u), HashUnit(base, 4u), HashUnit(base, 5u));
+}
+
+vec3 ClumpRandom(vec2 local_xz, float size, uint seed)
+{
+	const vec2 grid = local_xz / size;
+	const vec2 cell = floor(grid);
+	const vec2 fraction = grid - cell;
+	const vec2 blend = fraction * fraction * (3.0f - 2.0f * fraction);
+	const ivec2 corner = ivec2(cell);
+	return mix(mix(ClumpCorner(corner, seed), ClumpCorner(corner + ivec2(1, 0), seed), blend.x),
+		mix(ClumpCorner(corner + ivec2(0, 1), seed),
+			ClumpCorner(corner + ivec2(1, 1), seed), blend.x), blend.y);
+}
+
 float TerrainGrassWeight(float slope, float height_t)
 {
 	const float rock = smoothstep(u_TerrainGrowth.x * 0.5f,
@@ -141,9 +161,24 @@ void main()
 	const float local_x = -half_x + (float(cx) + HashUnit(hash_base, 1u)) * u_Shape.z;
 	const float local_z = -half_z + (float(cz) + HashUnit(hash_base, 2u)) * u_Shape.w;
 
-	const float yaw = HashUnit(hash_base, 3u) * kTwoPi;
-	const float height = u_Blade.x * u_BasisUp.w * (0.7f + 0.55f * HashUnit(hash_base, 4u));
-	const float width = u_Blade.y * u_BasisRight.w * (0.75f + 0.5f * HashUnit(hash_base, 5u));
+	float yaw = HashUnit(hash_base, 3u) * kTwoPi;
+	float height_seed = HashUnit(hash_base, 4u);
+	float width_seed = HashUnit(hash_base, 5u);
+	if (u_Clump.y > 0.0f)
+	{
+		const vec3 clump = ClumpRandom(vec2(local_x, local_z), u_Clump.x, seed);
+		const float clump_yaw = clump.x * kTwoPi;
+		float difference = yaw - clump_yaw;
+		if (difference > kTwoPi * 0.5f)
+			difference -= kTwoPi;
+		else if (difference < -kTwoPi * 0.5f)
+			difference += kTwoPi;
+		yaw = clump_yaw + difference * (1.0f - u_Clump.y);
+		height_seed = mix(height_seed, clump.y, u_Clump.y);
+		width_seed = mix(width_seed, clump.z, u_Clump.y);
+	}
+	const float height = u_Blade.x * u_BasisUp.w * (0.7f + 0.55f * height_seed);
+	const float width = u_Blade.y * u_BasisRight.w * (0.75f + 0.5f * width_seed);
 
 	vec3 position = u_Origin.xyz + right_axis * local_x + forward_axis * local_z;
 

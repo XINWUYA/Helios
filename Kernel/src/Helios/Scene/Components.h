@@ -401,6 +401,9 @@ namespace Helios
 		float m_Density{ 55.0f };                /* 每平米株数（近档） */
 		float m_Height{ 0.5f };
 		float m_Width{ 0.045f };
+		/* 同一区域共享朝向与高宽趋势；0 关闭，不改变实例与剔除块。 */
+		float m_ClumpSize{ 1.5f };
+		float m_ClumpStrength{ 0.0f };
 
 		/* 距离抽稀：StartCullDistance 以内满密度，之后逐株变稀，EndCullDistance 处归零。
 		 * 名字跟 UE 的 Grass Variety 一致，好对照 */

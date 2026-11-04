@@ -147,6 +147,8 @@ namespace Helios
 			float ChunkDepth{ 0.0f };
 			float Height{ 0.0f };
 			float Width{ 0.0f };
+			float ClumpSize{ 1.5f };
+			float ClumpStrength{ 0.0f };
 			float ScaleX{ 1.0f };
 			float ScaleY{ 1.0f };
 			float SurfaceAlign{ 1.0f };
@@ -234,6 +236,8 @@ namespace Helios
 		float m_ChunkDepth{ 0.0f };
 		float m_Height{ 0.0f };
 		float m_Width{ 0.0f };
+		float m_ClumpSize{ 1.5f };
+		float m_ClumpStrength{ 0.0f };
 		float m_ScaleX{ 1.0f };
 		float m_ScaleY{ 1.0f };
 		float m_SurfaceAlign{ 1.0f };

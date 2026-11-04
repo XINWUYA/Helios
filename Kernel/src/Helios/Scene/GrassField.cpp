@@ -54,6 +54,24 @@ namespace Helios
 
 		constexpr float kTwoPi = 6.2831853f;
 
+		glm::vec3 ClumpRandom(const glm::vec2& local_xz, float size, uint32_t seed)
+		{
+			const glm::vec2 grid = local_xz / size;
+			const glm::vec2 cell = glm::floor(grid);
+			const glm::vec2 fraction = grid - cell;
+			const glm::vec2 blend = fraction * fraction * (3.0f - 2.0f * fraction);
+			const int32_t x = static_cast<int32_t>(cell.x);
+			const int32_t z = static_cast<int32_t>(cell.y);
+			const auto sample = [seed](int32_t cx, int32_t cz)
+			{
+				const uint32_t base = MixHash(static_cast<uint32_t>(cx)
+					^ MixHash(static_cast<uint32_t>(cz) ^ MixHash(seed ^ 0xa511e9b3u)));
+				return glm::vec3(HashUnit(base, 3u), HashUnit(base, 4u), HashUnit(base, 5u));
+			};
+			return glm::mix(glm::mix(sample(x, z), sample(x + 1, z), blend.x),
+				glm::mix(sample(x, z + 1), sample(x + 1, z + 1), blend.x), blend.y);
+		}
+
 		float TerrainMaterialFloat(const Material& material, const char* name, float fallback)
 		{
 			for (const auto& [_, param] : material.GetAllParameters())
@@ -151,7 +169,8 @@ namespace Helios
 		};
 		mix(&component.m_Extent, sizeof(component.m_Extent));
 		for (const float value : { component.m_Density, component.m_Height, component.m_Width,
-			component.m_StartCullDistance, component.m_EndCullDistance, component.m_MinDensityScale })
+			component.m_ClumpSize, component.m_ClumpStrength, component.m_StartCullDistance,
+			component.m_EndCullDistance, component.m_MinDensityScale })
 		{
 			mix(&value, sizeof(value));
 		}
@@ -259,6 +278,8 @@ namespace Helios
 		const float density = std::max(0.0f, component.m_Density);
 		m_Height = std::max(0.0f, component.m_Height);
 		m_Width = std::max(0.0f, component.m_Width);
+		m_ClumpSize = std::max(component.m_ClumpSize, 0.25f);
+		m_ClumpStrength = std::clamp(component.m_ClumpStrength, 0.0f, 1.0f);
 		m_SurfaceAlign = std::clamp(component.m_SurfaceAlign, 0.0f, 1.0f);
 		m_MaxSlope = std::max(0.0f, component.m_MaxSlope);
 		m_UseTerrainGrowth = component.m_UseTerrainGrowth;
@@ -614,6 +635,8 @@ namespace Helios
 		params.ChunkDepth = m_ChunkDepth;
 		params.Height = m_Height;
 		params.Width = m_Width;
+		params.ClumpSize = m_ClumpSize;
+		params.ClumpStrength = m_ClumpStrength;
 		params.ScaleX = m_ScaleX;
 		params.ScaleY = m_ScaleY;
 		params.SurfaceAlign = m_SurfaceAlign;
@@ -676,9 +699,25 @@ namespace Helios
 					const float local_z = -params.HalfZ
 						+ (static_cast<float>(cz) + HashUnit(base, 2u)) * params.ChunkDepth;
 
-					const float yaw = HashUnit(base, 3u) * kTwoPi;
-					const float height = params.Height * params.ScaleY * (0.7f + 0.55f * HashUnit(base, 4u));
-					const float width = params.Width * params.ScaleX * (0.75f + 0.5f * HashUnit(base, 5u));
+					float yaw = HashUnit(base, 3u) * kTwoPi;
+					float height_seed = HashUnit(base, 4u);
+					float width_seed = HashUnit(base, 5u);
+					if (params.ClumpStrength > 0.0f)
+					{
+						const glm::vec3 clump = ClumpRandom(glm::vec2(local_x, local_z),
+							params.ClumpSize, params.Seed);
+						const float clump_yaw = clump.x * kTwoPi;
+						float difference = yaw - clump_yaw;
+						if (difference > kTwoPi * 0.5f)
+							difference -= kTwoPi;
+						else if (difference < -kTwoPi * 0.5f)
+							difference += kTwoPi;
+						yaw = clump_yaw + difference * (1.0f - params.ClumpStrength);
+						height_seed = glm::mix(height_seed, clump.y, params.ClumpStrength);
+						width_seed = glm::mix(width_seed, clump.z, params.ClumpStrength);
+					}
+					const float height = params.Height * params.ScaleY * (0.7f + 0.55f * height_seed);
+					const float width = params.Width * params.ScaleX * (0.75f + 0.5f * width_seed);
 
 					glm::vec3 position = params.Origin + params.Right * local_x + params.Forward * local_z;
 
@@ -822,6 +861,7 @@ namespace Helios
 			glm::vec4 TerrainShape{ 0.0f };  /* x 半宽、y 半长、z 分辨率、w 是否有地形 */
 			glm::vec4 GrassShape{ 0.0f };    /* x 贴面程度、y cos(最大坡度)、z 坡度过滤、w 生长权重 */
 			glm::vec4 TerrainGrowth{ 0.0f }; /* xyz 岩坡、砂线、雪线 */
+			glm::vec4 Clump{ 0.0f };         /* x 簇宽、y 簇级相关强度 */
 			glm::mat4 TerrainModel{ 1.0f };  /* 地形局部 → 世界 */
 			glm::mat4 TerrainInverse{ 1.0f };
 			glm::mat4 TerrainNormalMatrix{ 1.0f };
@@ -837,6 +877,7 @@ namespace Helios
 		params.Shape = glm::vec4(m_HalfX, m_HalfZ, m_ChunkWidth, m_ChunkDepth);
 		params.Blade = glm::vec4(m_Height, m_Width, m_ReceiveShadow ? 1.0f : 0.0f,
 			static_cast<float>(m_InstanceCount));
+		params.Clump = glm::vec4(m_ClumpSize, m_ClumpStrength, 0.0f, 0.0f);
 
 		SharedPtr<DeviceStorageBuffer> terrain_heights;
 		if (m_Ground != nullptr)
