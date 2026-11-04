@@ -111,15 +111,33 @@ namespace Helios
 		/* 层级树双击 = 镜头定位到该实体（与 F 键同一套取景） */
 		m_SceneHierarchy.SetFocusEntityFunc([this](const Entity& entity) { FocusEntity(entity); });
 
-		/* 项目配了启动场景就打开：换 --project 打开另一个项目，第一屏就能看出区别 */
+		/* 启动就开一个场景：上次打开的那个，没有才退回项目配的启动场景 */
+		OpenStartupScene();
+	}
+
+	/* 上次打开的场景优先，其次是项目配的启动场景：文件被删或移走就顺位往下退 */
+	void SceneEditorLayer::OpenStartupScene()
+	{
+		PROFILE_FUNCTION();
+
 		const ProjectConfig config = LoadProjectConfig();
+
+		std::vector<std::string> candidates;
+		if (!m_LastScenePath.empty())
+			candidates.push_back(m_LastScenePath);
 		if (!config.StartupScene.empty())
+			candidates.push_back(config.StartupScene);
+
+		for (const std::string& candidate : candidates)
 		{
-			const std::filesystem::path scene_path = ResolveAssetPath(PathFromUtf8(config.StartupScene));
+			const std::filesystem::path scene_path = ResolveAssetPath(PathFromUtf8(candidate));
 			if (std::filesystem::is_regular_file(scene_path))
+			{
 				OpenScene(PathToUtf8(scene_path));
-			else
-				EDITOR_LOG_WARN("Startup scene not found: {}.", PathToUtf8(scene_path));
+				return;
+			}
+
+			EDITOR_LOG_WARN("Scene not found, skipped: {}.", candidate);
 		}
 	}
 
@@ -566,6 +584,12 @@ namespace Helios
 
 		m_ActiveScenePath = path;
 		m_ActiveSceneKey = path.empty() ? std::string() : ViewKey(path);
+		/* 记下这次打开的是谁：下次启动直接接上；新建还没保存的场景就是空的 */
+		if (m_LastScenePath != m_ActiveSceneKey)
+		{
+			m_LastScenePath = m_ActiveSceneKey;
+			m_ViewStatesDirty = true;
+		}
 
 		/* 层级面板的根节点就是当前场景名：路径改了必须同步，否则另存为之后显示的仍是旧名字 */
 		m_SceneHierarchy.SetScenePath(path);
@@ -588,6 +612,7 @@ namespace Helios
 	}
 
 	/* 文件格式（<项目>/.helios/view.cfg）：
+	 *   LastScene=上次打开的场景
 	 *   [场景路径]
 	 *   Pivot=x y z / Angles=yaw pitch / Distance=d */
 	void SceneEditorLayer::LoadViewStates()
@@ -619,11 +644,22 @@ namespace Helios
 			}
 
 			const size_t separator = line.find('=');
-			if (separator == std::string::npos || scene.empty())
+			if (separator == std::string::npos)
 				continue;
 
 			const std::string key = line.substr(0, separator);
 			const std::string raw = line.substr(separator + 1);
+
+			/* 分段外面这一行记的是「上次打开的场景」 */
+			if (key == "LastScene")
+			{
+				m_LastScenePath = raw;
+				continue;
+			}
+
+			if (scene.empty())
+				continue;
+
 			SceneViewState& state = m_ViewStates[scene];
 			if (key == "Pivot")
 				std::sscanf(raw.c_str(), "%f %f %f", &state.Pivot.x, &state.Pivot.y, &state.Pivot.z);
@@ -651,6 +687,10 @@ namespace Helios
 			return;
 
 		stream << std::fixed << std::setprecision(4);
+
+		/* 空着就不写这行：下次启动直接落到项目的启动场景 */
+		if (!m_LastScenePath.empty())
+			stream << "LastScene=" << m_LastScenePath << "\n";
 		for (const auto& [scene, state] : m_ViewStates)
 		{
 			stream << "[" << scene << "]\n";
@@ -725,9 +765,8 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		/* 旧场景的视角先记账落盘，再换内容 */
+		/* 旧场景的视角先记下来，等新场景接好再一起落盘 */
 		CaptureViewState();
-		StoreViewStates();
 
 		/* 旧场景摘除编辑器相机（场景可能仍被别处引用而继续存活）；
 		 * 脚本实例挂在旧场景上，一并停掉，别让它们继续引用要被替换的实体 */
@@ -762,6 +801,9 @@ namespace Helios
 		/* 新建 / 打开场景后场景视口必须可见：它同时是视口窗口被关闭后的恢复入口，
 		 * 否则用户新建了一个空场景却看不到它。 */
 		Panel::SetVisible(Panel::kScene, true);
+
+		/* 一次写入：旧场景的视角、新场景名、接回来的视角都定下来了 */
+		StoreViewStates();
 	}
 
 	void SceneEditorLayer::NewScene()

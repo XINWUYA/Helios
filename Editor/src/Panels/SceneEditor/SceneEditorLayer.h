@@ -106,8 +106,8 @@ namespace Helios
 		/* 把「干净点」记在当前编辑历史位置上：保存成功、以及切场景（历史被清空）后调用 */
 		void MarkSceneSaved();
 
-		/* 每个场景记一份视角：切场景 / 保存 / 关编辑器时记账，再打开时接回来。
-		 * 存 <项目>/.helios/view.cfg，键是场景相对项目根的路径。 */
+		/* 场景视口状态：每个场景一份视角，外加「上次打开的是哪个」。
+		 * 存 <项目>/.helios/view.cfg，场景键取相对项目根的路径。 */
 		struct SceneViewState
 		{
 			glm::vec3 Pivot{ 0.0f };
@@ -130,6 +130,8 @@ namespace Helios
 		void UpdateViewStateAutosave(float delta_time);
 		void LoadViewStates();
 		void StoreViewStates();
+		/* 启动时开哪个场景：上次打开的优先，其次项目配的启动场景 */
+		void OpenStartupScene();
 		/* 更新视口 */
 		void UpdateViewport();
 		/* 场景相机（游戏相机）的画面尺寸 = 窗口画布（物理像素）。
@@ -208,6 +210,8 @@ namespace Helios
 		std::map<std::string, SceneViewState> m_ViewStates;
 		/* 当前场景的键（随路径变，逐帧比对用不着每次换算） */
 		std::string m_ActiveSceneKey{};
+		/* 上次打开的场景：下次启动接着开它（相对路径，跟场景键同一套写法） */
+		std::string m_LastScenePath{};
 		/* 视角停手到落盘的计时 */
 		float m_ViewIdleSeconds{ 0.0f };
 		bool m_ViewStatesLoaded{ false };
