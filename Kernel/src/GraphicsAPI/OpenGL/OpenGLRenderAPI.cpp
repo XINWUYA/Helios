@@ -292,9 +292,14 @@ namespace Helios
 		}
 
 		BindInstanceAttributes(vertex_array, instance_buffer, instance_offset_bytes, instance_layout);
+		/* 索引宽度跟 VAO 上挂的缓冲走：地形 patch 用的是 16 位索引，
+		 * 这里写死 32 位会把相邻两个索引拼成一个，画出来全是错位的三角形 */
+		const auto index_buffer = vertex_array->GetIndexBuffer();
+		const GLenum index_gl_type = index_buffer != nullptr && index_buffer->GetIndexType() == IndexType::UInt16
+			? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT;
 		/* 间接参数用的是 GL_DRAW_INDIRECT_BUFFER 这个独立绑定点，不参与 GLState 的跟踪 */
 		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, storage->GetBufferID());
-		glDrawElementsIndirect(TranslateToOpenGLPrimitiveType(type), GL_UNSIGNED_INT,
+		glDrawElementsIndirect(TranslateToOpenGLPrimitiveType(type), index_gl_type,
 			reinterpret_cast<const void*>(static_cast<uintptr_t>(args_offset_bytes)));
 		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 	}
