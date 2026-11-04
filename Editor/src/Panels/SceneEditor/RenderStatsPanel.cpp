@@ -607,8 +607,9 @@ namespace Helios
 		return out;
 	}
 
-	/* 几何统计卡的行内容（纯函数）：未结算 = 四行占位；间接绘制并进 Draw Calls 行 ——
-	 * 它的元素数与实例数在 GPU 参数块里，混进顶点 / 三角形会让这两行的口径失真 */
+	/* 几何统计卡的行内容（纯函数）：未结算时都是占位；间接绘制并进 Draw Calls 行 ——
+	 * 它的元素数与实例数在 GPU 参数块里，混进顶点 / 三角形会让这两行的口径失真。
+	 * Grass Draws 是草地的可见加阴影提交数，对照批表开关用 */
 	void RenderStatsPanel::BuildGeometryRows(const RenderStatisticsSnapshot& stats,
 		std::vector<GeometryRow>& out_rows)
 	{
@@ -617,6 +618,7 @@ namespace Helios
 		if (!stats.Valid)
 		{
 			out_rows.push_back({ "Draw Calls", kNoDataText });
+			out_rows.push_back({ "Grass Draws", kNoDataText });
 			out_rows.push_back({ "Triangles", kNoDataText });
 			out_rows.push_back({ "Vertices", kNoDataText });
 			out_rows.push_back({ "Instances", kNoDataText });
@@ -625,9 +627,9 @@ namespace Helios
 
 		char count_text[24];
 		FormatCount(stats.DrawCalls, count_text, sizeof(count_text));
+		char draw_calls_text[48];
 		if (stats.IndirectDrawCalls > 0)
 		{
-			char draw_calls_text[48];
 			std::snprintf(draw_calls_text, sizeof(draw_calls_text), "%s (%llu indirect)", count_text,
 				static_cast<unsigned long long>(stats.IndirectDrawCalls));
 			out_rows.push_back({ "Draw Calls", draw_calls_text });
@@ -636,6 +638,10 @@ namespace Helios
 		{
 			out_rows.push_back({ "Draw Calls", count_text });
 		}
+
+		/* 草地的笔数单列一行：切批表开关时盯这一项，别看总数猜 */
+		char grass_text[24];
+		out_rows.push_back({ "Grass Draws", FormatCount(stats.GrassDrawCalls, grass_text, sizeof(grass_text)) });
 
 		char value_text[24];
 		out_rows.push_back({ "Triangles", FormatCount(stats.Triangles, value_text, sizeof(value_text)) });

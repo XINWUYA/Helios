@@ -123,6 +123,8 @@ namespace Helios
 			.Group("Shadows")
 			.Field(&GrassComponent::m_ReceiveShadow, "ReceiveShadow", FieldType::Bool)
 			.Field(&GrassComponent::m_CastShadow, "CastShadow", FieldType::Bool)
+			.Field(&GrassComponent::m_ShadowFadeDistance, "ShadowFadeDistance", FieldType::Float, 0.5f)
+			.Range(0.0f, 400.0f)
 			/* 踩踏恢复归回叶片组，种子 / 株数预算 / 底面归回草地范围组 */
 			.Group("Blades")
 			.Field(&GrassComponent::m_BendRecover, "BendRecover", FieldType::Float, 0.05f)

@@ -14,6 +14,8 @@ namespace Helios
 		uint64_t Vertices{ 0 };          /* 顶点数（索引绘制按索引数，即顶点着色器的调用量） */
 		uint64_t Instances{ 0 };         /* 实例化绘制覆盖的实例总数 */
 		uint64_t IndirectDrawCalls{ 0 }; /* 其中的间接绘制数 */
+		/* 草地可见与阴影路径的提交总数，含间接绘制。 */
+		uint64_t GrassDrawCalls{ 0 };
 		/* 是否结算过至少一帧：刚启动 / 释放后为 false，面板据此显示占位 */
 		bool Valid{ false };
 	};
@@ -30,6 +32,9 @@ namespace Helios
 
 		/* 一笔绘制：instances 传实例化绘制的实例数（非实例化传 0） */
 		void AddDrawCall(PrimitiveType type, uint64_t element_count, uint32_t instances, bool indirect);
+
+		/* 草地的一笔提交：不参与几何量折算，只单独记笔数 */
+		void AddGrassDrawCall();
 
 		/* 帧边界：累计值结算成快照，随后清零 */
 		void EndFrame();

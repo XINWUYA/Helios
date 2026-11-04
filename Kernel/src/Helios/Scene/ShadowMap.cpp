@@ -2,8 +2,10 @@
 #include "ShadowMap.h"
 #include "Scene.h"
 #include <cmath>
+#include <cstring>
 #include <glm/gtc/type_ptr.hpp>
 #include <Helios/Common/Math.h>
+#include <Helios/Renderer/RenderStatistics.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/RenderView.h>
@@ -25,13 +27,78 @@ namespace Helios
 {
 	namespace
 	{
-		/* 草影的距离圈：圈内满密度，往外连续变稀到没有。草影单独占一层，不受 ShadowFar 限制，
-		 * 所以能一直铺到级联够不着的地方 —— 不然远处草地会是一整片没有影子的纯色 */
+		/* 草影满密度半径：再远逐株变稀，最远距离跟着阴影距离走（见 submit_grass_casters） */
 		constexpr float kGrassShadowFullRadius = 20.0f;
-		constexpr float kGrassShadowFadeRadius = 60.0f;
 
 		/* 级联深度板里地形高度的采样上限（每轴）：只用来撑深度区间，不必逐纹素扫 */
 		constexpr uint32_t kTerrainDepthSamples = 96;
+
+		struct GroundBounds
+		{
+			glm::vec3 Min{ 0.0f };
+			glm::vec3 Max{ 0.0f };
+		};
+
+		uint64_t MixSignature(uint64_t seed, uint64_t value)
+		{
+			return seed ^ (value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2));
+		}
+
+		uint64_t MixSignature(uint64_t seed, const glm::vec3& value)
+		{
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				uint32_t bits = 0;
+				std::memcpy(&bits, &value[axis], sizeof(bits));
+				seed = MixSignature(seed, bits);
+			}
+			return seed;
+		}
+
+		/* 地形和草地不在可见网格表里，级联分割区间得靠它们的包围盒撑开，
+		 * 否则场景里只剩一个小模型时级联全挤在它周围，远处的草和地面没有影子。
+		 * 返回签名，高度改过或包围盒变了都会变 */
+		uint64_t CollectGroundBounds(Scene& scene, LayerMask culling_mask, std::vector<GroundBounds>& out)
+		{
+			uint64_t signature = 0;
+			for (auto [entity, terrain] : scene.GetRegistry().view<TerrainComponent>().each())
+			{
+				if (terrain.m_Field == nullptr || terrain.m_Field->IsEmpty()
+					|| !scene.IsEntityInRenderView(entity, culling_mask))
+					continue;
+
+				const glm::vec3 origin = terrain.m_Field->GetOrigin();
+				const glm::vec2 half = terrain.m_Field->GetWorldHalfExtent();
+				GroundBounds bounds;
+				bounds.Min = glm::vec3(origin.x - half.x, terrain.m_Field->GetMinWorldHeight(), origin.z - half.y);
+				bounds.Max = glm::vec3(origin.x + half.x, terrain.m_Field->GetMaxWorldHeight(), origin.z + half.y);
+				out.push_back(bounds);
+				signature = MixSignature(signature, terrain.m_Field->GetRevision());
+			}
+
+			for (auto [entity, grass] : scene.GetRegistry().view<GrassComponent>().each())
+			{
+				if (grass.m_Field == nullptr || grass.m_Field->IsEmpty()
+					|| !scene.IsEntityInRenderView(entity, culling_mask))
+					continue;
+
+				GroundBounds bounds{ glm::vec3(std::numeric_limits<float>::max()),
+					glm::vec3(-std::numeric_limits<float>::max()) };
+				for (const GrassField::Chunk& chunk : grass.m_Field->GetChunks())
+				{
+					if (chunk.Count == 0)
+						continue;
+					bounds.Min = glm::min(bounds.Min, chunk.Center - chunk.Extent);
+					bounds.Max = glm::max(bounds.Max, chunk.Center + chunk.Extent);
+				}
+				if (bounds.Min.x <= bounds.Max.x)
+					out.push_back(bounds);
+			}
+
+			for (const GroundBounds& bounds : out)
+				signature = MixSignature(MixSignature(signature, bounds.Min), bounds.Max);
+			return signature;
+		}
 	}
 
 	namespace
@@ -157,7 +224,7 @@ namespace Helios
 	 * 供 PrepareForShadowMaps（首次准备）与每帧执行前（方向光旋转 / 相机移动）共用。
 	 * 通过对比缓存（方向光方向 + 相机视图/投影矩阵 + 是否拿到投射物）跳过无变化的重算。 */
 	void ShadowMapManager::UpdateCascadeMatrices(const Camera* camera, const std::vector<VisibleMeshObject>* mesh_objects,
-		Scene* scene)
+		Scene* scene, LayerMask culling_mask)
 	{
 		/* 准备方向光的ShadowMap */
 		if (m_CascadeShadowMaps.empty())
@@ -191,16 +258,10 @@ namespace Helios
 		const uint32_t caster_count = (mesh_objects != nullptr)
 			? static_cast<uint32_t>(mesh_objects->size()) : 0u;
 
-		/* 地形重建过（换了参数或高度）也要重算：深度板按它的高度范围拟合 */
-		uint64_t terrain_revision = 0;
-		if (scene != nullptr)
-		{
-			for (auto [entity, terrain] : scene->GetRegistry().view<TerrainComponent>().each())
-			{
-				if (terrain.m_Field != nullptr)
-					terrain_revision ^= terrain.m_Field->GetRevision();
-			}
-		}
+		/* 地形与草地重建或挪动过也要重算：分割区间和深度板都按它们拟合 */
+		std::vector<GroundBounds> ground_bounds;
+		const uint64_t ground_signature = (scene != nullptr)
+			? CollectGroundBounds(*scene, culling_mask, ground_bounds) : 0u;
 
 		const bool unchanged =
 			!m_IsDirty &&
@@ -208,7 +269,7 @@ namespace Helios
 			mat_equal(view_mat, m_LastViewMat) &&
 			mat_equal(proj_mat, m_LastProjMat) &&
 			caster_count == m_LastCasterCount &&
-			terrain_revision == m_LastTerrainRevision;
+			ground_signature == m_LastGroundSignature;
 		if (unchanged)
 			return;
 
@@ -217,7 +278,7 @@ namespace Helios
 		m_LastViewMat = view_mat;
 		m_LastProjMat = proj_mat;
 		m_LastCasterCount = caster_count;
-		m_LastTerrainRevision = terrain_revision;
+		m_LastGroundSignature = ground_signature;
 		m_IsDirty = false;
 
 
@@ -282,6 +343,20 @@ namespace Helios
 					scene_far = std::max(scene_far, depth);
 				}
 				caster_bounds.emplace_back(LightSpaceBounds{ bounds.Min, bounds.Max, object_index });
+			}
+		}
+
+		for (const GroundBounds& bounds : ground_bounds)
+		{
+			for (int corner = 0; corner < 8; ++corner)
+			{
+				const glm::vec3 world_corner(
+					(corner & 1) ? bounds.Max.x : bounds.Min.x,
+					(corner & 2) ? bounds.Max.y : bounds.Min.y,
+					(corner & 4) ? bounds.Max.z : bounds.Min.z);
+				const float depth = -(view_mat * glm::vec4(world_corner, 1.0f)).z;
+				scene_near = std::min(scene_near, depth);
+				scene_far = std::max(scene_far, depth);
 			}
 		}
 
@@ -434,7 +509,7 @@ namespace Helios
 
 				for (auto [entity, terrain] : scene->GetRegistry().view<TerrainComponent>().each())
 				{
-					if (!terrain.m_CastShadow)
+					if (!terrain.m_CastShadow || !scene->IsEntityInRenderView(entity, culling_mask))
 						continue;
 					if (terrain.m_Field == nullptr)
 						terrain.m_Field = CreateSharedPtr<TerrainField>();
@@ -760,7 +835,8 @@ namespace Helios
 
 				/* 草的投影：模拟投射物列表之外单独提交一笔。远近只做粗筛，疏密交给着色器按株抖点，
 				 * 走的是跟可见着色同一套叶片展开，所以风和脚印都对得上 */
-				const auto submit_grass_casters = [this, render_view, copy_material_values](uint8_t cascade_id)
+				const auto submit_grass_casters = [this, render_view, copy_material_values](
+					uint8_t cascade_id, const glm::mat4& light_view_projection)
 				{
 					if (m_GrassShadowShader == nullptr)
 						return;
@@ -772,15 +848,25 @@ namespace Helios
 					const Camera* camera = render_view->GetCullingCamera();
 					const glm::vec3 eye = camera != nullptr ? camera->GetPosition() : glm::vec3(0.0f);
 
+					/* 草影最远距离默认跟阴影距离走：主方向光的 ShadowFar，没设就退回相机 far */
+					float shadow_far = (camera != nullptr) ? camera->GetFarClip() : 60.0f;
+					if (!m_CascadeShadowMaps.empty() && m_CascadeShadowMaps[0]->m_pLight != nullptr)
+					{
+						const auto& info = m_CascadeShadowMaps[0]->m_pLight->GetShadowMapInfo();
+						if (info != nullptr && info->ShadowFar > 0.0f)
+							shadow_far = info->ShadowFar;
+					}
+
 					const auto grass_material = Material::Create(m_GrassShadowShader);
 					grass_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
 					grass_material->SetParameters(ParamType::Vec3, "u_GrassShadowEye", eye);
-					grass_material->SetParameters(ParamType::Float, "u_GrassShadowFullRadius", kGrassShadowFullRadius);
-					grass_material->SetParameters(ParamType::Float, "u_GrassShadowFadeRadius", kGrassShadowFadeRadius);
 					/* 叶片是单面几何，投影不能剔背面，否则一半的草不写深度 */
 					grass_material->GetRasterState().CullMode = CullMode::Cull_None;
 
 					const MeshPrimitive& blade = GrassField::GetBladePrimitive();
+					/* 只画落进本级联正交盒的块：盒外的草写不进这张阴影图，
+					 * 顶点却照跑一遍。用光源矩阵的视锥判，块是轴对齐盒 */
+					const Frustum light_frustum = Frustum::FromViewProjection(light_view_projection);
 					for (auto [entity, grass] : scene->GetRegistry().view<GrassComponent>().each())
 					{
 						if (!grass.m_CastShadow || grass.GetMaterial() == nullptr
@@ -797,17 +883,57 @@ namespace Helios
 						 * 只有风与脚印走 per-draw，其余从材质来 */
 						copy_material_values(*grass.GetMaterial(), *grass_material);
 
+						/* 草影抽稀半径：默认跟阴影距离，组件上可手动收紧（取较小） */
+						const float fade_radius = (grass.m_ShadowFadeDistance > 0.0f)
+							? std::min(grass.m_ShadowFadeDistance, shadow_far)
+							: shadow_far;
+						grass_material->SetParameters(ParamType::Float, "u_GrassShadowFadeRadius", fade_radius);
+						grass_material->SetParameters(ParamType::Float, "u_GrassShadowFullRadius",
+							std::min(kGrassShadowFullRadius, fade_radius * 0.5f));
+
 						DrawParams per_draw = GrassDraw::MakeDrawParams(grass, scene->GetGrassWindTime());
+						/* 和可见着色一样按批提交。批比块大，盒外与远处的判定放宽了，
+						 * 多出来的株在着色器里按距离抽稀丢掉，不写深度 */
+						const auto& batches = grass.m_Field->GetBatches();
+						const bool use_batches = GrassField::IsGlobalBatchingEnabled() && !batches.empty();
+						if (use_batches)
+						{
+							for (const GrassField::Batch& batch : batches)
+							{
+								if (light_frustum.IsOutside(batch.Center, batch.Extent))
+									continue;
+
+								const float batch_distance = glm::distance(eye, batch.Center)
+									- glm::length(glm::vec2(batch.Extent.x, batch.Extent.z));
+								if (batch_distance > fade_radius)
+									continue;
+
+								Renderer::SubmitInstanced(grass_material, blade, instance_buffer,
+									batch.First, batch.Count, &per_draw, 0, &Renderer::GetGrassInstanceLayout());
+								RenderStatistics::Instance().AddGrassDrawCall();
+							}
+							continue;
+						}
+
 						for (const GrassField::Chunk& chunk : grass.m_Field->GetChunks())
 						{
+							if (chunk.Count == 0)
+								continue;
+
+							/* 盒外整块跳过：级联盒外的草写不进这张阴影图，顶点却照跑一遍。
+							 * 盒内再按距离圈收：圈外的块不用提交 */
+							if (light_frustum.IsOutside(chunk.Center, chunk.Extent))
+								continue;
+
 							/* 按块的外接半径放宽筛选：块中心在圈外但叶子还伸进圈里的照样提交 */
 							const float distance = glm::distance(eye, chunk.Center)
 								- glm::length(glm::vec2(chunk.Extent.x, chunk.Extent.z));
-							if (distance > kGrassShadowFadeRadius)
+							if (distance > fade_radius)
 								continue;
 
 							Renderer::SubmitInstanced(grass_material, blade, instance_buffer,
 								chunk.First, chunk.Count, &per_draw, 0, &Renderer::GetGrassInstanceLayout());
+							RenderStatistics::Instance().AddGrassDrawCall();
 						}
 					}
 				};
@@ -893,8 +1019,8 @@ namespace Helios
 					}
 
 					/* 草不在投射物列表里：在本层的渲染通道里单独补一笔 */
-					if (draw_grass)
-						submit_grass_casters(layer);
+					if (draw_grass && light_view_projection != nullptr)
+						submit_grass_casters(layer, *light_view_projection);
 
 					/* 地形同样不在投射物列表里：patch 按这一层的盒子选，单独补一笔 */
 					if (light_view_projection != nullptr)

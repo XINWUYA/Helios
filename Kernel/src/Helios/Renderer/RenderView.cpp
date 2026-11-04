@@ -133,7 +133,7 @@ namespace Helios
 		if (m_IsHasShadowCast)
 		{
 			m_pShadowMapManager->UpdateCascadeMatrices(GetCullingCamera(), &m_SceneMeshObjects,
-				GetOwnerScene().get());
+				GetOwnerScene().get(), m_CullingMask);
 			m_pShadowMapManager->UpdatePunctualMatrices();
 		}
 

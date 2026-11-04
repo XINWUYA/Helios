@@ -40,6 +40,11 @@ namespace Helios
 		m_Pending.Instances += instances;
 	}
 
+	void RenderStatistics::AddGrassDrawCall()
+	{
+		++m_Pending.GrassDrawCalls;
+	}
+
 	void RenderStatistics::EndFrame()
 	{
 		m_Snapshot = m_Pending;

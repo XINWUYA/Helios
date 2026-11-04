@@ -417,9 +417,10 @@ namespace Helios
 		float m_WindCullDistance{ 0.0f };
 
 		bool m_ReceiveShadow{ true };
-		/* 投影：跟模型组件同一口径，关掉这片草就不进阴影图。
-		 * 只投到近处两级联、密度取 1/4，付出的顶点量约为可见绘制的一小部分（见评估文档 5.3） */
+		/* 关闭后不投草影；最远距离由阴影范围或 ShadowFadeDistance 限制。 */
 		bool m_CastShadow{ true };
+		/* 草影最远距离：0 = 跟随阴影距离（ShadowFar），大于 0 时取它和阴影距离的较小值 */
+		float m_ShadowFadeDistance{ 0.0f };
 		/* 被踩过的草弹回原状要多久（秒） */
 		float m_BendRecover{ 6.0f };
 		int m_Seed{ 7 };

@@ -8,6 +8,7 @@
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/PostProcess/PostProcessPasses.h>
 #include <Helios/Renderer/RenderView.h>
+#include <Helios/Renderer/RenderStatistics.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Scene/Camera.h>
 #include <Helios/Scene/Components.h>
@@ -247,6 +248,7 @@ namespace Helios
 					{
 						Renderer::SubmitIndirect(material, blade, grass.m_Field->GetIndirectDrawBuffer(),
 							grass.m_Field->GetIndirectArgs(), &per_draw, &Renderer::GetGrassInstanceLayout());
+						RenderStatistics::Instance().AddGrassDrawCall();
 						continue;
 					}
 
@@ -267,6 +269,7 @@ namespace Helios
 
 							Renderer::SubmitInstanced(material, blade, instance_buffer, batch.First, batch.Count,
 								&per_draw, 0, &Renderer::GetGrassInstanceLayout());
+							RenderStatistics::Instance().AddGrassDrawCall();
 						}
 						continue;
 					}
@@ -291,6 +294,7 @@ namespace Helios
 						 * 按块截断实例数会在块边界上留台阶 */
 						Renderer::SubmitInstanced(material, blade, instance_buffer, chunk.First, chunk.Count,
 							&per_draw, 0, &Renderer::GetGrassInstanceLayout());
+						RenderStatistics::Instance().AddGrassDrawCall();
 					}
 				}
 			}
