@@ -889,40 +889,17 @@ namespace Helios
 			? std::string("(model default)")
 			: PathToUtf8(PathFromUtf8(source).filename());
 
-		const float value_width = ImGuiExt::BeginPropertyRow("Material", EditorTheme::Token::PropertyLabelWidth, true);
+		ImGuiExt::AssetRefRowOptions options;
+		options.Label = "Material";
+		options.Text = display;
+		options.Tooltip = source.empty()
+			? std::string("Drag a .mtl material asset here to assign it")
+			: RELATIVE_PATH(source)
+				+ "\n\nDrag a .mtl material asset here to assign or replace it. Editing parameters detaches from the asset.";
 
-		/* 只读展示当前来源（文本可选中复制）；拖放目标与 tooltip 挂在输入框上 */
-		char buffer[256] = {};
-		snprintf(buffer, sizeof(buffer), "%s", display.c_str());
-		ImGui::SetNextItemWidth(value_width);
-		ImGui::InputText("##MaterialRef", buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
-
-		if (ImGui::IsItemHovered())
-		{
-			if (!source.empty())
-				ImGui::SetTooltip("%s\n\nDrag a .mtl material asset here to assign or replace it. Editing parameters detaches from the asset.",
-					RELATIVE_PATH(source).c_str());
-			else
-				ImGui::SetTooltip("Drag a .mtl material asset here to assign it");
-		}
-
-		if (ImGui::BeginDragDropTarget())
-		{
-			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
-			{
-				std::filesystem::path relative_path;
-				if (payload->DataSize > 1 && TryPathFromUtf8Payload(
-					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
-				{
-					const std::string extension = LowercaseExtension(relative_path);
-					if (extension == ".mtl")
-						AssignSubModelMaterial(static_cast<size_t>(index), PathToUtf8(ResolveAssetPath(relative_path)));
-				}
-			}
-			ImGui::EndDragDropTarget();
-		}
-
-		ImGuiExt::EndPropertyRow();
+		const ImGuiExt::AssetRefRowResult row = ImGuiExt::DrawAssetRefRow(options);
+		if (!row.DroppedPath.empty() && LowercaseExtension(PathFromUtf8(row.DroppedPath)) == ".mtl")
+			AssignSubModelMaterial(static_cast<size_t>(index), PathToUtf8(ResolveAssetPath(PathFromUtf8(row.DroppedPath))));
 	}
 
 	SharedPtr<Material> ModelEditorLayer::GetSubModelMaterial(size_t index) const

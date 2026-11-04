@@ -5,7 +5,7 @@
 
 namespace Helios::MaterialSlotRow
 {
-	/* 材质槽的一行：槽名 | 实例标记 | 来源文件名（拖入挂载）| Reset | 清除。
+	/* 材质槽的一行：槽名 | 实例标记 | 来源文件名（拖入挂载）| 重置 / 清除。
 	 * 只管画与收集意图，改数据由调用方按各自的槽语义处理（模型的槽有"回模型默认"，
 	 * 草地只有一个槽，回的是内建外观）。模型卡与草地卡共用这一份版式。 */
 	struct State
@@ -25,8 +25,8 @@ namespace Helios::MaterialSlotRow
 	{
 		None,
 		Assign, /* 拖进来一个材质 */
-		Clear,  /* 点 X */
-		Reset,  /* 点 Reset：回到来源资产 */
+		Clear,  /* 点清除图标 */
+		Reset,  /* 点重置图标：丢掉本地改动，回来源资产 */
 	};
 
 	struct Result

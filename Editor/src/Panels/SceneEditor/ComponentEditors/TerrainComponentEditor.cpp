@@ -84,16 +84,6 @@ namespace Helios
 				|| std::strcmp(field.Name, "HeightScale") == 0 || std::strcmp(field.Name, "Seed") == 0;
 		}
 
-		/* 引用输入框：只读展示名字，靠拖放赋值（与模型卡同一套交互） */
-		void DrawRefInputBox(const char* id, const std::string& text, float width, const char* hint)
-		{
-			char buffer[256] = {};
-			std::strncpy(buffer, text.c_str(), sizeof(buffer) - 1);
-
-			ImGui::SetNextItemWidth(width);
-			ImGui::InputTextWithHint(id, hint, buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
-		}
-
 		/* 绑资产：把数据侧的参数抄进组件，面板上的数字跟实际用的对得上。
 		 * 材质只在还挂着内建默认时才跟着换，用户自己挑过的不覆盖 */
 		bool BindAsset(TerrainComponent& component, const std::string& absolute_path)
@@ -124,7 +114,7 @@ namespace Helios
 			return true;
 		}
 
-		/* 地形资产行：拖 .terrain 进来换数据源，Clear 回到程序化生成 */
+		/* 地形资产行：拖 .terrain 进来换数据源，清除回到程序化生成 */
 		bool DrawTerrainAssetRow(TerrainComponent& component, bool editable = true)
 		{
 			bool changed = false;
@@ -137,55 +127,35 @@ namespace Helios
 				asset_path = RELATIVE_PATH(component.m_AssetPath);
 			}
 
-			ImGui::BeginDisabled(!editable);
-			const float frame_height = ImGui::GetFrameHeight();
-			const float value_width = ImGuiExt::BeginPropertyRow("Asset");
-			const float gap = ImGui::GetStyle().ItemInnerSpacing.x;
 			const bool has_asset = !component.m_AssetPath.empty();
-			const float clear_width = has_asset ? frame_height : 0.0f;
-			const float target_width = has_asset
-				? std::max(1.0f, value_width - clear_width - gap)
-				: value_width;
 
-			DrawRefInputBox("##TerrainAssetRef", asset_name, target_width, "Drop a .terrain here");
+			ImGui::BeginDisabled(!editable);
+			ImGuiExt::AssetRefRowOptions options;
+			options.Label = "Asset";
+			options.Text = asset_name;
+			options.Hint = "Drop a .terrain here";
+			options.ShowClear = has_asset;
+			options.ClearHint = "Clear the terrain asset and use procedural heights";
+			options.Tooltip = has_asset
+				? asset_path + "\n\nDrop another .terrain to replace it, or clear to go back to the procedural heightmap"
+				: std::string("Heightmap comes from the component parameters.\nDrop a .terrain asset to drive it from a file");
 
-			if (ImGui::IsItemHovered())
-			{
-				if (has_asset)
-					ImGui::SetTooltip("%s\n\nDrop another .terrain to replace it, or clear to go back to the procedural heightmap",
-						asset_path.c_str());
-				else
-					ImGui::SetTooltip("Heightmap comes from the component parameters.\nDrop a .terrain asset to drive it from a file");
-			}
-
-			if (ImGui::BeginDragDropTarget())
-			{
-				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
-				{
-					std::filesystem::path relative_path;
-					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
-						payload->Data, static_cast<size_t>(payload->DataSize), relative_path)
-						&& LowercaseExtension(relative_path) == ".terrain")
-					{
-						changed = BindAsset(component, PathToUtf8(ResolveAssetPath(relative_path)));
-					}
-				}
-				ImGui::EndDragDropTarget();
-			}
-
-			if (has_asset)
-			{
-				ImGui::SameLine(0.0f, gap);
-				if (Icons::IconButton(Icons::Id::Remove, ImVec2(clear_width, frame_height), false,
-					"Clear the terrain asset and use procedural heights"))
-				{
-					component.m_AssetPath.clear();
-					changed = true;
-				}
-			}
-
-			ImGuiExt::EndPropertyRow();
+			const ImGuiExt::AssetRefRowResult row = ImGuiExt::DrawAssetRefRow(options);
 			ImGui::EndDisabled();
+
+			if (row.Clear)
+			{
+				component.m_AssetPath.clear();
+				changed = true;
+			}
+
+			if (!row.DroppedPath.empty())
+			{
+				const std::filesystem::path relative_path = PathFromUtf8(row.DroppedPath);
+				if (LowercaseExtension(relative_path) == ".terrain")
+					changed = BindAsset(component, PathToUtf8(ResolveAssetPath(relative_path)));
+			}
+
 			return changed;
 		}
 

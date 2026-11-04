@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <imgui.h>
+#include <string>
 #include "UI/EditorTheme.h"
 #include "Helios/Scene/LayerMask.h"
 
@@ -79,6 +80,31 @@ namespace ImGuiExt
 	/* 行内小标签（如 Instance）：强调色淡底的小圆角条，只做标识、不吃鼠标；
 	 * 画在光标处并占掉这段宽度，返回宽度供调用方从值列宽度里扣掉。 */
 	float DrawTagChip(const char* text, float height = 0.0f);
+
+	/* 资源引用行：左标签 + 只读输入框（拖入即挂）+ 行尾图标（重置 / 清除）。
+	 * 只管画和收集意图，拖进来的路径原样给出，扩展名判断与赋值归调用方。 */
+	struct AssetRefRowOptions
+	{
+		const char* Label{ "Asset" };
+		std::string Text;         /* 框里显示的名字，一般只放文件名 */
+		std::string HoverPath;    /* 悬停时补在提示前面的路径，空则不补 */
+		std::string Tooltip;      /* 完整悬停文案，空则用 HoverPath + Hint 拼 */
+		const char* Hint{ "" };   /* 空文本时的占位提示 */
+		const char* Chip{ nullptr }; /* 行首小标签（如 Instance），宽度不够自动收掉 */
+		bool ShowReset{ false };
+		bool ShowClear{ false };
+		const char* ResetHint{ nullptr };
+		const char* ClearHint{ nullptr };
+	};
+
+	struct AssetRefRowResult
+	{
+		bool Reset{ false };
+		bool Clear{ false };
+		std::string DroppedPath; /* 拖入的资源相对路径，空表示没有 */
+	};
+
+	AssetRefRowResult DrawAssetRefRow(const AssetRefRowOptions& options);
 }
 
 }

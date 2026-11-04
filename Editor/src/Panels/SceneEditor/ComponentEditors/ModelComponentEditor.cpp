@@ -9,10 +9,7 @@
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/SceneCommon.h"
-#include <algorithm>
-#include <cctype>
 #include <cstdio>
-#include <cstring>
 #include <filesystem>
 
 namespace Helios
@@ -22,17 +19,6 @@ namespace Helios
 		/* ==================== 材质槽区块 ====================
 		 * 每槽一行（槽名 | 绑定的材质文件 + 拖拽挂载 / 清除 / 重置）= Model 卡里的"材质引用"。
 		 * 材质详情（Shader 和参数）在 SceneHierarchy 的"材质卡"里（通道不能嵌套、只能同级平铺）。 */
-
-		/* 资源引用输入框：外观是标准输入框、只读展示资源名（文本可选中复制），
-		 * 拖放目标与 tooltip 由调用方挂在控件上；空文本时显示 hint（弱化色）。 */
-		void DrawRefInputBox(const char* id, const std::string& text, float width, const char* hint)
-		{
-			char buffer[256] = {};
-			std::strncpy(buffer, text.c_str(), sizeof(buffer) - 1);
-
-			ImGui::SetNextItemWidth(width);
-			ImGui::InputTextWithHint(id, hint, buffer, sizeof(buffer), ImGuiInputTextFlags_ReadOnly);
-		}
 
 		/* 槽行：槽名 | 有效材质（.mtl）+ 清除 / 重置。版式与草地卡共用 MaterialSlotRow，
 		 * 这里只管模型槽的语义：绑定落在 m_SlotOverrides，Reset 回模型默认或来源资产。 */
@@ -173,69 +159,46 @@ namespace Helios
 				}
 			}
 
-			/* 模型引用输入框：只读展示模型名，拖放 .mesh / .model 直接落在输入框上；
+			/* 模型引用行：只读展示模型名，拖放 .mesh / .model 直接落在输入框上；
 			 * 完整路径在 tooltip 里给出（输入框只放名字，长路径不进布局） */
-			const float value_width = ImGuiExt::BeginPropertyRow("Model");
-			const float frame_height = ImGui::GetFrameHeight();
-			const float gap = ImGui::GetStyle().ItemInnerSpacing.x;
-			const float clear_width = model != nullptr
-				? ImGui::CalcTextSize("Clear").x + ImGui::GetStyle().FramePadding.x * 2.0f
-				: 0.0f;
-			const float target_width = model != nullptr
-				? std::max(1.0f, value_width - clear_width - gap)
-				: value_width;
+			ImGuiExt::AssetRefRowOptions options;
+			options.Label = "Model";
+			options.Text = model_name;
+			options.Hint = "Drop .mesh / .model here";
+			options.ShowClear = model != nullptr;
+			options.ClearHint = "Clear the model";
+			options.Tooltip = model != nullptr
+				? model_path + "\n\nDrag a .mesh or .model asset from the Resource Browser to assign or replace the model"
+				: std::string("Drag a .mesh or .model asset from the Resource Browser to assign the model");
 
-			DrawRefInputBox("##ModelRef", model_name, target_width, "Drop .mesh / .model here");
+			const ImGuiExt::AssetRefRowResult row = ImGuiExt::DrawAssetRefRow(options);
 
-			if (ImGui::IsItemHovered())
+			if (row.Clear)
 			{
-				if (model != nullptr)
-					ImGui::SetTooltip("%s\n\nDrag a .mesh or .model asset from the Resource Browser to assign or replace the model",
-						model_path.c_str());
-				else
-					ImGui::SetTooltip("Drag a .mesh or .model asset from the Resource Browser to assign the model");
+				model.reset();
+				changed = true;
 			}
 
-			if (ImGui::BeginDragDropTarget())
+			if (!row.DroppedPath.empty())
 			{
-				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
-				{
-					std::filesystem::path relative_path;
-					if (payload->DataSize > 1 && TryPathFromUtf8Payload(
-						payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
-					{
-						const std::string extension = LowercaseExtension(relative_path);
+				const std::filesystem::path relative_path = PathFromUtf8(row.DroppedPath);
+				const std::string extension = LowercaseExtension(relative_path);
 
-						/* .mesh 是纯几何，.model 是带材质槽的清单，两种都能直接挂 */
-						if (extension == ".mesh" || extension == ".model")
+				/* .mesh 是纯几何，.model 是带材质槽的清单，两种都能直接挂 */
+				if (extension == ".mesh" || extension == ".model")
+				{
+					const std::string absolute_path = PathToUtf8(ResolveAssetPath(relative_path));
+					if (model == nullptr || model->GetPath() != absolute_path)
+					{
+						SharedPtr<Model> loaded_model = Model::Create(absolute_path);
+						if (loaded_model != nullptr)
 						{
-							const std::string absolute_path = PathToUtf8(ResolveAssetPath(relative_path));
-							if (model == nullptr || model->GetPath() != absolute_path)
-							{
-								SharedPtr<Model> loaded_model = Model::Create(absolute_path);
-								if (loaded_model != nullptr)
-								{
-									model = std::move(loaded_model);
-									changed = true;
-								}
-							}
+							model = std::move(loaded_model);
+							changed = true;
 						}
 					}
 				}
-				ImGui::EndDragDropTarget();
 			}
-
-			if (model != nullptr)
-			{
-				ImGui::SameLine(0.0f, gap);
-				if (ImGui::Button("Clear", ImVec2(clear_width, frame_height)))
-				{
-					model.reset();
-					changed = true;
-				}
-			}
-
-			ImGuiExt::EndPropertyRow();
 
 			/* 投影 / 接受阴影：渲染端的逐对象开关（见 VisibleMeshObject 与阴影 Pass / 光照采样） */
 			if (MaterialParamUI::BeginPropertyGroup("##Rendering", "Rendering"))

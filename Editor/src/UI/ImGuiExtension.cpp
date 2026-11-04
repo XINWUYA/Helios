@@ -9,6 +9,7 @@
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/Scene/LayerMask.h"
+#include "UI/EditorIcons.h"
 
 namespace Helios::ImGuiExt
 {
@@ -1096,6 +1097,83 @@ namespace Helios::ImGuiExt
 			ImGui::GetColorU32(EditorTheme::Token::AccentInk), text);
 
 		return width;
+	}
+
+	AssetRefRowResult DrawAssetRefRow(const AssetRefRowOptions& options)
+	{
+		PROFILE_FUNCTION();
+
+		AssetRefRowResult result;
+
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float value_width = BeginPropertyRow(options.Label);
+		/* 行高在 Begin 之后取：本行的 FramePadding 已被压成统一的一档 */
+		const float frame_height = ImGui::GetFrameHeight();
+		const float gap = style.ItemInnerSpacing.x;
+
+		/* 行尾每个图标各占一个行高，外加一格间隔 */
+		const float icon_zone = (options.ShowReset ? frame_height + gap : 0.0f)
+			+ (options.ShowClear ? frame_height + gap : 0.0f);
+
+		/* 窄面板先收 chip，保住输入框和图标 */
+		float chip_width = 0.0f;
+		if (options.Chip != nullptr)
+		{
+			const float chip = ImGui::CalcTextSize(options.Chip).x + style.FramePadding.x * 2.0f + gap;
+			if (value_width - icon_zone - chip >= frame_height * 2.0f)
+			{
+				chip_width = DrawTagChip(options.Chip, frame_height) + gap;
+				ImGui::SameLine(0.0f, gap);
+			}
+		}
+
+		char buffer[256] = {};
+		std::strncpy(buffer, options.Text.c_str(), sizeof(buffer) - 1);
+		ImGui::SetNextItemWidth(ImMax(value_width - icon_zone - chip_width, 1.0f));
+		ImGui::InputTextWithHint("##AssetRef", options.Hint, buffer, sizeof(buffer),
+			ImGuiInputTextFlags_ReadOnly);
+
+		if (ImGui::IsItemHovered())
+		{
+			std::string tooltip = options.Tooltip;
+			if (tooltip.empty())
+			{
+				if (!options.HoverPath.empty())
+					tooltip = options.HoverPath + "\n\n";
+				tooltip += options.Hint;
+			}
+			if (!tooltip.empty())
+				ImGui::SetTooltip("%s", tooltip.c_str());
+		}
+
+		if (ImGui::BeginDragDropTarget())
+		{
+			if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
+			{
+				std::filesystem::path relative_path;
+				if (payload->DataSize > 1 && TryPathFromUtf8Payload(
+					payload->Data, static_cast<size_t>(payload->DataSize), relative_path))
+					result.DroppedPath = PathToUtf8(relative_path);
+			}
+			ImGui::EndDragDropTarget();
+		}
+
+		if (options.ShowReset)
+		{
+			ImGui::SameLine(0.0f, gap);
+			result.Reset = Icons::IconButton(Icons::Id::Delete,
+				ImVec2(frame_height, frame_height), false, options.ResetHint);
+		}
+
+		if (options.ShowClear)
+		{
+			ImGui::SameLine(0.0f, gap);
+			result.Clear = Icons::IconButton(Icons::Id::Remove,
+				ImVec2(frame_height, frame_height), false, options.ClearHint);
+		}
+
+		EndPropertyRow();
+		return result;
 	}
 
 }
