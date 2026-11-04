@@ -102,7 +102,7 @@ namespace Helios::MaterialParamUI
 
 	/* 一条材质参数行：值画在临时缓冲上，改动经 write_back 落进目标材质（槽位 → 自动实例化
 	 * 写回；资产编辑缓冲 / 模型编辑器 → 直接写）。行对齐：标签跟 frame 高控件垂直居中。
-	 * 贴图行只画缩略图（点击定位、拖入替换、悬停看大图）。
+	 * 贴图行画缩略图加一枚下拉（点击定位、拖入替换、悬停看大图、下拉选引擎内置贴图）。
 	 * spec 决定标签文案与控件形态（@property 显示名 / @type / @range）：标了 @type(color) 的
 	 * vec3 / vec4 画取色器 —— 色块点开是取色盘，右边照旧能填分量（float 显示，0 到 1）。 */
 	void DrawMaterialParamRow(const MaterialParamInfo& param_info, const MaterialPropertySpec& spec,

@@ -12,6 +12,7 @@
 #include "Command/AssetFileOps.h"
 #include "UI/EditorTheme.h"
 #include "UI/ImGuiExtensions.h"
+#include "UI/BuiltinTextures.h"
 #include "Helios/Core/AssetManager.h"
 
 namespace Helios::MaterialParamUI
@@ -412,6 +413,10 @@ namespace Helios::MaterialParamUI
 
 				const auto& show_texture = texture ? texture
 					: AssetManager::Instance().GetOrLoad<DeviceTexture>(ABSOLUTE_PATH("Textures/Default.png"));
+				/* 缩略图显示的那张图的相对路径：内置图在资源浏览器里没有落点 */
+				const std::string shown_relative = show_texture != nullptr
+					? RELATIVE_PATH(show_texture->GetPath()) : std::string();
+				const bool shown_builtin = BuiltinTextures::Contains(shown_relative);
 
 				/* 缩略图与行高同高（frame 高含 1px 外框）：逐行对齐、不撑行 */
 				const float thumbnail = ImGui::GetFrameHeight() - 2.0f;
@@ -442,17 +447,30 @@ namespace Helios::MaterialParamUI
 				{
 					ImGui::BeginTooltip();
 					ImGui::Image((ImTextureID)show_texture.get(), ImVec2(200, 200), ImVec2(0, 1), ImVec2(1, 0));
-					ImGui::TextDisabled("Click to reveal in the resource browser");
+					ImGui::TextDisabled("%s", shown_builtin
+						? "Built-in texture" : "Click to reveal in the resource browser");
 					ImGui::EndTooltip();
 				}
 
-				/* 点击缩略图 = 在资源浏览器里定位这张贴图（没接定位通道时点击无效果） */
-				if (clicked && reveal_asset && show_texture != nullptr)
+				/* 内置贴图不在资源浏览器里，从缩略图右邻的下拉选 */
+				ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+				std::string picked_builtin;
+				if (BuiltinTextures::DrawPicker("##BuiltinTexture",
+					texture != nullptr ? RELATIVE_PATH(texture->GetPath()) : std::string(), picked_builtin))
 				{
-					const std::string relative = RELATIVE_PATH(show_texture->GetPath());
-					if (!relative.empty() && relative.rfind("..", 0) != 0)
-						reveal_asset(relative);
+					const auto picked_texture = AssetManager::Instance().GetOrLoad<DeviceTexture>(
+						ABSOLUTE_PATH(picked_builtin));
+					if (picked_texture->IsLoaded())
+					{
+						texture = picked_texture;
+						edited = true;
+					}
 				}
+
+				/* 点击缩略图 = 在资源浏览器里定位这张贴图（没接定位通道时点击无效果） */
+				if (clicked && reveal_asset && !shown_builtin
+					&& !shown_relative.empty() && shown_relative.rfind("..", 0) != 0)
+					reveal_asset(shown_relative);
 
 				ImGuiExt::EndPropertyRow();
 
