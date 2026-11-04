@@ -9,6 +9,7 @@
 #include "UI/EditorIcons.h"
 #include "Viewport/SceneGizmos.h"
 #include "Viewport/ViewGizmo.h"
+#include "Viewport/TerrainBrushPreview.h"
 #include "UI/PanelChrome.h"
 #include "UI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
@@ -596,6 +597,7 @@ namespace Helios
 
 		/* 换场景就把笔刷关掉：工具状态是编辑器级的全局量，留着的话新场景里一按左键就开始画 */
 		TerrainSculpt::GetSettings().Brush = TerrainSculpt::Mode::None;
+		TerrainSculpt::GetExportRequest() = {};
 		m_SculptActive = false;
 		m_SculptTerrain = {};
 	}
@@ -691,6 +693,7 @@ namespace Helios
 		/* 空着就不写这行：下次启动直接落到项目的启动场景 */
 		if (!m_LastScenePath.empty())
 			stream << "LastScene=" << m_LastScenePath << "\n";
+
 		for (const auto& [scene, state] : m_ViewStates)
 		{
 			stream << "[" << scene << "]\n";
@@ -1093,7 +1096,8 @@ namespace Helios
 		if (m_ActiveScenePath.empty())
 			return;
 
-		SaveEditedTerrains();
+		if (!SaveEditedTerrains())
+			return;
 		m_pMainScene->Serializer(m_ActiveScenePath);
 
 		/* 场景内容与文件一致了：当前位置成为新的干净点 */
@@ -1115,7 +1119,8 @@ namespace Helios
 		if (file_path.empty())
 			return;
 
-		SaveEditedTerrains();
+		if (!SaveEditedTerrains())
+			return;
 		m_pMainScene->Serializer(file_path);
 
 		/* 保存成功后，当前场景路径切换为新路径 */
@@ -1639,7 +1644,8 @@ namespace Helios
 			&& m_IsViewportHovered
 			&& Input::IsMouseButtonPressed(Mouse::ButtonLeft)
 			&& !IsGizmoHovered() && !ImGui::IsAnyItemHovered()
-			&& !Input::IsKeyPressed(Key::LeftAlt);
+			&& !Input::IsKeyPressed(Key::LeftAlt)
+			&& TerrainSculpt::GetExportRequest().Status != TerrainSculpt::ExportStatus::Pending;
 
 		if (!painting)
 		{
@@ -1709,8 +1715,9 @@ namespace Helios
 	/* 笔刷预览：在落笔处沿地表画一圈，半径与真正改高度的范围一致 */
 	void SceneEditorLayer::ShowTerrainBrushUI()
 	{
-		if (TerrainSculpt::GetSettings().Brush == TerrainSculpt::Mode::None || !m_IsViewportHovered
-			|| m_ViewportRegion.Width == 0 || m_ViewportRegion.Height == 0)
+		if (m_PlayMode != PlayMode::Edit || m_pEditorCamera == nullptr
+			|| TerrainSculpt::GetSettings().Brush == TerrainSculpt::Mode::None || !m_IsViewportHovered
+			|| m_ViewportRegion.Width <= 0 || m_ViewportRegion.Height <= 0)
 			return;
 
 		Entity entity;
@@ -1724,27 +1731,12 @@ namespace Helios
 		const ImVec2 viewport_min(m_ViewportRegion.MinX, m_ViewportRegion.MinY);
 		const ImVec2 viewport_size(static_cast<float>(m_ViewportRegion.Width), static_cast<float>(m_ViewportRegion.Height));
 
-		constexpr int kSegments = 64;
-		ImVec2 points[kSegments];
-		int count = 0;
-		for (int index = 0; index < kSegments; ++index)
-		{
-			const float angle = 6.2831853f * static_cast<float>(index) / static_cast<float>(kSegments);
-			const glm::vec2 local = center + glm::vec2(std::cos(angle), std::sin(angle)) * radius;
-			float height = 0.0f;
-			if (!field.SampleHeightLocal(local, height))
-				continue;
-
-			const glm::vec4 clip = view_projection * glm::vec4(field.ToWorld(local, height), 1.0f);
-			if (clip.w <= 1.0e-4f)
-				continue;
-			points[count++] = ImVec2(viewport_min.x + (clip.x / clip.w * 0.5f + 0.5f) * viewport_size.x,
-				viewport_min.y + (1.0f - (clip.y / clip.w * 0.5f + 0.5f)) * viewport_size.y);
-		}
-
-		if (count > 2)
-			ImGui::GetWindowDrawList()->AddPolyline(points, count, IM_COL32(255, 158, 41, 255),
-				count == kSegments ? ImDrawFlags_Closed : ImDrawFlags_None, 1.5f);
+		const bool paused = Input::IsKeyPressed(Key::LeftAlt) || IsGizmoHovered() || ImGui::IsAnyItemHovered()
+			|| TerrainSculpt::GetExportRequest().Status == TerrainSculpt::ExportStatus::Pending;
+		const auto state = paused ? TerrainBrushPreview::State::Paused : m_SculptActive
+			? TerrainBrushPreview::State::Painting : TerrainBrushPreview::State::Hover;
+		TerrainBrushPreview::Draw(ImGui::GetWindowDrawList(), field, center, radius,
+			view_projection, viewport_min, viewport_size, state);
 	}
 
 	/* 一笔结束：把改动的矩形存成一条命令，撤销按它回填 */
@@ -1810,9 +1802,8 @@ namespace Helios
 		return true;
 	}
 
-	/* 导出地形：已绑资产就写回那份文件；没绑就落到 <项目>/Terrains/<实体名>.terrain，
-	 * 同名文件已经有了就加序号，不覆盖别的地形 */
-	bool SceneEditorLayer::ExportTerrain(Entity entity)
+	/* 导出地形：绑定模式写回原资产，非绑定模式新建不重名副本。 */
+	bool SceneEditorLayer::ExportTerrain(Entity entity, bool bind_asset)
 	{
 		if (!entity || !entity.HasComponent<TerrainComponent>())
 			return false;
@@ -1821,8 +1812,10 @@ namespace Helios
 		if (terrain.m_Field == nullptr || terrain.m_Field->IsEmpty())
 			return false;
 
-		std::filesystem::path path = PathFromUtf8(terrain.m_AssetPath);
-		if (terrain.m_AssetPath.empty())
+		std::filesystem::path path;
+		if (bind_asset && !terrain.m_AssetPath.empty())
+			path = PathFromUtf8(terrain.m_AssetPath);
+		else
 		{
 			std::string name = "Terrain";
 			if (entity.HasComponent<NameComponent>())
@@ -1858,7 +1851,7 @@ namespace Helios
 		}
 
 		/* 新绑了资产路径：场景里的引用变了，要提示保存 */
-		if (terrain.m_AssetPath != PathToUtf8(path))
+		if (bind_asset && terrain.m_AssetPath != PathToUtf8(path))
 		{
 			terrain.m_AssetPath = PathToUtf8(path);
 			m_HasUnrecordedChange = true;
@@ -1867,18 +1860,15 @@ namespace Helios
 		return true;
 	}
 
-	void SceneEditorLayer::ExportSelectedTerrain()
-	{
-		ExportTerrain(m_SceneHierarchy.GetSelectedEntity());
-	}
-
-	void SceneEditorLayer::SaveEditedTerrains()
+	bool SceneEditorLayer::SaveEditedTerrains()
 	{
 		for (auto [handle, terrain] : m_pMainScene->GetRegistry().view<TerrainComponent>().each())
 		{
-			if (terrain.m_Field != nullptr && terrain.m_Field->HasUnsavedEdits())
-				ExportTerrain(Entity{ handle, m_pMainScene });
+			if (terrain.m_Field != nullptr && terrain.m_Field->HasUnsavedEdits()
+				&& !ExportTerrain(Entity{ handle, m_pMainScene }))
+				return false;
 		}
+		return true;
 	}
 
 	/* F 键：把轨道中心聚焦到选中实体 */
@@ -1932,6 +1922,13 @@ namespace Helios
 		/* 相机列表与面板 UI 同源：即使本帧不渲染（视口为 0）也刷新，面板不读过期条目 */
 		CollectCameraEntries();
 
+		if (const Entity target = TerrainSculpt::ConsumeExportRequest())
+		{
+			const uint64_t serial = TerrainSculpt::GetExportRequest().Serial;
+			FinishSculptStroke();
+			TerrainSculpt::CompleteExport(serial, ExportTerrain(target, TerrainSculpt::GetExportRequest().BindAsset));
+		}
+
 		if (m_ViewportRegion.Width <= 0 || m_ViewportRegion.Height <= 0)
 			return;
 
@@ -1960,10 +1957,6 @@ namespace Helios
 				m_pMainScene->OnUpdate(delta_time);
 				break;
 			}
-
-			/* 卡片上点了导出：这里才拿得到选中实体 */
-			if (TerrainSculpt::ConsumeExportRequest())
-				ExportSelectedTerrain();
 
 			/* 相机这一帧的姿态定下来了，顺手看看要不要落盘 */
 			UpdateViewStateAutosave(delta_time);

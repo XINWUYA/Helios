@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -165,16 +165,16 @@ namespace Helios
 	/* 单个材质槽的值语义：实例在拷贝时深拷贝一份 —— 组件撤销快照靠这条把改过的参数
 	 * 一起存 / 还原；引用形态是共享资产，保持浅拷贝。模型槽是多槽表，深拷贝写在
 	 * ModelComponent 的拷贝构造里，两者口径一致。 */
-	struct GrassMaterialSlot : MaterialSlotOverride
+	struct InstanceMaterialSlot : MaterialSlotOverride
 	{
-		GrassMaterialSlot() = default;
-		GrassMaterialSlot(const GrassMaterialSlot& other)
+		InstanceMaterialSlot() = default;
+		InstanceMaterialSlot(const InstanceMaterialSlot& other)
 			: MaterialSlotOverride(other)
 		{
 			if (IsInstance && pMaterial != nullptr)
 				pMaterial = pMaterial->Clone();
 		}
-		GrassMaterialSlot& operator=(const GrassMaterialSlot& other)
+		InstanceMaterialSlot& operator=(const InstanceMaterialSlot& other)
 		{
 			if (this == &other)
 				return *this;
@@ -444,7 +444,7 @@ namespace Helios
 
 		/* 材质槽：pMaterial 是生效材质；IsInstance / SourceAssetPath 的含义与模型槽一致 ——
 		 * 面板上改参数时从资产克隆一份，改动只落在这片草地上，Reset 回资产 */
-		GrassMaterialSlot m_MaterialSlot;
+		InstanceMaterialSlot m_MaterialSlot;
 		SharedPtr<GrassField> m_Field{ nullptr };
 
 		[[nodiscard]] const SharedPtr<Material>& GetMaterial() const { return m_MaterialSlot.pMaterial; }
@@ -494,7 +494,7 @@ namespace Helios
 		bool m_CastShadow{ true };
 
 		/* 材质槽：与模型 / 草地同一套三态语义（覆盖 / 实例 / 默认） */
-		MaterialSlotOverride m_MaterialSlot;
+		InstanceMaterialSlot m_MaterialSlot;
 		SharedPtr<TerrainField> m_Field{ nullptr };
 
 		[[nodiscard]] const SharedPtr<Material>& GetMaterial() const { return m_MaterialSlot.pMaterial; }

@@ -188,11 +188,10 @@ namespace Helios
 		/* 鼠标射线打中选中的地形：给出落点（局部 xz）与按两轴缩放换算后的局部半径 */
 		bool RaycastSculptTarget(Entity& out_entity, glm::vec2& out_local, glm::vec2& out_radius) const;
 		void ShowTerrainBrushUI();
-		/* 把地形高度写进 .terrain 并绑上：已绑资产就写回原文件，否则新建一份不重名的 */
-		bool ExportTerrain(Entity entity);
-		void ExportSelectedTerrain();
+		/* 导出高度；绑定模式写回已有资产，非绑定模式另存副本。 */
+		bool ExportTerrain(Entity entity, bool bind_asset = true);
 		/* 场景文件不存高度：保存场景前把笔刷改过的地形先写进资产 */
-		void SaveEditedTerrains();
+		bool SaveEditedTerrains();
 
 		/* F 键：把视角聚焦到选中实体 */
 		void FocusSelectedEntity();

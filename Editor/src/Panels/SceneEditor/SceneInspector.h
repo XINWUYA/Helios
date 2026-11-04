@@ -75,15 +75,21 @@ namespace Helios
 		/* 字段控件的绘制回调：拿到字段元数据与可写的存储。
 		 * 偏移字段拿到的是组件内的原位地址，访问器字段拿到的是栈上缓冲
 		 * （回写由 DrawEditableField 负责），两者对回调是透明的。 */
-		using FieldDrawFunc = void (*)(const FieldDesc& field, void* field_ptr);
+		using FieldDrawFunc = std::function<void(const FieldDesc& field, void* field_ptr)>;
+		static void DrawFieldControl(const FieldDesc& field, void* field_ptr);
 
 		/* Model 的材质卡：每槽一张，排在 Model 组件卡之后（卡片背景走绘制通道、通道不可嵌套，
 		 * "卡中卡"画不出来 —— 所以材质详情不能画在组件卡里，只能同级平铺）。 */
 		void DrawModelMaterialCards(Entity entity, ModelComponent& component);
 		/* 草地的材质卡：草地只有一个槽，同样平铺在 Grass 组件卡之后 */
 		void DrawGrassMaterialCard(Entity entity, GrassComponent& component);
-		/* 地形的材质卡：与草地同一路数，排在 Terrain 组件卡之后 */
+		bool DrawTerrainPanel(const ComponentDesc& desc, Entity& entity, TerrainComponent& component);
+		bool DrawTerrainMaterialBody(TerrainComponent& component);
 		void DrawTerrainMaterialCard(Entity entity, TerrainComponent& component);
+		void DrawTerrainField(const ComponentDesc& desc, Entity& entity, TerrainComponent& component,
+			const FieldDesc& field);
+		void DrawTerrainRebuildPrompt(const ComponentDesc& desc, Entity& entity, TerrainComponent& component);
+		bool DrawTerrainExpandBlock(Entity entity, TerrainComponent& component);
 		/* Model 编辑器的入口按钮：模型是文件资产时才有（内建模型没有资产文件，不出现）。
 		 * 画在当前卡片里 —— 实体侧在 Model 组件卡尾部，资源侧在详情卡尾部。 */
 		void DrawOpenInModelEditorButton(const std::string& absolute_path);
@@ -155,7 +161,7 @@ namespace Helios
 		 * 事务（连续拖动/输入合并成一条历史）也在这里开合，因此组件卡里的字段与
 		 * 面板头部就地编辑的实体名共享同一套撤销语义。 */
 		void DrawEditableField(const ComponentDesc& desc, Entity& entity, void* component,
-		                       const FieldDesc& field, FieldDrawFunc draw);
+		                       const FieldDesc& field, const FieldDrawFunc& draw);
 		/* 组件卡尾部的一行动作按钮（如 Model 卡的「Open in Model Editor」）：
 		 * 标签为空表示没有；点击回调由调用方按组件准备。 */
 		struct ComponentCardFooter
@@ -168,7 +174,21 @@ namespace Helios
 		 * order_index / order_count 是本帧在面板里的位置，给菜单的上下移动判断边界。
 		 * footer 非空时在卡身末尾补一行按钮（跟着卡片一起折叠）。 */
 		void DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component,
-		                        int order_index, int order_count, const ComponentCardFooter* footer = nullptr);
+		                        int order_index, int order_count, const ComponentCardFooter* footer = nullptr,
+			const std::function<bool()>& body = {});
+
+		struct TerrainPanelState
+		{
+			Entity Target;
+			const FieldDesc* PendingField{ nullptr };
+			alignas(16) uint8_t Before[kFieldValueCapacity]{};
+			alignas(16) uint8_t After[kFieldValueCapacity]{};
+			uint64_t ExportSerial{ 0 };
+			glm::vec2 ExpandSourceSize{ 0.0f };
+			glm::vec2 ExpandTargetSize{ 0.0f };
+			bool ExpandFailed{ false };
+		};
+		TerrainPanelState m_TerrainPanel;
 
 		/* 所属场景 */
 		SharedPtr<Scene> m_pOwnerScene;

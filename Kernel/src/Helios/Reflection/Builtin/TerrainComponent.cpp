@@ -45,7 +45,7 @@ namespace Helios
 			else
 				terrain.m_AssetPath.clear();
 
-			terrain.m_MaterialSlot = MaterialSlotOverride{};
+			terrain.m_MaterialSlot = InstanceMaterialSlot{};
 
 			for (const tinyxml2::XMLElement* instance_doc = element->FirstChildElement("MaterialOverride");
 				instance_doc != nullptr; instance_doc = instance_doc->NextSiblingElement("MaterialOverride"))

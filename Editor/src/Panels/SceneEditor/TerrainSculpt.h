@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "Helios/Scene/Entity.h"
 
 namespace Helios::TerrainSculpt
 {
@@ -29,22 +30,49 @@ namespace Helios::TerrainSculpt
 		return s_Settings;
 	}
 
-	/* 卡片上的按钮只置一个请求：导出要知道当前选中的是哪个实体，交给编辑器层做 */
-	inline bool& ExportRequested()
+	enum class ExportStatus : uint8_t { Idle, Pending, Succeeded, Failed };
+	struct ExportRequest
 	{
-		static bool s_Requested = false;
-		return s_Requested;
+		Entity Target;
+		uint64_t Serial{ 0 };
+		ExportStatus Status{ ExportStatus::Idle };
+		bool Consumed{ false };
+		bool BindAsset{ true };
+	};
+
+	inline ExportRequest& GetExportRequest()
+	{
+		static ExportRequest s_Request;
+		return s_Request;
 	}
 
-	inline void RequestExport()
+	/* 请求绑到实体，换选中不会把高度写进另一块地形。 */
+	inline uint64_t RequestExport(Entity target, bool bind_asset = true)
 	{
-		ExportRequested() = true;
+		ExportRequest& request = GetExportRequest();
+		if (!target || request.Status == ExportStatus::Pending)
+			return 0;
+		request.Target = target;
+		++request.Serial;
+		request.Status = ExportStatus::Pending;
+		request.Consumed = false;
+		request.BindAsset = bind_asset;
+		return request.Serial;
 	}
 
-	inline bool ConsumeExportRequest()
+	inline Entity ConsumeExportRequest()
 	{
-		const bool requested = ExportRequested();
-		ExportRequested() = false;
-		return requested;
+		ExportRequest& request = GetExportRequest();
+		if (request.Status != ExportStatus::Pending || request.Consumed)
+			return {};
+		request.Consumed = true;
+		return request.Target;
+	}
+
+	inline void CompleteExport(uint64_t serial, bool succeeded)
+	{
+		ExportRequest& request = GetExportRequest();
+		if (request.Serial == serial && request.Status == ExportStatus::Pending)
+			request.Status = succeeded ? ExportStatus::Succeeded : ExportStatus::Failed;
 	}
 }

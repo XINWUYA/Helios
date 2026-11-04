@@ -10,14 +10,13 @@ uniform mat4 u_TerrainModel;          /* 局部 → 世界 */
 uniform mat4 u_TerrainInverse;        /* 世界 → 局部（页烘焙把世界点拉回来） */
 uniform mat4 u_TerrainNormalMatrix;   /* 法线：世界矩阵的逆转置，只用 3x3 */
 
-/* 地形数据：高度图与范围。带 @property 的会进材质参数表（属性面板里直接看），
- * 渲染时由 C++ 按地形逐绘制覆盖 —— 同一份材质仍可被多块地形共用 */
-uniform sampler2D u_HeightMap;    // @property
-uniform vec2 u_TerrainExtent;     // @property 局部半宽半长（米）
+/* 高度图与范围由地形逐绘制提供，不作为材质编辑项。 */
+uniform sampler2D u_HeightMap;
+uniform vec2 u_TerrainExtent;
 uniform vec2 u_TerrainWorldExtent; /* 世界空间的半宽半长：页表按世界切 */
 uniform vec3 u_TerrainOrigin;      /* 地形中心的世界坐标（页表与拾取定位用） */
-uniform vec2 u_HeightmapSize;     // @property 高度图边长（纹素）
-uniform float u_HeightScale;      // @property 局部高度幅度（米）
+uniform vec2 u_HeightmapSize;
+uniform float u_HeightScale;
 /* morph 带宽的缩放：1 = 边长的四分之一，0 = 只剩一个顶点间距（检查程序用来对照"没有 morph"） */
 uniform float u_TerrainMorphScale = 1.0f;
 

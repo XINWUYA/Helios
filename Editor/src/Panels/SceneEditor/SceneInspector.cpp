@@ -227,6 +227,7 @@ namespace Helios
 
 		m_pOwnerScene = scene;
 		m_Entity = {};
+		m_TerrainPanel = {};
 
 		/* 场景已更换，字段编辑的合并窗口不再有效 */
 		m_FieldEditTransactionOpen = false;
@@ -1328,7 +1329,7 @@ namespace Helios
 	}
 
 	/* 按字段类型绘制单个控件，field_ptr 指向可写的字段存储 */
-	static void DrawFieldControl(const FieldDesc& field, void* field_ptr)
+	void SceneInspector::DrawFieldControl(const FieldDesc& field, void* field_ptr)
 	{
 		switch (field.Type)
 		{
@@ -1418,7 +1419,7 @@ namespace Helios
 	/* 单个字段的编辑：取快照 → 画控件 → 比较 → 有变化就生成历史命令。组件卡的字段和面板
 	 * 头部的实体名都走这里 —— 撤销语义只有这一份实现（名字连改十次也只留一条历史）。 */
 	void SceneInspector::DrawEditableField(const ComponentDesc& desc, Entity& entity, void* component,
-	                                       const FieldDesc& field, FieldDrawFunc draw)
+	                                       const FieldDesc& field, const FieldDrawFunc& draw)
 	{
 		/* 上一帧有控件活跃、这一帧没有 → 一次编辑结束，给命令栈封口。
 		 * 否则下一次编辑会并进上一条历史，撤销一次退过头。 */
@@ -1491,17 +1492,59 @@ namespace Helios
 		}
 	}
 
-	/* 按字段元数据生成控件（组件卡的卡身） */
+	/* 按字段元数据生成控件（组件卡的卡身）：字段按 Group 归拢，同组收在一个可折叠标题下。
+	 * 没声明分组的组件照旧平铺；只有一组时标题是多余的，也不画。 */
 	void SceneInspector::DrawComponentFieldsBySchema(const ComponentDesc& desc, Entity& entity, void* component)
 	{
+		struct FieldGroup
+		{
+			const char* Name{ nullptr };              /* 空 = 未分组 */
+			std::vector<const FieldDesc*> Fields;
+		};
+
+		/* 先按可见性筛再分组：整组字段都被条件藏起来时，不留一个空标题 */
+		const auto same_group = [](const char* lhs, const char* rhs)
+		{
+			if (lhs == nullptr || rhs == nullptr)
+				return lhs == rhs;
+			return std::strcmp(lhs, rhs) == 0;
+		};
+
+		std::vector<FieldGroup> groups;
 		for (const FieldDesc& field : desc.Fields)
 		{
 			/* 条件不满足：不画该行（字段值保留，序列化照常） */
 			if (!EvaluateCondition(field.Condition, component))
 				continue;
 
-			ImGui::PushID(field.Name);
-			DrawEditableField(desc, entity, component, field, &DrawFieldControl);
+			auto group = std::find_if(groups.begin(), groups.end(),
+				[&](const FieldGroup& candidate) { return same_group(candidate.Name, field.Group); });
+			if (group == groups.end())
+			{
+				groups.push_back(FieldGroup{ field.Group, {} });
+				group = groups.end() - 1;
+			}
+			group->Fields.push_back(&field);
+		}
+
+		/* 未分组的排在前面（与材质卡的排法一致）：注册顺序只在同一组内说话 */
+		std::stable_partition(groups.begin(), groups.end(),
+			[](const FieldGroup& group) { return group.Name == nullptr; });
+
+		const bool show_group_titles = groups.size() > 1;
+		for (const FieldGroup& group : groups)
+		{
+			if (show_group_titles && group.Name != nullptr
+				&& !MaterialParamUI::BeginPropertyGroup(group.Name, group.Name))
+				continue;
+
+			ImGui::PushID(group.Name != nullptr ? group.Name : "##Ungrouped");
+			for (const FieldDesc* field : group.Fields)
+			{
+				ImGui::PushID(field->Name);
+				DrawEditableField(desc, entity, component, *field, &DrawFieldControl);
+				ImGui::PopID();
+			}
 			ImGui::PopID();
 		}
 	}
@@ -1727,28 +1770,7 @@ namespace Helios
 			ImGuiExt::EndPropertyRow();
 		}
 
-		/* 参数行：集合与类型来自 Shader 反射（见 BuildMaterialParamRows）——换 Shader 行集跟着换；
-		 * 值取当前生效材质，反射声明而材质还没有的先显示默认值 */
-		const std::vector<MaterialParamUI::MaterialParamRow> rows = MaterialParamUI::BuildMaterialParamRows(*current);
-		if (rows.empty())
-			MaterialParamUI::DrawMaterialReflectionNotice(*current);
-
-		for (const MaterialParamUI::MaterialParamRow& row : rows)
-		{
-			const SharedPtr<Material> live = resolve_live();
-			if (live == nullptr)
-				break;
-
-			const auto& parameters = live->GetAllParameters();
-			const auto iter = parameters.find(ToID(row.Param.Name));
-			const MaterialParamInfo& param_info = (iter != parameters.end()) ? iter->second : row.Param;
-
-			MaterialParamUI::DrawMaterialParamRow(param_info, row.Spec, m_AssetRevealFunc,
-				[&write_param](ParamType type, const std::string& name, const std::any& value)
-				{
-					write_param(type, name, value);
-				});
-		}
+		MaterialParamUI::DrawMaterialParams(*current, [&]() { return resolve_live().get(); }, m_AssetRevealFunc, write_param);
 
 		/* 渲染队列：小于 2500 不透明，2500 起透明（透明批次统一关深度写、按距离从远到近画） */
 		{
@@ -2042,95 +2064,45 @@ namespace Helios
 		ImGui::PopID();
 	}
 
-	/* 地形卡的材质：地形只有一个槽，与草地一样平铺在 Terrain 组件卡之后。
-	 * 卡片背景走绘制通道、通道不可嵌套，所以材质只能单独一张卡 */
-	void SceneInspector::DrawTerrainMaterialCard(Entity entity, TerrainComponent& component)
+	bool SceneInspector::DrawTerrainMaterialBody(TerrainComponent& component)
 	{
-		PROFILE_FUNCTION();
-
 		if (component.GetMaterial() == nullptr)
-			return;
+			return false;
 
-		const ComponentDesc* desc = ComponentRegistry::Instance().Find(std::type_index(typeid(TerrainComponent)));
-		if (desc == nullptr)
-			return;
-
-		ImGui::PushID("##TerrainMaterial");
-		const PanelChrome::Card card = PanelChrome::BeginCard("Material · Terrain", Icons::Id::FileMaterial);
-
-		if (component.m_MaterialSlot.IsInstance)
-		{
-			PanelChrome::DrawCardBadge(card, "Instance",
-				"Edited copy for this terrain — changes don't go into the material asset\n"
-				"Reset in the Terrain card's Material row re-clones from the asset");
-		}
-
-		if (card.Open)
-		{
-			const bool can_record = m_pCommandStack != nullptr
-				&& desc->Capture != nullptr && desc->Restore != nullptr;
-
-			ComponentSnapshot before;
-			if (can_record)
-				desc->Capture(entity, before);
-
-			bool changed = false;
-			const auto resolve_live = [&component]() { return component.GetMaterial(); };
-
-			const bool body_changed = DrawMaterialCardBody(component.GetMaterial(), resolve_live,
-				[&](ParamType type, const std::string& name, const std::any& value)
-				{
-					bool created = false;
-					const SharedPtr<Material> live = MakeTerrainMaterialInstance(component, created);
-					if (live == nullptr)
-						return;
-
-					if (type == ParamType::Texture)
-						live->SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
-					else
-						live->SetParameters(type, name, value);
-					changed = true;
-				},
-				[&](int32_t render_queue)
-				{
-					bool created = false;
-					if (const SharedPtr<Material> live = MakeTerrainMaterialInstance(component, created))
-					{
-						live->SetRenderQueue(render_queue);
-						changed = true;
-					}
-				},
-				[&](const RenderRasterState& state)
-				{
-					bool created = false;
-					if (const SharedPtr<Material> live = MakeTerrainMaterialInstance(component, created))
-					{
-						live->SetRasterState(state);
-						changed = true;
-					}
-				});
-
-			if ((changed || body_changed) && can_record && before.IsValid())
+		bool changed = false;
+		const auto resolve_live = [&component]() { return component.GetMaterial(); };
+		const bool body_changed = DrawMaterialCardBody(component.GetMaterial(), resolve_live,
+			[&](ParamType type, const std::string& name, const std::any& value)
 			{
-				if (ImGui::IsAnyItemActive() && !m_ComponentEditTransactionOpen)
+				bool created = false;
+				const SharedPtr<Material> live = MakeTerrainMaterialInstance(component, created);
+				if (live == nullptr)
+					return;
+				if (type == ParamType::Texture)
+					live->SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
+				else
+					live->SetParameters(type, name, value);
+				changed = true;
+			},
+			[&](int32_t queue)
+			{
+				bool created = false;
+				if (const auto live = MakeTerrainMaterialInstance(component, created))
 				{
-					m_ComponentEditTransactionOpen = true;
-					m_pCommandStack->BeginTransaction();
+					live->SetRenderQueue(queue);
+					changed = true;
 				}
-
-				ComponentSnapshot after;
-				desc->Capture(entity, after);
-				if (after.IsValid())
+			},
+			[&](const RenderRasterState& state)
+			{
+				bool created = false;
+				if (const auto live = MakeTerrainMaterialInstance(component, created))
 				{
-					m_pCommandStack->Execute(CreateUniquePtr<ComponentCustomDrawCommand>(
-						entity, desc->Has, desc->Restore, std::move(before), std::move(after), desc->Name));
+					live->SetRasterState(state);
+					changed = true;
 				}
-			}
-
-				}
-
-		PanelChrome::EndCard(card);
-		ImGui::PopID();
+			});
+		return changed || body_changed;
 	}
 
 	/* ==================== 相机预览卡（Camera 组件的附加卡）====================
@@ -2191,27 +2163,15 @@ namespace Helios
 		/* Shader 行（与模型编辑器共用同一控件）：点开菜单换 Shader，选中后记脏 + 热更新 */
 		if (MaterialParamUI::DrawMaterialShaderRow(material))
 			on_edit();
-		/* 参数行：集合来自 Shader 反射（换 Shader 后立即按新 Shader 列行）；值取编辑缓冲，
-		 * 反射声明而缓冲里还没有的先显示反射默认值 —— 编辑时才落进缓冲；
-		 * 反射不到时画报错提示，不回退旧参数表 */
-		const std::vector<MaterialParamUI::MaterialParamRow> rows = MaterialParamUI::BuildMaterialParamRows(material);
-		if (rows.empty())
-			MaterialParamUI::DrawMaterialReflectionNotice(material);
-
-		for (const MaterialParamUI::MaterialParamRow& row : rows)
-		{
-			MaterialParamUI::DrawMaterialParamRow(row.Param, row.Spec, m_AssetRevealFunc,
-				[&material, &on_edit](ParamType type, const std::string& name, const std::any& value)
-				{
-					if (type == ParamType::Texture)
-						material.SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
-					else
-						material.SetParameters(type, name, value);
-
-					/* 有改动 → 记脏（Apply 变可用）+ 热更新（见 DrawAssetMaterialCards） */
-					on_edit();
-				});
-		}
+		MaterialParamUI::DrawMaterialParams(material, [&]() { return &material; }, m_AssetRevealFunc,
+			[&](ParamType type, const std::string& name, const std::any& value)
+			{
+				if (type == ParamType::Texture)
+					material.SetTexture(name, std::any_cast<SharedPtr<DeviceTexture>>(value));
+				else
+					material.SetParameters(type, name, value);
+				on_edit();
+			});
 
 		/* 渲染队列：小于 2500 不透明，2500 起透明（透明批次统一关深度写、按距离从远到近画） */
 		int32_t render_queue = material.GetRenderQueue();
@@ -2338,7 +2298,7 @@ namespace Helios
 	 * 组件自定义绘制）。卡片版式来自 PanelChrome，各面板共用。
 	 * 卡头可以拖着重排，菜单里也有逐格上移 / 下移。 */
 	void SceneInspector::DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component,
-		int order_index, int order_count, const ComponentCardFooter* footer)
+		int order_index, int order_count, const ComponentCardFooter* footer, const std::function<bool()>& body)
 	{
 		PROFILE_FUNCTION();
 
@@ -2360,8 +2320,9 @@ namespace Helios
 			/* 组件自定义编辑的合并窗口封口（拖动材质参数等 → 每帧快照命令由事务窗口合并为一条） */
 			ServiceComponentEditTransaction();
 
-			DrawComponentFieldsBySchema(desc, entity, component);
-			if (desc.CustomDraw != nullptr)
+			if (!body)
+				DrawComponentFieldsBySchema(desc, entity, component);
+			if (body || desc.CustomDraw != nullptr)
 			{
 				ComponentSnapshot before;
 				const bool can_record_custom_edit = m_pCommandStack != nullptr
@@ -2369,7 +2330,7 @@ namespace Helios
 				if (can_record_custom_edit)
 					desc.Capture(entity, before);
 
-				const bool changed = desc.CustomDraw(component);
+				const bool changed = body ? body() : desc.CustomDraw(component);
 				if (changed && can_record_custom_edit && before.IsValid())
 				{
 					/* 用户正在操作控件时开合并窗口：连续拖动只留一条历史 */
@@ -2604,8 +2565,11 @@ namespace Helios
 				}
 			}
 
+			std::function<bool()> body;
+			if (desc.Type == std::type_index(typeid(TerrainComponent)) && desc.CustomDraw != nullptr)
+				body = [&]() { return DrawTerrainPanel(desc, m_Entity, *static_cast<TerrainComponent*>(component)); };
 			DrawComponentBlock(desc, m_Entity, component, i, count,
-				model_footer.Label != nullptr ? &model_footer : nullptr);
+				model_footer.Label != nullptr ? &model_footer : nullptr, body);
 
 			/* 卡头菜单里的 Remove 当场就把组件销毁了，上面拿的指针已经悬空，
 			 * 附加卡动笔前重新查一次，组件没了就跳过。 */

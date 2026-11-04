@@ -45,7 +45,7 @@ namespace Helios
 				&& element->Attribute("CullDistance") != nullptr)
 				grass.m_EndCullDistance = element->FloatAttribute("CullDistance");
 
-			grass.m_MaterialSlot = GrassMaterialSlot{};
+			grass.m_MaterialSlot = InstanceMaterialSlot{};
 
 			/* 实例形态：参数内嵌在场景里，来源只用于 Reset */
 			for (const tinyxml2::XMLElement* instance_doc = element->FirstChildElement("MaterialOverride");
