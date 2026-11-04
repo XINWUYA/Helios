@@ -29,7 +29,11 @@ namespace Helios
         PROFILE_FUNCTION();
 
         CreateTexture(texture_desc);
-        CreateSamplerState(TextureLoadConfig{});
+
+        /* 运行期纹理（阴影图、渲染目标这类）边缘不能环绕，跟 GL 后端一样夹到边上 */
+        TextureLoadConfig sampler_config;
+        sampler_config.SamplerWrapMode = SamplerWrapMode::ClampToEdge;
+        CreateSamplerState(sampler_config);
         m_IsLoaded = m_Texture != nullptr;
     }
 
