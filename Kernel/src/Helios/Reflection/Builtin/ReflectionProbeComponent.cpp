@@ -88,7 +88,7 @@ namespace Helios
 					&ReflectionProbe::IsStaggeredBake, &ReflectionProbe::SetStaggeredBake>(),
 				"StaggeredBake", FieldType::Bool)
 			.When(MakePredicateCondition(&RealtimeSceneCapture))
-			/* 烘焙间隔：实时探针每隔这么多帧才烘一次，0 表示每帧都烘 */
+			/* 烘焙间隔：两轮烘焙之间停多少帧，0 表示每帧都烘 */
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBakeInterval, &ReflectionProbe::SetBakeInterval>(),
 				"BakeInterval", FieldType::Int)

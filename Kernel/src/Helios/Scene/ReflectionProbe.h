@@ -69,8 +69,8 @@ namespace Helios
         void SetStaggeredBake(bool value) { m_StaggeredBake = value; }
         [[nodiscard]] bool IsStaggeredBake() const { return m_StaggeredBake; }
 
-        /* 烘焙间隔（帧）：实时探针每隔这么多帧才烘一次，0 或 1 表示每帧都烘。
-         * 第一版结果出来之前不节流，重烘焙也会立刻跑完一轮。 */
+        /* 烘焙间隔（帧）：轮与轮之间停多少帧，一轮把六面烘完（开了分帧烘焙就一帧一面）。
+         * 0 或 1 表示不节流；第一版结果出来之前也不节流，重烘焙会立刻跑完一轮。 */
         void SetBakeInterval(int frames) { m_BakeInterval = frames; }
         [[nodiscard]] int GetBakeInterval() const { return m_BakeInterval; }
         /* 每帧重烤只对场景捕获有意义：贴图烘焙的输入是静态图，换图走重烤请求 */
@@ -244,9 +244,9 @@ namespace Helios
         bool m_EnvComplete{ false };
         /* 分帧烘焙：每帧只烘一面；关掉 = 每帧六面全烘 */
         bool m_StaggeredBake{ true };
-        /* 烘焙间隔（帧）：0 / 1 = 每帧都烘 */
+        /* 烘焙间隔（帧）：轮与轮之间停多少帧，0 / 1 = 每帧都烘 */
         int m_BakeInterval{ 0 };
-        /* 距上次烘焙过了多少帧（间隔节流用） */
+        /* 一轮结束后已经等了多少帧（间隔节流用） */
         int m_FramesSinceBake{ 0 };
         /* 实时烘焙的卷积进度：只算这一面，算完 6 面转一圈；环境图捕获跟它同一个面号 */
         uint32_t m_BakeConvolveFace{ 0 };

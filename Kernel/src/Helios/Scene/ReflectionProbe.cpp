@@ -113,10 +113,12 @@ namespace Helios
     {
         /* 还没烘出第一版（含刚重烘焙）不节流：先把结果赶出来，别让间隔拖住首帧 */
         if (m_BakeInterval <= 1 || !m_BakeCompleted)
-        {
-            m_FramesSinceBake = 0;
             return true;
-        }
+
+        /* 间隔按「轮」算：一轮要把六面走完。这一轮还没转回来（面号不为 0）就连着烘完，
+         * 轮与轮之间才停 —— 六个面挨在一起，TOD 推进时接缝也不会露 */
+        if (m_BakeConvolveFace != 0)
+            return true;
 
         if (++m_FramesSinceBake < m_BakeInterval)
             return false;
