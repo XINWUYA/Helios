@@ -17,6 +17,7 @@ namespace Helios
 	struct Frustum;
 	class DeviceTexture;
 	class DeviceFrameBuffer;
+	class Material;
 	class RenderView;
 
 	/* 地形 patch：所有 patch 共用同一个 33×33 模板网格，位置与 LOD 由实例属性给出，
@@ -25,7 +26,7 @@ namespace Helios
 	struct TerrainPatch
 	{
 		glm::vec4 Info{ 0.0f }; /* xyz = 左下角局部坐标，w = 覆盖边长（米） */
-		glm::vec4 Lod{ 0.0f };  /* x = 级数（0 最细），y = 采样步长，zw 保留 */
+		glm::vec4 Lod{ 0.0f };  /* x = 级数（0 为根），y = 采样步长，zw 保留 */
 	};
 
 	/* 一块地形的高度数据与 patch 划分。
@@ -34,6 +35,19 @@ namespace Helios
 	class HELIOS_API TerrainField
 	{
 	public:
+		struct HeightState
+		{
+			glm::vec2 Extent{ 0.0f };
+			uint32_t Resolution{ 0 };
+			float HeightScale{ 0.0f };
+			std::vector<float> Heights;
+		};
+		[[nodiscard]] HeightState CaptureHeightState() const;
+		bool RestoreHeightState(TerrainComponent& component, const HeightState& state);
+		/* 固定局部中心扩展；无效、缩小、无变化或超出精度上限时返回 0 */
+		[[nodiscard]] uint32_t GetExpansionResolution(const glm::vec2& new_extent) const;
+		bool Expand(TerrainComponent& component, const glm::vec2& new_extent);
+
 		/* 参数没变只更新矩阵；换参数 / 资产才重建高度图 */
 		void Rebuild(const TerrainComponent& component, const glm::mat4& world);
 
@@ -171,7 +185,7 @@ namespace Helios
 		static void SetGlobalMorphScale(float scale);
 		[[nodiscard]] static float GetGlobalMorphScale();
 
-		/* 模板网格：33×33 顶点，顶点只有 UV（0..1）。所有地形共用一份。 */
+		/* 模板网格：33×33 主网格与外圈裙边，所有地形共用。 */
 		static const MeshPrimitive& GetPatchPrimitive();
 		/* 实例数据布局，与 Terrain.glsl 的 location 5/6 对应 */
 		static const VertexBufferLayout& GetInstanceLayout();
@@ -181,13 +195,14 @@ namespace Helios
 		static constexpr uint32_t kPatchIndexCount = (kPatchQuads + 2) * (kPatchQuads + 2) * 6;
 
 	private:
-		void BuildHeightMap(const TerrainComponent& component);
+		bool BuildHeightMap(const TerrainComponent& component);
+		void BindHeightmapParams(const TerrainComponent& component) const;
 		/* 节点表：按层摊平的满四叉树，跟着高度数据一起重建 */
 		void BuildNodeTable();
-		/* 高度图上传：纹理 + CPU 副本，两种来源共用 */
-		void UploadHeightMap(std::vector<float> heights);
-		/* 标记哪些 patch 需要 morph：只有挨着更细节点的才做。
-		 * 相邻两侧都往各自父级收敛会收敛到不同精度的表面，反而裂开 */
+		/* 先创建纹理，成功后提交高度数据与局部几何 */
+		bool UploadHeightMap(std::vector<float> heights, const glm::vec2& extent,
+			uint32_t resolution, float height_scale);
+		/* 细节点挨着粗节点时，沿接缝向父级表面收敛。 */
 		static void MarkMorphPatches(std::vector<TerrainPatch>& patches);
 		/* 2:1 平衡：相邻叶子最多差一档，否则 morph 对不上 */
 		static void BalancePatches(std::vector<TerrainPatch>& patches);
@@ -229,7 +244,8 @@ namespace Helios
 		/* 本次高度图的来源（资产路径；程序化时为空） */
 		std::string m_AssetPath;
 		TerrainVirtualTexture m_VirtualTexture;
-		/* 上一次烘页时的材质版本：改了层颜色 / 层贴图就把页表作废 */
+		/* 材质换实例或版本变化时作废颜色缓存 */
+		SharedPtr<Material> m_MaterialIdentity;
 		uint32_t m_MaterialRevision{ 0 };
 
 		/* GPU 选择：节点表与它对应的显存，CPU 四叉树也查同一张表 */

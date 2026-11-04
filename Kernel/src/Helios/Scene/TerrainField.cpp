@@ -111,7 +111,7 @@ namespace Helios
 		};
 
 		const TerrainAsset::Data* LoadAssetCached(const std::string& path,
-			std::filesystem::file_time_type& out_write_time)
+			std::filesystem::file_time_type& out_write_time, bool force_reload = false)
 		{
 			using Clock = std::chrono::steady_clock;
 			constexpr auto kCheckInterval = std::chrono::milliseconds(500);
@@ -136,7 +136,7 @@ namespace Helios
 			AssetEntry& entry = *found;
 			entry.UsedAt = now;
 
-			if (now - entry.CheckedAt >= kCheckInterval)
+			if (force_reload || now - entry.CheckedAt >= kCheckInterval)
 			{
 				entry.CheckedAt = now;
 
@@ -148,7 +148,7 @@ namespace Helios
 				if (!exists)
 					write_time = std::filesystem::file_time_type{};
 
-				if (write_time != entry.WriteTime || !entry.Loaded)
+				if (force_reload || write_time != entry.WriteTime || !entry.Loaded)
 				{
 					entry.WriteTime = write_time;
 					entry.Loaded = exists && TerrainAsset::Read(path, entry.Data);
@@ -158,6 +158,117 @@ namespace Helios
 			out_write_time = entry.WriteTime;
 			return entry.Loaded ? &entry.Data : nullptr;
 		}
+
+		uint64_t ComputeBuildKey(const TerrainComponent& component,
+			const std::filesystem::file_time_type& asset_write_time, bool from_asset)
+		{
+			uint64_t key = 0xcbf29ce484222325ull;
+			const auto mix = [&key](const void* data, size_t size)
+			{
+				const auto* bytes = static_cast<const uint8_t*>(data);
+				for (size_t i = 0; i < size; ++i)
+				{
+					key ^= bytes[i];
+					key *= 0x100000001b3ull;
+				}
+			};
+			mix(&component.m_Extent, sizeof(component.m_Extent));
+			mix(&component.m_Resolution, sizeof(component.m_Resolution));
+			mix(&component.m_HeightScale, sizeof(component.m_HeightScale));
+			mix(&component.m_Seed, sizeof(component.m_Seed));
+			mix(&component.m_LodRatio, sizeof(component.m_LodRatio));
+			mix(&component.m_MinNodeSize, sizeof(component.m_MinNodeSize));
+			mix(&from_asset, sizeof(from_asset));
+			if (from_asset)
+			{
+				mix(&asset_write_time, sizeof(asset_write_time));
+				mix(component.m_AssetPath.data(), component.m_AssetPath.size());
+			}
+			return key;
+		}
+
+		bool IsValidHeightGeometry(const glm::vec2& extent, uint32_t resolution, float height_scale,
+			size_t height_count)
+		{
+			return std::isfinite(extent.x) && std::isfinite(extent.y)
+				&& extent.x > 0.0f && extent.y > 0.0f
+				&& extent.x <= std::numeric_limits<float>::max() * 0.5f
+				&& extent.y <= std::numeric_limits<float>::max() * 0.5f
+				&& resolution >= TerrainAsset::kMinResolution && resolution <= TerrainAsset::kMaxResolution
+				&& std::isfinite(height_scale) && height_scale >= 0.0f
+				&& height_count == static_cast<size_t>(resolution) * resolution;
+		}
+	}
+
+	TerrainField::HeightState TerrainField::CaptureHeightState() const
+	{
+		return HeightState{ m_Extent, m_Resolution, m_HeightScale, m_Heights };
+	}
+
+	bool TerrainField::RestoreHeightState(TerrainComponent& component, const HeightState& state)
+	{
+		if (m_StrokeActive
+			|| !IsValidHeightGeometry(state.Extent, state.Resolution, state.HeightScale, state.Heights.size()))
+			return false;
+		if (!UploadHeightMap(state.Heights, state.Extent, state.Resolution, state.HeightScale))
+			return false;
+
+		component.m_Extent = state.Extent;
+		component.m_Resolution = state.Resolution;
+		component.m_HeightScale = state.HeightScale;
+		m_AssetPath = component.m_AssetPath;
+		std::filesystem::file_time_type asset_write_time{};
+		const bool from_asset = !component.m_AssetPath.empty()
+			&& LoadAssetCached(component.m_AssetPath, asset_write_time) != nullptr;
+		m_BuildKey = ComputeBuildKey(component, asset_write_time, from_asset);
+		m_HeightsEdited = true;
+		BindHeightmapParams(component);
+		return true;
+	}
+
+	uint32_t TerrainField::GetExpansionResolution(const glm::vec2& new_extent) const
+	{
+		if (m_StrokeActive || m_HeightMap == nullptr
+			|| !IsValidHeightGeometry(m_Extent, m_Resolution, m_HeightScale, m_Heights.size())
+			|| !IsValidHeightGeometry(new_extent, m_Resolution, m_HeightScale, m_Heights.size())
+			|| new_extent.x < m_Extent.x || new_extent.y < m_Extent.y
+			|| (new_extent.x == m_Extent.x && new_extent.y == m_Extent.y))
+			return 0;
+
+		const double ratio = std::max(static_cast<double>(new_extent.x) / m_Extent.x,
+			static_cast<double>(new_extent.y) / m_Extent.y);
+		const double resolution = std::ceil(ratio * static_cast<double>(m_Resolution - 1)) + 1.0;
+		if (!std::isfinite(resolution) || resolution > TerrainAsset::kMaxResolution)
+			return 0;
+		return static_cast<uint32_t>(resolution);
+	}
+
+	bool TerrainField::Expand(TerrainComponent& component, const glm::vec2& new_extent)
+	{
+		const uint32_t resolution = GetExpansionResolution(new_extent);
+		if (resolution == 0
+			|| !std::all_of(m_Heights.begin(), m_Heights.end(), [](float height) { return std::isfinite(height); }))
+			return false;
+
+		HeightState state;
+		state.Extent = new_extent;
+		state.Resolution = resolution;
+		state.HeightScale = m_HeightScale;
+		state.Heights.resize(static_cast<size_t>(resolution) * resolution);
+		for (uint32_t z = 0; z < resolution; ++z)
+		{
+			for (uint32_t x = 0; x < resolution; ++x)
+			{
+				const glm::vec2 uv(static_cast<float>(x) / static_cast<float>(resolution - 1),
+					static_cast<float>(z) / static_cast<float>(resolution - 1));
+				const glm::vec2 local = glm::clamp((uv * 2.0f - 1.0f) * new_extent, -m_Extent, m_Extent);
+				float height = 0.0f;
+				if (!TerrainSampling::SampleHeight(m_Heights.data(), m_Resolution, m_Extent, 1.0f, local, height))
+					return false;
+				state.Heights[static_cast<size_t>(z) * resolution + x] = height;
+			}
+		}
+		return RestoreHeightState(component, state);
 	}
 
 	void TerrainField::Rebuild(const TerrainComponent& component, const glm::mat4& world)
@@ -184,10 +295,11 @@ namespace Helios
 
 		/* 材质参数变了（层颜色 / 层贴图 / 阈值）：页池里烘的颜色已经过期，
 		 * 页表整张作废，下一帧按需重烘。几何不动，不用重建高度图 */
-		const uint32_t material_revision = component.GetMaterial() != nullptr
-			? component.GetMaterial()->GetRevision() : 0u;
-		if (material_revision != m_MaterialRevision)
+		const SharedPtr<Material>& material = component.GetMaterial();
+		const uint32_t material_revision = material != nullptr ? material->GetRevision() : 0u;
+		if (material != m_MaterialIdentity || material_revision != m_MaterialRevision)
 		{
+			m_MaterialIdentity = material;
 			m_MaterialRevision = material_revision;
 			m_VirtualTexture.Reset();
 		}
@@ -197,63 +309,49 @@ namespace Helios
 		const TerrainAsset::Data* asset = component.m_AssetPath.empty()
 			? nullptr : LoadAssetCached(component.m_AssetPath, asset_write_time);
 
-		/* 构建键：只算局部参数与资产，变换不影响高度数据 */
-		uint64_t key = 0xcbf29ce484222325ull;
-		const auto mix = [&key](const void* data, size_t size)
-		{
-			const auto* bytes = static_cast<const uint8_t*>(data);
-			for (size_t i = 0; i < size; ++i)
-			{
-				key ^= bytes[i];
-				key *= 0x100000001b3ull;
-			}
-		};
-		mix(&component.m_Extent, sizeof(component.m_Extent));
-		mix(&component.m_Resolution, sizeof(component.m_Resolution));
-		mix(&component.m_HeightScale, sizeof(component.m_HeightScale));
-		mix(&component.m_Seed, sizeof(component.m_Seed));
-		mix(&component.m_LodRatio, sizeof(component.m_LodRatio));
-		mix(&component.m_MinNodeSize, sizeof(component.m_MinNodeSize));
-
-		/* 资产内容换了（重新导出 / 外部编辑）也要重建，时间戳就是它的版本号 */
 		const bool from_asset = asset != nullptr;
-		if (from_asset)
-		{
-			mix(&asset_write_time, sizeof(asset_write_time));
-			mix(component.m_AssetPath.data(), component.m_AssetPath.size());
-		}
-
+		const uint64_t key = ComputeBuildKey(component, asset_write_time, from_asset);
 		if (key == m_BuildKey && m_HeightMap != nullptr)
 			return;
-		m_BuildKey = key;
 
+		/* 未导出的同源编辑态优先于外部文件刷新，几何变更仍走正常重建 */
+		if (m_HeightsEdited && m_HeightMap != nullptr && !m_AssetPath.empty()
+			&& m_AssetPath == component.m_AssetPath && m_Extent == component.m_Extent
+			&& m_Resolution == component.m_Resolution && m_HeightScale == component.m_HeightScale)
+		{
+			const uint32_t min_node_size = std::max(1u, component.m_MinNodeSize);
+			const bool nodes_changed = min_node_size != m_MinNodeSize;
+			m_LodRatio = std::max(0.5f, component.m_LodRatio);
+			m_MinNodeSize = min_node_size;
+			if (nodes_changed)
+				BuildNodeTable();
+			for (SelectionSlot& slot : m_Selections)
+				slot.Frame = std::numeric_limits<uint32_t>::max();
+			m_BuildKey = key;
+			return;
+		}
+
+		m_LodRatio = std::max(0.5f, component.m_LodRatio);
+		m_MinNodeSize = std::max(1u, component.m_MinNodeSize);
 		if (from_asset)
 		{
-			/* 数据以资产为准：组件上的分辨率 / 范围 / 起伏只在程序化模式下起作用 */
-			m_Extent = glm::vec2(std::max(0.0f, asset->Extent.x), std::max(0.0f, asset->Extent.y));
-			m_Resolution = std::clamp(asset->Resolution, 16u, 4096u);
-			m_HeightScale = std::max(0.0f, asset->HeightScale);
-			m_LodRatio = std::max(0.5f, component.m_LodRatio);
-			m_MinNodeSize = std::max(1u, component.m_MinNodeSize);
+			if (!UploadHeightMap(asset->Heights, asset->Extent, asset->Resolution, asset->HeightScale))
+				return;
 			m_AssetPath = component.m_AssetPath;
-			UploadHeightMap(asset->Heights);
 		}
 		else
 		{
-			m_Extent = glm::vec2(std::max(0.0f, component.m_Extent.x), std::max(0.0f, component.m_Extent.y));
-			m_Resolution = std::clamp(component.m_Resolution, 16u, 4096u);
-			m_HeightScale = std::max(0.0f, component.m_HeightScale);
-			m_LodRatio = std::max(0.5f, component.m_LodRatio);
-			m_MinNodeSize = std::max(1u, component.m_MinNodeSize);
+			if (!BuildHeightMap(component))
+				return;
 			m_AssetPath.clear();
-			BuildHeightMap(component);
 		}
+		m_BuildKey = key;
+		BindHeightmapParams(component);
+	}
 
-		/* 高度数据换了，贴地对象要重新采样；笔刷编辑只推进这一个版本号，不动构建键 */
-		m_HeightsRevision = m_BuildKey;
-
-		/* 高度图与范围写进材质参数：属性面板里直接看到这块地形用的是哪张图。
-		 * 资产材质（不是实例）不写，免得改到别人共用的那份 */
+	void TerrainField::BindHeightmapParams(const TerrainComponent& component) const
+	{
+		/* 仅绑定实例或默认材质，不修改共享资产材质 */
 		const SharedPtr<Material>& material = component.m_MaterialSlot.pMaterial;
 		if (material != nullptr && (component.m_MaterialSlot.IsInstance
 			|| component.m_MaterialSlot.SourceAssetPath.empty()))
@@ -266,10 +364,15 @@ namespace Helios
 		}
 	}
 
-	void TerrainField::BuildHeightMap(const TerrainComponent& component)
+	bool TerrainField::BuildHeightMap(const TerrainComponent& component)
 	{
-		const uint32_t resolution = m_Resolution;
-		std::vector<float> heights(static_cast<size_t>(resolution) * resolution, 0.0f);
+		const uint32_t resolution = std::clamp(component.m_Resolution, 16u, TerrainAsset::kMaxResolution);
+		const glm::vec2 extent = glm::max(component.m_Extent, glm::vec2(0.0f));
+		const float height_scale = std::max(0.0f, component.m_HeightScale);
+		const size_t height_count = static_cast<size_t>(resolution) * resolution;
+		if (!IsValidHeightGeometry(extent, resolution, height_scale, height_count))
+			return false;
+		std::vector<float> heights(height_count, 0.0f);
 
 		const uint32_t seed = static_cast<uint32_t>(component.m_Seed);
 
@@ -281,7 +384,7 @@ namespace Helios
 			{
 				const glm::vec2 uv(static_cast<float>(x) / static_cast<float>(resolution - 1),
 					static_cast<float>(z) / static_cast<float>(resolution - 1));
-				const glm::vec2 local_xz = (uv * 2.0f - 1.0f) * m_Extent;
+				const glm::vec2 local_xz = (uv * 2.0f - 1.0f) * extent;
 
 				float h = 0.62f * Fbm(local_xz * 0.0025f, seed, 4);
 				h += 0.28f * Fbm(local_xz * 0.012f, seed + 17u, 5);
@@ -305,12 +408,15 @@ namespace Helios
 				h -= lowest_value;
 		}
 
-		UploadHeightMap(std::move(heights));
+		return UploadHeightMap(std::move(heights), extent, resolution, height_scale);
 	}
 
-	void TerrainField::UploadHeightMap(std::vector<float> heights)
+	bool TerrainField::UploadHeightMap(std::vector<float> heights, const glm::vec2& extent,
+		uint32_t resolution, float height_scale)
 	{
-		const uint32_t resolution = m_Resolution;
+		if (!IsValidHeightGeometry(extent, resolution, height_scale, heights.size())
+			|| !std::all_of(heights.begin(), heights.end(), [](float height) { return std::isfinite(height); }))
+			return false;
 
 		/* 高度图存归一化值（0..1），世界高度 = 实体高度 + 值 × HeightScale */
 		TextureDesc desc;
@@ -321,28 +427,36 @@ namespace Helios
 		desc.SamplerType = SamplerType::Sampler2D;
 		desc.Usage = TextureUsage::Sampleable;
 
-		m_HeightMap = DeviceTexture::Create("TerrainHeightMap", desc);
-		if (m_HeightMap == nullptr)
+		SharedPtr<DeviceTexture> height_map = DeviceTexture::Create("TerrainHeightMap", desc);
+		if (height_map == nullptr || !height_map->IsLoaded())
 		{
 			CORE_LOG_ERROR("Failed to create terrain heightmap texture.");
-			return;
+			return false;
 		}
 
 		PixelDesc pixel_desc;
 		pixel_desc.Format = PixelFormat::R;
 		pixel_desc.Type = PixelType::Float;
-		m_HeightMap->SetData(heights.data(), pixel_desc);
+		height_map->SetData(heights.data(), pixel_desc);
 
-		/* 换了高度数据，页池里的旧页全作废（页池本身留着，下一帧重烘） */
-		m_VirtualTexture.Reset();
-
-		/* 留一份 CPU 副本：草地 / 物件贴地时按世界坐标双线性采样 */
+		m_HeightMap = std::move(height_map);
+		m_Extent = extent;
+		m_Resolution = resolution;
+		m_HeightScale = height_scale;
 		m_Heights = std::move(heights);
 		m_HeightsEdited = false;
-		/* 节点的高度范围要读 CPU 副本，放在它后面建 */
+		++m_HeightsRevision;
 		BuildNodeTable();
-		/* 重新建了高度图，GPU 副本作废，下次要的时候重传 */
 		m_HeightStorage = nullptr;
+		for (SelectionSlot& slot : m_Selections)
+		{
+			slot.Frame = std::numeric_limits<uint32_t>::max();
+			slot.Args = nullptr;
+		}
+		m_VirtualTexture.Reset();
+		m_BasemapFrameBuffer = nullptr;
+		m_Basemap = nullptr;
+		return true;
 	}
 
 	void TerrainField::RefreshHeightMap(const glm::uvec2& texel_min, const glm::uvec2& texel_max)
@@ -555,6 +669,8 @@ namespace Helios
 		if (!TerrainAsset::Write(path, data))
 			return false;
 
+		std::filesystem::file_time_type write_time;
+		LoadAssetCached(path, write_time, true);
 		m_HeightsEdited = false;
 		return true;
 	}
