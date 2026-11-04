@@ -458,6 +458,7 @@ namespace Helios
 
 		/* 要划掉的工程先记下来：循环里重建列表会让 entry 引用失效 */
 		std::filesystem::path remove_request;
+		int remove_index = -1;
 
 		/* 会出滚动条时把右边那条栏让出来，右端的字和细线都不会被压在条上 */
 		const float scroll_reserve = (row_height * static_cast<float>(m_Entries.size()) > list_height + 0.5f)
@@ -529,7 +530,10 @@ namespace Helios
 				}
 
 				if (remove_clicked)
+				{
 					remove_request = entry.Path;
+					remove_index = index;
+				}
 			}
 
 			PanelChrome::PopMenuStyle();
@@ -614,6 +618,17 @@ namespace Helios
 		ImGui::EndChild();
 		ImGui::PopStyleColor();
 		ImGui::PopStyleVar();
+
+		/* 划掉的工程等列表画完再动：边遍历边删会让行引用失效。
+		 * 选中项在它后面时索引跟着前移，删的就是选中项就停在原位（越界由 RefreshEntries 收）。 */
+		if (!remove_request.empty())
+		{
+			m_RecentProjects.Remove(remove_request);
+			RefreshEntries();
+
+			if (m_Selected > remove_index)
+				--m_Selected;
+		}
 	}
 
 	void ProjectLauncherLayer::ShowActions(float width)
