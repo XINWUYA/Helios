@@ -2,6 +2,22 @@
 #include <cstdint>
 #include "Helios/Scene/Entity.h"
 
+namespace Helios::GrassPaint
+{
+	enum class Mode : uint8_t { None, Add, Erase };
+	struct Settings
+	{
+		Mode Brush{ Mode::None };
+		float Radius{ 8.0f };
+		float Strength{ 0.7f };
+	};
+	inline Settings& GetSettings()
+	{
+		static Settings settings;
+		return settings;
+	}
+}
+
 namespace Helios::TerrainSculpt
 {
 	/* 笔刷模式：None 时不接管视口左键 */

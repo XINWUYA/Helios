@@ -25,6 +25,7 @@
 #include "Common/FileDialog.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Scene/TerrainField.h"
+#include "Helios/Scene/GrassField.h"
 #include "Common/ProjectConfig.h"
 #include "Helios/Script/ScriptRuntime.h"
 
@@ -65,6 +66,44 @@ namespace Helios
 			Entity           m_Entity;
 			std::vector<int> m_Before;
 			std::vector<int> m_After;
+		};
+
+		class GrassPaintCommand final : public ICommand
+		{
+		public:
+			GrassPaintCommand(Entity entity, glm::uvec2 min, glm::uvec2 max,
+				std::vector<uint8_t> before, std::vector<uint8_t> after, bool empty_before)
+				: m_Entity(entity), m_Min(min), m_Max(max), m_Before(std::move(before)),
+				  m_After(std::move(after)), m_EmptyBefore(empty_before) {}
+			void Do() override { Apply(m_After, false); }
+			void Undo() override { Apply(m_Before, m_EmptyBefore); }
+			[[nodiscard]] const char* GetLabel() const override { return "Paint Grass Density"; }
+		private:
+			void Apply(const std::vector<uint8_t>& values, bool clear)
+			{
+				if (!m_Entity || !m_Entity.HasComponent<GrassComponent>())
+					return;
+				auto& grass = m_Entity.GetComponent<GrassComponent>();
+				if (clear)
+					grass.m_DensityMask.clear();
+				else
+				{
+					constexpr uint32_t n = GrassComponent::kDensityMaskSize;
+					if (grass.m_DensityMask.empty())
+						grass.m_DensityMask.assign(size_t(n) * n, 255u);
+					if (grass.m_DensityMask.size() != size_t(n) * n)
+						return;
+					size_t index = 0;
+					for (uint32_t z = m_Min.y; z <= m_Max.y; ++z)
+						for (uint32_t x = m_Min.x; x <= m_Max.x; ++x)
+							grass.m_DensityMask[size_t(z) * n + x] = values[index++];
+				}
+				++grass.m_DensityMaskRevision;
+			}
+			Entity m_Entity;
+			glm::uvec2 m_Min, m_Max;
+			std::vector<uint8_t> m_Before, m_After;
+			bool m_EmptyBefore;
 		};
 
 		/* 视角记录文件：跟层级树的展开状态一样放在项目的 .helios 下 */
@@ -404,8 +443,12 @@ namespace Helios
 		{
 			/* 笔刷模式下、选中的是地形时左键是用来画的，不改选中；选中别的照常点选 */
 			const Entity selected = m_SceneHierarchy.GetSelectedEntity();
-			if (TerrainSculpt::GetSettings().Brush != TerrainSculpt::Mode::None && m_IsViewportHovered
-				&& selected && selected.HasComponent<TerrainComponent>())
+			if (m_IsViewportHovered && selected && !IsGizmoHovered()
+				&& !Input::IsKeyPressed(Key::LeftAlt) && !ImGui::IsAnyItemHovered()
+				&& ((TerrainSculpt::GetSettings().Brush != TerrainSculpt::Mode::None
+					&& selected.HasComponent<TerrainComponent>())
+					|| (GrassPaint::GetSettings().Brush != GrassPaint::Mode::None
+						&& selected.HasComponent<GrassComponent>())))
 				return false;
 
 			/* 这一击真落在场景视口上才拾取：指针不在视口上（如 Frame Graph 页签
@@ -597,7 +640,11 @@ namespace Helios
 
 		/* 换场景就把笔刷关掉：工具状态是编辑器级的全局量，留着的话新场景里一按左键就开始画 */
 		TerrainSculpt::GetSettings().Brush = TerrainSculpt::Mode::None;
+		GrassPaint::GetSettings().Brush = GrassPaint::Mode::None;
 		TerrainSculpt::GetExportRequest() = {};
+		m_GrassPaintActive = false;
+		m_GrassPaintTarget = {};
+		m_GrassMaskBefore.clear();
 		m_SculptActive = false;
 		m_SculptTerrain = {};
 	}
@@ -769,6 +816,7 @@ namespace Helios
 		PROFILE_FUNCTION();
 
 		/* 旧场景的视角先记下来，等新场景接好再一起落盘 */
+		FinishGrassPaint();
 		CaptureViewState();
 
 		/* 旧场景摘除编辑器相机（场景可能仍被别处引用而继续存活）；
@@ -868,6 +916,7 @@ namespace Helios
 		if (m_PlayMode == mode)
 			return;
 
+		FinishGrassPaint();
 		m_PlayMode = mode;
 		OnPlayModeChanged();
 	}
@@ -1087,6 +1136,7 @@ namespace Helios
 	void SceneEditorLayer::SaveScene()
 	{
 		PROFILE_FUNCTION();
+		FinishGrassPaint();
 
 		/* 若当前场景从未保存过，需要先确定一个保存路径 */
 		if (m_ActiveScenePath.empty())
@@ -1135,14 +1185,14 @@ namespace Helios
 	bool SceneEditorLayer::Undo()
 	{
 		PROFILE_FUNCTION();
-
+		FinishGrassPaint();
 		return m_CommandStack.Undo();
 	}
 
 	bool SceneEditorLayer::Redo()
 	{
 		PROFILE_FUNCTION();
-
+		FinishGrassPaint();
 		return m_CommandStack.Redo();
 	}
 
@@ -1202,6 +1252,7 @@ namespace Helios
 
 			/* 地形笔刷落点 */
 			ShowTerrainBrushUI();
+			ShowGrassBrushUI();
 
 			/* Gizmos */
 			ShowOperationGizmoUI();
@@ -1633,6 +1684,150 @@ namespace Helios
 		}
 	}
 
+	void SceneEditorLayer::UpdateGrassPaint(float delta_time)
+	{
+		const auto& settings = GrassPaint::GetSettings();
+		const Entity selected = m_SceneHierarchy.GetSelectedEntity();
+		const bool painting = m_PlayMode == PlayMode::Edit
+			&& settings.Brush != GrassPaint::Mode::None && selected
+			&& selected.HasComponent<GrassComponent>() && m_IsViewportHovered
+			&& Input::IsMouseButtonPressed(Mouse::ButtonLeft) && !IsGizmoHovered()
+			&& !ImGui::IsAnyItemHovered() && !Input::IsKeyPressed(Key::LeftAlt);
+		if (!painting)
+		{
+			FinishGrassPaint();
+			return;
+		}
+		if (m_GrassPaintActive && m_GrassPaintTarget != selected)
+			FinishGrassPaint();
+		auto& grass = selected.GetComponent<GrassComponent>();
+		if (grass.m_Field == nullptr || grass.m_Field->IsEmpty())
+			return;
+		glm::vec3 origin(0.0f), direction(0.0f), point(0.0f);
+		if (!BuildViewportRay(origin, direction)
+			|| !grass.m_Field->RaycastDensity(origin, direction, settings.Radius, point))
+			return;
+		if (!m_GrassPaintActive)
+		{
+			m_GrassMaskBefore = grass.m_DensityMask;
+			m_GrassPaintTarget = selected;
+			m_GrassPaintActive = true;
+		}
+		const float amount = std::min(settings.Strength * delta_time, 1.0f)
+			* (settings.Brush == GrassPaint::Mode::Add ? 1.0f : -1.0f);
+		grass.m_Field->PaintDensity(grass, point, settings.Radius, amount);
+	}
+
+	void SceneEditorLayer::FinishGrassPaint()
+	{
+		if (!m_GrassPaintActive)
+			return;
+		const Entity entity = m_GrassPaintTarget;
+		m_GrassPaintActive = false;
+		m_GrassPaintTarget = {};
+		if (!entity || !entity.HasComponent<GrassComponent>())
+		{
+			m_GrassMaskBefore.clear();
+			return;
+		}
+		constexpr uint32_t n = GrassComponent::kDensityMaskSize;
+		const auto& after_mask = entity.GetComponent<GrassComponent>().m_DensityMask;
+		if (after_mask.size() != size_t(n) * n
+			|| (!m_GrassMaskBefore.empty() && m_GrassMaskBefore.size() != size_t(n) * n))
+		{
+			m_GrassMaskBefore.clear();
+			return;
+		}
+		glm::uvec2 lo(n), hi(0u);
+		for (uint32_t z = 0; z < n; ++z)
+			for (uint32_t x = 0; x < n; ++x)
+			{
+				const size_t index = size_t(z) * n + x;
+				const uint8_t before = m_GrassMaskBefore.empty() ? 255u : m_GrassMaskBefore[index];
+				if (before == after_mask[index]) continue;
+				lo = glm::min(lo, glm::uvec2(x, z));
+				hi = glm::max(hi, glm::uvec2(x, z));
+			}
+		if (lo.x < n)
+		{
+			std::vector<uint8_t> before, after;
+			for (uint32_t z = lo.y; z <= hi.y; ++z)
+				for (uint32_t x = lo.x; x <= hi.x; ++x)
+				{
+					const size_t index = size_t(z) * n + x;
+					before.push_back(m_GrassMaskBefore.empty() ? 255u : m_GrassMaskBefore[index]);
+					after.push_back(after_mask[index]);
+				}
+			m_CommandStack.Execute(CreateUniquePtr<GrassPaintCommand>(entity, lo, hi,
+				std::move(before), std::move(after), m_GrassMaskBefore.empty()));
+		}
+		m_GrassMaskBefore.clear();
+	}
+
+	void SceneEditorLayer::ShowGrassBrushUI()
+	{
+		if (m_PlayMode != PlayMode::Edit || !m_IsViewportHovered
+			|| GrassPaint::GetSettings().Brush == GrassPaint::Mode::None)
+			return;
+		const Entity selected = m_SceneHierarchy.GetSelectedEntity();
+		if (!selected || !selected.HasComponent<GrassComponent>())
+			return;
+		const auto& grass = selected.GetComponent<GrassComponent>();
+		if (grass.m_Field == nullptr) return;
+		glm::vec3 origin(0.0f), direction(0.0f), point(0.0f);
+		if (!BuildViewportRay(origin, direction)
+			|| !grass.m_Field->RaycastDensity(origin, direction,
+				GrassPaint::GetSettings().Radius, point)) return;
+		const glm::mat4 vp = m_pEditorCamera->GetProjectionMatrix() * m_pEditorCamera->GetViewMatrix();
+		const ImVec2 min(m_ViewportRegion.MinX, m_ViewportRegion.MinY);
+		const ImVec2 size(float(m_ViewportRegion.Width), float(m_ViewportRegion.Height));
+		const auto project = [&](const glm::vec3& world, ImVec2& screen)
+		{
+			const glm::vec4 clip = vp * glm::vec4(world, 1.0f);
+			if (clip.w <= 1e-4f || clip.z < 0.0f || clip.z > clip.w)
+				return false;
+			screen = ImVec2(min.x + (clip.x / clip.w * 0.5f + 0.5f) * size.x,
+				min.y + (0.5f - clip.y / clip.w * 0.5f) * size.y);
+			return std::isfinite(screen.x) && std::isfinite(screen.y);
+		};
+		const float radius = GrassPaint::GetSettings().Radius;
+		const glm::vec3 axis_x = grass.m_Field->GetPaintAxisX();
+		const glm::vec3 axis_z = grass.m_Field->GetPaintAxisZ();
+		ImDrawList* draw = ImGui::GetWindowDrawList();
+		draw->PushClipRect(min, ImVec2(min.x + size.x, min.y + size.y), true);
+		constexpr int segments = 64;
+		std::vector<ImVec2> arc;
+		for (int i = 0; i <= segments; ++i)
+		{
+			const float angle = float(i) * 6.2831853f / float(segments);
+			glm::vec3 world = point + (axis_x * std::cos(angle) + axis_z * std::sin(angle)) * radius;
+			bool valid = true;
+			if (const TerrainField* ground = grass.m_Field->GetGround())
+				valid = ground->SampleHeightWorld(glm::vec2(world.x, world.z), world.y);
+			ImVec2 screen;
+			if (valid && project(world + glm::vec3(0.0f, 0.05f, 0.0f), screen))
+				arc.push_back(screen);
+			else
+			{
+				if (arc.size() > 1)
+					draw->AddPolyline(arc.data(), int(arc.size()), IM_COL32(84, 212, 150, 220),
+						ImDrawFlags_None, 2.0f);
+				arc.clear();
+			}
+		}
+		if (arc.size() > 1)
+			draw->AddPolyline(arc.data(), int(arc.size()), IM_COL32(84, 212, 150, 220),
+				ImDrawFlags_None, 2.0f);
+		ImVec2 center;
+		if (project(point, center))
+		{
+			const ImU32 color = IM_COL32(84, 212, 150, 245);
+			draw->AddLine(ImVec2(center.x - 7.0f, center.y), ImVec2(center.x + 7.0f, center.y), color, 2.0f);
+			draw->AddLine(ImVec2(center.x, center.y - 7.0f), ImVec2(center.x, center.y + 7.0f), color, 2.0f);
+		}
+		draw->PopClipRect();
+	}
+
 	/* 地形笔刷：按住左键在选中地形上拖，抬起来算一笔。
 	 * 半径按世界米给，进地形前按实体缩放换成局部米，笔刷在屏幕上的大小才稳定 */
 	void SceneEditorLayer::UpdateTerrainSculpt(float delta_time)
@@ -1948,6 +2143,7 @@ namespace Helios
 
 				/* 笔刷在场景更新之前改高度，这一帧的草地贴地就能跟上 */
 				UpdateTerrainSculpt(delta_time);
+				UpdateGrassPaint(delta_time);
 
 				/* 更新场景中的实体 */
 				m_pMainScene->OnUpdate(delta_time);

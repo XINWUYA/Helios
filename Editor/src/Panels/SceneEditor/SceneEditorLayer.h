@@ -183,6 +183,9 @@ namespace Helios
 		/* 地形笔刷：按当前工具与鼠标位置改选中地形的高度，一笔结束后入历史 */
 		void UpdateTerrainSculpt(float delta_time);
 		void FinishSculptStroke();
+		void UpdateGrassPaint(float delta_time);
+		void FinishGrassPaint();
+		void ShowGrassBrushUI();
 		/* 视口鼠标位置 → 世界射线（近平面起点 + 归一化方向） */
 		bool BuildViewportRay(glm::vec3& out_origin, glm::vec3& out_direction) const;
 		/* 鼠标射线打中选中的地形：给出落点（局部 xz）与按两轴缩放换算后的局部半径 */
@@ -222,6 +225,9 @@ namespace Helios
 		/* 地形笔刷：一笔进行中的目标实体（松开鼠标时把这一笔入历史） */
 		Entity m_SculptTerrain{};
 		bool m_SculptActive{ false };
+		Entity m_GrassPaintTarget{};
+		std::vector<uint8_t> m_GrassMaskBefore;
+		bool m_GrassPaintActive{ false };
 		/* 上次保存（或加载）时的场景改动条数：与当前条数不一致即表示有未保存的改动。
 		 * 用条数而不是历史位置：资源操作（新建 / 重命名 / 删除）也入同一条历史，
 		 * 它们不改场景内容，按位置比对会被它们带出假的"未保存"（见 CommandStack::GetSceneEditCount）。 */
