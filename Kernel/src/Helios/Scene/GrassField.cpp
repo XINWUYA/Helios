@@ -124,9 +124,10 @@ namespace Helios
 		mix(&component.m_ReceiveShadow, sizeof(component.m_ReceiveShadow));
 		mix(&g_GpuPlacementEnabled, sizeof(g_GpuPlacementEnabled));
 		mix(glm::value_ptr(world), sizeof(glm::mat4));
-		/* 地形换了一份或重建过：贴地高度要重新采样 */
-		const uint64_t ground_key = ground != nullptr ? ground->GetRevision() : 0ull;
-		mix(&ground_key, sizeof(ground_key));
+		/* 地形实例或高度变化时重新贴地 */
+		mix(&ground, sizeof(ground));
+		const uint64_t ground_revision = ground != nullptr ? ground->GetRevision() : 0ull;
+		mix(&ground_revision, sizeof(ground_revision));
 		/* 观察范围按块尺寸量化：相机缩放、平移动不到一个块就不重建。
 		 * 重建一次要重传几十兆实例数据，相机连续动起来卡顿全在这里 */
 		const float focus_quantum = std::clamp(component.m_EndCullDistance * 0.25f, 8.0f, 64.0f);
@@ -500,8 +501,14 @@ namespace Helios
 			batch = Batch{};
 		};
 
+		/* 批的窗口：3 块宽 2 块高，大概 60×40 米。
+		 * 按整行合出来的批是细长条，视锥切到一角就整批放行，批数等于可见块数，白合 */
+		constexpr uint32_t kBatchBlocksX = 3;
+		constexpr uint32_t kBatchBlocksZ = 2;
+
 		Batch batch;
-		uint32_t batch_row = 0;
+		uint32_t batch_x0 = 0;
+		uint32_t batch_z0 = 0;
 		for (size_t index = 0; index < m_Chunks.size(); ++index)
 		{
 			const Chunk& chunk = m_Chunks[index];
@@ -509,12 +516,14 @@ namespace Helios
 			if (chunk.Count == 0)
 				continue;
 
-			/* 跨行就断开：同一行的块挨着，批的包围盒才紧，剔除不至于整片放行 */
-			const uint32_t row = static_cast<uint32_t>(index) / m_ChunksX;
-			if (batch.ChunkCount > 0
-				&& (row != batch_row || batch.Count + chunk.Count > kBatchInstanceBudget))
+			const uint32_t cx = static_cast<uint32_t>(index) % m_ChunksX;
+			const uint32_t cz = static_cast<uint32_t>(index) / m_ChunksX;
+			if (batch.ChunkCount > 0)
 			{
-				close(batch);
+				const bool outside_window = cx < batch_x0 || cx >= batch_x0 + kBatchBlocksX
+					|| cz < batch_z0 || cz >= batch_z0 + kBatchBlocksZ;
+				if (outside_window || batch.Count + chunk.Count > kBatchInstanceBudget)
+					close(batch);
 			}
 
 			if (batch.ChunkCount == 0)
@@ -522,7 +531,8 @@ namespace Helios
 				batch.First = chunk.First;
 				batch.Center = chunk.Center;
 				batch.Extent = chunk.Extent;
-				batch_row = row;
+				batch_x0 = cx;
+				batch_z0 = cz;
 			}
 			else
 			{
