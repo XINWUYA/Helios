@@ -16,7 +16,7 @@ namespace Helios
 	void RegisterReflectionProbeComponent();
 	void RegisterAnimatorComponent();
 	void RegisterScriptComponent();
-	void RegisterPostProcessComponents();    /* PostProcess / Bloom */
+	void RegisterPostProcessComponents();    /* PostProcess / Taa / Fog / Bloom */
 	void RegisterGrassComponent();           /* Grass（草地） */
 	void RegisterGrassBendComponent();       /* GrassBend（压草的物体） */
 	void RegisterTerrainComponent();         /* Terrain（高度场地形） */

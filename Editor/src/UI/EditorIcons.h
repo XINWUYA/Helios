@@ -80,7 +80,7 @@ namespace Helios
 			/* 动画：片段 / 轨道 / 暂停 / 曲线 / 预览 / 循环播放（播放与停止在运行组） */
 			AnimationClip, Animation, Pause, Curve, Preview, Loop,
 			/* 后处理：链 / 后处理对象 / 常见效果（Bloom、TAA 已接入，其余效果组件接入后直接用） */
-			RenderPass, PostProcess, Bloom, ColorGrading, DepthOfField, MotionBlur, AntiAliasing, Vignette, Taa,
+			RenderPass, PostProcess, Bloom, Fog, ColorGrading, DepthOfField, MotionBlur, AntiAliasing, Vignette, Taa,
 			COUNT
 		};
 

@@ -1,6 +1,7 @@
 #include "Pch.h"
 #include "PostProcessPasses.h"
 #include "Effects/Bloom.h"
+#include "Effects/Fog.h"
 #include "Effects/Taa.h"
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
@@ -15,6 +16,14 @@ namespace Helios
 {
 	namespace PostProcess
 	{
+		FrameGraphResourceHandleTyped<FrameGraphTexture> FindSceneDepth(FrameGraph& frame_graph)
+		{
+			auto depth = frame_graph.GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassDepth");
+			if (!depth)
+				depth = frame_graph.GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
+			return depth;
+		}
+
 		bool HasEnabledEffects(const RenderView& render_view)
 		{
 			/* 调试视图不支持后处理 */
@@ -113,6 +122,8 @@ namespace Helios
 					/* TAA 排在 Bloom 之前（Phase::Temporal）：泛光吃的是降噪后的颜色，
 					 * 高光不会逐帧跳 */
 					RegisterTaaEffect();
+					/* 雾也排在 Bloom 之前：Bloom 合成会把颜色落成 8bit，雾要在那之前 */
+					RegisterFogEffect();
 					RegisterBloomEffect();
 				}
 			};

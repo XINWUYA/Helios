@@ -29,6 +29,7 @@
 #include "UI/EditorTheme.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Renderer/PostProcess/Effects/Bloom.h"
+#include "Helios/Renderer/PostProcess/Effects/Fog.h"
 #include "Helios/Renderer/PostProcess/Effects/Taa.h"
 #include "Helios/Renderer/ShaderCompiler.h"
 #include <tinyxml2.h>
@@ -117,6 +118,7 @@ namespace Helios
 			if (type == typeid(ReflectionProbeComponent)) return Icons::Id::ReflectionProbe;
 			if (type == typeid(PostProcessComponent))     return Icons::Id::PostProcess;
 			if (type == typeid(BloomComponent))           return Icons::Id::Bloom;
+			if (type == typeid(FogComponent))             return Icons::Id::Fog;
 			if (type == typeid(SkyComponent))             return Icons::Id::Sky;
 			if (type == typeid(TaaComponent))             return Icons::Id::Taa;
 			if (type == typeid(GrassComponent))           return Icons::Id::Grass;

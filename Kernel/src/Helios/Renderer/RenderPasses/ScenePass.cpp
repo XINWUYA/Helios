@@ -627,9 +627,10 @@ namespace Helios
 						builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
 						builder.BindOutputResource(data.Output, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
 						builder.BindOutputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
-						builder.BindOutputResource(data.Depth, temporal
-							? (FrameGraphTexture::Usage::DepthAttachment | FrameGraphTexture::Usage::Sampleable)
-							: FrameGraphTexture::Usage::DepthAttachment);
+						/* 深度恒带 Sampleable：后处理里的雾要按场景深度算距离，
+						 * 不依赖 TAA 是否开启 */
+						builder.BindOutputResource(data.Depth,
+							FrameGraphTexture::Usage::DepthAttachment | FrameGraphTexture::Usage::Sampleable);
 
 						FrameGraphPassInfo::Descriptor pass_desc;
 						pass_desc.Attachments.ColorAttachments(0) = data.Output;

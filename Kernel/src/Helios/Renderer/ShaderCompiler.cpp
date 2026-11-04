@@ -674,7 +674,7 @@ namespace Helios
         /* 翻译规则版本：glslang 的编译规则、spirv-cross 的 MSL 版本与绑定槽位约定
          * 变化时，源码哈希不变但产物该失效。改这些规则请同时递增它。
          * 内容指纹也带上它，换代后热重载的"没变"判断不会被旧指纹挡住。 */
-        constexpr const char* kTranslatorVersion = "helios-shader-translator-v5";
+        constexpr const char* kTranslatorVersion = "helios-shader-translator-v6";
 
         /* glslang 的全局状态没有初始化调用可依赖，编译一律串行：
          * 首次加载在主线程、热重载在后台线程，两者可能撞上 */
@@ -1443,6 +1443,7 @@ namespace Helios
         constexpr uint32_t OpTypeImage = 25;
         constexpr uint32_t OpTypeSampledImage = 27;
         constexpr uint32_t OpTypePointer = 32;
+        constexpr uint32_t OpFunction = 54;
         constexpr uint32_t OpVariable = 59;
         constexpr uint32_t OpDecorate = 71;
         constexpr uint32_t DecorationBinding = 33;
@@ -1472,9 +1473,22 @@ namespace Helios
             i += word_count;
         }
 
-        /* 2) 变量 -> OpTypePointer -> (OpTypeSampledImage) -> OpTypeImage 的结果 id。
+        /* 2) 变量 -> OpTypePointer -> (OpTypeSampledImage) -> OpTypeImage，记下各条指令的位置。
          * OpVariable 的变量 id 在 word2（word1 是结果类型），需专用遍历。 */
-        std::vector<uint32_t> image_type_ids;
+        struct ImageEntry
+        {
+            size_t VariableInstruction;
+            size_t PointerInstruction;
+            size_t SampledImageInstruction;
+            size_t ImageInstruction;
+            uint32_t ImageTypeId;
+        };
+
+        constexpr size_t kNoInstruction = static_cast<size_t>(-1);
+        std::vector<ImageEntry> entries;
+        /* 每个图像类型被几个变量引用，共用时不能就地改（见第 3 步） */
+        std::unordered_map<uint32_t, uint32_t> image_references;
+
         for (size_t i = 5; i < spirv.size();)
         {
             const uint32_t instruction = spirv[i];
@@ -1483,42 +1497,109 @@ namespace Helios
             {
                 const uint32_t ptr_type = spirv[i + 1];
                 const uint32_t variable_id = spirv[i + 2];
-                bool hit = false;
-                for (const uint32_t variable : variables)
-                    hit = hit || variable == variable_id;
-                if (hit)
-                {
-                    const uint32_t* pointer = find_by_result_id(OpTypePointer, ptr_type);
-                    if (pointer == nullptr)
-                        continue;
 
-                    uint32_t image_type_id = pointer[3];
-                    if (const uint32_t* sampled_image = find_by_result_id(OpTypeSampledImage, image_type_id))
-                        image_type_id = sampled_image[2];
-                    image_type_ids.push_back(image_type_id);
+                const uint32_t* pointer = find_by_result_id(OpTypePointer, ptr_type);
+                if (pointer == nullptr)
+                {
+                    i += word_count;
+                    continue;
+                }
+
+                size_t sampled_image_index = kNoInstruction;
+                uint32_t image_type_id = pointer[3];
+                const uint32_t* sampled_image = find_by_result_id(OpTypeSampledImage, image_type_id);
+                if (sampled_image != nullptr)
+                {
+                    sampled_image_index = static_cast<size_t>(sampled_image - spirv.data());
+                    image_type_id = sampled_image[2];
+                }
+
+                /* 指向 OpTypeSampler 的变量（组合采样器拆出来的那一半）这里找不到图像，跳过 */
+                const uint32_t* image = find_by_result_id(OpTypeImage, image_type_id);
+                if (image == nullptr)
+                {
+                    i += word_count;
+                    continue;
+                }
+
+                ++image_references[image_type_id];
+                const bool is_depth = std::find(variables.begin(), variables.end(), variable_id) != variables.end();
+                if (is_depth)
+                {
+                    entries.push_back(ImageEntry{ i, static_cast<size_t>(pointer - spirv.data()),
+                        sampled_image_index, static_cast<size_t>(image - spirv.data()), image_type_id });
                 }
             }
             i += word_count;
         }
 
-        /* 3) 把这些图像的 Depth 操作数置 1（OpTypeImage: [result, sampledType, Dim, Depth, ...]） */
+        /* 3) 独占就就地置 Depth（OpTypeImage: [result, sampledType, Dim, Depth, ...]）；
+         * 被别的采样器共用时复制一条类型链再改 —— 彩色采样器和深度采样器的 OpTypeImage
+         * 完全一样，glslang 会去重成同一个类型，就地改会把彩色采样器一起标成深度图。 */
         bool patched = false;
-        for (size_t i = 5; i < spirv.size();)
+        std::vector<uint32_t> appended;
+        std::vector<std::pair<size_t, uint32_t>> repoint;
+
+        const auto copy_instruction = [&spirv](size_t index)
         {
-            const uint32_t instruction = spirv[i];
-            const uint32_t word_count = instruction >> 16;
-            if ((instruction & 0xFFFFu) == OpTypeImage && word_count >= 9)
+            const size_t word_count = spirv[index] >> 16;
+            return std::vector<uint32_t>(spirv.begin() + static_cast<ptrdiff_t>(index),
+                spirv.begin() + static_cast<ptrdiff_t>(index + word_count));
+        };
+
+        for (const ImageEntry& entry : entries)
+        {
+            if (image_references[entry.ImageTypeId] <= 1)
             {
-                for (const uint32_t image_type_id : image_type_ids)
+                spirv[entry.ImageInstruction + 4] = 1;
+                patched = true;
+                continue;
+            }
+
+            /* 新的类型 id 直接取模块头里的 id 上界往下发 */
+            const uint32_t new_image_id = spirv[3]++;
+            std::vector<uint32_t> image = copy_instruction(entry.ImageInstruction);
+            image[1] = new_image_id;
+            image[4] = 1;
+            appended.insert(appended.end(), image.begin(), image.end());
+
+            uint32_t pointer_target = new_image_id;
+            if (entry.SampledImageInstruction != kNoInstruction)
+            {
+                const uint32_t new_sampled_id = spirv[3]++;
+                std::vector<uint32_t> sampled = copy_instruction(entry.SampledImageInstruction);
+                sampled[1] = new_sampled_id;
+                sampled[2] = new_image_id;
+                appended.insert(appended.end(), sampled.begin(), sampled.end());
+                pointer_target = new_sampled_id;
+            }
+
+            const uint32_t new_pointer_id = spirv[3]++;
+            std::vector<uint32_t> pointer = copy_instruction(entry.PointerInstruction);
+            pointer[1] = new_pointer_id;
+            pointer[3] = pointer_target;
+            appended.insert(appended.end(), pointer.begin(), pointer.end());
+
+            repoint.emplace_back(entry.VariableInstruction, new_pointer_id);
+            patched = true;
+        }
+
+        for (const auto& [variable_instruction, pointer_id] : repoint)
+            spirv[variable_instruction + 1] = pointer_id;
+
+        if (!appended.empty())
+        {
+            /* 类型定义只能出现在第一个函数之前 */
+            size_t insert_at = spirv.size();
+            for (size_t i = 5; i < spirv.size(); i += (spirv[i] >> 16))
+            {
+                if ((spirv[i] & 0xFFFFu) == OpFunction)
                 {
-                    if (spirv[i + 1] == image_type_id)
-                    {
-                        spirv[i + 4] = 1;
-                        patched = true;
-                    }
+                    insert_at = i;
+                    break;
                 }
             }
-            i += word_count;
+            spirv.insert(spirv.begin() + static_cast<ptrdiff_t>(insert_at), appended.begin(), appended.end());
         }
         return patched;
     }

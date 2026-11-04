@@ -11,6 +11,7 @@
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
+#include "../PostProcessPasses.h"
 
 namespace Helios
 {
@@ -39,15 +40,6 @@ namespace Helios
 				return IsTaaEnabled(state);
 			}
 
-			/* 深度按管线取：前向是场景 Pass 写的那张，延迟是 G-Buffer 的 */
-			TextureHandle FindDepth(FrameGraph& frame_graph)
-			{
-				auto depth = frame_graph.GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassDepth");
-				if (!depth)
-					depth = frame_graph.GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
-				return depth;
-			}
-
 			TextureHandle BuildTaa(RenderView& render_view, TextureHandle input)
 			{
 				PROFILE_FUNCTION();
@@ -61,7 +53,7 @@ namespace Helios
 					return input;
 
 				auto& frame_graph = render_view.GetFrameGraph();
-				const auto depth = FindDepth(*frame_graph);
+				const auto depth = PostProcess::FindSceneDepth(*frame_graph);
 				const auto velocity = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("Velocity");
 				/* 缺深度或速度就没法重投影，宁可不做也不留拖影 */
 				if (!depth || !velocity)

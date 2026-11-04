@@ -8,19 +8,21 @@
         </Entity>
         <Entity ID="1" Name="Sun">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.610000 0.420000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Light LightType="0" LightColor="1.000000 1.000000 1.000000 1.000000" LightIntensity="5" IsCastShadow="true" ShadowSize="2048" ShadowBias="0.0099999998" CascadeCount="4" ShadowFar="194"/>
+            <Light LightType="0" LightColor="0.933123 0.869851 0.727484 1.000000" LightIntensity="5" IsCastShadow="true" ShadowSize="2048" ShadowBias="0.0099999998" CascadeCount="4" ShadowFar="100"/>
         </Entity>
         <Entity ID="2" Name="Grass Field">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
-            <Grass Material="Materials/Grass.mtl" Extent="30.000000 30.000000" Density="50" Height="1" Width="0.088" StartCullDistance="22" EndCullDistance="80" MinDensityScale="0.079999998" WindDirection="1.000000 0.350000" WindStrength="0.12" WindSpeed="1.6" WindSpatialScale="0.25" WindCullDistance="0" ReceiveShadow="true" CastShadow="true" ShadowFadeDistance="78.5" BendRecover="6" Seed="7" ConformToTerrain="true" SurfaceAlign="1" MaxSlope="42" FollowTerrain="true" MaxInstances="2500000" DrawFlatUnderlay="true"/>
+            <Animator Clip="Animations/Nature.anim" Speed="1" Loop="true" AutoPlay="true"/>
+            <Grass Material="Materials/Grass.mtl" Extent="50.000000 50.000000" Density="51" Height="2.03" Width="0.235" StartCullDistance="37" EndCullDistance="288" MinDensityScale="0" WindDirection="1.000000 0.350000" WindStrength="0.55000001" WindSpeed="1.6" WindSpatialScale="0.25" WindCullDistance="0" ReceiveShadow="true" CastShadow="true" ShadowFadeDistance="100" BendRecover="6" Seed="7" ConformToTerrain="true" SurfaceAlign="1" MaxSlope="67" FollowTerrain="true" MaxInstances="2500000" DrawFlatUnderlay="true" UseTerrainGrowth="false" ClumpSize="1.5" ClumpStrength="0" StablePlacement="true"/>
         </Entity>
         <Entity ID="3" Name="Grass Patch North">
             <Transform Position="0.000000 0.000000 -34.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Visibility Visible="false"/>
-            <Grass Material="Materials/Grass.mtl" Extent="10.000000 10.000000" Density="45" Height="0.69999999" Width="0.050000001" StartCullDistance="18" EndCullDistance="70" MinDensityScale="0.1" WindDirection="-0.400000 1.000000" WindStrength="0.18000001" WindSpeed="1.3" WindSpatialScale="0.2" WindCullDistance="0" ReceiveShadow="true" CastShadow="true" ShadowFadeDistance="0" BendRecover="6" Seed="21" ConformToTerrain="true" SurfaceAlign="1" MaxSlope="42" FollowTerrain="false" MaxInstances="500000" DrawFlatUnderlay="true"/>
+            <Grass Material="Materials/Grass.mtl" Extent="10.000000 10.000000" Density="45" Height="0.69999999" Width="0.050000001" StartCullDistance="18" EndCullDistance="70" MinDensityScale="0.1" WindDirection="-0.400000 1.000000" WindStrength="0.18000001" WindSpeed="1.3" WindSpatialScale="0.2" WindCullDistance="0" ReceiveShadow="true" CastShadow="true" ShadowFadeDistance="0" BendRecover="6" Seed="21" ConformToTerrain="true" SurfaceAlign="1" MaxSlope="42" FollowTerrain="false" MaxInstances="500000" DrawFlatUnderlay="true" UseTerrainGrowth="false" ClumpSize="1.5" ClumpStrength="0" StablePlacement="false"/>
         </Entity>
         <Entity ID="4" Name="Boulder">
             <Transform Position="0.000000 7.845531 0.000000" Rotation="0.000000 -0.000000 0.000000" Scale="3.000000 3.000000 3.000000"/>
+            <Visibility Visible="false"/>
             <Model ModelPath="Models/dragon/dragon.mesh" CastShadow="true" ReceiveShadow="true" EnableSkinning="false">
                 <MaterialOverride Slot="Default" Asset="Materials/Red.mtl"/>
             </Model>
@@ -29,13 +31,12 @@
         <Entity ID="5" Name="Sky">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Layer Mask="16"/>
-            <Model ModelPath="BuiltinSphere" CastShadow="false" ReceiveShadow="false" EnableSkinning="false">
-                <MaterialOverride Slot="Default" Asset="Materials/Sky.mtl"/>
-            </Model>
+            <Sky Hour="9.8999996" AutoAdvance="false" Latitude="30" NorthAngle="0" DayOfYear="172" MoonPhase="0.5" SunIntensity="5" MoonIntensity="0.12" StarIntensity="1" Haze="1" Exposure="1.5"/>
         </Entity>
         <Entity ID="6" Name="Post Process">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <PostProcess Enabled="true"/>
+            <Fog Enabled="true" Density="0.02" HeightFalloff="0.11" BaseHeight="0" StartDistance="75" MaxOpacity="0.94" SkyAffect="0.94999999" UseSkyColor="true" Color="0.680000 0.760000 0.880000 0.440000" SunScatter="0.44" Anisotropy="0.60000002"/>
             <TAA Enabled="true" HistoryWeight="0.89999998" Sharpness="0.34999999"/>
         </Entity>
         <Entity ID="7" Name="Reflection Probe">
