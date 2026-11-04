@@ -1161,7 +1161,7 @@ namespace Helios::ImGuiExt
 		if (options.ShowReset)
 		{
 			ImGui::SameLine(0.0f, gap);
-			result.Reset = Icons::IconButton(Icons::Id::Delete,
+			result.Reset = Icons::IconButton(Icons::Id::Reset,
 				ImVec2(frame_height, frame_height), false, options.ResetHint);
 		}
 

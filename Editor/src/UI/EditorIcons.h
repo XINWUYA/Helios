@@ -14,7 +14,7 @@ namespace Helios
 			/* 文件与资源操作 */
 			NewScene, OpenScene, Save, Import, Export, NewAsset,
 			/* 编辑历史 */
-			Undo, Redo,
+			Undo, Redo, Reset,
 			/* 路径导航（资源管理器顶栏：回到上次路径 / 重进路径） */
 			Back, Forward,
 			/* 变换 */
