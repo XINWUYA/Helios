@@ -693,7 +693,8 @@ namespace Helios
 	bool Renderer::DispatchGrassPlacement(const SharedPtr<DeviceStorageBuffer>& instances,
 		const void* param_data, uint32_t param_size, uint32_t instance_count,
 		const SharedPtr<DeviceStorageBuffer>& terrain_heights,
-		const SharedPtr<DeviceStorageBuffer>& chunk_indices)
+		const SharedPtr<DeviceStorageBuffer>& chunk_indices,
+		const SharedPtr<DeviceStorageBuffer>& density_mask)
 	{
 		if (m_pRenderAPI == nullptr || instances == nullptr || instance_count == 0
 			|| chunk_indices == nullptr || !m_pRenderAPI->SupportsCompute())
@@ -703,16 +704,19 @@ namespace Helios
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
 
-		/* 绑定点跟 GrassPlacement.glsl 对齐：1 号是实例数据、2 号是地形高度、3 号是块映射表，
-		 * 参数块在 4 号。着色器声明了 2 号就必须有绑定，没地形时用引擎的哑缓冲顶上
-		 * （Metal 缺绑定直接断言） */
+		/* 1 号实例、2 号高度、3 号块表、4 号参数、5 号密度图；
+		 * 高度和密度缺数据时仍要绑哑缓冲，避免 Metal 缺槽断言。 */
 		const SharedPtr<DeviceStorageBuffer> heights =
 			(terrain_heights != nullptr) ? terrain_heights : DeviceStorageBuffer::Dummy();
 		if (heights == nullptr)
 			return false;
 
+		const SharedPtr<DeviceStorageBuffer> mask = density_mask != nullptr
+			? density_mask : DeviceStorageBuffer::Dummy();
+		if (mask == nullptr)
+			return false;
 		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers =
-			{ { 1, instances }, { 2, heights }, { 3, chunk_indices } };
+			{ { 1, instances }, { 2, heights }, { 3, chunk_indices }, { 5, mask } };
 		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
 		const uint32_t group_count = (instance_count + group_size - 1) / group_size;
 		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);

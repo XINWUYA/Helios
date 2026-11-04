@@ -99,6 +99,13 @@ namespace Helios
 		/* GPU 放置且还没算过时派发一次计算。场景每帧调一次，赶在开始画之前 */
 		void EnsurePlaced();
 
+		/* 密度笔刷在草地局部平面落笔，按世界米给半径。返回是否真的改到。 */
+		bool PaintDensity(GrassComponent& component, const glm::vec3& world_position,
+			float radius, float amount);
+		/* 供视口笔刷定位：贴地时打到地形，平地时打到草地所在平面。 */
+		bool RaycastDensity(const glm::vec3& origin, const glm::vec3& direction,
+			float radius, glm::vec3& out_position) const;
+
 		/* 脚印：物体踩过的地方弯下去，站着时保持，走开之后慢慢弹回。
 		 * world_position 是物体的世界位置，radius 是影响半径（米） */
 		void StampBend(const glm::vec3& world_position, float radius);
@@ -118,10 +125,13 @@ namespace Helios
 		/* 最近一次生成时叶根的世界高度范围：贴地检查用 */
 		[[nodiscard]] float GetInstanceMinY() const { return m_InstanceMinY; }
 		[[nodiscard]] float GetInstanceMaxY() const { return m_InstanceMaxY; }
-		/* 最近一次生成时被坡度过滤退化掉的株数 */
+		/* 最近一次生成时退化掉的株数，包含坡度和生长权重。 */
 		[[nodiscard]] uint32_t GetSlopeCulledCount() const { return m_SlopeCulledCount; }
 		[[nodiscard]] bool IsEmpty() const { return m_InstanceCount == 0; }
 		[[nodiscard]] bool UsesGpuPlacement() const { return m_UsingGpuPlacement; }
+		[[nodiscard]] const TerrainField* GetGround() const { return m_Ground; }
+		[[nodiscard]] glm::vec3 GetPaintAxisX() const { return m_Right; }
+		[[nodiscard]] glm::vec3 GetPaintAxisZ() const { return m_Forward; }
 
 		/* 脚印贴图与它覆盖的世界范围（xy = 最小角 xz，zw = 1 / 尺寸） */
 		[[nodiscard]] const SharedPtr<DeviceTexture>& GetTrampleTexture() const { return m_TrampleTexture; }
@@ -160,6 +170,8 @@ namespace Helios
 			uint32_t PerChunk{ 0 };
 			uint32_t InstanceCount{ 0 };
 			uint32_t Seed{ 0 };
+			bool StablePlacement{ false };
+			std::vector<uint8_t> DensityMask;
 			bool ReceiveShadow{ true };
 
 			/* 每块在实例缓冲里的区间（First, Count）：Count 为 0 的块不生成 */
@@ -251,6 +263,9 @@ namespace Helios
 		uint32_t m_ChunksZ{ 0 };
 		uint32_t m_PerChunk{ 0 };
 		uint32_t m_Seed{ 0 };
+		std::vector<uint8_t> m_DensityMask;
+		SharedPtr<DeviceStorageBuffer> m_DensityMaskStorage;
+		bool m_StablePlacement{ false };
 		uint32_t m_InstanceCount{ 0 };
 		float m_InstanceMinY{ 0.0f };
 		float m_InstanceMaxY{ 0.0f };

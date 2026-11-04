@@ -54,6 +54,40 @@ namespace Helios
 
 		constexpr float kTwoPi = 6.2831853f;
 
+		float DensityAt(const uint8_t* mask, const glm::vec2& uv)
+		{
+			constexpr uint32_t n = GrassComponent::kDensityMaskSize;
+			const glm::vec2 texel = glm::clamp(uv, glm::vec2(0.0f), glm::vec2(1.0f)) * float(n - 1);
+			const glm::uvec2 a(texel);
+			const glm::uvec2 b = glm::min(a + glm::uvec2(1u), glm::uvec2(n - 1));
+			const glm::vec2 f = texel - glm::vec2(a);
+			return glm::mix(glm::mix(float(mask[a.y * n + a.x]), float(mask[a.y * n + b.x]), f.x),
+				glm::mix(float(mask[b.y * n + a.x]), float(mask[b.y * n + b.x]), f.x), f.y) / 255.0f;
+		}
+
+		glm::vec2 StableCandidate(uint32_t index, uint32_t chunk_seed)
+		{
+			uint32_t bits = index + 1u;
+			bits = (bits >> 16u) | (bits << 16u);
+			bits = ((bits & 0x00ff00ffu) << 8u) | ((bits & 0xff00ff00u) >> 8u);
+			bits = ((bits & 0x0f0f0f0fu) << 4u) | ((bits & 0xf0f0f0f0u) >> 4u);
+			bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xccccccccu) >> 2u);
+			bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xaaaaaaaau) >> 1u);
+			const float x = static_cast<float>(bits) * (1.0f / 4294967296.0f);
+
+			uint32_t value = index + 1u;
+			float z = 0.0f;
+			float factor = 1.0f / 3.0f;
+			while (value > 0u)
+			{
+				z += static_cast<float>(value % 3u) * factor;
+				value /= 3u;
+				factor /= 3.0f;
+			}
+			return glm::fract(glm::vec2(x + HashUnit(chunk_seed, 9u),
+				z + HashUnit(chunk_seed, 10u)));
+		}
+
 		glm::vec3 ClumpRandom(const glm::vec2& local_xz, float size, uint32_t seed)
 		{
 			const glm::vec2 grid = local_xz / size;
@@ -175,6 +209,12 @@ namespace Helios
 			mix(&value, sizeof(value));
 		}
 		mix(&component.m_Seed, sizeof(component.m_Seed));
+		mix(&component.m_StablePlacement, sizeof(component.m_StablePlacement));
+		mix(&component.m_DensityMaskRevision, sizeof(component.m_DensityMaskRevision));
+		const size_t mask_bytes = component.m_DensityMask.size();
+		mix(&mask_bytes, sizeof(mask_bytes));
+		if (mask_bytes == size_t(GrassComponent::kDensityMaskSize) * GrassComponent::kDensityMaskSize)
+			mix(component.m_DensityMask.data(), mask_bytes);
 		mix(&component.m_SurfaceAlign, sizeof(component.m_SurfaceAlign));
 		mix(&component.m_MaxSlope, sizeof(component.m_MaxSlope));
 		mix(&component.m_FollowTerrain, sizeof(component.m_FollowTerrain));
@@ -289,6 +329,26 @@ namespace Helios
 		m_MinDensityScale = component.m_MinDensityScale;
 		m_ReceiveShadow = component.m_ReceiveShadow;
 		m_Seed = static_cast<uint32_t>(std::max(0, component.m_Seed));
+		m_StablePlacement = component.m_StablePlacement;
+		m_DensityMask = component.m_DensityMask.size()
+			== size_t(GrassComponent::kDensityMaskSize) * GrassComponent::kDensityMaskSize
+			? component.m_DensityMask : std::vector<uint8_t>{};
+		if (!m_DensityMask.empty()
+			&& std::all_of(m_DensityMask.begin(), m_DensityMask.end(), [](uint8_t value) { return value == 255u; }))
+			m_DensityMask.clear();
+		if (m_DensityMask.empty())
+			m_DensityMaskStorage = nullptr;
+		else
+		{
+			const uint32_t bytes = static_cast<uint32_t>(m_DensityMask.size());
+			std::vector<uint32_t> packed(bytes / 4u);
+			for (uint32_t i = 0; i < bytes; ++i)
+				packed[i / 4u] |= uint32_t(m_DensityMask[i]) << ((i % 4u) * 8u);
+			if (m_DensityMaskStorage == nullptr || m_DensityMaskStorage->GetDataSize() < bytes)
+				m_DensityMaskStorage = DeviceStorageBuffer::Create("GrassDensityMask", packed.data(), bytes);
+			else
+				m_DensityMaskStorage->SetData(packed.data(), bytes);
+		}
 
 		if (m_HalfX <= 0.0f || m_HalfZ <= 0.0f || density <= 0.0f || m_Height <= 0.0f)
 		{
@@ -447,9 +507,10 @@ namespace Helios
 		 * 相邻块深浅略有差别，看起来不像一整块塑料 */
 		/* 贴着地形时不需要块底面：草底下就是地形本身，再铺一层草色方块会跟起伏打架 */
 		std::vector<GrassInstanceData> pads;
-		if (m_Ground == nullptr)
+		if (m_Ground == nullptr && m_DensityMask.empty())
 			pads.reserve(m_Chunks.size());
-		for (size_t chunk_index = 0; m_Ground == nullptr && chunk_index < m_Chunks.size(); ++chunk_index)
+		for (size_t chunk_index = 0; m_Ground == nullptr && m_DensityMask.empty()
+			&& chunk_index < m_Chunks.size(); ++chunk_index)
 		{
 			const Chunk& chunk = m_Chunks[chunk_index];
 			GrassInstanceData pad;
@@ -648,6 +709,8 @@ namespace Helios
 		params.PerChunk = m_PerChunk;
 		params.InstanceCount = m_InstanceCount;
 		params.Seed = m_Seed;
+		params.StablePlacement = m_StablePlacement;
+		params.DensityMask = m_DensityMask;
 		params.ReceiveShadow = m_ReceiveShadow;
 		params.ChunkRanges.reserve(m_Chunks.size());
 		for (const Chunk& chunk : m_Chunks)
@@ -687,17 +750,20 @@ namespace Helios
 
 			const uint32_t cx = chunk_index % params.ChunksX;
 			const uint32_t cz = chunk_index / params.ChunksX;
+			const uint32_t chunk_seed = MixHash(cx ^ MixHash(cz ^ MixHash(params.Seed)));
 			for (uint32_t i = 0; i < range.y; ++i)
 			{
 				{
 					/* 每株一个基值：块坐标与序号一起混进去，同样的输入每次给同样的结果。
 					 * 计算着色器里是同一套公式，两边必须一字不差 */
-					const uint32_t base = MixHash(i ^ MixHash(cx ^ MixHash(cz ^ MixHash(params.Seed))));
-
+					const uint32_t base = MixHash(i ^ chunk_seed);
+					const glm::vec2 candidate = params.StablePlacement
+						? StableCandidate(i, chunk_seed)
+						: glm::vec2(HashUnit(base, 1u), HashUnit(base, 2u));
 					const float local_x = -params.HalfX
-						+ (static_cast<float>(cx) + HashUnit(base, 1u)) * params.ChunkWidth;
+						+ (static_cast<float>(cx) + candidate.x) * params.ChunkWidth;
 					const float local_z = -params.HalfZ
-						+ (static_cast<float>(cz) + HashUnit(base, 2u)) * params.ChunkDepth;
+						+ (static_cast<float>(cz) + candidate.y) * params.ChunkDepth;
 
 					float yaw = HashUnit(base, 3u) * kTwoPi;
 					float height_seed = HashUnit(base, 4u);
@@ -724,6 +790,7 @@ namespace Helios
 					/* 贴地：叶根落到地形表面；点不在地形范围内就留在原平面 */
 					glm::vec3 ground_normal(0.0f, 1.0f, 0.0f);
 					float growth = 1.0f;
+					float growth_weight = 1.0f;
 					if (params.HasGround)
 					{
 						const glm::vec2 world_xz(position.x, position.z);
@@ -771,13 +838,20 @@ namespace Helios
 										const float slope = std::clamp(1.0f - local_normal.y, 0.0f, 1.0f);
 										const float height_t = std::clamp(local_height
 											/ std::max(params.GroundHeightScale, 1.0f), 0.0f, 1.0f);
-										growth *= HashUnit(base, 8u) < TerrainGrassWeight(slope,
-											height_t, params.TerrainGrowth) ? 1.0f : 0.0f;
+										growth_weight = TerrainGrassWeight(slope, height_t, params.TerrainGrowth);
 									}
 								}
 							}
 						}
 					}
+					if (!params.DensityMask.empty())
+					{
+						const glm::vec2 uv = glm::vec2(local_x / (params.HalfX * 2.0f) + 0.5f,
+							local_z / (params.HalfZ * 2.0f) + 0.5f);
+						growth_weight *= DensityAt(params.DensityMask.data(), uv);
+					}
+					if ((params.UseTerrainGrowth && params.HasGround) || !params.DensityMask.empty())
+						growth *= HashUnit(base, 8u) < growth_weight ? 1.0f : 0.0f;
 
 					/* 叶面姿态：up 向坡面法线插值，右/前向对 up 正交化。
 					 * 这套公式在 GrassPlacement.glsl 里一字不差，两条路径才长得一样 */
@@ -804,7 +878,7 @@ namespace Helios
 	void GrassField::UploadInstances(std::vector<GrassInstanceData>& instances,
 		const SharedPtr<DeviceStorageBuffer>& storage)
 	{
-		/* 叶根高度范围、坡度退化数：贴地检查与调试用 */
+		/* 叶根高度和退化株数：贴地检查与调试用 */
 		m_SlopeCulledCount = 0;
 		m_InstanceMinY = std::numeric_limits<float>::max();
 		m_InstanceMaxY = -std::numeric_limits<float>::max();
@@ -861,7 +935,7 @@ namespace Helios
 			glm::vec4 TerrainShape{ 0.0f };  /* x 半宽、y 半长、z 分辨率、w 是否有地形 */
 			glm::vec4 GrassShape{ 0.0f };    /* x 贴面程度、y cos(最大坡度)、z 坡度过滤、w 生长权重 */
 			glm::vec4 TerrainGrowth{ 0.0f }; /* xyz 岩坡、砂线、雪线 */
-			glm::vec4 Clump{ 0.0f };         /* x 簇宽、y 簇级相关强度 */
+			glm::vec4 Clump{ 0.0f };         /* x 簇宽、y 簇级相关强度、z 稳定候选点、w 遮罩 */
 			glm::mat4 TerrainModel{ 1.0f };  /* 地形局部 → 世界 */
 			glm::mat4 TerrainInverse{ 1.0f };
 			glm::mat4 TerrainNormalMatrix{ 1.0f };
@@ -877,7 +951,8 @@ namespace Helios
 		params.Shape = glm::vec4(m_HalfX, m_HalfZ, m_ChunkWidth, m_ChunkDepth);
 		params.Blade = glm::vec4(m_Height, m_Width, m_ReceiveShadow ? 1.0f : 0.0f,
 			static_cast<float>(m_InstanceCount));
-		params.Clump = glm::vec4(m_ClumpSize, m_ClumpStrength, 0.0f, 0.0f);
+		params.Clump = glm::vec4(m_ClumpSize, m_ClumpStrength,
+			m_StablePlacement ? 1.0f : 0.0f, m_DensityMaskStorage != nullptr ? 1.0f : 0.0f);
 
 		SharedPtr<DeviceStorageBuffer> terrain_heights;
 		if (m_Ground != nullptr)
@@ -897,7 +972,7 @@ namespace Helios
 		}
 
 		if (Renderer::DispatchGrassPlacement(m_InstanceStorage, &params, sizeof(params), m_InstanceCount,
-			terrain_heights, m_ChunkIndexBuffer))
+			terrain_heights, m_ChunkIndexBuffer, m_DensityMaskStorage))
 			m_GpuDirty = false;
 	}
 
@@ -948,6 +1023,81 @@ namespace Helios
 			return;
 		m_IndirectPrepared = Renderer::DispatchGrassCull(m_InstanceStorage, m_IndirectDrawBuffer,
 			m_IndirectArgs, m_ChunkBoundsBuffer, &params, sizeof(params), m_InstanceCount);
+	}
+
+	bool GrassField::RaycastDensity(const glm::vec3& origin, const glm::vec3& direction,
+		float radius, glm::vec3& out_position) const
+	{
+		if (m_Ground != nullptr)
+		{
+			glm::vec2 local(0.0f);
+			float distance = 0.0f;
+			if (!m_Ground->Raycast(origin, direction, local, distance))
+				return false;
+			out_position = origin + direction * distance;
+		}
+		else
+		{
+			const glm::vec3 normal = glm::normalize(glm::cross(m_Right, m_Forward));
+			const float denominator = glm::dot(normal, direction);
+			if (std::abs(denominator) < 1e-5f)
+				return false;
+			const float distance = glm::dot(normal, m_Origin - origin) / denominator;
+			if (distance < 0.0f)
+				return false;
+			out_position = origin + direction * distance;
+		}
+		const glm::vec3 relative = out_position - m_Origin;
+		const glm::vec2 center(glm::dot(relative, m_Right), glm::dot(relative, m_Forward));
+		const glm::vec2 closest = glm::clamp(center, glm::vec2(-m_HalfX, -m_HalfZ),
+			glm::vec2(m_HalfX, m_HalfZ));
+		return glm::length(center - closest) <= std::max(0.0f, radius);
+	}
+
+	bool GrassField::PaintDensity(GrassComponent& component, const glm::vec3& world_position,
+		float radius, float amount)
+	{
+		if (m_HalfX <= 0.0f || m_HalfZ <= 0.0f || radius <= 0.0f || amount == 0.0f)
+			return false;
+		constexpr uint32_t n = GrassComponent::kDensityMaskSize;
+		const glm::vec3 relative = world_position - m_Origin;
+		const glm::vec2 center(glm::dot(relative, m_Right), glm::dot(relative, m_Forward));
+		if (std::abs(center.x) > m_HalfX + radius || std::abs(center.y) > m_HalfZ + radius)
+			return false;
+		if (component.m_DensityMask.empty())
+		{
+			if (amount > 0.0f)
+				return false;
+			component.m_DensityMask.assign(size_t(n) * n, 255u);
+		}
+		if (component.m_DensityMask.size() != size_t(n) * n)
+			return false;
+		bool changed = false;
+		for (uint32_t z = 0; z < n; ++z)
+		{
+			const float local_z = (float(z) / float(n - 1) * 2.0f - 1.0f) * m_HalfZ;
+			if (std::abs(local_z - center.y) >= radius)
+				continue;
+			for (uint32_t x = 0; x < n; ++x)
+			{
+				const float local_x = (float(x) / float(n - 1) * 2.0f - 1.0f) * m_HalfX;
+				const float distance = glm::length(glm::vec2(local_x, local_z) - center) / radius;
+				if (distance >= 1.0f)
+					continue;
+				const float weight = (1.0f - distance) * (1.0f - distance);
+				uint8_t& value = component.m_DensityMask[size_t(z) * n + x];
+				const uint8_t next = static_cast<uint8_t>(std::clamp(
+					std::lround(float(value) + amount * 255.0f * weight), 0l, 255l));
+				changed |= next != value;
+				value = next;
+			}
+		}
+		if (!changed && std::all_of(component.m_DensityMask.begin(), component.m_DensityMask.end(),
+			[](uint8_t value) { return value == 255u; }))
+			component.m_DensityMask.clear();
+		if (changed)
+			++component.m_DensityMaskRevision;
+		return changed;
 	}
 
 	void GrassField::StampBend(const glm::vec3& world_position, float radius)

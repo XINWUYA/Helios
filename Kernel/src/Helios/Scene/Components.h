@@ -399,6 +399,11 @@ namespace Helios
 	{
 		glm::vec2 m_Extent{ 12.0f, 12.0f };      /* 局部空间的半宽半长（米） */
 		float m_Density{ 55.0f };                /* 每平米株数（近档） */
+		/* 按固定序列放置候选株，密度变化时保留原位置；默认沿用随机散布。 */
+		bool m_StablePlacement{ false };
+		static constexpr uint32_t kDensityMaskSize = 256;
+		std::vector<uint8_t> m_DensityMask; /* 空 = 整片满密度，绘制时才采样 */
+		uint64_t m_DensityMaskRevision{ 0 }; /* 笔刷与撤销写回时推进，不进场景 */
 		float m_Height{ 0.5f };
 		float m_Width{ 0.045f };
 		/* 同一区域共享朝向与高宽趋势；0 关闭，不改变实例与剔除块。 */

@@ -25,7 +25,7 @@ layout(std140, binding = 4) uniform GrassPlacementBlock
 	vec4 u_TerrainShape;  /* x 局部半宽、y 局部半长、z 高度图分辨率、w 是否有地形 */
 	vec4 u_GrassShape;    /* x 贴面程度、y cos(最大坡度)、z 坡度过滤、w 生长权重 */
 	vec4 u_TerrainGrowth; /* xyz 岩坡、砂线、雪线 */
-	vec4 u_Clump;         /* x 簇宽、y 簇级相关强度 */
+	vec4 u_Clump;         /* x 簇宽、y 簇级相关强度、z 稳定候选点、w 遮罩 */
 	/* 地形几何在局部空间：世界点先拉到局部采样，法线再变换回世界 */
 	mat4 u_TerrainModel;
 	mat4 u_TerrainInverse;
@@ -42,6 +42,11 @@ layout(std430, binding = 2) readonly buffer TerrainHeights
 layout(std430, binding = 3) readonly buffer ChunkIndices
 {
 	uint u_ChunkIndices[];
+};
+
+layout(std430, binding = 5) readonly buffer GrassDensityMask
+{
+	uint u_DensityMask[];
 };
 
 layout(std430, binding = 1) writeonly buffer GrassInstanceBuffer
@@ -107,6 +112,39 @@ float HashUnit(uint base, uint channel)
 	return float(MixHash(base + channel * 0x9e3779b9u) & 0xFFFFFFu) / float(0x1000000u);
 }
 
+const int kGrassDensitySize = 256;
+
+float DensityTexel(ivec2 texel)
+{
+	const uint index = uint(texel.y * kGrassDensitySize + texel.x);
+	return float((u_DensityMask[index / 4u] >> ((index % 4u) * 8u)) & 255u) / 255.0f;
+}
+
+float DensityAt(vec2 uv)
+{
+	const vec2 texel = clamp(uv, vec2(0.0f), vec2(1.0f)) * float(kGrassDensitySize - 1);
+	const ivec2 a = ivec2(texel);
+	const ivec2 b = min(a + ivec2(1), ivec2(kGrassDensitySize - 1));
+	const vec2 f = texel - vec2(a);
+	return mix(mix(DensityTexel(a), DensityTexel(ivec2(b.x, a.y)), f.x),
+		mix(DensityTexel(ivec2(a.x, b.y)), DensityTexel(b), f.x), f.y);
+}
+
+vec2 StableCandidate(uint index, uint chunk_seed)
+{
+	const float x = float(bitfieldReverse(index + 1u)) * (1.0f / 4294967296.0f);
+	uint value = index + 1u;
+	float z = 0.0f;
+	float factor = 1.0f / 3.0f;
+	while (value > 0u)
+	{
+		z += float(value % 3u) * factor;
+		value /= 3u;
+		factor /= 3.0f;
+	}
+	return fract(vec2(x + HashUnit(chunk_seed, 9u), z + HashUnit(chunk_seed, 10u)));
+}
+
 vec3 ClumpCorner(ivec2 cell, uint seed)
 {
 	const uint base = MixHash(uint(cell.x)
@@ -151,15 +189,19 @@ void main()
 	const uint cz = chunk_index / chunks_x;
 	const uint seed = uint(u_Grid.w);
 
-	const uint hash_base = MixHash(blade_index ^ MixHash(cx ^ MixHash(cz ^ MixHash(seed))));
+	const uint chunk_seed = MixHash(cx ^ MixHash(cz ^ MixHash(seed)));
+	const uint hash_base = MixHash(blade_index ^ chunk_seed);
 
 	const vec3 right_axis = u_BasisRight.xyz;
 	const vec3 forward_axis = u_BasisForward.xyz;
 	const float half_x = u_Shape.x;
 	const float half_z = u_Shape.y;
 
-	const float local_x = -half_x + (float(cx) + HashUnit(hash_base, 1u)) * u_Shape.z;
-	const float local_z = -half_z + (float(cz) + HashUnit(hash_base, 2u)) * u_Shape.w;
+	const vec2 candidate = u_Clump.z > 0.5f
+		? StableCandidate(blade_index, chunk_seed)
+		: vec2(HashUnit(hash_base, 1u), HashUnit(hash_base, 2u));
+	const float local_x = -half_x + (float(cx) + candidate.x) * u_Shape.z;
+	const float local_z = -half_z + (float(cz) + candidate.y) * u_Shape.w;
 
 	float yaw = HashUnit(hash_base, 3u) * kTwoPi;
 	float height_seed = HashUnit(hash_base, 4u);
@@ -185,6 +227,7 @@ void main()
 	/* 贴地：叶根落到地形表面；坡太陡的株退化掉（不跳过，保持每块株数固定） */
 	vec3 ground_normal = vec3(0.0f, 1.0f, 0.0f);
 	float growth = 1.0f;
+	float growth_weight = 1.0f;
 	if (u_TerrainShape.w > 0.5f)
 	{
 		/* 世界点 → 局部 → 采样高度 → 换回世界，再反查一次局部（俯仰时才需要第二遍） */
@@ -207,12 +250,19 @@ void main()
 				{
 					const float slope = clamp(1.0f - local_normal.y, 0.0f, 1.0f);
 					const float height_t = clamp(local_h / max(u_Terrain.w, 1.0f), 0.0f, 1.0f);
-					growth *= HashUnit(hash_base, 8u) < TerrainGrassWeight(slope, height_t)
-						? 1.0f : 0.0f;
+					growth_weight = TerrainGrassWeight(slope, height_t);
 				}
 			}
 		}
 	}
+	if (u_Clump.w > 0.5f)
+	{
+		const vec2 uv = vec2(local_x / (half_x * 2.0f) + 0.5f,
+			local_z / (half_z * 2.0f) + 0.5f);
+		growth_weight *= DensityAt(uv);
+	}
+	if ((u_GrassShape.w > 0.5f && u_TerrainShape.w > 0.5f) || u_Clump.w > 0.5f)
+		growth *= HashUnit(hash_base, 8u) < growth_weight ? 1.0f : 0.0f;
 
 	/* 姿态对齐坡面：up 向法线插值，右/前向对 up 正交化（与 C++ 侧同一套公式） */
 	const vec3 up_axis = normalize(mix(vec3(0.0f, 1.0f, 0.0f), ground_normal,

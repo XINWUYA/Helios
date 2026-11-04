@@ -13,7 +13,28 @@ namespace Helios
 		 * 两种形态与模型槽一致 —— 引用只写路径，实例全量内嵌（不依赖来源资产存活） */
 		void SaveGrassMaterial(tinyxml2::XMLElement* element, const void* component)
 		{
-			const auto& slot = static_cast<const GrassComponent*>(component)->m_MaterialSlot;
+			const auto& grass = *static_cast<const GrassComponent*>(component);
+			const auto& mask = grass.m_DensityMask;
+			if (mask.size() == size_t(GrassComponent::kDensityMaskSize) * GrassComponent::kDensityMaskSize)
+			{
+				constexpr char digits[] = "0123456789abcdef";
+				std::string encoded;
+				for (size_t i = 0; i < mask.size();)
+				{
+					uint32_t run = 1;
+					while (run < 65535u && i + run < mask.size() && mask[i + run] == mask[i])
+						++run;
+					encoded += digits[mask[i] >> 4u];
+					encoded += digits[mask[i] & 15u];
+					for (int shift = 12; shift >= 0; shift -= 4)
+						encoded += digits[(run >> shift) & 15u];
+					i += run;
+				}
+				auto* mask_node = element->InsertNewChildElement("DensityMask");
+				mask_node->SetAttribute("Resolution", GrassComponent::kDensityMaskSize);
+				mask_node->SetText(encoded.c_str());
+			}
+			const auto& slot = grass.m_MaterialSlot;
 			if (slot.pMaterial == nullptr)
 				return;
 
@@ -36,6 +57,47 @@ namespace Helios
 		void LoadGrassMaterial(const tinyxml2::XMLElement* element, void* component)
 		{
 			auto& grass = *static_cast<GrassComponent*>(component);
+			grass.m_DensityMask.clear();
+			grass.m_DensityMaskRevision = 0;
+			if (const auto* mask_node = element->FirstChildElement("DensityMask");
+				mask_node != nullptr && mask_node->UnsignedAttribute("Resolution") == GrassComponent::kDensityMaskSize)
+			{
+				const char* text = mask_node->GetText();
+				if (text != nullptr)
+				{
+					const std::string_view encoded(text);
+					std::vector<uint8_t> decoded;
+					decoded.reserve(size_t(GrassComponent::kDensityMaskSize) * GrassComponent::kDensityMaskSize);
+					const auto hex = [](char c) -> int
+					{
+						if (c >= '0' && c <= '9') return c - '0';
+						if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+						return -1;
+					};
+					bool valid = !encoded.empty() && encoded.size() % 6u == 0u
+						&& encoded.size() <= size_t(GrassComponent::kDensityMaskSize)
+							* GrassComponent::kDensityMaskSize * 6u;
+					for (size_t i = 0; valid && i < encoded.size(); i += 6u)
+					{
+						int parts[6];
+						for (int digit = 0; digit < 6; ++digit)
+						{
+							parts[digit] = hex(encoded[i + digit]);
+							valid &= parts[digit] >= 0;
+						}
+						if (!valid) break;
+						const size_t count = size_t(parts[2] << 12 | parts[3] << 8 | parts[4] << 4 | parts[5]);
+						valid = count > 0 && decoded.size() + count
+							<= size_t(GrassComponent::kDensityMaskSize) * GrassComponent::kDensityMaskSize;
+						if (valid)
+							decoded.insert(decoded.end(), count, uint8_t(parts[0] << 4 | parts[1]));
+					}
+					if (valid && decoded.size() == size_t(GrassComponent::kDensityMaskSize) * GrassComponent::kDensityMaskSize)
+						grass.m_DensityMask = std::move(decoded);
+					else
+						CORE_LOG_WARN("Invalid grass density mask; using full density.");
+				}
+			}
 
 			/* 老场景里的 LodDistance / CullDistance：新属性没写就按旧名字读一次 */
 			if (element->Attribute("StartCullDistance") == nullptr
@@ -150,6 +212,8 @@ namespace Helios
 			.Field(&GrassComponent::m_ClumpStrength, "ClumpStrength", FieldType::Float, 0.01f)
 			.Range(0.0f, 1.0f)
 			.Slider()
+			.Group("Patch")
+			.Field(&GrassComponent::m_StablePlacement, "StablePlacement", FieldType::Bool)
 			.SaveExtra(&SaveGrassMaterial)
 			.LoadExtra(&LoadGrassMaterial)
 			.Register();
