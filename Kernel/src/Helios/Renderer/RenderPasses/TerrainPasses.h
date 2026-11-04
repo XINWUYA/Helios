@@ -40,7 +40,9 @@ namespace Helios
 		/* 虚拟纹理：挑出本帧要烘的页并烘进页池（切自己的帧缓冲，调用方在绑主通道之前调） */
 		HELIOS_API void BakeVirtualTextures(RenderView& view, Scene& scene);
 
-		/* 探针捕获：按探针周围的一块范围选 patch，不受主相机视锥限制 */
-		HELIOS_API void SubmitCapture(RenderView& view, Scene& scene, const glm::vec3& center, float radius);
+		/* 探针捕获：按探针周围的一块范围选 patch，不受主相机视锥限制。
+		 * culling_mask 取探针自己的，不能用宿主相机的（两者可以不一样） */
+		HELIOS_API void SubmitCapture(RenderView& view, Scene& scene, const glm::vec3& center,
+			float radius, LayerMask culling_mask);
 	}
 }

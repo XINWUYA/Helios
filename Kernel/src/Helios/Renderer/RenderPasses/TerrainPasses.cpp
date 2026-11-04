@@ -637,7 +637,8 @@ namespace Helios::TerrainDraw
 		}
 	}
 
-	void SubmitCapture(RenderView& view, Scene& scene, const glm::vec3& center, float radius)
+	void SubmitCapture(RenderView& view, Scene& scene, const glm::vec3& center, float radius,
+		LayerMask culling_mask)
 	{
 		FillPrimaryLight(view);
 

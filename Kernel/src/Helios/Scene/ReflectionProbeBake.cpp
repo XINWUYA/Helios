@@ -163,8 +163,9 @@ namespace Helios
                 Forward::SubmitSceneObjects(*render_view, *scene, false, submit_params);
                 Forward::SubmitSceneObjects(*render_view, *scene, true, submit_params);
 
-                /* 地形同样不在可见对象表里：不补这一趟，反射里就没有地面 */
-                TerrainDraw::SubmitCapture(*render_view, *scene, capture_position, far_plane);
+                /* 地形同样不在可见对象表里：不补这一趟，反射里就没有地面。
+                 * 掩码用探针自己的，宿主相机看不看得见地形与这里无关 */
+                TerrainDraw::SubmitCapture(*render_view, *scene, capture_position, far_plane, GetCullingMask());
             }
         }
         capture_fb->Unbind();
