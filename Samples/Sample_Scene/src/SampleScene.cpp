@@ -32,7 +32,7 @@ void SampleSceneLayer::OnAttached()
 	render_view->SetViewportRegion(region);
 	render_view->SetOwnerScene(m_pScene);
 
-	m_pCameraController = CreateSharedPtr<SampleCameraController>(camera_entity);
+	m_pCameraController = CreateSharedPtr<SampleCameraController>(camera_entity, true);
 	m_pCameraController->SetViewportRegion(region);
 	m_pCameraController->SetFocalPoint(glm::vec3(0.0f, 1.0f, 2.0f));
 	m_pCameraController->SetDistance(20.0f);

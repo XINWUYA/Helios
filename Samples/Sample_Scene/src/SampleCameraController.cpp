@@ -4,16 +4,12 @@
 namespace Helios
 {
 	SampleCameraController::SampleCameraController(const Entity& camera_entity, bool is_focus)
-		: m_CameraEntity(camera_entity)
+		: m_CameraEntity(camera_entity), m_IsFocus(is_focus)
 	{
 		PROFILE_FUNCTION();
 
 		const auto& camera_component = camera_entity.GetComponent<CameraComponent>();
 		m_pCamera = camera_component.m_Camera;
-	}
-
-	SampleCameraController::~SampleCameraController()
-	{
 	}
 
 	void SampleCameraController::OnUpdate(float delta_time)
@@ -53,14 +49,12 @@ namespace Helios
 			const float yaw_rad = glm::radians(m_Yaw);
 			const float pitch_rad = glm::radians(m_Pitch);
 
-			/* 根据pitch和yaw计算新的朝向 */
 			forward = glm::normalize(glm::vec3(
 				std::cos(pitch_rad) * std::sin(yaw_rad),
 				std::sin(pitch_rad),
 				-std::cos(pitch_rad) * std::cos(yaw_rad)
 			));
 			position = m_FocalPoint - forward * m_FocalDistance;
-
 
 			const glm::vec3 world_up(0.0f, 1.0f, 0.0f);
 			right = glm::normalize(glm::cross(forward, world_up));
@@ -111,8 +105,6 @@ namespace Helios
 		auto& transform_component = m_CameraEntity.GetComponent<TransformComponent>();
 		transform_component.m_Position = position;
 		transform_component.m_Rotation = glm::eulerAngles(glm::quat(glm::mat3(camera_transform)));
-
-		// m_pCamera->OnUpdate(delta_time);
 	}
 
 	void SampleCameraController::OnMousePan(const glm::vec2& delta)

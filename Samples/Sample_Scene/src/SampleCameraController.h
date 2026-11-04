@@ -8,7 +8,6 @@ namespace Helios
 	{
 	public:
 		SampleCameraController(const Entity& camera_entity, bool is_focus = false);
-		~SampleCameraController();
 
 		void OnUpdate(float delta_time);
 		void OnEvent(class IEvent* event) {}
