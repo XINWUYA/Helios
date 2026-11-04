@@ -61,13 +61,20 @@ void SampleCSM::OnAttached()
 		center_pos = (model_component.m_Model->GetAABBMin() + model_component.m_Model->GetAABBMax()) * 0.5f;
 	}
 
+	{
+		auto entity = m_pScene->CreateEntity("Grass");
+		auto& grass_component = entity.AddComponent<GrassComponent>();
+		grass_component.m_Extent = glm::vec2(10, 10);
+		grass_component.m_DrawFlatUnderlay = true;
+	}
+
 	/* 向场景中添加方向光 */
 	{
 		auto directional_light_entity = m_pScene->CreateEntity("DirectionalLight");
 		auto& light_component = directional_light_entity.AddComponent<LightComponent>(LightType::Directional);
 		m_pDirectionLight = StaticPtrCast<DirectionalLight>(light_component.m_Light);
 		m_pDirectionLight->SetDirection(glm::normalize(glm::vec3(0.5f, -0.7f, -0.5f)));
-		m_pDirectionLight->SetIntensity(2.0f);
+		m_pDirectionLight->SetIntensity(5.0f);
 		m_pDirectionLight->SetDebugName("DirectionalLight");
 
 		/* 配置阴影 */
