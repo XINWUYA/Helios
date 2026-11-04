@@ -64,10 +64,10 @@ namespace Helios
         void SetRealtime(bool realtime) { m_IsRealtime = realtime; }
         bool IsRealtime() const { return m_IsRealtime; }
 
-        /* 实时捕获分帧：每帧只捕获立方图的一面，跟卷积同一个面号，六帧转一圈。
+        /* 分帧烘焙：每帧只烘立方图的一面，跟卷积同一个面号，六帧转一圈。
          * 关掉就是每帧六面全烘，反射更新更及时，单帧成本约六倍。 */
-        void SetCaptureFacePerFrame(bool value) { m_CaptureFacePerFrame = value; }
-        [[nodiscard]] bool IsCaptureFacePerFrame() const { return m_CaptureFacePerFrame; }
+        void SetStaggeredBake(bool value) { m_StaggeredBake = value; }
+        [[nodiscard]] bool IsStaggeredBake() const { return m_StaggeredBake; }
 
         /* 烘焙间隔（帧）：实时探针每隔这么多帧才烘一次，0 或 1 表示每帧都烘。
          * 第一版结果出来之前不节流，重烘焙也会立刻跑完一轮。 */
@@ -212,7 +212,7 @@ namespace Helios
         SharedPtr<DeviceFrameBuffer> MakeSceneCaptureFrameBuffer(const SharedPtr<DeviceTexture>& color_target, const SharedPtr<DeviceTexture>& depth_target, uint32_t size);
         /* 生成环境立方体贴图：BakeFromSkyTexture 时用 EquirectToCube 从源图生成；否则在探针位置用 6 个朝向的
          * 相机实时捕获场景几何。返回的立方图供后续烘焙 IrradianceMap 和 PrefilterMap。
-         * face < 0 表示整轮 6 面；否则只捕获这一面，其余面沿用上一轮（实时分帧捕获）。 */
+         * face < 0 表示整轮 6 面；否则只捕获这一面，其余面沿用上一轮（实时分帧烘焙）。 */
         void BakeEnvCubemap(RenderView* render_view, int32_t face);
         /* 卷积的单面版本：实时烘焙每帧只算一面（六帧转一圈），一次性烘焙时由整轮版本循环调用 */
         void BakeIrradianceMapFace(uint32_t face);
@@ -239,11 +239,11 @@ namespace Helios
         BakeResult m_BakeResult{};
         bool m_IsRealtime{ false };
         bool m_BakeCompleted{ false };
-        /* 环境图是否已经整轮捕获过：没整轮填过时分帧捕获会把空面喂给卷积，
+        /* 环境图是否已经整轮捕获过：没整轮填过时分帧烘焙会把空面喂给卷积，
          * 所以首轮（含重烘焙）先整轮捕获一次 */
         bool m_EnvComplete{ false };
-        /* 实时捕获分帧：每帧只捕获一面；关掉 = 每帧六面全烘 */
-        bool m_CaptureFacePerFrame{ true };
+        /* 分帧烘焙：每帧只烘一面；关掉 = 每帧六面全烘 */
+        bool m_StaggeredBake{ true };
         /* 烘焙间隔（帧）：0 / 1 = 每帧都烘 */
         int m_BakeInterval{ 0 };
         /* 距上次烘焙过了多少帧（间隔节流用） */

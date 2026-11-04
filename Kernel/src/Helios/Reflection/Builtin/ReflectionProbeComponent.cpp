@@ -83,10 +83,10 @@ namespace Helios
 					&ReflectionProbe::IsRealtime, &ReflectionProbe::SetRealtime>(),
 				"Realtime", FieldType::Bool)
 			.When(MakePredicateCondition(&CapturesScene))
-			/* 实时捕获分帧：每帧只烘一面，省掉六分之五的场景绘制 */
+			/* 分帧烘焙：每帧只烘一面，省掉六分之五的场景绘制 */
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
-					&ReflectionProbe::IsCaptureFacePerFrame, &ReflectionProbe::SetCaptureFacePerFrame>(),
-				"CaptureFacePerFrame", FieldType::Bool)
+					&ReflectionProbe::IsStaggeredBake, &ReflectionProbe::SetStaggeredBake>(),
+				"StaggeredBake", FieldType::Bool)
 			.When(MakePredicateCondition(&RealtimeSceneCapture))
 			/* 烘焙间隔：实时探针每隔这么多帧才烘一次，0 表示每帧都烘 */
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
