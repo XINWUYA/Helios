@@ -22,46 +22,42 @@ layout(location = 0) out vec4 OutFragColor;
 
 uniform samplerCube u_EnvironmentMap;
 uniform int u_FaceId;
-/* 源环境立方图的最大 mip 层级（= log2(面尺寸)），用于换算源 texel 的立体角 */
+/* 源环境立方图的最大 mip 层级（= log2(面尺寸)），用于换算源 texel 的角尺寸 */
 uniform float u_EnvironmentMapMaxMip;
 
 void main()
 {
 	vec3 normal = GetCubeFaceDirection(u_FaceId, WorldPosition.xy);
 
-	/* 以法线为 z 轴构造切线基 */
-	vec3 up = abs(normal.z) < 0.999f ? vec3(0.0f, 0.0f, 1.0f) : vec3(1.0f, 0.0f, 0.0f);
-	vec3 tangent = normalize(cross(up, normal));
-	vec3 bitangent = cross(normal, tangent);
+	/* 整球按 0.1 弧度的经纬格点剖分，每格贡献 ΔθΔφ·sinθ·cosθ 的权重 */
+	const float k_SampleDelta = 0.1f;
 
 	vec3 irradiance = vec3(0.0f);
 
-	/* 源立方图单个 texel 的立体角（6 个面共 6*size^2 个 texel） */
+	/* 源 mip 按格点间距选：一次采样要糊住一个格点，太阳这种零点几度却亮出天空
+	 * 两个数量级的特征才不会在格点之间忽进忽出 */
 	float env_size = exp2(u_EnvironmentMapMaxMip);
-	float sa_texel = 4.0f * PI / (6.0f * env_size * env_size);
+	float texel_angle = (0.5f * PI) / env_size;
+	float source_mip = log2(max(k_SampleDelta / texel_angle, 1.0f));
 
-	/* 采样步长：输出面只有 32 像素，0.1 弧度已经是每像素约 1000 个样本，
-	 * 再密只是把同一条低频结果算更多遍（0.025 是约 1.6 万次，实时烘焙扛不住） */
-	const float k_SampleDelta = 0.1f;
-	float sample_count = 0.0f;
-	for (float phi = 0.0f; phi < 2.0f * PI; phi += k_SampleDelta)
+	/* 格点固定在贴图空间，不跟着法线转，法线只进余弦权重。按法线摆一套格点的话，
+	 * 同一个源 texel 在相邻像素上会跳进跳出，条纹就是这么来的 */
+	for (float theta = 0.5f * k_SampleDelta; theta < PI; theta += k_SampleDelta)
 	{
-		for (float theta = 0.0f; theta < 0.5f * PI; theta += k_SampleDelta)
+		float sin_theta = sin(theta);
+		for (float phi = 0.5f * k_SampleDelta; phi < 2.0f * PI; phi += k_SampleDelta)
 		{
-			/* 球坐标 → 切空间 → 世界空间 */
-			vec3 tangent_sample = vec3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
-			vec3 sample_vec = tangent_sample.x * tangent + tangent_sample.y * bitangent + tangent_sample.z * normal;
+			vec3 direction = vec3(sin_theta * cos(phi), cos(theta), sin_theta * sin(phi));
+			float ndl = dot(normal, direction);
+			if (ndl <= 0.0f)
+				continue;
 
-			/* 按本次采样的立体角（≈Δθ·Δφ·sinθ）选源 mip：避免太阳这类极亮 texel
-			 * 被点采样整颗命中，在辐照度里留下白斑 */
-			float sa_sample = k_SampleDelta * k_SampleDelta * sin(theta);
-			float source_mip = 0.5f * log2(max(sa_sample / sa_texel, 1.0f));
-
-			irradiance += textureLod(u_EnvironmentMap, sample_vec, source_mip).rgb * cos(theta) * sin(theta);
-			++sample_count;
+			irradiance += textureLod(u_EnvironmentMap, direction, source_mip).rgb * (ndl * sin_theta);
 		}
 	}
 
-	irradiance = PI * irradiance * (1.0f / sample_count);
+	/* 权重 λ = ΔθΔφ·sinθ·cosθ；再除 π 换成"平均入射辐亮度"口径
+	 * （合成侧 ComposeIBLDiffuse 直接乘 albedo，不再除 π） */
+	irradiance *= (k_SampleDelta * k_SampleDelta) / PI;
 	OutFragColor = vec4(irradiance, 1.0f);
 }
