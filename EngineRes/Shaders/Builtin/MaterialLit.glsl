@@ -5,22 +5,21 @@
 #include "MaterialInput.glsl"
 #include "Uniforms.glsl"
 
-/* 标准 lit 材质的贴图契约：9 个采样器（材质转换 / 调试视图都按名字找）。
- * 声明随本库走，前向材质着色器与延迟 GBuffer 自动同源。
- * @property = 归材质管的参数：材质面板列、写进 .mtl；引擎逐绘制给的不标。
- * 显示名 / 控件类型 / 范围 / 条件显示写在同一条注释里，写法见 DeviceShader.h 的 MaterialPropertySpec。 */
-uniform sampler2D u_AlbedoTexture; // @property
-uniform sampler2D u_SpecularTexture; // @property
-uniform sampler2D u_NormalTexture; // @property
-uniform sampler2D u_BumpTexture; // @property
-uniform sampler2D u_DisplacementTexture; // @property
-uniform sampler2D u_RoughnessTexture; // @property
-uniform sampler2D u_MetallicTexture; // @property
-uniform sampler2D u_EmissiveTexture; // @property
-uniform sampler2D u_AmbientTexture; // @property
+/* 标准 lit 材质的贴图契约：9 个采样器（材质转换 / 调试视图都按名字找），声明随本库走，
+ * 前向材质着色器与延迟 GBuffer 自动同源。@property = 归材质管的参数（面板列、写进 .mtl），
+ * @group = 面板上的小标题；引擎逐绘制给的不标。显示名 / 控件 / 范围 / 条件见 DeviceShader.h。 */
+uniform sampler2D u_AlbedoTexture; // @group(Surface) @property
+uniform sampler2D u_SpecularTexture; // @group(Surface) @property
+uniform sampler2D u_NormalTexture; // @group(Detail) @property
+uniform sampler2D u_BumpTexture; // @group(Detail) @property
+uniform sampler2D u_DisplacementTexture; // @group(Detail) @property
+uniform sampler2D u_RoughnessTexture; // @group(Surface) @property
+uniform sampler2D u_MetallicTexture; // @group(Surface) @property
+uniform sampler2D u_EmissiveTexture; // @group(Surface) @property
+uniform sampler2D u_AmbientTexture; // @group(Surface) @property
 
 /* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）：所有材质贴图采样共用、缺省不变换 */
-uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @property
+uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @group(Surface) @property
 
 /* 标准 lit 材质的采样装配：输入世界位置 / 主 UV / 顶点色 / 世界法线 / 世界切线，
  * 输出填好的 SMaterialInput。前向与延迟共用这唯一一份实现。 */

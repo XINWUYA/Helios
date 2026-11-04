@@ -220,6 +220,8 @@ namespace Helios
 	{
 		/* 光源对象由构造参数决定，故逐类声明可添加形态；菜单名即光源类型名。 */
 		MakeRegistrar<LightComponent>("Light")
+			/* 类型 / 颜色 / 强度 / 投影开关留在组外：它们是这盏灯的本身，
+			 * 形状与阴影参数各成一节。声明顺序 = 场景文件的属性顺序，别调。 */
 			.Field(MakeLightTypeAccessor(), "Type", FieldType::Enum)
 			.EnumOf<LightType>()
 			.SerializeName("LightType")
@@ -233,6 +235,7 @@ namespace Helios
 				"CastShadow", FieldType::Bool)
 			.SerializeName("IsCastShadow")
 			/* 范围与锥角：条件同时驱动 UI（不适用类型不显示）与序列化（不适用不写出） */
+			.Group("Shape")
 			.Field(MakeLightRangeAccessor(), "Range", FieldType::Float)
 			.When(FieldCondition{ 0, FieldType::Bool, ConditionOp::Always, 0.0, &IsPunctualLightComponent })
 			.SerializeName("LightRange")
@@ -241,6 +244,7 @@ namespace Helios
 			.SerializeName("LightAngle")
 			/* 阴影参数：勾选投影后出现（配置由 SetIsCastShadow 备好）；
 			 * 级联数与阴影距离只对方向光有意义。条件同时驱动 UI 与序列化。 */
+			.Group("Shadow")
 			.Field(MakeShadowMapInfoAccessor<&LightComponent::m_Light, &ShadowMapInfo::Size, 64.0, 8192.0>(),
 				"Size", FieldType::Int, 8.0f)
 			.When(FieldCondition{ 0, FieldType::Bool, ConditionOp::Always, 0.0, &HasShadowSettings })

@@ -18,9 +18,9 @@ layout(location = 9) in vec4 a_InstanceParams;
 #include "../Builtin/GrassBlade.glsl"
 
 /* 1 = 画的是块底面（叶根下的草色垫层），0 = 叶片 */
-uniform int u_FlatPad = 0;                         // @property
+uniform int u_FlatPad = 0;                         // @group(Ground pad) @property
 /* 底面比叶片画得更远：叶片停画之后，草色还能再撑一段 */
-uniform float u_PadCullDistance = 160.0f;          // @property
+uniform float u_PadCullDistance = 160.0f;          // @group(Ground pad) @property
 
 struct SVextex2Frag
 {
@@ -108,19 +108,19 @@ layout(location = 0) out vec4 OutFragColor;
 /* 草不能按像素拾取，ObjectId 写 -1 与空像素同口径 */
 layout(location = 1) out float ObjectId;
 
-uniform vec3 u_BaseColor = vec3(0.09f, 0.20f, 0.05f);          // @property @type(color)
-uniform vec3 u_TipColor = vec3(0.45f, 0.62f, 0.18f);           // @property @type(color)
-uniform vec3 u_TransmissionColor = vec3(0.55f, 0.75f, 0.25f);  // @property @type(color)
-uniform float u_Transmission = 0.6f;                            // @property
-uniform float u_TransmissionPower = 4.0f;                       // @property
-uniform float u_Roughness = 0.75f;                              // @property
+uniform vec3 u_BaseColor = vec3(0.09f, 0.20f, 0.05f);          // @group(Surface) @property @type(color)
+uniform vec3 u_TipColor = vec3(0.45f, 0.62f, 0.18f);           // @group(Surface) @property @type(color)
+uniform vec3 u_TransmissionColor = vec3(0.55f, 0.75f, 0.25f);  // @group(Transmission) @property @type(color)
+uniform float u_Transmission = 0.6f;                           // @group(Transmission) @property
+uniform float u_TransmissionPower = 4.0f;                      // @group(Transmission) @property
+uniform float u_Roughness = 0.75f;                             // @group(Surface) @property
 /* 与顶点阶段同一个开关：1 = 块底面（不做透射） */
-uniform int u_FlatPad = 0;                                      // @property
+uniform int u_FlatPad = 0;                                     // @group(Ground pad) @property
 /* 环绕光照宽度，与顶点阶段同名同值 */
-uniform float u_Wrap = 0.4f;                                    // @property
+uniform float u_Wrap = 0.4f;                                   // @group(Surface) @property
 /* 叶根的亮度：0 = 根部全黑。低机位看草丛，近处露出来的大多是根部，
  * 这一项决定近处会不会糊成一片黑 */
-uniform float u_RootAO = 0.35f;                                 // @property
+uniform float u_RootAO = 0.35f;                                // @group(Surface) @property
 
 void main()
 {

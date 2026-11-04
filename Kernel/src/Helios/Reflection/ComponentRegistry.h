@@ -118,6 +118,9 @@ namespace Helios
 	struct HELIOS_API FieldDesc
 	{
 		const char* Name{ nullptr };        /* 显示名 */
+		/* 功能分组名：属性面板把同名字段收在一个可折叠标题下，空 = 不分组。
+		 * 组按首次出现的顺序排；未分组的字段一律排在分组之前。 */
+		const char* Group{ nullptr };
 		FieldType   Type{ FieldType::Float };
 		size_t      Offset{ 0 };             /* 相对组件起始地址的字节偏移（访问器字段不使用） */
 		size_t      ValueSize{ 0 };          /* 值的字节数 */
@@ -281,6 +284,7 @@ namespace Helios
 		{
 			FieldDesc desc;
 			desc.Name = name;
+			desc.Group = m_CurrentGroup;
 			desc.Type = type;
 			desc.Offset = MemberOffset(member);
 			desc.ValueSize = sizeof(M);
@@ -290,6 +294,11 @@ namespace Helios
 			m_Desc.Fields.emplace_back(desc);
 			return *this;
 		}
+
+		/* 属性面板里的功能分组：作用于其后声明的字段，空 = 回到不分组。
+		 * 分组只管显示，不改声明顺序 —— 声明顺序同时是场景文件里属性的写出顺序，
+		 * 所以同一组可以隔几行再接着声明，面板按组归拢后仍是一节。 */
+		ComponentRegistrar& Group(const char* name);
 
 		/* 访问器字段：值不在组件体内，由 MakeAccessor / MakeEnumAccessor 提供的回调读写 */
 		ComponentRegistrar& Field(FieldAccessor accessor, const char* name, FieldType type,
@@ -362,5 +371,7 @@ namespace Helios
 
 	private:
 		ComponentDesc m_Desc;
+		/* 当前分组：由 Group() 设置，Field() 抄进字段元数据 */
+		const char* m_CurrentGroup{ nullptr };
 	};
 }

@@ -67,6 +67,7 @@ namespace Helios
 			.SaveExtra(&SaveProbeExtra)
 			.LoadExtra(&LoadProbeExtra)
 			/* 烘焙来源放最前：它决定后面哪些字段有意义（贴图烘焙 vs 捕获场景） */
+			.Group("Capture")
 			.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
 					&ReflectionProbe::BakeConfig::BakeFromSkyTexture>(),
@@ -86,6 +87,7 @@ namespace Helios
 					&ReflectionProbe::GetCullingMask, &ReflectionProbe::SetCullingMask>(),
 				"CullingMask", FieldType::LayerMask)
 			.When(MakePredicateCondition(&CapturesScene))
+			.Group("Bake")
 			.Field(MakeConfigAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBakeConfig, &ReflectionProbe::SetBakeConfig,
 					&ReflectionProbe::BakeConfig::EnvSize>(),

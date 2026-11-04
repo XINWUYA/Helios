@@ -33,6 +33,7 @@ namespace Helios
 	{
 		FieldDesc desc;
 		desc.Name = name;
+		desc.Group = m_CurrentGroup;
 		desc.Type = type;
 		desc.ValueSize = accessor.ValueSize;
 		desc.DragSpeed = drag_speed;
@@ -41,6 +42,12 @@ namespace Helios
 		desc.Get = accessor.Get;
 		desc.Set = accessor.Set;
 		m_Desc.Fields.emplace_back(desc);
+		return *this;
+	}
+
+	ComponentRegistrar& ComponentRegistrar::Group(const char* name)
+	{
+		m_CurrentGroup = (name != nullptr && *name != '\0') ? name : nullptr;
 		return *this;
 	}
 

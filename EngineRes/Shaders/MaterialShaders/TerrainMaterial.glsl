@@ -7,26 +7,26 @@
  * 不配贴图时就是平涂色，与最早的三色版观感一致。
  * 贴图按局部 xz 平铺（Tiling = 一张贴图铺多少米），旋转地形纹路跟着山走。
  * 可见着色（延迟 / 前向 / 调试）与页烘焙共用这一份，改混色只改这里。 */
-uniform sampler2D u_Layer0Albedo;                          // @property
-uniform vec3 u_Layer0Color = vec3(0.26f, 0.36f, 0.16f);    // @property @type(color)
-uniform float u_Layer0Tiling = 8.0f;                       // @property @range(1.0, 64.0)
-uniform sampler2D u_Layer1Albedo;                          // @property
-uniform vec3 u_Layer1Color = vec3(0.32f, 0.30f, 0.27f);    // @property @type(color)
-uniform float u_Layer1Tiling = 12.0f;                      // @property @range(1.0, 64.0)
-uniform sampler2D u_Layer2Albedo;                          // @property
-uniform vec3 u_Layer2Color = vec3(0.55f, 0.47f, 0.34f);    // @property @type(color)
-uniform float u_Layer2Tiling = 10.0f;                      // @property @range(1.0, 64.0)
-uniform sampler2D u_Layer3Albedo;                          // @property
-uniform vec3 u_Layer3Color = vec3(0.86f, 0.88f, 0.92f);    // @property @type(color)
-uniform float u_Layer3Tiling = 16.0f;                      // @property @range(1.0, 64.0)
+uniform sampler2D u_Layer0Albedo;                          // @group(Grass layer) @property(Texture)
+uniform vec3 u_Layer0Color = vec3(0.26f, 0.36f, 0.16f);    // @group(Grass layer) @property(Color) @type(color)
+uniform float u_Layer0Tiling = 8.0f;                       // @group(Grass layer) @property(Tile size) @range(1.0, 64.0)
+uniform sampler2D u_Layer1Albedo;                          // @group(Rock layer) @property(Texture)
+uniform vec3 u_Layer1Color = vec3(0.32f, 0.30f, 0.27f);    // @group(Rock layer) @property(Color) @type(color)
+uniform float u_Layer1Tiling = 12.0f;                      // @group(Rock layer) @property(Tile size) @range(1.0, 64.0)
+uniform sampler2D u_Layer2Albedo;                          // @group(Sand layer) @property(Texture)
+uniform vec3 u_Layer2Color = vec3(0.55f, 0.47f, 0.34f);    // @group(Sand layer) @property(Color) @type(color)
+uniform float u_Layer2Tiling = 10.0f;                      // @group(Sand layer) @property(Tile size) @range(1.0, 64.0)
+uniform sampler2D u_Layer3Albedo;                          // @group(Snow layer) @property(Texture)
+uniform vec3 u_Layer3Color = vec3(0.86f, 0.88f, 0.92f);    // @group(Snow layer) @property(Color) @type(color)
+uniform float u_Layer3Tiling = 16.0f;                      // @group(Snow layer) @property(Tile size) @range(1.0, 64.0)
 
-uniform float u_Roughness = 0.85f;                         // @property @range(0.05, 1.0)
+uniform float u_Roughness = 0.85f;                         // @group(Surface) @property(Roughness) @range(0.05, 1.0)
 /* 岩层起始坡度（1 - N.y）：超过它的坡面开始露岩 */
-uniform float u_RockSlope = 0.45f;                         // @property @range(0.0, 1.0)
+uniform float u_RockSlope = 0.45f;                         // @group(Layer blending) @property(Rock threshold) @range(0.0, 1.0)
 /* 砂层上限：低于这个高度比例铺砂，往上 8% 内淡出 */
-uniform float u_SandHeight = 0.06f;                        // @property @range(0.0, 1.0)
+uniform float u_SandHeight = 0.06f;                        // @group(Layer blending) @property(Sand height) @range(0.0, 1.0)
 /* 雪线：高于这个高度比例开始积雪，往上 18% 内铺满 */
-uniform float u_SnowHeight = 0.62f;                        // @property @range(0.0, 1.0)
+uniform float u_SnowHeight = 0.62f;                        // @group(Layer blending) @property(Snow line) @range(0.0, 1.0)
 
 /* 法线差分的固定步长（米）：由高度图纹素跨度推，所有 LOD 用同一个。
  * 跟着 patch 走的话，粗 patch 与细 patch 交界的坡度会算得不同，混色切出一条直带 */

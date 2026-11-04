@@ -10,7 +10,7 @@
 
 namespace Helios
 {
-	/* 一条材质属性的面板规范：全部写在声明行尾的注释里（跟在 @property 后面），
+	/* 一条材质属性的面板规范：全部写在声明行尾的注释里，
 	 *   @property            进面板，显示名默认就是参数名
 	 *   @property(显示名)     同上 + 换显示名（可以带空格）
 	 *   @type(color)         vec3 / vec4 用取色器
@@ -18,10 +18,11 @@ namespace Helios
 	 *   @type(slider)        float / int 用滑条，配合 @range
 	 *   @range(min, max, step)  数值范围（step 可省，当作拖拽步进）
 	 *   @showif(u_X, 值)      仅当 u_X 的当前值等于该值时显示（true / false 也可写）
-	 * 没写的项用默认：显示名 = 参数名、控件按参数类型、无范围、无条件。 */
+	 * 没写的项用默认：显示名 = 参数名、无分组、控件按参数类型、无范围、无条件。 */
 	struct MaterialPropertySpec
 	{
 		std::string	Label{};       /* 面板显示名（空 = 用参数名） */
+		std::string	Group{};       /* @group(分组名)，空 = 未分组 */
 		std::string	Widget{};      /* 控件类型（空 = 按参数类型来） */
 		bool		HasRange{false};
 		float		Min{0.0f};

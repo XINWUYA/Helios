@@ -52,7 +52,7 @@ void main()
 #include "../DebugShaders/DebugForward.glsl"
 
 /* 不透明度乘数：透明队列的材质靠它整体调淡；不透明队列不混合，改了看不见 */
-uniform float u_Opacity = 1.0f; // @property
+uniform float u_Opacity = 1.0f; // @group(Surface) @property
 
 struct SVextex2Frag
 {

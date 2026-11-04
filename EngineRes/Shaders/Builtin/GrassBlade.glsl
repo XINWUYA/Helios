@@ -16,18 +16,18 @@ uniform float u_BladeDensityScale = 1.0f;
 /* 超过这个距离不算风场与压弯，0 是始终算 */
 uniform float u_WindCullDistance = 0.0f;
 
-uniform vec2 u_WindDirection = vec2(1.0f, 0.35f); // @property
-uniform float u_WindStrength = 0.12f;              // @property
-uniform float u_WindSpeed = 1.6f;                  // @property
-uniform float u_WindSpatialScale = 0.25f;          // @property
+uniform vec2 u_WindDirection = vec2(1.0f, 0.35f); // @group(Wind) @property
+uniform float u_WindStrength = 0.12f;              // @group(Wind) @property
+uniform float u_WindSpeed = 1.6f;                  // @group(Wind) @property
+uniform float u_WindSpatialScale = 0.25f;          // @group(Wind) @property
 /* 时间由提交时逐片写入，不进材质面板 */
 uniform float u_WindTime = 0.0f;
-uniform float u_BladeCurl = 0.55f;                 // @property
+uniform float u_BladeCurl = 0.55f;                 // @group(Blade shape) @property
 
 /* 脚印图：rg 是倒向、b 是压下的程度；xy 是图左下角的世界坐标，zw 是 1 / 覆盖尺寸 */
 uniform sampler2D u_TrampleMap;
 uniform vec4 u_TrampleRect = vec4(0.0f);
-uniform float u_TrampleStrength = 0.7f;            // @property
+uniform float u_TrampleStrength = 0.7f;            // @group(Blade shape) @property
 
 const float kGrassTwoPi = 6.2831853f;
 

@@ -351,6 +351,7 @@ namespace Helios
 		{
 			MaterialPropertySpec spec;
 			spec.Label = DirectiveArg(comment, kPropertyMarker);
+			spec.Group = DirectiveArg(comment, "@group");
 
 			spec.Widget = DirectiveArg(comment, "@type");
 			for (char& character : spec.Widget)
@@ -534,7 +535,8 @@ namespace Helios
 				if (!declared.Default.has_value() && default_value.has_value())
 					declared.Default = std::move(default_value);
 				declared.Property = declared.Property || property;
-				if (!spec.Label.empty() || !spec.Widget.empty() || spec.HasRange || !spec.ShowIfParam.empty())
+				if (!spec.Label.empty() || !spec.Group.empty() || !spec.Widget.empty()
+					|| spec.HasRange || !spec.ShowIfParam.empty())
 					declared.PropertySpec = spec;
 				return;
 			}
