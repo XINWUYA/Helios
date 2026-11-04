@@ -59,8 +59,8 @@ namespace Helios
 			return probe != nullptr && !probe->GetBakeConfig().BakeFromSkyTexture;
 		}
 
-		/* 按面轮转只在「实时 + 捕获场景」下有意义：贴图烘焙一次做完，关掉实时也不轮转 */
-		bool RotatesCapture(const void* component)
+		/* 分帧捕获只在「实时 + 捕获场景」下有意义：贴图烘焙一次做完，关掉实时也不分帧 */
+		bool RealtimeSceneCapture(const void* component)
 		{
 			const auto& probe = static_cast<const ReflectionProbeComponent*>(component)->m_ReflectionProbe;
 			return probe != nullptr && probe->NeedsRealtimeBake();
@@ -83,11 +83,11 @@ namespace Helios
 					&ReflectionProbe::IsRealtime, &ReflectionProbe::SetRealtime>(),
 				"Realtime", FieldType::Bool)
 			.When(MakePredicateCondition(&CapturesScene))
-			/* 实时捕获按面轮转：每帧只烘一面，省掉六分之五的场景绘制 */
+			/* 实时捕获分帧：每帧只烘一面，省掉六分之五的场景绘制 */
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
-					&ReflectionProbe::IsFaceRotation, &ReflectionProbe::SetFaceRotation>(),
-				"FaceRotation", FieldType::Bool)
-			.When(MakePredicateCondition(&RotatesCapture))
+					&ReflectionProbe::IsCaptureFacePerFrame, &ReflectionProbe::SetCaptureFacePerFrame>(),
+				"CaptureFacePerFrame", FieldType::Bool)
+			.When(MakePredicateCondition(&RealtimeSceneCapture))
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBoxSize, &ReflectionProbe::SetBoxSize>(),
 				"BoxSize", FieldType::Vec3, 0.1f, 10.0f)
