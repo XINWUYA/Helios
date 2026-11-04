@@ -63,8 +63,8 @@ namespace Helios::MaterialParamUI
 	bool BeginPropertyGroup(const char* id, const char* title, bool default_open = true,
 		const char* suffix = nullptr);
 
-	/* 参数行空时的提示行（Danger 色）：三种状态分开说清 —— 没 Shader / 有 Shader 但反射为空
-	 * （后端不支持或声明识别不出）/ 反射到了但没有一条标 @property（材质没东西可改）。 */
+	/* 参数行空时的提示行：没 Shader 或反射拿不到声明（后端不支持 / 声明识别不出）用 Danger；
+	 * 扫过源码但没有一条标 @property（材质本来就没东西可改，天空吃 uniform 块就是这种）弱化提示。 */
 	void DrawMaterialReflectionNotice(const Material& material);
 
 	/* Shader 菜单树：按目录分层的节点（文件夹 = Children 非空；文件 = Path 为完整相对路径） */

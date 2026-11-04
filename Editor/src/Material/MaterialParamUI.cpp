@@ -207,15 +207,20 @@ namespace Helios::MaterialParamUI
 	void DrawMaterialReflectionNotice(const Material& material)
 	{
 		const SharedPtr<DeviceShader> shader = material.GetShader();
+		/* 扫过源码、只是没有裸 uniform（参数全在 uniform 块里）时不算故障 */
+		const bool scanned = shader != nullptr && shader->GetReflectionData().MaterialParamsScanned;
+
 		const char* message = nullptr;
 		if (shader == nullptr)
 			message = "No shader loaded — cannot reflect parameters";
-		else if (shader->GetReflectionData().MaterialParams.empty())
+		else if (!scanned)
 			message = "Shader reflection unavailable — parameters not listed";
 		else
 			message = "No @property params — nothing to edit in this shader";
 
-		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::Danger);
+		/* 没东西可改是常态（天空这类吃 uniform 块的着色器就是这样），弱化即可；反射不到才报警色 */
+		ImGui::PushStyleColor(ImGuiCol_Text,
+			scanned ? EditorTheme::Token::TextDim : EditorTheme::Token::Danger);
 		ImGui::TextWrapped("%s", message);
 		ImGui::PopStyleColor();
 	}

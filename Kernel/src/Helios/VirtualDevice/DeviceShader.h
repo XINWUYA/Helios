@@ -79,8 +79,11 @@ namespace Helios
 		std::unordered_map<std::string, uint8_t> SamplerStages{};
 		/* 反射到的全部材质候选参数（声明顺序）：采样器（Texture）+ 裸 uniform（int/float/vec2-4/mat4）。
 		 * 只有带 @property 标记的才归材质（见 ReflectedMaterialParam::Property），其余是引擎逐绘制
-		 * 给的值或库内部声明。空 = 拿不到声明的场合（如 SPIR-V 反射路径），调用方自行回退。 */
+		 * 给的值或库内部声明。块成员不算参数，表空不代表反射失败，见 MaterialParamsScanned。 */
 		std::vector<ReflectedMaterialParam> MaterialParams{};
+		/* 参数表是否真扫过源码：只声明 uniform 块（引擎常量）的着色器扫完也是空的。
+		 * 面板据此区分「没有可改的」和「反射拿不到声明」，后者才算失败 */
+		bool MaterialParamsScanned{ false };
 		/* 声明为 uniform 块（std140）的 binding：计算派发据此区分 uniform 缓冲与 storage 缓冲 */
 		std::unordered_set<uint32_t> UniformBlockBindings{};
 		/* 顶点阶段声明的 attribute：名字 → layout(location = N) 的 N。
@@ -95,6 +98,7 @@ namespace Helios
 			SamplerStateBindings.clear();
 			SamplerStages.clear();
 			MaterialParams.clear();
+			MaterialParamsScanned = false;
 			UniformBlockBindings.clear();
 			VertexAttributeLocations.clear();
 			VariantSpecs.clear();

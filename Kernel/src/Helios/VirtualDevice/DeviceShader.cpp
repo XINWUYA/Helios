@@ -522,6 +522,8 @@ namespace Helios
 		if (source.empty())
 			return;
 
+		/* 源码在手、下面要逐行扫了：空表可能只是"确实没有裸 uniform"，不是反射失败 */
+		m_Reflection.MaterialParamsScanned = true;
 
 		/* 材质参数表按名去重（顶点 / 片元各调用一次）：先到者定类型，
 		 * 后到的默认值只在前者没有时补上，材质标记取或、面板规范取有内容的那份。 */
