@@ -1589,6 +1589,17 @@ namespace Helios
 				render_queue, component_changed);
 		}
 
+		void WriteBackMaterialShader(ModelComponent& component, const Model& model, int slot_index,
+			const std::string& shader_path, bool& component_changed)
+		{
+			const MaterialSlot* slot = model.GetSlotByIndex(slot_index);
+			if (slot == nullptr)
+				return;
+
+			MaterialSlotEditing::WriteShader(model, component.m_SlotOverrides, slot->Name,
+				shader_path, component_changed);
+		}
+
 		/* 有效材质（覆盖 ?: 模型默认 ?: 白模）由 Components.h 的 ResolveSlotMaterial 提供 */
 
 		/* ---- 光栅化状态（RenderRasterState）的行 ---- */
@@ -1748,8 +1759,9 @@ namespace Helios
 	/* 材质卡主体：Shader 行 + 参数行 + 渲染队列 + 光栅化状态。
 	 * 材质从哪来、改动往哪写由调用方给的回调决定 —— 模型槽写回实体覆盖（首次改动自动克隆成实例），
 	 * 草地直接写它自己的那个槽。resolve_live 每行都重新取一次：一次改动可能已经把材质换成实例了。 */
-	bool SceneInspector::DrawMaterialCardBody(const SharedPtr<Material>& current,
+	bool SceneInspector::DrawMaterialCardBody(SharedPtr<Material> current,
 		const std::function<SharedPtr<Material>()>& resolve_live,
+		const MaterialShaderWriter& write_shader,
 		const MaterialParamWriter& write_param,
 		const std::function<void(int32_t)>& write_queue,
 		const std::function<void(const RenderRasterState&)>& write_raster)
@@ -1759,15 +1771,15 @@ namespace Helios
 		if (current == nullptr)
 			return false;
 
-		/* Shader 行（只读）：长路径只裁不换行（换行会撑成两行、错位）。裁剪必须走
-		 * DrawClippedTextLine（定宽占位 + 省略号）—— PushClipRect 只压绘制不压布局，超宽路径
-		 * 会把面板撑出横滑。 */
-		if (current->GetShader() != nullptr)
+		/* Shader 行：点开菜单换 Shader（与模型编辑器、.mtl 卡同一个控件）。换完重新取一次材质，
+		 * 参数清单按新 Shader 反射走；旧值留在材质里，切回来还在。 */
+		if (const std::string picked = MaterialParamUI::DrawMaterialShaderPicker(*current); !picked.empty())
 		{
-			const float value_width = ImGuiExt::BeginPropertyRow("Shader", EditorTheme::Token::PropertyLabelWidth, true);
-			const std::string shader_path = RELATIVE_PATH(current->GetShader()->GetPath());
-			PanelChrome::DrawClippedTextLine(shader_path.c_str(), value_width);
-			ImGuiExt::EndPropertyRow();
+			write_shader(picked);
+			changed = true;
+			current = resolve_live();
+			if (current == nullptr)
+				return changed;
 		}
 
 		MaterialParamUI::DrawMaterialParams(*current, [&]() { return resolve_live().get(); }, m_AssetRevealFunc, write_param);
@@ -1826,6 +1838,10 @@ namespace Helios
 		};
 
 		const bool body_changed = DrawMaterialCardBody(resolve_live(), resolve_live,
+			[&](const std::string& shader_path)
+			{
+				WriteBackMaterialShader(component, model, slot_index, shader_path, changed);
+			},
 			[&](ParamType type, const std::string& name, const std::any& value)
 			{
 				WriteBackMaterialParam(component, model, slot_index, type, name, value, changed);
@@ -1927,50 +1943,6 @@ namespace Helios
 		}
 	}
 
-	namespace
-	{
-		/* 第一次改参数前把共享材质克隆成这片草地自己的副本：之后的改动只落在这里，
-		 * 来源 .mtl 与别的草地都不受影响（与模型槽"首次改动自动实例化"同一套语义） */
-		SharedPtr<Material> MakeGrassMaterialInstance(GrassComponent& component, bool& created)
-		{
-			MaterialSlotOverride& slot = component.m_MaterialSlot;
-			if (slot.IsInstance && slot.pMaterial != nullptr)
-				return slot.pMaterial;
-
-			if (slot.pMaterial == nullptr)
-				return nullptr;
-
-			const SharedPtr<Material> source = slot.pMaterial;
-			if (slot.SourceAssetPath.empty())
-				slot.SourceAssetPath = source->GetPath();
-
-			slot.pMaterial = source->Clone();
-			slot.IsInstance = true;
-			created = true;
-			return slot.pMaterial;
-		}
-
-		/* 地形与草地同一个语义：改参数就地克隆一份实例，Reset 回来源 .mtl */
-		SharedPtr<Material> MakeTerrainMaterialInstance(TerrainComponent& component, bool& created)
-		{
-			MaterialSlotOverride& slot = component.m_MaterialSlot;
-			if (slot.IsInstance && slot.pMaterial != nullptr)
-				return slot.pMaterial;
-
-			if (slot.pMaterial == nullptr)
-				return nullptr;
-
-			const SharedPtr<Material> source = slot.pMaterial;
-			if (slot.SourceAssetPath.empty())
-				slot.SourceAssetPath = source->GetPath();
-
-			slot.pMaterial = source->Clone();
-			slot.IsInstance = true;
-			created = true;
-			return slot.pMaterial;
-		}
-	}
-
 	/* 草地卡的材质：草地只有一个槽，同样平铺在 Grass 组件卡之后。
 	 * 编辑语义与模型槽一致 —— 第一次改参数就把共享材质克隆成这片草地自己的副本，
 	 * 来源 .mtl 与其它草地不受影响；Reset 在组件卡的材质行里。 */
@@ -2010,10 +1982,16 @@ namespace Helios
 			const auto resolve_live = [&component]() { return component.GetMaterial(); };
 
 			const bool body_changed = DrawMaterialCardBody(component.GetMaterial(), resolve_live,
+				[&](const std::string& shader_path)
+				{
+					bool written = false;
+					MaterialSlotEditing::WriteShader(component.m_MaterialSlot, shader_path, written);
+					changed |= written;
+				},
 				[&](ParamType type, const std::string& name, const std::any& value)
 				{
 					bool created = false;
-					const SharedPtr<Material> live = MakeGrassMaterialInstance(component, created);
+					const SharedPtr<Material> live = MaterialSlotEditing::MakeInstance(component.m_MaterialSlot, created);
 					if (live == nullptr)
 						return;
 
@@ -2026,7 +2004,7 @@ namespace Helios
 				[&](int32_t render_queue)
 				{
 					bool created = false;
-					if (const SharedPtr<Material> live = MakeGrassMaterialInstance(component, created))
+					if (const SharedPtr<Material> live = MaterialSlotEditing::MakeInstance(component.m_MaterialSlot, created))
 					{
 						live->SetRenderQueue(render_queue);
 						changed = true;
@@ -2035,7 +2013,7 @@ namespace Helios
 				[&](const RenderRasterState& state)
 				{
 					bool created = false;
-					if (const SharedPtr<Material> live = MakeGrassMaterialInstance(component, created))
+					if (const SharedPtr<Material> live = MaterialSlotEditing::MakeInstance(component.m_MaterialSlot, created))
 					{
 						live->SetRasterState(state);
 						changed = true;
@@ -2072,10 +2050,16 @@ namespace Helios
 		bool changed = false;
 		const auto resolve_live = [&component]() { return component.GetMaterial(); };
 		const bool body_changed = DrawMaterialCardBody(component.GetMaterial(), resolve_live,
+			[&](const std::string& shader_path)
+			{
+				bool written = false;
+				MaterialSlotEditing::WriteShader(component.m_MaterialSlot, shader_path, written);
+				changed |= written;
+			},
 			[&](ParamType type, const std::string& name, const std::any& value)
 			{
 				bool created = false;
-				const SharedPtr<Material> live = MakeTerrainMaterialInstance(component, created);
+				const SharedPtr<Material> live = MaterialSlotEditing::MakeInstance(component.m_MaterialSlot, created);
 				if (live == nullptr)
 					return;
 				if (type == ParamType::Texture)
@@ -2087,7 +2071,7 @@ namespace Helios
 			[&](int32_t queue)
 			{
 				bool created = false;
-				if (const auto live = MakeTerrainMaterialInstance(component, created))
+				if (const auto live = MaterialSlotEditing::MakeInstance(component.m_MaterialSlot, created))
 				{
 					live->SetRenderQueue(queue);
 					changed = true;
@@ -2096,7 +2080,7 @@ namespace Helios
 			[&](const RenderRasterState& state)
 			{
 				bool created = false;
-				if (const auto live = MakeTerrainMaterialInstance(component, created))
+				if (const auto live = MaterialSlotEditing::MakeInstance(component.m_MaterialSlot, created))
 				{
 					live->SetRasterState(state);
 					changed = true;

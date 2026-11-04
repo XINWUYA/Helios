@@ -93,11 +93,13 @@ namespace Helios
 		/* Model 编辑器的入口按钮：模型是文件资产时才有（内建模型没有资产文件，不出现）。
 		 * 画在当前卡片里 —— 实体侧在 Model 组件卡尾部，资源侧在详情卡尾部。 */
 		void DrawOpenInModelEditorButton(const std::string& absolute_path);
-		/* 材质卡主体：当前材质的属性行（Shader + 参数）。材质怎么改由三个回调决定 ——
-		 * 模型槽写回实体覆盖（首次改动自动克隆），草地直接写自己的槽 */
+		/* 材质卡主体：当前材质的属性行（Shader + 参数 + 渲染队列 + 光栅化状态）。材质怎么改由
+		 * 四个回调决定 —— 模型槽写回实体覆盖（首次改动自动克隆），草地与地形写自己的槽 */
 		using MaterialParamWriter = std::function<void(ParamType, const std::string&, const std::any&)>;
-		bool DrawMaterialCardBody(const SharedPtr<Material>& current,
+		using MaterialShaderWriter = std::function<void(const std::string&)>;
+		bool DrawMaterialCardBody(SharedPtr<Material> current,
 			const std::function<SharedPtr<Material>()>& resolve_live,
+			const MaterialShaderWriter& write_shader,
 			const MaterialParamWriter& write_param,
 			const std::function<void(int32_t)>& write_queue,
 			const std::function<void(const RenderRasterState&)>& write_raster);

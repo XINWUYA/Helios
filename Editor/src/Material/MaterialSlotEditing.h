@@ -26,6 +26,16 @@ namespace Helios
 			std::unordered_map<std::string, MaterialSlotOverride>& overrides,
 			const std::string& slot_name, bool& changed);
 
+		/* 单槽版（草地 / 地形）：槽里没有材质时返回空，不拿白模顶上 */
+		[[nodiscard]] SharedPtr<Material> MakeInstance(MaterialSlotOverride& slot, bool& changed);
+
+		/* 换 Shader：只换材质本体，旧参数留着（切回来还在） */
+		void WriteShader(MaterialSlotOverride& slot, const std::string& shader_path, bool& changed);
+
+		void WriteShader(const Model& model,
+			std::unordered_map<std::string, MaterialSlotOverride>& overrides,
+			const std::string& slot_name, const std::string& shader_path, bool& changed);
+
 		void WriteParam(const Model& model,
 			std::unordered_map<std::string, MaterialSlotOverride>& overrides,
 			const std::string& slot_name, ParamType type, const std::string& name,

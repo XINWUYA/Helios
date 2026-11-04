@@ -1,5 +1,8 @@
 #include "Pch.h"
 #include "MaterialSlotEditing.h"
+#include "Helios/Core/AssetManager.h"
+#include "Helios/Scene/SceneCommon.h"
+#include "Helios/VirtualDevice/DeviceShader.h"
 
 namespace Helios::MaterialSlotEditing
 {
@@ -10,6 +13,12 @@ namespace Helios::MaterialSlotEditing
 		{
 			const auto iter = overrides.find(slot_name);
 			return (iter != overrides.end()) ? &iter->second : nullptr;
+		}
+
+		SharedPtr<DeviceShader> LoadShader(const std::string& shader_path)
+		{
+			return shader_path.empty()
+				? nullptr : AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(shader_path));
 		}
 	}
 
@@ -85,6 +94,47 @@ namespace Helios::MaterialSlotEditing
 		changed = true;
 
 		return overrides[slot_name].pMaterial;
+	}
+
+	SharedPtr<Material> MakeInstance(MaterialSlotOverride& slot, bool& changed)
+	{
+		if (slot.IsInstance && slot.pMaterial != nullptr)
+			return slot.pMaterial;
+
+		if (slot.pMaterial == nullptr)
+			return nullptr;
+
+		/* 克隆前先记住来源文件：实例保存后还能指回原来的 .mtl */
+		const SharedPtr<Material> source = slot.pMaterial;
+		if (slot.SourceAssetPath.empty())
+			slot.SourceAssetPath = source->GetPath();
+
+		slot.pMaterial = source->Clone();
+		slot.IsInstance = true;
+		changed = true;
+		return slot.pMaterial;
+	}
+
+	void WriteShader(MaterialSlotOverride& slot, const std::string& shader_path, bool& changed)
+	{
+		const SharedPtr<Material> instance = MakeInstance(slot, changed);
+		if (instance == nullptr)
+			return;
+
+		instance->SetShader(LoadShader(shader_path));
+		changed = true;
+	}
+
+	void WriteShader(const Model& model,
+		std::unordered_map<std::string, MaterialSlotOverride>& overrides,
+		const std::string& slot_name, const std::string& shader_path, bool& changed)
+	{
+		const SharedPtr<Material> instance = MakeInstance(model, overrides, slot_name, changed);
+		if (instance == nullptr)
+			return;
+
+		instance->SetShader(LoadShader(shader_path));
+		changed = true;
 	}
 
 	void WriteParam(const Model& model,
