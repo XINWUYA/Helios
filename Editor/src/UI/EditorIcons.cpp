@@ -5,6 +5,7 @@
 #include "Helios/Scene/SceneCommon.h"
 #include <magic_enum.hpp>
 #include <tinyxml2.h>
+#include <imgui_internal.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -488,69 +489,85 @@ namespace Helios::Icons
 	}
 
 	int IconToggleGroup(const char* id, const Id* icons, const char* const* tooltips,
-		int count, int selected, const ImVec2& size)
+		int count, int selected, const ImVec2& size, const char* const* labels)
 	{
-		if (count <= 0 || icons == nullptr)
+		ImGuiWindow* window = ImGui::GetCurrentWindow();
+		if (window->SkipItems || count <= 0 || icons == nullptr || size.x <= 0.0f || size.y <= 0.0f)
 			return -1;
 
-		const ImGuiStyle& style = ImGui::GetStyle();
-		const float seg_width = size.x / static_cast<float>(count);
-		const ImVec2 pos = ImGui::GetCursorScreenPos();
-		const ImVec2 end(pos.x + size.x, pos.y + size.y);
-		ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-		/* 底槽：控件底色 + 一档边框，与属性面板的分段开关同一套画法 */
-		draw_list->AddRectFilled(pos, end, ImGui::GetColorU32(EditorTheme::Token::Neutral4), style.FrameRounding);
-		draw_list->AddRect(pos, end, ImGui::GetColorU32(EditorTheme::Token::Border),
-			style.FrameRounding, 0, EditorTheme::Scaled(1.0f));
-
-		/* 选中块：往里收一点，强调色淡填充 + 描边 */
-		const float inset = EditorTheme::Scaled(2.0f);
-		const float block_rounding = std::max(EditorTheme::Scaled(1.0f), style.FrameRounding - EditorTheme::Scaled(1.0f));
-		if (selected >= 0 && selected < count)
-		{
-			const float block_x = pos.x + seg_width * static_cast<float>(selected);
-			const ImVec2 block_min(block_x + inset, pos.y + inset);
-			const ImVec2 block_max(block_x + seg_width - inset, pos.y + size.y - inset);
-			draw_list->AddRectFilled(block_min, block_max,
-				ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.17f)), block_rounding);
-			draw_list->AddRect(block_min, block_max,
-				ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.65f)),
-				block_rounding, 0, EditorTheme::Scaled(1.0f));
-		}
-
-		int clicked = -1;
 		ImGui::PushID(id);
+		int choice = std::clamp(selected, 0, count - 1);
+		const ImGuiStyle& style = ImGui::GetStyle();
+		const float inset = EditorTheme::Scaled(2.0f);
+		const float font_size = ImGui::GetFontSize();
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x, std::max(0.0f, (size.y - font_size) * 0.5f)));
+		for (ImGuiCol color : { ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive,
+			ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive, ImGuiCol_Text, ImGuiCol_Border })
+			ImGui::PushStyleColor(color, EditorTheme::Token::Clear);
+		ImGui::SetNextItemWidth(size.x);
+		ImGui::SliderInt("##Choice", &choice, 0, count - 1, "%d", ImGuiSliderFlags_NoInput);
+		ImGui::PopStyleColor(7);
+		ImGui::PopStyleVar();
+		const ImVec2 pos = ImGui::GetItemRectMin(), end = ImGui::GetItemRectMax();
+		const ImGuiID control_id = ImGui::GetItemID();
+		const float seg_width = (end.x - pos.x) / static_cast<float>(count);
+		const bool hovered = ImGui::IsItemHovered();
+		const int hover_index = static_cast<int>(std::clamp((ImGui::GetIO().MousePos.x - pos.x) / seg_width,
+			0.0f, static_cast<float>(count - 1)));
+		if (ImGui::IsItemActive() && ImGui::GetCurrentContext()->ActiveIdSource == ImGuiInputSource_Mouse
+			&& ImGui::GetIO().MouseDown[0])
+			choice = hover_index;
+		if (choice != selected)
+			ImGui::MarkItemEdited(control_id);
+
+		ImDrawList* draw_list = ImGui::GetWindowDrawList();
+		draw_list->AddRectFilled(pos, end, ImGui::GetColorU32(EditorTheme::Token::Neutral4), style.FrameRounding);
+		draw_list->AddRect(pos, end, ImGui::GetColorU32(EditorTheme::Token::Border), style.FrameRounding);
+		if (hovered && hover_index != choice)
+			draw_list->AddRectFilled(ImVec2(pos.x + seg_width * hover_index + inset, pos.y + inset),
+				ImVec2(pos.x + seg_width * (hover_index + 1) - inset, end.y - inset),
+				ImGui::GetColorU32(EditorTheme::Token::Neutral5), style.FrameRounding);
+
+		/* 选中块只存显示位置，模式切换立即生效。 */
+		const ImGuiID slide_id = window->GetID("##Slide");
+		float slide = window->StateStorage.GetFloat(slide_id, static_cast<float>(choice));
+		slide += (static_cast<float>(choice) - slide) * std::min(ImGui::GetIO().DeltaTime * 18.0f, 1.0f);
+		if (std::abs(slide - choice) < 0.001f)
+			slide = static_cast<float>(choice);
+		window->StateStorage.SetFloat(slide_id, slide);
+		const ImVec2 block_min(pos.x + seg_width * slide + inset, pos.y + inset);
+		const ImVec2 block_max(block_min.x + seg_width - inset * 2.0f, end.y - inset);
+		draw_list->AddRectFilled(block_min, block_max,
+			ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.17f)), style.FrameRounding);
+		draw_list->AddRect(block_min, block_max,
+			ImGui::GetColorU32(EditorTheme::WithAlpha(EditorTheme::Token::Accent, 0.65f)), style.FrameRounding);
+
+		const float icon_size = std::max(1.0f, std::min(seg_width - inset * 2.0f, labels != nullptr ? font_size : size.y * 0.66f));
+		float longest_label = 0.0f;
+		if (labels != nullptr)
+			for (int index = 0; index < count; ++index)
+				if (labels[index] != nullptr)
+					longest_label = std::max(longest_label, ImGui::CalcTextSize(labels[index]).x);
+		const float icon_text_gap = EditorTheme::Scaled(8.0f);
+		const bool show_labels = labels != nullptr && seg_width >= longest_label + icon_size + icon_text_gap + inset * 2.0f;
 		for (int index = 0; index < count; ++index)
 		{
-			ImGui::PushID(index);
-			ImGui::InvisibleButton("##segment", ImVec2(seg_width, size.y));
-			const bool hovered = ImGui::IsItemHovered();
-			if (ImGui::IsItemClicked())
-				clicked = index;
-			if (hovered && tooltips != nullptr && tooltips[index] != nullptr)
-				ImGui::SetTooltip("%s", tooltips[index]);
-			ImGui::PopID();
-
-			/* 未选中格的悬停提亮：只在没被选中块盖住的地方画 */
-			const float seg_x = pos.x + seg_width * static_cast<float>(index);
-			if (hovered && index != selected)
-			{
-				draw_list->AddRectFilled(ImVec2(seg_x, pos.y), ImVec2(seg_x + seg_width, pos.y + size.y),
-					ImGui::GetColorU32(EditorTheme::Token::Neutral5), style.FrameRounding);
-			}
-
-			const float icon_size = std::min(seg_width, size.y) * 0.66f;
-			const ImU32 color = ImGui::GetColorU32(index == selected || hovered
+			const float left = pos.x + seg_width * index;
+			const float text_width = show_labels && labels[index] != nullptr ? ImGui::CalcTextSize(labels[index]).x : 0.0f;
+			const float icon_x = text_width > 0.0f ? left + (seg_width - text_width - icon_size - icon_text_gap) * 0.5f + icon_size * 0.5f
+				: left + seg_width * 0.5f;
+			const ImU32 color = ImGui::GetColorU32(index == choice || (hovered && index == hover_index)
 				? EditorTheme::Token::Text : EditorTheme::Token::TextDim);
-			Draw(draw_list, icons[index],
-				ImVec2(seg_x + seg_width * 0.5f, pos.y + size.y * 0.5f), icon_size, color);
-
-			if (index + 1 < count)
-				ImGui::SameLine(0.0f, 0.0f);
+			draw_list->PushClipRect(ImVec2(left + inset, pos.y), ImVec2(left + seg_width - inset, end.y), true);
+			Draw(draw_list, icons[index], ImVec2(icon_x, (pos.y + end.y) * 0.5f), icon_size, color);
+			if (text_width > 0.0f)
+				draw_list->AddText(ImVec2(icon_x + icon_size * 0.5f + icon_text_gap, pos.y + (size.y - font_size) * 0.5f), color, labels[index]);
+			draw_list->PopClipRect();
 		}
+		ImGui::RenderNavHighlight(ImRect(pos, end), control_id, ImGuiNavHighlightFlags_TypeThin);
+		if (hovered && tooltips != nullptr && tooltips[hover_index] != nullptr)
+			ImGui::SetTooltip("%s", tooltips[hover_index]);
 		ImGui::PopID();
-
-		return clicked;
+		return choice != selected ? choice : -1;
 	}
 }

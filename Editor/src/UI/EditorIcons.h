@@ -34,6 +34,8 @@ namespace Helios
 			/* 场景树节点：Scene 是根节点（当前场景），其余按实体持有的组件区分类型 */
 			Scene, Entity, Model, Cube, Sphere, Plane, Shape3D, Camera, Light, LightDirectional, LightPoint, LightSpot, ReflectionProbe, Sprite,
 			Audio, Particle, Terrain,
+			/* 地形笔刷 */
+			TerrainNoop, TerrainRaise, TerrainLower, TerrainSmooth,
 			/* 组件卡头部：与实体类型图标分开，按"这是个什么组件"造型 */
 			Transform, Tag,
 			/* 脚本组件：圆角代码页（与源文件图标同一枚记号） */
@@ -110,9 +112,9 @@ namespace Helios
 		/* 统一图标按钮：集中尺寸、扁平底色、checked 高亮与 tooltip */
 		bool IconButton(Id id, const ImVec2& size, bool checked = false, const char* tooltip = nullptr);
 
-		/* 分段图标开关：一条底槽并排若干格，选中格描边高亮。返回本帧被点的格，没点返回 -1。
-		 * tooltips 逐格对应，可传 nullptr。 */
+		/* 分段滑动开关：点击或拖动切换，选中块平滑移动；未切换返回 -1。
+		 * labels 在图标右侧显示，窄控件只留图标；tooltips 用于悬停说明。 */
 		int IconToggleGroup(const char* id, const Id* icons, const char* const* tooltips,
-			int count, int selected, const ImVec2& size);
+			int count, int selected, const ImVec2& size, const char* const* labels = nullptr);
 	}
 }
