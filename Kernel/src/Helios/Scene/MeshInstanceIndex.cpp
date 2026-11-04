@@ -215,7 +215,9 @@ namespace Helios
 		Entry* entry = nullptr;
 		if (slot != 0)
 		{
-			Entry& candidate = m_Entries[slot - 1];
+			/* 表里存的是槽位 + 1（0 表示没有），换成真槽位再用 */
+			--slot;
+			Entry& candidate = m_Entries[slot];
 			/* 句柄比对：实体销毁后下标可能被新实体复用 */
 			if (candidate.Alive && candidate.Entity == entity)
 				entry = &candidate;
@@ -243,8 +245,7 @@ namespace Helios
 		entry->Cullable = cullable;
 
 		/* 没动过的实例只更新标记：包围盒与格子都不用碰 */
-		if (entry->World == world && entry->LocalBounds.Min == local_bounds.Min
-			&& entry->LocalBounds.Max == local_bounds.Max)
+		if (entry->World == world && entry->LocalBounds.Min == local_bounds.Min && entry->LocalBounds.Max == local_bounds.Max)
 			return;
 
 		Unplace(*entry, slot);
