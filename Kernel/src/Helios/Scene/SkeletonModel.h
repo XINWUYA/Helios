@@ -56,7 +56,7 @@ namespace Helios
 
 	/* 资产层的骨骼数据：关节表 + 每个段的顶点权重，直接写在 .mesh 末尾。
 	 * 所有用这个模型的实体共享同一份（只读）。 */
-	class SkeletonData
+	class HELIOS_API SkeletonData
 	{
 	public:
 		[[nodiscard]] bool IsEmpty() const { return m_Joints.empty(); }

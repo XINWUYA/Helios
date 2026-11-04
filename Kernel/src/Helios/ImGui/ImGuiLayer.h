@@ -12,7 +12,7 @@ namespace Helios
 	class ImGuiRenderer;
 	class FrameGraph;
 
-	class ImGuiLayer : public ILayer
+	class HELIOS_API ImGuiLayer : public ILayer
 	{
 	public:
 		/* 界面字体 / 风格的安装器：应用注入自己的 UI 外观（字体、配色、间距等）。
