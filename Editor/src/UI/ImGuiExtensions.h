@@ -42,7 +42,10 @@ namespace ImGuiExt
 	void DrawDragFloatUI(const std::string& label, float& value, float speed = 1.0f,
 		float min_value = 0.0f, float max_value = 0.0f,
 		float label_width = EditorTheme::Token::PropertyLabelWidth);
-	/* 绘制一个滑块：量程必须给全，带填充条，拖拽与手输都按量程钳制 */
+	/* 行内滑块：框内数值、矩形把手和底部进度线，Ctrl 点击可手输。 */
+	bool DrawSliderInt(const char* id, int& value, int min_value, int max_value, const char* format = "%d");
+	bool DrawSliderFloat(const char* id, float& value, float min_value, float max_value, const char* format = "%.2f");
+	/* 属性滑块：量程来自字段定义，拖动与手输都按量程钳制。 */
 	void DrawSliderIntUI(const char* label, int& value, int min_value, int max_value,
 		float label_width = EditorTheme::Token::PropertyLabelWidth);
 	void DrawSliderFloatUI(const std::string& label, float& value, float min_value, float max_value,

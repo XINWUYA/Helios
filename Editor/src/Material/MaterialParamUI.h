@@ -52,6 +52,17 @@ namespace Helios::MaterialParamUI
 	 * 已有的，没有的就显示反射默认值。反射不到就返回空、不回退旧参数表（让调用方画报错）。 */
 	std::vector<MaterialParamRow> BuildMaterialParamRows(const Material& material);
 
+	using ParamWriter = std::function<void(ParamType, const std::string&, const std::any&)>;
+	/* 同名分组合并为一个折叠标题，未分组参数保持原行布局。 */
+	void DrawMaterialParams(const Material& material, const std::function<const Material*()>& resolve_live,
+		const std::function<void(const std::string&)>& reveal_asset, const ParamWriter& write_back);
+
+	/* 一组参数 / 字段的折叠标题（属性面板的材质卡、组件卡与地形面板共用一套版式）：
+	 * 返回 true = 展开，调用方紧接着画组内内容。suffix 是标题后的补充说明（弱化色，
+	 * 如「3 slots, 1 instance」），放不下时按行宽裁剪。 */
+	bool BeginPropertyGroup(const char* id, const char* title, bool default_open = true,
+		const char* suffix = nullptr);
+
 	/* 参数行空时的提示行（Danger 色）：三种状态分开说清 —— 没 Shader / 有 Shader 但反射为空
 	 * （后端不支持或声明识别不出）/ 反射到了但没有一条标 @property（材质没东西可改）。 */
 	void DrawMaterialReflectionNotice(const Material& material);

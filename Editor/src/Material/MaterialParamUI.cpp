@@ -132,6 +132,77 @@ namespace Helios::MaterialParamUI
 		return rows;
 	}
 
+	bool BeginPropertyGroup(const char* id, const char* title, bool default_open, const char* suffix)
+	{
+		ImGui::PushID(id);
+		ImGui::SetNextItemOpen(default_open, ImGuiCond_Once);
+		ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Token::Clear);
+		const bool open = ImGui::TreeNodeEx("##Group", ImGuiTreeNodeFlags_SpanFullWidth
+			| ImGuiTreeNodeFlags_NoTreePushOnOpen, "%s", "");
+		ImGui::PopStyleColor();
+		const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+		const float arrow = ImGui::GetFontSize() * 0.55f;
+		const float y = (min.y + max.y) * 0.5f;
+		const float text_y = y - ImGui::GetFontSize() * 0.5f;
+		const float text_x = min.x + arrow + ImGui::GetStyle().ItemInnerSpacing.x;
+		ImDrawList* draw = ImGui::GetWindowDrawList();
+		PanelChrome::DrawDisclosureArrow(draw, ImVec2(min.x + arrow * 0.5f, y), arrow, open,
+			ImGui::GetColorU32(EditorTheme::Token::TextDim));
+		draw->PushClipRect(min, max, true);
+		/* 小标题按卡片惯例全大写；中文没有小写字母，原样保留 */
+		std::string display_title(title);
+		for (char& ch : display_title)
+		{
+			if (ch >= 'a' && ch <= 'z')
+				ch = static_cast<char>(ch - 'a' + 'A');
+		}
+		/* 小标题用面板标题字体（SemiBold）按正文字号画：比参数行重一档，又不抢卡片头的级 */
+		const ImFont* title_font = (EditorTheme::GetFonts().Title != nullptr)
+			? EditorTheme::GetFonts().Title : ImGui::GetFont();
+		draw->AddText(title_font, ImGui::GetFontSize(), ImVec2(text_x, text_y),
+			ImGui::GetColorU32(EditorTheme::Token::TextLabel), display_title.c_str());
+		if (suffix != nullptr && *suffix != '\0')
+		{
+			const float title_width = title_font->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, 0.0f,
+				display_title.c_str()).x;
+			draw->AddText(ImVec2(text_x + title_width + ImGui::GetStyle().ItemInnerSpacing.x, text_y),
+				ImGui::GetColorU32(EditorTheme::Token::TextDim), suffix);
+		}
+		draw->PopClipRect();
+		ImGui::PopID();
+		return open;
+	}
+
+	void DrawMaterialParams(const Material& material, const std::function<const Material*()>& resolve_live,
+		const std::function<void(const std::string&)>& reveal_asset, const ParamWriter& write_back)
+	{
+		const auto rows = BuildMaterialParamRows(material);
+		if (rows.empty())
+			DrawMaterialReflectionNotice(material);
+		std::vector<std::string> groups{ "" };
+		for (const auto& row : rows)
+			if (std::find(groups.begin(), groups.end(), row.Spec.Group) == groups.end())
+				groups.push_back(row.Spec.Group);
+		for (const std::string& group : groups)
+		{
+			if (!group.empty() && !BeginPropertyGroup(group.c_str(), group.c_str()))
+				continue;
+			ImGui::PushID(group.c_str());
+			for (const auto& row : rows)
+			{
+				if (row.Spec.Group != group)
+					continue;
+				const Material* live = resolve_live();
+				if (live == nullptr)
+					break;
+				const auto& parameters = live->GetAllParameters();
+				const auto it = parameters.find(ToID(row.Param.Name));
+				DrawMaterialParamRow(it != parameters.end() ? it->second : row.Param, row.Spec, reveal_asset, write_back);
+			}
+			ImGui::PopID();
+		}
+	}
+
 	void DrawMaterialReflectionNotice(const Material& material)
 	{
 		const SharedPtr<DeviceShader> shader = material.GetShader();
@@ -402,7 +473,7 @@ namespace Helios::MaterialParamUI
 				}
 				else if (spec.Widget == "slider" && spec.HasRange)
 				{
-					edited = ImGui::SliderInt("##Value", &value,
+					edited = ImGuiExt::DrawSliderInt("##Value", value,
 						static_cast<int>(spec.Min), static_cast<int>(spec.Max));
 				}
 				else
@@ -422,7 +493,7 @@ namespace Helios::MaterialParamUI
 				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
 				if (spec.Widget == "slider" && spec.HasRange)
-					edited = ImGui::SliderFloat("##Value", &value, spec.Min, spec.Max);
+					edited = ImGuiExt::DrawSliderFloat("##Value", value, spec.Min, spec.Max, "%.3f");
 				else
 					edited = ImGui::DragFloat("##Value", &value, spec.Step > 0.0f ? spec.Step : 0.01f,
 						spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);
@@ -449,7 +520,8 @@ namespace Helios::MaterialParamUI
 				const float value_width = ImGuiExt::BeginPropertyRow(label, kLabelWidth, true);
 				ImGui::SetNextItemWidth(value_width);
 				if (spec.Widget == "color")
-					edited = ImGui::ColorEdit3("##Value", glm::value_ptr(value), ImGuiColorEditFlags_Float);
+					edited = ImGui::ColorEdit3("##Value", glm::value_ptr(value), ImGuiColorEditFlags_Float
+						| (value_width < ImGui::GetFontSize() * 9.0f ? ImGuiColorEditFlags_NoInputs : 0));
 				else
 					edited = ImGui::DragFloat3("##Value", glm::value_ptr(value), spec.Step > 0.0f ? spec.Step : 0.01f,
 						spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);
@@ -465,7 +537,8 @@ namespace Helios::MaterialParamUI
 				ImGui::SetNextItemWidth(value_width);
 				if (spec.Widget == "color")
 					edited = ImGui::ColorEdit4("##Value", glm::value_ptr(value),
-						ImGuiColorEditFlags_Float | ImGuiColorEditFlags_AlphaBar);
+						ImGuiColorEditFlags_Float | ImGuiColorEditFlags_AlphaBar
+						| (value_width < ImGui::GetFontSize() * 11.0f ? ImGuiColorEditFlags_NoInputs : 0));
 				else
 					edited = ImGui::DragFloat4("##Value", glm::value_ptr(value), spec.Step > 0.0f ? spec.Step : 0.01f,
 						spec.HasRange ? spec.Min : 0.0f, spec.HasRange ? spec.Max : 0.0f);

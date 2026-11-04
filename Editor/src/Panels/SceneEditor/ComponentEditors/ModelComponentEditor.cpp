@@ -2,6 +2,7 @@
 #include "ComponentEditors.h"
 #include "Common/TextMatch.h"
 #include "Helios/Core/AssetManager.h"
+#include "Material/MaterialParamUI.h"
 #include "UI/EditorTheme.h"
 #include "UI/ImGuiExtensions.h"
 #include "UI/MaterialSlotRow.h"
@@ -10,6 +11,7 @@
 #include "Helios/Scene/SceneCommon.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 
@@ -116,8 +118,6 @@ namespace Helios
 			if (slots.empty())
 				return false;
 
-			bool changed = false;
-
 			/* 统计口径按"实例"说：改过的槽位是就地克隆的副本，不是资产本身 */
 			int instance_count = 0;
 			for (const auto& slot : slots)
@@ -128,15 +128,16 @@ namespace Helios
 					++instance_count;
 			}
 
-			ImGui::Spacing();
-			ImGui::TextColored(EditorTheme::Token::TextLabel, "Materials");
-			ImGui::SameLine();
-			/* 统计文案窄窗里必须能折行：裸文本的布局宽度不受裁剪影响，会撑出横向滚动 */
-			ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
-			ImGui::TextDisabled("(%d slot%s, %d instance%s)", static_cast<int>(slots.size()),
-				slots.size() == 1 ? "" : "s", instance_count, instance_count == 1 ? "" : "s");
-			ImGui::PopTextWrapPos();
+			char stats[48] = {};
+			std::snprintf(stats, sizeof(stats), "%d slot%s, %d instance%s",
+				static_cast<int>(slots.size()), slots.size() == 1 ? "" : "s",
+				instance_count, instance_count == 1 ? "" : "s");
 
+			/* 槽位信息放在组标题上：收起时也看得到有几个槽、几个改过 */
+			if (!MaterialParamUI::BeginPropertyGroup("##Materials", "Materials", true, stats))
+				return false;
+
+			bool changed = false;
 			for (int i = 0; i < static_cast<int>(slots.size()); ++i)
 			{
 				ImGui::PushID(i);
@@ -237,16 +238,19 @@ namespace Helios
 			ImGuiExt::EndPropertyRow();
 
 			/* 投影 / 接受阴影：渲染端的逐对象开关（见 VisibleMeshObject 与阴影 Pass / 光照采样） */
-			if (ImGuiExt::DrawCheckboxUI("CastShadow", component.m_CastShadow))
-				changed = true;
-			if (ImGuiExt::DrawCheckboxUI("ReceiveShadow", component.m_ReceiveShadow))
-				changed = true;
-
-			/* 带骨骼的模型才给这个开关：关掉按绑定姿态画（排查 / 省性能） */
-			if (model != nullptr && model->HasSkin())
+			if (MaterialParamUI::BeginPropertyGroup("##Rendering", "Rendering"))
 			{
-				if (ImGuiExt::DrawCheckboxUI("Skinning", component.m_EnableSkinning))
+				if (ImGuiExt::DrawCheckboxUI("CastShadow", component.m_CastShadow))
 					changed = true;
+				if (ImGuiExt::DrawCheckboxUI("ReceiveShadow", component.m_ReceiveShadow))
+					changed = true;
+
+				/* 带骨骼的模型才给这个开关：关掉按绑定姿态画（排查 / 省性能） */
+				if (model != nullptr && model->HasSkin())
+				{
+					if (ImGuiExt::DrawCheckboxUI("Skinning", component.m_EnableSkinning))
+						changed = true;
+				}
 			}
 
 			/* 材质槽区块：每槽一行 + 当前材质属性（可就地编辑） */

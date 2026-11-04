@@ -662,21 +662,40 @@ namespace Helios::ImGuiExt
 
 	namespace
 	{
-		/* 滑块的量程填充：这一版 ImGui 的滑块只画把手，看不出"扫到哪儿了"。
-		 * 补一条贴底的横条 —— 数值文字在竖直中间，不受影响 */
-		void DrawSliderFill(float ratio)
+		/* 进度线只占框底，临时输入时不覆盖输入框。 */
+		void DrawSliderFill(double value, double min_value, double max_value)
 		{
-			if (!(ratio > 0.0f))
+			const ImGuiContext& context = *ImGui::GetCurrentContext();
+			if (ImGui::GetCurrentWindow()->SkipItems || ImGui::TempInputIsActive(context.LastItemData.ID)
+				|| !(max_value > min_value))
 				return;
-
-			const ImVec2 rect_min = ImGui::GetItemRectMin();
-			const ImVec2 rect_max = ImGui::GetItemRectMax();
-			const float track_right = rect_min.x + (rect_max.x - rect_min.x) * ImClamp(ratio, 0.0f, 1.0f);
-			const float bottom = rect_max.y - 1.0f;
-
-			ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(rect_min.x + 1.0f, bottom - 2.0f),
-				ImVec2(track_right, bottom), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 1.0f);
+			const double ratio = (value - min_value) / (max_value - min_value);
+			if (!(ratio > 0.0))
+				return;
+			const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+			const float inset = EditorTheme::Scaled(1.0f);
+			const float width = max.x - min.x - inset * 2.0f;
+			const float thickness = std::min(EditorTheme::Scaled(2.0f), (max.y - min.y) * 0.25f);
+			if (width <= 0.0f)
+				return;
+			const float right = min.x + inset + width * static_cast<float>(std::min(ratio, 1.0));
+			ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(min.x + inset, max.y - inset - thickness),
+				ImVec2(right, max.y - inset), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), inset);
 		}
+	}
+
+	bool DrawSliderInt(const char* id, int& value, int min_value, int max_value, const char* format)
+	{
+		const bool changed = ImGui::SliderInt(id, &value, min_value, max_value, format, ImGuiSliderFlags_AlwaysClamp);
+		DrawSliderFill(value, min_value, max_value);
+		return changed;
+	}
+
+	bool DrawSliderFloat(const char* id, float& value, float min_value, float max_value, const char* format)
+	{
+		const bool changed = ImGui::SliderFloat(id, &value, min_value, max_value, format, ImGuiSliderFlags_AlwaysClamp);
+		DrawSliderFill(value, min_value, max_value);
+		return changed;
 	}
 
 	/* 绘制一个滑块：量程给全才画，手输同样按量程钳制 */
@@ -687,10 +706,7 @@ namespace Helios::ImGuiExt
 		const float value_width = BeginPropertyRow(label, label_width);
 
 		ImGui::SetNextItemWidth(value_width);
-		ImGui::SliderInt("##SliderInt", &value, min_value, max_value, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-		if (max_value > min_value)
-			DrawSliderFill(static_cast<float>(value - min_value) / static_cast<float>(max_value - min_value));
+		DrawSliderInt("##SliderInt", value, min_value, max_value);
 
 		EndPropertyRow();
 	}
@@ -704,11 +720,7 @@ namespace Helios::ImGuiExt
 		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
 		ImGui::SetNextItemWidth(value_width);
-		ImGui::SliderFloat("##SliderFloat", &value, min_value, max_value, format,
-			ImGuiSliderFlags_AlwaysClamp);
-
-		if (max_value > min_value)
-			DrawSliderFill((value - min_value) / (max_value - min_value));
+		DrawSliderFloat("##SliderFloat", value, min_value, max_value, format);
 
 		EndPropertyRow();
 	}

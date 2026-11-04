@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "ComponentEditors.h"
+#include "Material/MaterialParamUI.h"
 #include "UI/MaterialSlotRow.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Reflection/ComponentRegistry.h"
@@ -17,12 +18,16 @@ namespace Helios
 			auto& component = *static_cast<GrassComponent*>(raw);
 			MaterialSlotOverride& slot = component.m_MaterialSlot;
 
+			/* 材质引用单独成组：它跟上面的草地参数不是一类东西，收起时也不碍事 */
+			if (!MaterialParamUI::BeginPropertyGroup("##Material", "Material"))
+				return false;
+
 			const std::string material_path = !slot.SourceAssetPath.empty()
 				? slot.SourceAssetPath
 				: (slot.pMaterial != nullptr ? slot.pMaterial->GetPath() : std::string());
 
 			MaterialSlotRow::State state;
-			state.Label = "Material";
+			state.Label = "Source";
 			state.Path = material_path;
 			state.EmptyText = "Built-in default";
 			state.HoverPath = material_path.empty() ? std::string() : RELATIVE_PATH(material_path);

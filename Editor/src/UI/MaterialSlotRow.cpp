@@ -49,7 +49,8 @@ namespace Helios::MaterialSlotRow
 
 		/* 实例标记放值列开头：一眼分出哪一行是改出来的副本，占的宽度从文件名里扣 */
 		float chip_width = 0.0f;
-		if (state.IsInstance)
+		const float instance_width = ImGui::CalcTextSize("Instance").x + ImGui::GetStyle().FramePadding.x * 2.0f + gap;
+		if (state.IsInstance && value_width - button_zone - instance_width >= frame_height * 2.0f)
 		{
 			chip_width = ImGuiExt::DrawTagChip("Instance", frame_height) + gap;
 			ImGui::SameLine(0.0f, gap);

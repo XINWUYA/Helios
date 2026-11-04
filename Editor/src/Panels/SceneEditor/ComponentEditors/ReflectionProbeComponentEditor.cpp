@@ -3,6 +3,7 @@
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/Utils.h"
+#include "Material/MaterialParamUI.h"
 #include "UI/EditorTheme.h"
 #include "UI/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
@@ -162,7 +163,8 @@ namespace Helios
 			bool changed = false;
 
 			/* 只有从贴图烘焙时才需要这张源图；捕获场景的探针不显示它 */
-			if (probe->GetBakeConfig().BakeFromSkyTexture)
+			if (probe->GetBakeConfig().BakeFromSkyTexture
+				&& MaterialParamUI::BeginPropertyGroup("##SkySource", "Sky source"))
 			{
 				SharedPtr<DeviceTexture> skybox = probe->GetSkyBoxTexture();
 				ImGuiExt::DrawTextureUI("SkyBox", skybox);
@@ -171,14 +173,15 @@ namespace Helios
 					probe->SetSkyBoxTexture(skybox);
 					changed = true;
 				}
-
-				ImGui::Separator();
 			}
 
 			/* 烘焙结果是只读状态：它随「保存场景」一并落盘，写盘要等 GPU 执行完，
 			 * 所以不是存档当帧就完成。状态行与上面的资源行共用同一套属性行布局。 */
 			using WriteState = ReflectionProbe::BakeCacheWriteState;
 			const WriteState state = probe->GetBakeCacheWriteState();
+
+			if (!MaterialParamUI::BeginPropertyGroup("##BakeResult", "Bake result"))
+				return changed;
 
 			const char* status = "Not baked";
 			if (state == WriteState::Requested)
