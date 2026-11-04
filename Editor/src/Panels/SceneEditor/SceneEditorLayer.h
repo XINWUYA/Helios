@@ -59,9 +59,6 @@ namespace Helios
 		 * 少量不走命令栈的改动（如拖入模型）由 m_HasUnrecordedChange 兜底。 */
 		[[nodiscard]] bool IsSceneDirty() const;
 
-		void Active(bool active = true) { m_IsActivated = active; }
-		bool IsActivated() const { return m_IsActivated; }
-
 		void SetGizmoType(int type) { m_GizmoType = type; }
 		/* 操作 gizmo 的轴基：true = 实体局部轴，false = 世界轴 */
 		void SetGizmoLocalSpace(bool local) { m_GizmoLocalSpace = local; }
@@ -73,6 +70,8 @@ namespace Helios
 		void SetPlayMode(PlayMode mode);
 		/* 热重载脚本：运行中的实例按字段迁移到新库，不需要退出 Runtime */
 		void ReloadScripts(const std::function<bool()>& swap_module);
+
+		[[nodiscard]] const EditorCamera* GetEditorCamera() const { return m_pEditorCamera.get(); }
 
 		/* 渲染管线（场景视口）：前向 / 延迟 —— 状态在编辑器相机的视图上（相机转发） */
 		void SetRenderPipeline(RenderPipeline pipeline) { m_pEditorCamera->SetRenderPipeline(pipeline); }
@@ -253,8 +252,6 @@ namespace Helios
 		PlayMode m_PlayMode{ PlayMode::Edit };
 		/* 进 Runtime 前的场景快照：退出时按它还原，空路径 = 没有快照 */
 		std::filesystem::path m_RuntimeSnapshotPath;
-		/* 当前编辑器是否被启用 */
-		bool m_IsActivated{ true };
 		/* 渲染图可视化页：依赖图 + 各 Pass 的中间渲染结果（抓取开关由面板自持） */
 		FrameGraphPanel m_FrameGraphPanel;
 		/* 时间轴面板 */

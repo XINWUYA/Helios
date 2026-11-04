@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "PanelRegistry.h"
+#include "PanelChrome.h"
 #include <array>
 #include <cstring>
 #include <imgui.h>
@@ -43,7 +44,7 @@ namespace Helios::Panel
 			if (desc.ToggleMenu != menu || desc.MenuLabel == nullptr)
 				continue;
 
-			ImGui::MenuItem(desc.MenuLabel, nullptr, &s_Visible[index]);
+			PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, desc.MenuLabel, &s_Visible[index]);
 			if (desc.Tooltip != nullptr && ImGui::IsItemHovered())
 				ImGui::SetTooltip("%s", desc.Tooltip);
 		}

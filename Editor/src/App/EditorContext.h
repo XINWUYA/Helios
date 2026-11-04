@@ -8,6 +8,7 @@ namespace Helios
 {
 	class SceneEditorLayer;
 	class ModelEditorLayer;
+	class EditorCamera;
 
 	/* 编辑器共享上下文：面板之间唯一的通信通道。「按名字查 Layer + 下转型」集中在本实现里，
 	 * 调用方只依赖显式接口。 */
@@ -60,6 +61,8 @@ namespace Helios
 		 * swap_module 由调用方给（编译并换库），面板不认识脚本模块。 */
 		void ReloadScripts(const std::function<bool()>& swap_module);
 
+		[[nodiscard]] const EditorCamera* GetEditorCamera();
+
 		/* ---- 渲染管线（编辑器场景视口）：前向 / 延迟。
 		 * 状态在相机的视图上（单一数据源），这里只做通道转发。 ---- */
 		[[nodiscard]] RenderPipeline GetRenderPipeline();
@@ -69,12 +72,6 @@ namespace Helios
 		 * DebugViewMode。同样落相机视图，这里只做通道转发。 ---- */
 		[[nodiscard]] DebugViewMode GetDebugViewMode();
 		void SetDebugViewMode(DebugViewMode mode);
-
-		/* ---- 面板显隐：整层启用 ---- */
-		[[nodiscard]] bool IsSceneEditorActive();
-		void SetSceneEditorActive(bool active);
-		[[nodiscard]] bool IsModelEditorActive();
-		void SetModelEditorActive(bool active);
 
 		/* 模型导入（ModelEditor 面板） */
 		void ImportModel();

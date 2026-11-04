@@ -51,8 +51,15 @@ namespace Helios
 
 		/* 显示菜单栏UI */
 		void ShowMenuUI();
+		/* 菜单栏各下拉（行版式统一走 PanelChrome） */
+		void ShowFileMenu();
+		void ShowWindowMenu();
+		void ShowRenderingMenu();
+		void ShowScriptsMenu();
+		void ShowShadersMenu();
 		/* 显示顶部工具栏（菜单栏与工作区之间的固定一行） */
 		void ShowToolbarUI();
+		void ShowEditorCameraUI();
 		/* 新建脚本模板：选个路径，生成带注册宏的 .cpp，编一次就能挂到实体上 */
 		void CreateScriptTemplate();
 
@@ -69,15 +76,20 @@ namespace Helios
 		LogPanel m_LogPanel;
 		/* 上次关闭时的停靠前台页签恢复（等启动首帧的聚焦级联过去后逐帧应用） */
 		PanelLayoutRestore m_LayoutRestore;
-		/* 用户请求重置布局（View → Reset Layout），下一帧生效 */
+		/* 用户请求重置布局（Window → Layout → Default），下一帧生效 */
 		bool m_ResetLayoutRequested{ false };
-		/* 实时样式编辑器（Options 菜单 / 工具栏选项开关） */
+		/* 保存布局的命名弹窗：菜单收起来之后再弹，免得被菜单的 popup 带走 */
+		bool m_ShowSaveLayoutPopup{ false };
+		char m_LayoutName[64]{};
+		/* 当前布局名（空 = 内置默认布局） */
+		std::string m_ActiveLayout;
+		/* Window 菜单控制的样式编辑器 */
 		bool m_ShowStyleEditor{ false };
 		/* C++ 脚本模块：编译与加载都在这里，脚本类注册进 ScriptRegistry */
 		ScriptModule m_ScriptModule;
 		/* 着色器热重载：盯依赖文件的修改时间，改了就地换掉 */
 		ShaderReloader m_ShaderReloader;
-		/* Settings 菜单的全局开关（跟项目本地存，见 EditorSettings） */
+		/* Rendering 菜单的画质设置，按项目保存 */
 		EditorSettings::State m_Settings{};
 		/* 菜单栏左端的品牌记号：白色线稿贴图，按强调色着色（与启动页同一张） */
 		SharedPtr<DeviceTexture> m_pEmblem;

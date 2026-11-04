@@ -22,8 +22,9 @@ namespace Helios
 		inline constexpr const char* kLog            = "Log";
 		/* 时间轴：选中实体的动画片段编辑（播放头 / 关键帧 / 录制） */
 		inline constexpr const char* kTimeline       = "Timeline";
-		/* 脚本执行顺序：全场景脚本挂载点的 Order 总表（从 Settings 菜单打开，默认不占布局） */
+		/* 脚本执行顺序：全场景脚本挂载点的 Order 总表（从 Scripts 菜单打开，默认不占布局） */
 		inline constexpr const char* kScriptOrder    = "Script Order";
+		inline constexpr const char* kEditorCamera   = "Editor Camera";
 
 		/* 默认停靠的语义槽位，与 BuildDefaultLayout 里的 DockNode 划分一一对应 */
 		enum class DockSlot : uint8_t
@@ -41,31 +42,33 @@ namespace Helios
 		enum class Menu : uint8_t
 		{
 			None = 0,
-			View,
+			Window,
 			Scripts,
 		};
 
 		struct Desc
 		{
-			const char* Id;                 /* 窗口键 */
-			DockSlot    Slot;               /* 默认停靠槽位 */
-			Menu        ToggleMenu;         /* 开关所在菜单 */
-			const char* MenuLabel;          /* 菜单里的名字 */
-			bool        DefaultVisible;     /* 启动时开不开 */
-			const char* Tooltip{ nullptr }; /* 菜单项悬停说明 */
+			const char*   Id;                 /* 窗口键 */
+			DockSlot      Slot;               /* 默认停靠槽位 */
+			Menu          ToggleMenu;         /* 开关所在菜单 */
+			const char*   MenuLabel;          /* 菜单里的名字 */
+			bool          DefaultVisible;     /* 启动时开不开 */
+			const char*   Tooltip{ nullptr }; /* 菜单项悬停说明 */
 		};
 
 		/* 全部停靠窗口：调整默认分栏、菜单开关都只改这里 */
 		inline constexpr Desc kPanels[] = {
 			{ kSceneHierarchy,  DockSlot::LeftTop,      Menu::None,    nullptr,          true },
 			{ kResourceBrowser, DockSlot::LeftBottom,   Menu::None,    nullptr,          true },
-			{ kScene,           DockSlot::Center,       Menu::View,    "Scene Viewport", true },
-			{ kModel,           DockSlot::Center,       Menu::View,    "Model Viewport", true },
-			{ kFrameGraph,      DockSlot::Center,       Menu::View,    "Frame Graph",    true },
+			{ kScene,           DockSlot::Center,       Menu::Window,  "Scene Viewport", true },
+			{ kModel,           DockSlot::Center,       Menu::Window,  "Model Viewport", false },
+			{ kFrameGraph,      DockSlot::Center,       Menu::Window,  "Frame Graph",    true },
 			{ kProperties,      DockSlot::RightTop,     Menu::None,    nullptr,          true },
-			{ kStatInfo,        DockSlot::RightBottom,  Menu::None,    nullptr,          true },
-			{ kLog,             DockSlot::CenterBottom, Menu::View,    "Log",            true },
-			{ kTimeline,        DockSlot::CenterBottom, Menu::View,    "Timeline",       true },
+			{ kStatInfo,        DockSlot::RightBottom,  Menu::Window,  "Stat Info",      true },
+			{ kLog,             DockSlot::CenterBottom, Menu::Window,  "Log",            true },
+			{ kTimeline,        DockSlot::CenterBottom, Menu::Window,  "Timeline",       true },
+			{ kEditorCamera,    DockSlot::Floating,     Menu::Window,  "Editor Camera",  false,
+				"Live read-only parameters of the scene editor camera" },
 			{ kScriptOrder,     DockSlot::Floating,     Menu::Scripts, "Script Order",   false,
 				"Global script execution order, sorted by Order" },
 		};

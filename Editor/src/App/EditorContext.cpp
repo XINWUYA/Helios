@@ -159,6 +159,12 @@ namespace Helios
 			swap_module();
 	}
 
+	const EditorCamera* EditorContext::GetEditorCamera()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr ? layer->GetEditorCamera() : nullptr;
+	}
+
 	/* 渲染管线读写都经场景面板落到编辑器相机（权威值在相机上）。
 	 * 面板未就绪时读回缺省延迟（相机缺省值），写为无操作。 */
 	RenderPipeline EditorContext::GetRenderPipeline()
@@ -184,30 +190,6 @@ namespace Helios
 	{
 		if (auto* layer = GetSceneLayer())
 			layer->SetDebugViewMode(mode);
-	}
-
-	bool EditorContext::IsSceneEditorActive()
-	{
-		const auto* layer = GetSceneLayer();
-		return layer != nullptr && layer->IsActivated();
-	}
-
-	void EditorContext::SetSceneEditorActive(bool active)
-	{
-		if (auto* layer = GetSceneLayer())
-			layer->Active(active);
-	}
-
-	bool EditorContext::IsModelEditorActive()
-	{
-		const auto* layer = GetModelLayer();
-		return layer != nullptr && layer->IsActivated();
-	}
-
-	void EditorContext::SetModelEditorActive(bool active)
-	{
-		if (auto* layer = GetModelLayer())
-			layer->Active(active);
 	}
 
 	void EditorContext::ImportModel()

@@ -203,9 +203,9 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		if (!m_IsActivated)
+		if (!Panel::IsVisible(Panel::kModel))
 			return;
-		
+
 		Renderer::SetClearColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
 		Renderer::Clear();
 
@@ -248,9 +248,6 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		if (!m_IsActivated)
-			return;
-
 		/* 预览与材质参数在同一个窗口（参数是可折叠浮层） */
 		ShowModelWindowUI();
 	}
@@ -258,9 +255,6 @@ namespace Helios
 	void ModelEditorLayer::OnEvent(IEvent* event)
 	{
 		PROFILE_FUNCTION();
-
-		if (!m_IsActivated)
-			return;
 
 		if (!event)
 			return;
@@ -859,18 +853,12 @@ namespace Helios
 					}
 				}
 
-				const std::vector<MaterialParamUI::MaterialParamRow> rows = MaterialParamUI::BuildMaterialParamRows(*material);
-				if (rows.empty())
-					MaterialParamUI::DrawMaterialReflectionNotice(*material);
-
-				for (const MaterialParamUI::MaterialParamRow& row : rows)
-				{
-					MaterialParamUI::DrawMaterialParamRow(row.Param, row.Spec, m_AssetRevealFunc,
-						[this, i](ParamType type, const std::string& name, const std::any& value)
-						{
-							WriteSubModelMaterialParam(i, type, name, value);
-						});
-				}
+				MaterialParamUI::DrawMaterialParams(*material,
+					[&]() { return MaterialSlotEditing::Resolve(*m_pModel, m_SlotOverrides, slot->Name).get(); },
+					m_AssetRevealFunc, [this, i](ParamType type, const std::string& name, const std::any& value)
+					{
+						WriteSubModelMaterialParam(i, type, name, value);
+					});
 
 				/* 渲染队列：小于 2500 不透明，2500 起透明 */
 				int32_t render_queue = material->GetRenderQueue();
@@ -1036,7 +1024,6 @@ namespace Helios
 			return;
 
 		/* 模型已就绪：层与视口窗口一并唤回，导入结果必然可见 */
-		m_IsActivated = true;
 		Panel::SetVisible(Panel::kModel, true);
 	}
 
@@ -1049,7 +1036,6 @@ namespace Helios
 			return;
 
 		/* 模型已就绪：层与视口窗口一并唤回（同导入） */
-		m_IsActivated = true;
 		Panel::SetVisible(Panel::kModel, true);
 	}
 

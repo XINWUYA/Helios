@@ -15,6 +15,8 @@ namespace Helios::EditorSettings
 		bool GpuGrassPlacement{ false };
 		/* 草地走 GPU 剔除 + 间接绘制（关掉退回逐块提交） */
 		bool GpuGrassIndirect{ false };
+		/* 草地按批提交：连续块按实例预算合成一次绘制（关掉退回逐块提交） */
+		bool GrassBatching{ true };
 		/* 地形虚拟纹理：页池缓存地表颜色（关掉逐像素直接算） */
 		bool TerrainVirtualTexture{ false };
 		/* 页池档位：页边长（纹素），128 / 256 / 512 */

@@ -1,11 +1,16 @@
 ﻿#include "Pch.h"
 #include "MainEditorLayer.h"
 #include "UI/DebugViewMenu.h"
+#include "UI/ImGuiExtensions.h"
+#include "Panels/PanelWindow.h"
+#include "Viewport/EditorBuiltinCamera.h"
+#include <cstdio>
 #include "Viewport/SceneGizmos.h"
 #include "UI/EditorIcons.h"
 #include "UI/PanelChrome.h"
 #include "UI/PanelRegistry.h"
 #include "Common/FileDialog.h"
+#include "Common/EditorLayouts.h"
 #include "Command/AssetFileOps.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/AssetPath.h"
@@ -92,6 +97,7 @@ namespace Helios
 		m_ResourceBrowser.OnImGuiRenderer();
 		/* 日志窗口（Kernel / Editor 的运行时输出） */
 		m_LogPanel.OnImGuiRender(Panel::VisibleFlag(Panel::kLog));
+		ShowEditorCameraUI();
 	}
 
 	void MainEditorLayer::OnEvent(IEvent* event)
@@ -229,6 +235,36 @@ namespace Helios
 		{
 			return DebugViewMenu::ModeLabel(mode);
 		}
+
+		/* 菜单栏下拉的统一版式：圆角 / 内边距 / 行距和其它浮层菜单同一套。
+		 * 要压在 BeginMenu 之前 —— 弹层的窗口参数在本帧第一次 Begin 时就锁定了。 */
+		bool BeginBarMenu(const char* label)
+		{
+			PanelChrome::PushMenuStyle(true);
+			if (ImGui::BeginMenu(label))
+				return true;
+
+			PanelChrome::PopMenuStyle();
+			return false;
+		}
+
+		void EndBarMenu()
+		{
+			ImGui::EndMenu();
+			PanelChrome::PopMenuStyle();
+		}
+
+		bool BarMenuItem(const char* label, const char* shortcut = nullptr, bool enabled = true)
+		{
+			return PanelChrome::MenuItemWithIcon(Icons::Id::None, label, shortcut, enabled,
+				ImGui::GetFrameHeight());
+		}
+
+		bool BeginBarSubmenu(const char* label)
+		{
+			return PanelChrome::BeginMenuWithIcon(Icons::Id::None, label,
+				ImGui::GetFrameHeight());
+		}
 	}
 
 	/* 默认布局：左（层级树 / 资产浏览器）· 中（视口）· 右（属性 / 统计）。只在 ini 里没有这个
@@ -303,63 +339,33 @@ namespace Helios
 		file << content;
 		file.close();
 
-		CORE_LOG_INFO("[Script] Created {}. Pick Scripts > Recompile to load it.", path);
+		CORE_LOG_INFO("[Script] Created {}. Pick Build > Recompile Scripts to load it.", path);
 	}
 
 	void MainEditorLayer::ShowMenuUI()
 	{
 		PROFILE_FUNCTION();
 
-		static bool p_open = true;
-		static bool opt_fullscreen = true;
-		static bool opt_padding = false;
-		static ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
+		/* 宿主窗口铺满主视口、不参与停靠：菜单栏与工具栏都挂在它下面 */
+		const ImGuiViewport* viewport = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos(viewport->WorkPos);
+		ImGui::SetNextWindowSize(viewport->WorkSize);
+		ImGui::SetNextWindowViewport(viewport->ID);
 
-		// We are using the ImGuiWindowFlags_NoDocking flag to make the parent window not dockable into,
-		// because it would be confusing to have two docking targets within each others.
-		ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
-		if (opt_fullscreen)
-		{
-			const ImGuiViewport* viewport = ImGui::GetMainViewport();
-			ImGui::SetNextWindowPos(viewport->WorkPos);
-			ImGui::SetNextWindowSize(viewport->WorkSize);
-			ImGui::SetNextWindowViewport(viewport->ID);
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-			window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
-			window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
-		}
-		else
-		{
-			dockspace_flags &= ~ImGuiDockNodeFlags_PassthruCentralNode;
-		}
+		const ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking
+			| ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize
+			| ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
 
-		// When using ImGuiDockNodeFlags_PassthruCentralNode, DockSpace() will render our background
-		// and handle the pass-thru hole, so we ask Begin() to not render a background.
-		if (dockspace_flags & ImGuiDockNodeFlags_PassthruCentralNode)
-			window_flags |= ImGuiWindowFlags_NoBackground;
-
-		// Important: note that we proceed even if Begin() returns false (aka window is collapsed).
-		// This is because we want to keep our DockSpace() active. If a DockSpace() is inactive,
-		// all active windows docked into it will lose their parent and become undocked.
-		// We cannot preserve the docking relationship between an active window and an inactive docking, otherwise
-		// any change of dockspace/settings would lead to windows being stuck in limbo and never being visible.
 		/* 宿主画布背景压暗一档（Neutral0）：停靠面板（Neutral2）形成"浮在画布上"的层级 */
 		EditorTheme::PushDockHostBackground();
-		if (!opt_padding)
-			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		/* 菜单栏高度 = 字体高 + 2×FramePadding.y，压厚一档，左端的徽标才放得下看得清的尺寸 */
-		const ImVec2 host_frame_padding = ImGui::GetStyle().FramePadding;
-		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-			ImVec2(host_frame_padding.x, ImMax(host_frame_padding.y, Scaled(5.0f))));
-		/* ### 之后为窗口 ID：保持不变，旧的 imgui.ini 停靠布局继续有效 */
-		ImGui::Begin("Helios###DockSpace Demo", &p_open, window_flags);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+		/* ### 之后为窗口 ID：保持不变，旧的 imgui.ini 停靠布局继续有效。
+		 * 菜单栏高度 = 字体高 + 2×主题的 FramePadding.y（24px），左端的徽标正好嵌进去 */
+		ImGui::Begin("Helios###DockSpace Demo", nullptr, window_flags);
 		{
-			if (!opt_padding)
-				ImGui::PopStyleVar();
-
-			if (opt_fullscreen)
-				ImGui::PopStyleVar(2);
+			ImGui::PopStyleVar(3);
 
 			/* 菜单栏 */
 			if (ImGui::BeginMenuBar())
@@ -368,10 +374,13 @@ namespace Helios
 				 * 只有 BeginMenuBar 把裁剪框开到菜单栏内；MenuBarBg 仍是底，菜单项后画压在上面 */
 				const ImRect bar = ImGui::GetCurrentWindow()->MenuBarRect();
 				const ImVec2 fade_end(ImMin(bar.Max.x, bar.Min.x + Scaled(560.0f)), bar.Max.y);
-				const ImVec4& accent = EditorTheme::Token::Accent;
+				const ImVec4 accent = EditorTheme::Token::Accent;
 				const ImU32 tint = ImGui::GetColorU32(ImVec4(accent.x, accent.y, accent.z, 0.22f));
 				const ImU32 fade = ImGui::GetColorU32(ImVec4(accent.x, accent.y, accent.z, 0.0f));
 				ImGui::GetWindowDrawList()->AddRectFilledMultiColor(bar.Min, fade_end, tint, fade, fade, tint);
+
+				/* 左端留一档白边：徽标不贴死在窗口边缘上 */
+				ImGui::Indent(Scaled(7.0f));
 
 				/* 品牌记号：太阳徽标，与启动页同一张贴图、按强调色着色。没渲染设备时（离屏预览）
 				 * 不碰资产缓存，菜单栏就空着不占位 */
@@ -389,7 +398,7 @@ namespace Helios
 					const float mark = row - Scaled(3.0f);
 					/* 缩到 20pt 后线稿大半像素落在抗锯齿边缘，直接吃 Accent 会比色板暗一截，
 					 * 往白里提一档才和菜单文字的亮度站平 */
-					const ImVec4 mark_color = EditorTheme::MixRgb(EditorTheme::Token::Accent,
+					const ImVec4 mark_color = EditorTheme::MixRgb(accent,
 						ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 0.40f);
 					const ImVec2 cursor = ImGui::GetCursorScreenPos();
 					const ImVec2 mark_min(cursor.x, cursor.y + (row - mark) * 0.5f);
@@ -399,374 +408,17 @@ namespace Helios
 					ImGui::Dummy(ImVec2(mark, row));
 				}
 
-				if (ImGui::BeginMenu("File"))
-				{
-					if (ImGui::MenuItem("New Scene", "Ctrl+N"))
-						m_Context.NewScene();
+				/* 顶级项展开时用淡强调底：列表选中那档 40% 放到这条窄栏里太重 */
+				ImGui::PushStyleColor(ImGuiCol_Header, EditorTheme::WithAlpha(accent, 0.28f));
 
-					if (ImGui::MenuItem("Open Scene", "Ctrl+O"))
-						m_Context.ImportScene();
+				ShowFileMenu();
+				ShowWindowMenu();
+				ShowRenderingMenu();
+				ShowScriptsMenu();
+				ShowShadersMenu();
 
-					if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
-						m_Context.SaveScene();
-
-					if (ImGui::MenuItem("Save Scene As", "Ctrl+Shift+S"))
-						m_Context.SaveSceneAs();
-
-					if (ImGui::MenuItem("Import Model(.obj)", "Ctrl+I"))
-					{
-						m_Context.SetModelEditorActive(true);
-						m_Context.ImportModel();
-					}
-
-					if (ImGui::MenuItem("Export Mesh & Mtl(.mesh & .mtl)", "Ctrl+E"))
-					{
-						/* TODO: 尚未实现导出 */
-					}
-
-					if (ImGui::MenuItem("Exit"))
-						Application::Instance()->Close();
-
-					ImGui::EndMenu();
-				}
-
-				/* Edit：编辑历史 */
-				if (ImGui::BeginMenu("Edit"))
-				{
-					const char* undo_label = m_Context.GetUndoLabel();
-					const char* redo_label = m_Context.GetRedoLabel();
-
-					/* 菜单里带上操作名，用户能看到 Ctrl+Z 会撤销什么 */
-					const std::string undo_text = "Undo" + (undo_label != nullptr ? std::string(" ") + undo_label : std::string());
-					const std::string redo_text = "Redo" + (redo_label != nullptr ? std::string(" ") + redo_label : std::string());
-
-					if (ImGui::MenuItem(undo_text.c_str(), "Ctrl+Z", false, m_Context.CanUndo()))
-						m_Context.Undo();
-
-					if (ImGui::MenuItem(redo_text.c_str(), "Ctrl+Y", false, m_Context.CanRedo()))
-						m_Context.Redo();
-
-					ImGui::EndMenu();
-				}
-
-				/* View：面板显隐 + 渲染管线 + 布局重置。
-				 * 分两级：视口窗口（窗口右上角的关闭按钮只能靠这里恢复）与面板整层启用；
-				 * 场景的新建 / 打开也会自动唤回视口窗口，避免「关掉后再也打不开」。 */
-				if (ImGui::BeginMenu("View"))
-				{
-					/* 各窗口的开关按注册表画（Panel::kPanels） */
-					Panel::DrawToggleMenuItems(Panel::Menu::View);
-
-					ImGui::Separator();
-
-					/* 渲染管线（编辑器场景视口）：前向 / 延迟 二选一 —— 相机每帧按选择重建渲染图 */
-					const RenderPipeline render_pipeline = m_Context.GetRenderPipeline();
-					if (ImGui::MenuItem("Forward Pipeline", nullptr, render_pipeline == RenderPipeline::Forward))
-						m_Context.SetRenderPipeline(RenderPipeline::Forward);
-					if (ImGui::MenuItem("Deferred Pipeline", nullptr, render_pipeline == RenderPipeline::Deferred))
-						m_Context.SetRenderPipeline(RenderPipeline::Deferred);
-
-					/* 调试视图（编辑器场景视口）：与工具栏 Debug View 按钮共用同一份档位表 */
-					if (ImGui::BeginMenu("Debug View"))
-					{
-						DrawDebugViewMenuItems(m_Context);
-						ImGui::EndMenu();
-					}
-
-					ImGui::Separator();
-
-					bool scene_active = m_Context.IsSceneEditorActive();
-					if (ImGui::MenuItem("Scene Editor", nullptr, &scene_active))
-						m_Context.SetSceneEditorActive(scene_active);
-
-					bool model_active = m_Context.IsModelEditorActive();
-					if (ImGui::MenuItem("Model Editor", nullptr, &model_active))
-						m_Context.SetModelEditorActive(model_active);
-
-					ImGui::Separator();
-
-					if (ImGui::MenuItem("Reset Layout"))
-						m_ResetLayoutRequested = true;
-
-					ImGui::EndMenu();
-				}
-
-				/* Scripts：C++ 脚本模块的重编与重载 */
-				if (ImGui::BeginMenu("Scripts"))
-				{
-					if (ImGui::MenuItem("New Script..."))
-						CreateScriptTemplate();
-
-					ImGui::Separator();
-
-					if (ImGui::MenuItem("Recompile Scripts"))
-					{
-						/* 运行中也能用：实例按字段值迁移到新库，不用退出 Runtime */
-						m_Context.ReloadScripts([this]() { return m_ScriptModule.Recompile(); });
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Compile the project scripts and hot-reload the module");
-
-					if (ImGui::MenuItem("Reload Module"))
-						m_Context.ReloadScripts([this]() { return m_ScriptModule.LoadLatest(); });
-
-					/* 自动化的两个开关：调试时把自动重载关掉，免得编一次就换一个 image */
-					ImGui::Separator();
-
-					bool auto_reload = m_Settings.AutoReloadScripts;
-					if (ImGui::MenuItem("Auto Reload", nullptr, &auto_reload))
-					{
-						m_Settings.AutoReloadScripts = auto_reload;
-						m_ScriptModule.SetAutoReloadEnabled(auto_reload);
-						EditorSettings::Save(m_Settings);
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Reload the module as soon as a new build shows up");
-
-					bool auto_compile = m_Settings.AutoCompileScripts;
-					if (ImGui::MenuItem("Auto Compile On Open", nullptr, &auto_compile))
-					{
-						m_Settings.AutoCompileScripts = auto_compile;
-						m_ScriptModule.SetAutoCompileEnabled(auto_compile);
-						EditorSettings::Save(m_Settings);
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Build the project scripts on open when no module exists yet");
-
-					/* 脚本执行顺序：全场景一张表，Order 小的先跑 */
-					ImGui::Separator();
-					Panel::DrawToggleMenuItems(Panel::Menu::Scripts);
-
-					ImGui::Separator();
-					ImGui::TextDisabled("%s", m_ScriptModule.GetStatus().c_str());
-					ImGui::TextDisabled("%d class(es) registered", m_ScriptModule.GetClassCount());
-					ImGui::EndMenu();
-				}
-
-				/* Shaders：着色器热重载 */
-				if (ImGui::BeginMenu("Shaders"))
-				{
-					if (ImGui::MenuItem("Reload All"))
-					{
-						const size_t reloaded = m_ShaderReloader.ReloadAll();
-						EDITOR_LOG_INFO("[Shader] Reloaded {} of {} cached shaders", reloaded,
-							AssetManager::Instance().GetCount<DeviceShader>());
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Reload every cached shader whose files differ from the loaded version, ignoring timestamps");
-
-					if (ImGui::MenuItem("Reload Changed"))
-						m_ShaderReloader.ReloadChanged();
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Reload only the shaders whose files changed");
-
-					ImGui::Separator();
-
-					bool auto_reload_shaders = m_Settings.AutoReloadShaders;
-					if (ImGui::MenuItem("Auto Reload", nullptr, &auto_reload_shaders))
-					{
-						m_Settings.AutoReloadShaders = auto_reload_shaders;
-						m_ShaderReloader.SetAutoReloadEnabled(auto_reload_shaders);
-						EditorSettings::Save(m_Settings);
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Reload a shader as soon as its file or an included file changes");
-
-					ImGui::Separator();
-					ImGui::TextDisabled("%d cached, %d queued",
-						static_cast<int>(AssetManager::Instance().GetCount<DeviceShader>()),
-						static_cast<int>(m_ShaderReloader.GetPendingCount()));
-					ImGui::EndMenu();
-				}
-
-				/* Settings：全局开关（对所有视口生效） */
-				if (ImGui::BeginMenu("Settings"))
-				{
-					bool msaa = m_Settings.MSAA;
-					if (ImGui::MenuItem("MSAA", nullptr, &msaa))
-					{
-						m_Settings.MSAA = msaa;
-						EditorSettings::Apply(m_Settings);
-						EditorSettings::Save(m_Settings);
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("On: 4x MSAA on the scene pass, smoother object edges. Off: back to single sample.\nWith TAA enabled the geometry pass stays single sampled so depth can be sampled");
-
-					ImGui::Separator();
-
-					bool gpu_skinning = m_Settings.GPUSkinning;
-					if (ImGui::MenuItem("GPU Skinning", nullptr, &gpu_skinning))
-					{
-						m_Settings.GPUSkinning = gpu_skinning;
-						EditorSettings::Apply(m_Settings);
-						EditorSettings::Save(m_Settings);
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("On: vertices are skinned in a compute shader. Off: back to CPU skinning");
-
-					ImGui::Separator();
-
-					bool terrain_vt = m_Settings.TerrainVirtualTexture;
-					if (ImGui::MenuItem("Terrain Virtual Texture", nullptr, &terrain_vt))
-					{
-						m_Settings.TerrainVirtualTexture = terrain_vt;
-						EditorSettings::Apply(m_Settings);
-						EditorSettings::Save(m_Settings);
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("On: terrain color comes from a paged cache around the camera. Off: shaded per pixel. Both look the same up close to within a couple of levels");
-
-					/* 页池档位：页边长越大，单页越清晰、池里装得下的页越少 */
-					if (ImGui::BeginMenu("Terrain VT Page Size"))
-					{
-						const uint32_t sizes[] = { 128, 256, 512 };
-						for (const uint32_t size : sizes)
-						{
-							char label[32];
-							std::snprintf(label, sizeof(label), "%u px", size);
-							const bool selected = m_Settings.TerrainVirtualTextureTexels == size;
-							if (ImGui::MenuItem(label, nullptr, selected))
-							{
-								m_Settings.TerrainVirtualTextureTexels = size;
-								EditorSettings::Apply(m_Settings);
-								EditorSettings::Save(m_Settings);
-							}
-						}
-						ImGui::EndMenu();
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Page edge in texels. The pool keeps a fixed 32MB budget, so bigger pages mean fewer of them");
-
-					ImGui::Separator();
-
-					bool gpu_grass = m_Settings.GpuGrassPlacement;
-					if (ImGui::MenuItem("GPU Grass Placement", nullptr, &gpu_grass))
-					{
-						m_Settings.GpuGrassPlacement = gpu_grass;
-						EditorSettings::Apply(m_Settings);
-						EditorSettings::Save(m_Settings);
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("On: blade positions are generated in a compute shader. Off: back to per-blade CPU placement. Needs compute shader support");
-
-					bool gpu_grass_indirect = m_Settings.GpuGrassIndirect;
-					if (ImGui::MenuItem("GPU Grass Indirect Draw", nullptr, &gpu_grass_indirect))
-					{
-						m_Settings.GpuGrassIndirect = gpu_grass_indirect;
-						EditorSettings::Apply(m_Settings);
-						EditorSettings::Save(m_Settings);
-					}
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("On: grass is culled on the GPU and drawn with one indirect call. Off: one submit per chunk. Needs compute shader support");
-
-					ImGui::Separator();
-
-					/* 画质档：一次缩放所有草地的抽稀阈值，改完立即生效，不用重建 */
-					float density_scale = m_Settings.GrassDensityScale;
-					ImGui::SetNextItemWidth(140.0f);
-					if (ImGui::SliderFloat("Grass Density", &density_scale, 0.0f, 2.0f, "%.2f"))
-					{
-						m_Settings.GrassDensityScale = density_scale;
-						EditorSettings::Apply(m_Settings);
-					}
-					if (ImGui::IsItemDeactivatedAfterEdit())
-						EditorSettings::Save(m_Settings);
-					if (ImGui::IsItemHovered())
-						ImGui::SetTooltip("Scales how much grass survives distance thinning. 1 = as authored, 0 = none");
-
-					ImGui::EndMenu();
-				}
-
-				/* Theme：六套强调色 —— 一行一个色块 + 名字，当前档右端打勾 */
-				if (ImGui::BeginMenu("Theme"))
-				{
-					const ImGuiStyle& style = ImGui::GetStyle();
-					const float box = ImGui::GetTextLineHeight() * 0.78f;
-					const float gap = style.ItemInnerSpacing.x;
-					const float tick = ImGui::GetFontSize() * 0.8f;
-					const float row_height = ImGui::GetFrameHeight();
-
-					/* 行宽按最长的名字定死：各行的色卡、文字、勾才会纵向对齐 */
-					const float block_gap = Scaled(3.0f);
-					const float pair_width = box + block_gap + box * 0.62f;
-					float name_width = 0.0f;
-					for (int i = 0; i < EditorTheme::ThemeCount(); ++i)
-						name_width = std::max(name_width, ImGui::CalcTextSize(EditorTheme::GetTheme(i).Name).x);
-
-					const float row_width = style.FramePadding.x * 2.0f + pair_width + gap + name_width + gap + tick;
-
-					for (int i = 0; i < EditorTheme::ThemeCount(); ++i)
-					{
-						const EditorTheme::ThemePreset& preset = EditorTheme::GetTheme(i);
-						const bool active = (i == EditorTheme::ActiveTheme());
-
-						ImGui::PushID(i);
-						if (ImGui::Selectable("##theme", false, ImGuiSelectableFlags_None,
-							ImVec2(row_width, row_height)))
-						{
-							m_Settings.Theme = i;
-							EditorTheme::SetTheme(i);
-							EditorSettings::Save(m_Settings);
-						}
-						ImGui::PopID();
-
-						const ImVec2 row_min = ImGui::GetItemRectMin();
-						const ImVec2 row_max = ImGui::GetItemRectMax();
-						const float center_y = (row_min.y + row_max.y) * 0.5f;
-						ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-						/* 色卡：主色一块、副色缩一号底对齐 —— 一眼看出这套主题配的是哪两个色 */
-						const ImVec2 swatch_min(row_min.x + style.FramePadding.x, center_y - box * 0.5f);
-						draw_list->AddRectFilled(swatch_min, ImVec2(swatch_min.x + box, swatch_min.y + box),
-							ImGui::GetColorU32(preset.Accent), box * 0.3f);
-
-						const float alt_box = box * 0.62f;
-						const ImVec2 alt_min(swatch_min.x + box + block_gap, swatch_min.y + box - alt_box);
-						draw_list->AddRectFilled(alt_min, ImVec2(alt_min.x + alt_box, alt_min.y + alt_box),
-							ImGui::GetColorU32(preset.Alt), alt_box * 0.3f);
-						/* 辅色有深有浅，描一圈细边才不会在深色底上糊掉 */
-						draw_list->AddRect(alt_min, ImVec2(alt_min.x + alt_box, alt_min.y + alt_box),
-							ImGui::GetColorU32(EditorTheme::Token::Border), alt_box * 0.3f, 0, 1.0f);
-
-						draw_list->AddText(ImVec2(swatch_min.x + pair_width + gap,
-											 row_min.y + (row_height - ImGui::GetTextLineHeight()) * 0.5f),
-							ImGui::GetColorU32(ImGuiCol_Text), preset.Name);
-
-						if (active)
-						{
-							const float x = row_max.x - style.FramePadding.x - tick;
-							const ImU32 tick_color = ImGui::GetColorU32(EditorTheme::Token::Accent);
-							const float thickness = Scaled(1.6f);
-							draw_list->AddLine(ImVec2(x, center_y),
-								ImVec2(x + tick * 0.38f, center_y + tick * 0.36f), tick_color, thickness);
-							draw_list->AddLine(ImVec2(x + tick * 0.38f, center_y + tick * 0.36f),
-								ImVec2(x + tick, center_y - tick * 0.34f), tick_color, thickness);
-						}
-					}
-
-					ImGui::EndMenu();
-				}
-
-				if (ImGui::BeginMenu("Options"))
-				{
-					// Disabling fullscreen would allow the window to be moved to the front of other windows,
-					// which we can't undo at the moment without finer window depth/z control.
-					ImGui::MenuItem("Fullscreen", NULL, &opt_fullscreen);
-					ImGui::MenuItem("Padding", NULL, &opt_padding);
-					ImGui::MenuItem("Style Editor", nullptr, &m_ShowStyleEditor);
-					ImGui::Separator();
-
-					if (ImGui::MenuItem("Flag: NoSplit", "", (dockspace_flags & ImGuiDockNodeFlags_NoSplit) != 0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoSplit; }
-					if (ImGui::MenuItem("Flag: NoResize", "", (dockspace_flags & ImGuiDockNodeFlags_NoResize) != 0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoResize; }
-					if (ImGui::MenuItem("Flag: NoDockingInCentralNode", "", (dockspace_flags & ImGuiDockNodeFlags_NoDockingInCentralNode) != 0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoDockingInCentralNode; }
-					if (ImGui::MenuItem("Flag: AutoHideTabBar", "", (dockspace_flags & ImGuiDockNodeFlags_AutoHideTabBar) != 0)) { dockspace_flags ^= ImGuiDockNodeFlags_AutoHideTabBar; }
-					if (ImGui::MenuItem("Flag: PassthruCentralNode", "", (dockspace_flags & ImGuiDockNodeFlags_PassthruCentralNode) != 0, opt_fullscreen)) { dockspace_flags ^= ImGuiDockNodeFlags_PassthruCentralNode; }
-					ImGui::Separator();
-
-					if (ImGui::MenuItem("Close", NULL, false))
-						p_open = false;
-					ImGui::EndMenu();
-				}
+				ImGui::PopStyleColor();
+				ImGui::Unindent(Scaled(7.0f));
 
 				ImGui::EndMenuBar();
 			}
@@ -789,11 +441,46 @@ namespace Helios
 					BuildDefaultLayout(dockspace_id, dockspace_size);
 				}
 
-				ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
+				ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+			}
+
+			/* 保存布局：菜单点完就收起，命名框在这里弹（模态要留在宿主窗口的作用域里） */
+			if (m_ShowSaveLayoutPopup)
+			{
+				m_ShowSaveLayoutPopup = false;
+				m_LayoutName[0] = '\0';
+				ImGui::OpenPopup("Save Layout");
+			}
+
+			if (ImGui::BeginPopupModal("Save Layout", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+			{
+				ImGui::TextUnformatted("Save the current layout as");
+
+				if (ImGui::IsWindowAppearing())
+					ImGui::SetKeyboardFocusHere();
+				ImGui::SetNextItemWidth(Scaled(240.0f));
+				const bool entered = ImGui::InputText("##layout_name", m_LayoutName, sizeof(m_LayoutName),
+					ImGuiInputTextFlags_EnterReturnsTrue);
+
+				const bool can_save = m_LayoutName[0] != '\0';
+				ImGui::BeginDisabled(!can_save);
+				const bool clicked = ImGui::Button("Save");
+				ImGui::EndDisabled();
+
+				if (can_save && (clicked || entered) && EditorLayouts::Save(m_LayoutName))
+				{
+					m_ActiveLayout = m_LayoutName;
+					ImGui::CloseCurrentPopup();
+				}
+
+				ImGui::SameLine();
+				if (ImGui::Button("Cancel"))
+					ImGui::CloseCurrentPopup();
+
+				ImGui::EndPopup();
 			}
 		}
 		ImGui::End();
-		ImGui::PopStyleVar();
 		EditorTheme::PopDockHostBackground();
 
 		/* Style Editor：实时调参，Export 后固化回 EditorTheme.h */
@@ -801,8 +488,391 @@ namespace Helios
 			ImGui::ShowStyleEditor();
 	}
 
-	/* 顶部工具栏：固定一行、横跨整个窗口宽，跟菜单栏一起构成顶部 chrome。分组从左到右按操作
-	 * 频率排：文件 → 编辑历史 → 变换；运行控制单独贴右端，免得误点。 */
+	/* File：场景存取与模型导入 */
+	void MainEditorLayer::ShowFileMenu()
+	{
+		if (!BeginBarMenu("File"))
+			return;
+
+		PanelChrome::MenuSectionHeader("SCENE");
+
+		if (BarMenuItem("New Scene", "Ctrl+N"))
+			m_Context.NewScene();
+		if (BarMenuItem("Open Scene...", "Ctrl+I"))
+			m_Context.ImportScene();
+		/* 没有改动时保存是空操作，与工具栏保存按钮同一判据 */
+		if (BarMenuItem("Save Scene", "Ctrl+S", m_Context.IsSceneDirty()))
+			m_Context.SaveScene();
+		if (BarMenuItem("Save Scene As...", "Ctrl+Shift+S"))
+			m_Context.SaveSceneAs();
+
+		ImGui::Separator();
+		PanelChrome::MenuSectionHeader("ASSET");
+
+		if (BarMenuItem("New Script..."))
+			CreateScriptTemplate();
+		if (BarMenuItem("Import Model..."))
+			m_Context.ImportModel();
+
+		ImGui::Separator();
+
+		if (BarMenuItem("Exit"))
+			Application::Instance()->Close();
+
+		EndBarMenu();
+	}
+
+	/* Window：各窗口显隐、布局重置与编辑器外观 */
+	void MainEditorLayer::ShowWindowMenu()
+	{
+		if (!BeginBarMenu("Window"))
+			return;
+
+		PanelChrome::MenuSectionHeader("PANELS");
+
+		Panel::DrawToggleMenuItems(Panel::Menu::Window);
+
+		ImGui::Separator();
+		PanelChrome::MenuSectionHeader("LAYOUT");
+
+		if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::None, "Default", m_ActiveLayout.empty()))
+		{
+			m_ResetLayoutRequested = true;
+			m_ActiveLayout.clear();
+			ImGui::CloseCurrentPopup();
+		}
+
+		for (const EditorLayouts::Entry& layout : EditorLayouts::List())
+		{
+			if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::None, layout.Name.c_str(),
+				m_ActiveLayout == layout.Name))
+			{
+				if (EditorLayouts::Load(layout))
+				{
+					m_ActiveLayout = layout.Name;
+					ImGui::CloseCurrentPopup();
+				}
+			}
+		}
+
+		ImGui::Separator();
+
+		if (BarMenuItem("Save Layout As..."))
+			m_ShowSaveLayoutPopup = true;
+
+		ImGui::Separator();
+		PanelChrome::MenuSectionHeader("APPEARANCE");
+
+		if (BeginBarSubmenu("Theme"))
+		{
+			const ImGuiStyle& style = ImGui::GetStyle();
+			const float box = ImGui::GetTextLineHeight() * 0.78f;
+			const float gap = style.ItemInnerSpacing.x;
+			const float tick = ImGui::GetFontSize() * 0.8f;
+			const float row_height = ImGui::GetFrameHeight();
+
+			/* 行宽按最长的名字定死：各行的色卡、文字、勾才会纵向对齐 */
+			const float block_gap = Scaled(3.0f);
+			const float pair_width = box + block_gap + box * 0.62f;
+			float name_width = 0.0f;
+			for (int i = 0; i < EditorTheme::ThemeCount(); ++i)
+				name_width = std::max(name_width, ImGui::CalcTextSize(EditorTheme::GetTheme(i).Name).x);
+
+			const float row_width = style.FramePadding.x * 2.0f + pair_width + gap + name_width + gap + tick;
+
+			for (int i = 0; i < EditorTheme::ThemeCount(); ++i)
+			{
+				const EditorTheme::ThemePreset& preset = EditorTheme::GetTheme(i);
+				const bool active = (i == EditorTheme::ActiveTheme());
+
+				ImGui::PushID(i);
+				if (ImGui::Selectable("##theme", false, ImGuiSelectableFlags_None,
+					ImVec2(row_width, row_height)))
+				{
+					m_Settings.Theme = i;
+					EditorTheme::SetTheme(i);
+					EditorSettings::Save(m_Settings);
+				}
+				ImGui::PopID();
+
+				const ImVec2 row_min = ImGui::GetItemRectMin();
+				const ImVec2 row_max = ImGui::GetItemRectMax();
+				const float center_y = (row_min.y + row_max.y) * 0.5f;
+				ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+				/* 色卡：主色一块、副色缩一号底对齐 —— 一眼看出这套主题配的是哪两个色 */
+				const ImVec2 swatch_min(row_min.x + style.FramePadding.x, center_y - box * 0.5f);
+				draw_list->AddRectFilled(swatch_min, ImVec2(swatch_min.x + box, swatch_min.y + box),
+					ImGui::GetColorU32(preset.Accent), box * 0.3f);
+
+				const float alt_box = box * 0.62f;
+				const ImVec2 alt_min(swatch_min.x + box + block_gap, swatch_min.y + box - alt_box);
+				draw_list->AddRectFilled(alt_min, ImVec2(alt_min.x + alt_box, alt_min.y + alt_box),
+					ImGui::GetColorU32(preset.Alt), alt_box * 0.3f);
+				/* 辅色有深有浅，描一圈细边才不会在深色底上糊掉 */
+				draw_list->AddRect(alt_min, ImVec2(alt_min.x + alt_box, alt_min.y + alt_box),
+					ImGui::GetColorU32(EditorTheme::Token::Border), alt_box * 0.3f, 0, 1.0f);
+
+				draw_list->AddText(ImVec2(swatch_min.x + pair_width + gap,
+					row_min.y + (row_height - ImGui::GetTextLineHeight()) * 0.5f),
+				ImGui::GetColorU32(ImGuiCol_Text), preset.Name);
+
+				if (active)
+				{
+					const float x = row_max.x - style.FramePadding.x - tick;
+					const ImU32 tick_color = ImGui::GetColorU32(EditorTheme::Token::Accent);
+					const float thickness = Scaled(1.6f);
+					draw_list->AddLine(ImVec2(x, center_y),
+						ImVec2(x + tick * 0.38f, center_y + tick * 0.36f), tick_color, thickness);
+					draw_list->AddLine(ImVec2(x + tick * 0.38f, center_y + tick * 0.36f),
+						ImVec2(x + tick, center_y - tick * 0.34f), tick_color, thickness);
+				}
+			}
+
+			PanelChrome::EndMenuWithIcon();
+		}
+
+		PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Style Editor", &m_ShowStyleEditor);
+
+		EndBarMenu();
+	}
+
+	/* Rendering：渲染管线与画质开关（对所有视口生效） */
+	void MainEditorLayer::ShowRenderingMenu()
+	{
+		if (!BeginBarMenu("Rendering"))
+			return;
+
+		const auto apply_settings = [this]()
+		{
+			EditorSettings::Apply(m_Settings);
+			EditorSettings::Save(m_Settings);
+		};
+
+		PanelChrome::MenuSectionHeader("PIPELINE");
+
+		const RenderPipeline pipeline = m_Context.GetRenderPipeline();
+		if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::None, "Forward", pipeline == RenderPipeline::Forward))
+			m_Context.SetRenderPipeline(RenderPipeline::Forward);
+		if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::None, "Deferred", pipeline == RenderPipeline::Deferred))
+			m_Context.SetRenderPipeline(RenderPipeline::Deferred);
+
+		ImGui::Separator();
+		PanelChrome::MenuSectionHeader("QUALITY");
+
+		bool msaa = m_Settings.MSAA;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "MSAA", &msaa))
+		{
+			m_Settings.MSAA = msaa;
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("On: 4x MSAA on the scene pass, smoother object edges. Off: back to single sample.\nWith TAA enabled the geometry pass stays single sampled so depth can be sampled");
+
+		bool gpu_skinning = m_Settings.GPUSkinning;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "GPU Skinning", &gpu_skinning))
+		{
+			m_Settings.GPUSkinning = gpu_skinning;
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("On: vertices are skinned in a compute shader. Off: back to CPU skinning");
+
+		ImGui::Separator();
+		PanelChrome::MenuSectionHeader("TERRAIN");
+
+		bool terrain_vt = m_Settings.TerrainVirtualTexture;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Terrain Virtual Texture", &terrain_vt))
+		{
+			m_Settings.TerrainVirtualTexture = terrain_vt;
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("On: terrain color comes from a paged cache around the camera. Off: shaded per pixel. Both look the same up close to within a couple of levels");
+
+		/* 页池档位：页边长越大，单页越清晰、池里装得下的页越少 */
+		if (BeginBarSubmenu("Page Size"))
+		{
+			const uint32_t sizes[] = { 128, 256, 512 };
+			for (const uint32_t size : sizes)
+			{
+				char label[32];
+				std::snprintf(label, sizeof(label), "%u px", size);
+				if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::None, label,
+					m_Settings.TerrainVirtualTextureTexels == size))
+				{
+					m_Settings.TerrainVirtualTextureTexels = size;
+					apply_settings();
+				}
+			}
+			PanelChrome::EndMenuWithIcon();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Page edge in texels. The pool keeps a fixed 32MB budget, so bigger pages mean fewer of them");
+
+		ImGui::Separator();
+		PanelChrome::MenuSectionHeader("GRASS");
+
+		bool gpu_grass = m_Settings.GpuGrassPlacement;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "GPU Grass Placement", &gpu_grass))
+		{
+			m_Settings.GpuGrassPlacement = gpu_grass;
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("On: blade positions are generated in a compute shader. Off: back to per-blade CPU placement. Needs compute shader support");
+
+		bool gpu_grass_indirect = m_Settings.GpuGrassIndirect;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "GPU Grass Indirect Draw", &gpu_grass_indirect))
+		{
+			m_Settings.GpuGrassIndirect = gpu_grass_indirect;
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("On: grass is culled on the GPU and drawn with one indirect call. Off: one submit per chunk. Needs compute shader support");
+
+		/* 关掉就是逐块提交，用来对比 draw call */
+		bool grass_batching = m_Settings.GrassBatching;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Grass Block Batching", &grass_batching))
+		{
+			m_Settings.GrassBatching = grass_batching;
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("On: adjacent chunks are merged into one draw by instance budget. Off: one submit per chunk. No effect while indirect draw is on");
+
+		/* 草密度：连续值留在编辑器设置里，菜单只给三档 */
+		if (BeginBarSubmenu("Grass Density"))
+		{
+			const float density = m_Settings.GrassDensityScale;
+			const struct { const char* Label; float Value; } levels[] = {
+				{ "Low", 0.5f }, { "Normal", 1.0f }, { "High", 1.5f },
+			};
+			for (const auto& level : levels)
+			{
+				if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::None, level.Label,
+					std::abs(density - level.Value) < 0.01f))
+				{
+					m_Settings.GrassDensityScale = level.Value;
+					apply_settings();
+				}
+			}
+			PanelChrome::EndMenuWithIcon();
+		}
+
+		EndBarMenu();
+	}
+
+	/* Scripts：C++ 脚本模块的编译与热重载 */
+	void MainEditorLayer::ShowScriptsMenu()
+	{
+		if (!BeginBarMenu("Scripts"))
+			return;
+
+		const auto apply_settings = [this]()
+		{
+			EditorSettings::Apply(m_Settings);
+			EditorSettings::Save(m_Settings);
+		};
+
+		if (BarMenuItem("Recompile Scripts"))
+			m_Context.ReloadScripts([this]() { return m_ScriptModule.Recompile(); });
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Compile the project scripts and hot-reload the module");
+
+		if (BarMenuItem("Reload Module"))
+			m_Context.ReloadScripts([this]() { return m_ScriptModule.LoadLatest(); });
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Load the newest built module and migrate live instances to it");
+
+		ImGui::Separator();
+
+		bool auto_reload = m_Settings.AutoReloadScripts;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Auto Reload", &auto_reload))
+		{
+			m_Settings.AutoReloadScripts = auto_reload;
+			m_ScriptModule.SetAutoReloadEnabled(auto_reload);
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Reload the module as soon as a new build shows up");
+
+		bool auto_compile = m_Settings.AutoCompileScripts;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Auto Compile On Open", &auto_compile))
+		{
+			m_Settings.AutoCompileScripts = auto_compile;
+			m_ScriptModule.SetAutoCompileEnabled(auto_compile);
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Build the project scripts on open when no module exists yet");
+
+		ImGui::Separator();
+
+		/* 脚本执行顺序：全场景一张表，Order 小的先跑 */
+		Panel::DrawToggleMenuItems(Panel::Menu::Scripts);
+
+		ImGui::Separator();
+		PanelChrome::MenuStatusText(m_ScriptModule.GetStatus().c_str());
+
+		char class_count[64];
+		std::snprintf(class_count, sizeof(class_count), "%d class(es) registered",
+			m_ScriptModule.GetClassCount());
+		PanelChrome::MenuStatusText(class_count);
+
+		EndBarMenu();
+	}
+
+	/* Shaders：着色器热重载 */
+	void MainEditorLayer::ShowShadersMenu()
+	{
+		if (!BeginBarMenu("Shaders"))
+			return;
+
+		const auto apply_settings = [this]()
+		{
+			EditorSettings::Apply(m_Settings);
+			EditorSettings::Save(m_Settings);
+		};
+
+		if (BarMenuItem("Reload All"))
+		{
+			const size_t reloaded = m_ShaderReloader.ReloadAll();
+			EDITOR_LOG_INFO("[Shader] Reloaded {} of {} cached shaders", reloaded,
+				AssetManager::Instance().GetCount<DeviceShader>());
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Reload every cached shader whose files differ from the loaded version, ignoring timestamps");
+
+		if (BarMenuItem("Reload Changed"))
+			m_ShaderReloader.ReloadChanged();
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Reload only the shaders whose files changed");
+
+		ImGui::Separator();
+
+		bool auto_reload_shaders = m_Settings.AutoReloadShaders;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Auto Reload", &auto_reload_shaders))
+		{
+			m_Settings.AutoReloadShaders = auto_reload_shaders;
+			m_ShaderReloader.SetAutoReloadEnabled(auto_reload_shaders);
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Reload a shader as soon as its file or an included file changes");
+
+		ImGui::Separator();
+
+		char shader_status[96];
+		std::snprintf(shader_status, sizeof(shader_status), "%d cached, %d queued",
+			static_cast<int>(AssetManager::Instance().GetCount<DeviceShader>()),
+			static_cast<int>(m_ShaderReloader.GetPendingCount()));
+		PanelChrome::MenuStatusText(shader_status);
+
+		EndBarMenu();
+	}
+
+	/* 顶部工具栏依次排列文件操作和变换工具，运行按钮居中，视图工具贴右。 */
 	void MainEditorLayer::ShowToolbarUI()
 	{
 		PROFILE_FUNCTION();
@@ -895,14 +965,16 @@ namespace Helios
 				m_Context.SetPlayMode(running ? PlayMode::Edit : PlayMode::Runtime);
 			}
 
-			/* ---- 视图辅助（贴最右侧，成一小组）：Debug View + Gizmos 显隐 ----
-			 * Debug View 在左：弹层切换成像通道档位（高亮 = 有调试档位生效）；
-			 * Gizmos 在最右：弹层显隐视图辅助（状态读写全局 ViewportGizmoOptions）。 */
-			const float toolbar_right = ImGui::GetContentRegionMax().x - kButtonSize;
-			const float utility_group_x = toolbar_right - kButtonSize - ImGui::GetStyle().ItemSpacing.x;
+			const float utility_group_width = kButtonSize * 3.0f + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+			const float utility_group_x = ImGui::GetContentRegionMax().x - utility_group_width;
 			const float play_right = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
 			ImGui::SameLine(std::max(play_right + kGroupGap, utility_group_x));
 
+			bool& camera_visible = Panel::VisibleFlag(Panel::kEditorCamera);
+			if (Icons::IconButton(Icons::Id::Camera, button_size, camera_visible, "Editor Camera Parameters"))
+				camera_visible = !camera_visible;
+
+			ImGui::SameLine();
 			const char* debug_view_label = DebugViewModeLabel(m_Context.GetDebugViewMode());
 			const std::string debug_view_tip =
 				std::string("Debug View") + (debug_view_label != nullptr ? std::string(": ") + debug_view_label : std::string());
@@ -993,6 +1065,116 @@ namespace Helios
 		const ImVec2 bar_max = ImGui::GetItemRectMax();
 		ImGui::GetWindowDrawList()->AddLine(ImVec2(bar_min.x, bar_max.y), ImVec2(bar_max.x, bar_max.y),
 			ImGui::GetColorU32(EditorTheme::Token::Separator), 1.0f);
+	}
+
+	void MainEditorLayer::ShowEditorCameraUI()
+	{
+		bool& visible = Panel::VisibleFlag(Panel::kEditorCamera);
+		if (!visible)
+			return;
+
+		const ImGuiViewport* viewport = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - Scaled(16.0f),
+			viewport->WorkPos.y + Scaled(70.0f)), ImGuiCond_FirstUseEver, ImVec2(1.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(Scaled(500.0f), Scaled(640.0f)), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSizeConstraints(ImVec2(Scaled(360.0f), Scaled(240.0f)), ImVec2(FLT_MAX, FLT_MAX));
+		PanelWindow window(Panel::kEditorCamera, &visible);
+		if (!window)
+			return;
+
+		const EditorCamera* camera = m_Context.GetEditorCamera();
+		if (camera == nullptr)
+		{
+			ImGui::TextDisabled("Scene editor camera is not available.");
+			return;
+		}
+
+		const auto row = [](const char* label, const char* format, auto... values)
+		{
+			char text[256];
+			std::snprintf(text, sizeof(text), format, values...);
+			const float width = ImGuiExt::BeginPropertyRow(label, Scaled(122.0f));
+			PanelChrome::DrawClippedTextLine(text, width);
+			if (ImGui::IsItemHovered() && ImGui::CalcTextSize(text).x > width)
+				ImGui::SetTooltip("%s", text);
+			ImGuiExt::EndPropertyRow();
+		};
+		const auto vector_row = [&](const char* label, const glm::vec3& value)
+		{
+			row(label, "X %.3f   Y %.3f   Z %.3f", value.x, value.y, value.z);
+		};
+
+		ImGui::TextDisabled("Scene viewport camera   |   Live   |   Read-only");
+		const auto transform = PanelChrome::BeginCard("Transform");
+		if (transform.Open)
+		{
+			vector_row("Position", camera->GetPosition());
+			vector_row("Pivot", camera->GetFocalPoint());
+			row("Yaw", "%.3f deg", glm::degrees(camera->GetYaw()));
+			row("Pitch", "%.3f deg", glm::degrees(camera->GetPitch()));
+			row("Orbit Distance", "%.3f", camera->GetDistance());
+		}
+		PanelChrome::EndCard(transform);
+
+		const auto projection = PanelChrome::BeginCard("Projection");
+		if (projection.Open)
+		{
+			row("Type", "%s", "Perspective");
+			row("Vertical FOV", "%.3f deg", camera->GetFov());
+			row("Aspect Ratio", "%.6f", camera->GetAspectRatio());
+			row("Near Clip", "%.6g", camera->GetNearClip());
+			row("Far Clip", "%.6g", camera->GetFarClip());
+			const auto& region = camera->GetViewportRegion();
+			row("Render Size", "%u x %u px", region.Width, region.Height);
+			row("Depth", "%s", "Reversed Z");
+		}
+		PanelChrome::EndCard(projection);
+
+		const auto navigation = PanelChrome::BeginCard("Navigation");
+		if (navigation.Open)
+		{
+			const char* state = camera->IsFlying() ? "Fly" : camera->IsOrbiting() ? "Orbit"
+				: camera->IsNavigating() ? "Pan / Zoom" : "Idle";
+			row("Gesture", "%s", state);
+			row("Base Fly Speed", "%.3f", camera->GetMoveSpeed());
+		}
+		PanelChrome::EndCard(navigation);
+
+		const auto directions = PanelChrome::BeginCard("Directions", Icons::Id::None,
+			Icons::Id::None, nullptr, false);
+		if (directions.Open)
+		{
+			vector_row("Forward", camera->GetForwardDir());
+			vector_row("Right", camera->GetRightDir());
+			vector_row("Up", camera->GetUpDir());
+			const glm::quat orientation = camera->GetOrientation();
+			row("Quaternion", "X %.4f   Y %.4f   Z %.4f   W %.4f",
+				orientation.x, orientation.y, orientation.z, orientation.w);
+		}
+		PanelChrome::EndCard(directions);
+
+		const auto matrices = PanelChrome::BeginCard("Matrices", Icons::Id::None,
+			Icons::Id::None, nullptr, false);
+		if (matrices.Open)
+		{
+			const auto matrix_rows = [&](const char* label, const glm::mat4& matrix)
+			{
+				ImGui::PushID(label);
+				ImGui::TextDisabled("%s", label);
+				for (int index = 0; index < 4; ++index)
+				{
+					char row_label[16];
+					std::snprintf(row_label, sizeof(row_label), "Row %d", index);
+					row(row_label, "%.6g   %.6g   %.6g   %.6g",
+						matrix[0][index], matrix[1][index], matrix[2][index], matrix[3][index]);
+				}
+				ImGui::PopID();
+			};
+			matrix_rows("View", camera->GetViewMatrix());
+			matrix_rows("Projection", camera->GetProjectionMatrix());
+			matrix_rows("View Projection", camera->GetViewProjectionMatrix());
+		}
+		PanelChrome::EndCard(matrices);
 	}
 
 	void MainEditorLayer::OnUpdate(float delta_time)

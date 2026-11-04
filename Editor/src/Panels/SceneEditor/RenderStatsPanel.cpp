@@ -651,7 +651,7 @@ namespace Helios
 		SyncCPUTraceTextSession();
 
 		/* 面板标题由页签承担（图标 + "Stat Info"）；被挡住或折叠时不画三张卡 */
-		if (PanelWindow window(Panel::kStatInfo); window)
+		if (PanelWindow window(Panel::kStatInfo, &Panel::VisibleFlag(Panel::kStatInfo)); window)
 		{
 			ShowFrameStatsCard();
 			ShowCPUTimingsCard();

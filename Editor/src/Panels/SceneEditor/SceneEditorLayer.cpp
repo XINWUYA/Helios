@@ -163,9 +163,6 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		if (!m_IsActivated)
-			return;
-		
 		/* 统计信息 */
 		ShowStatisticInfoUI();
 
@@ -205,7 +202,7 @@ namespace Helios
 	{
 		PROFILE_FUNCTION();
 
-		if (!m_IsActivated || !event)
+		if (!event)
 			return;
 
 		EventDispatcher dispatcher(event);
@@ -764,7 +761,6 @@ namespace Helios
 
 		/* 新建 / 打开场景后场景视口必须可见：它同时是视口窗口被关闭后的恢复入口，
 		 * 否则用户新建了一个空场景却看不到它。 */
-		m_IsActivated = true;
 		Panel::SetVisible(Panel::kScene, true);
 	}
 
@@ -1886,9 +1882,6 @@ namespace Helios
 	void SceneEditorLayer::OnUpdate(float delta_time)
 	{
 		PROFILE_FUNCTION();
-
-		if (!m_IsActivated)
-			return;
 
 		UpdateViewport();
 		UpdateSceneCameraViewports();

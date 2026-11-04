@@ -32,11 +32,6 @@ namespace Helios
 		using AssetRevealFunc = std::function<void(const std::string&)>;
 		void SetAssetRevealFunc(AssetRevealFunc func) { m_AssetRevealFunc = std::move(func); }
 
-		/* 激活窗口 */
-		void Active(bool active = true) { m_IsActivated = active; }
-		bool IsActivated() const { return m_IsActivated; }
-
-
 		/* 编辑器相机（自检用：断言打开模型后的取景） */
 		[[nodiscard]] EditorCamera* GetEditorCamera() { return m_pEditorCamera.get(); }
 
@@ -157,8 +152,6 @@ namespace Helios
 		/* 选中的片段下标（-1 = 没有） */
 		int m_SelectedClip{ -1 };
 
-		/* 当前窗口是否被激活 */
-		bool m_IsActivated{ false };
 		/* 材质参数面板是否展开（右上角开关切换） */
 		bool m_IsParamsPanelOpen{ true };
 		/* 本帧指针是否悬停在面板折叠开关上（收起态它盖在视口角上，要挡掉视口悬停） */
