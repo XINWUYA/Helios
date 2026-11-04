@@ -1992,8 +1992,9 @@ namespace Helios
 		if (glm::length(delta) < 1e-6f)
 			return false;
 
-		out_origin = near_point;
-		out_direction = glm::normalize(delta);
+		/* 近平面可能已切进地形；从相机眼位出发才会命中真正的表面。 */
+		out_origin = m_pEditorCamera->GetPosition();
+		out_direction = glm::normalize(far_point - out_origin);
 		return true;
 	}
 
