@@ -30,6 +30,19 @@ namespace Helios
 		constexpr float kRowsPerWheelNotch = 3.0f;	/* 滚一格 = 三行 */
 		constexpr int kRecordIdleFrames = 8;
 		constexpr float kKeyHitRadius = 5.0f;
+		/* 手柄能拉多长（相对段长三分之一）：最长顶到相邻帧 */
+		constexpr float kTangentWeightMin = 0.05f;
+		constexpr float kTangentWeightMax = 3.0f;
+
+		/* 轨道默认插值的三档，顺序和 KeyInterp 一致 */
+		constexpr const char* kTrackInterpItems[] = { "Step", "Linear", "Bezier" };
+
+		/* 某一段的有效插值：没单独设过就跟轨道走 */
+		KeyInterp SegmentInterp(const AnimationTrack& track, size_t from_index)
+		{
+			const AnimationKey& from = track.Keys[from_index];
+			return from.HasInterp ? from.Interp : track.Interp;
+		}
 
 		ImU32 ColorU32(const ImVec4& color)
 		{
@@ -539,6 +552,34 @@ namespace Helios
 		}
 		MarkClipChanged();
 		CommitEdit("Set Key Interp");
+	}
+
+	void TimelinePanel::ResetSelectedKeyTangents()
+	{
+		if (m_Clip == nullptr || m_Selection.empty())
+			return;
+
+		BeginEdit();
+		bool changed = false;
+		for (const TimelineModel::KeyRef& selection_ref : m_Selection)
+		{
+			if (selection_ref.Track < 0
+				|| selection_ref.Track >= static_cast<int>(m_Clip->GetTracks().size()))
+				continue;
+			AnimationTrack& selection_track = m_Clip->GetTracks()[selection_ref.Track];
+			if (selection_ref.Key < 0
+				|| selection_ref.Key >= static_cast<int>(selection_track.Keys.size()))
+				continue;
+
+			if (!selection_track.Keys[selection_ref.Key].HasTangent)
+				continue;
+			selection_track.Keys[selection_ref.Key].HasTangent = false;
+			changed = true;
+		}
+
+		if (changed)
+			MarkClipChanged();
+		CommitEdit("Reset Tangents");
 	}
 
 	bool TimelinePanel::WantsArrowKeys() const
@@ -1130,13 +1171,46 @@ namespace Helios
 		const float toggle_x = right - control;
 		const float switch_x = toggle_x - style.ItemSpacing.x - switch_width;
 
+		/* 轨道默认插值只在曲线模式露出来：逐帧的覆盖值归右侧属性栏，全局值归顶栏 */
+		float left_end = time_end;
+		const bool interp_track_valid = m_SelectedTrack >= 0 && m_SelectedTrack < GetTrackCount();
+		if (m_CurveView && m_Clip != nullptr)
+		{
+			const float label_width = ImGui::CalcTextSize("Interp").x;
+			constexpr float kInterpComboWidth = 88.0f;
+			constexpr float kLabelGap = 4.0f;
+			const float combo_width = label_width + kLabelGap + kInterpComboWidth;
+			const float combo_x = time_end + style.ItemSpacing.x * 2.0f;
+
+			/* 窄面板先保右边的模式切换和属性栏开关，放不下这一块就不画 */
+			if (combo_x + combo_width < switch_x - style.ItemSpacing.x)
+			{
+				ImGui::SetCursorScreenPos(ImVec2(combo_x, control_y));
+				ImGui::BeginDisabled(!interp_track_valid);
+				ImGui::AlignTextToFramePadding();
+				ImGui::TextUnformatted("Interp");
+				ImGui::SameLine(0.0f, kLabelGap);
+				ImGui::SetNextItemWidth(kInterpComboWidth);
+
+				int interp = interp_track_valid
+					? static_cast<int>(m_Clip->GetTracks()[m_SelectedTrack].Interp) : 0;
+				if (ImGui::Combo("##TrackInterp", &interp, kTrackInterpItems, 3))
+					SetTrackInterp(static_cast<KeyInterp>(interp));
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Default interpolation for this track");
+				ImGui::EndDisabled();
+
+				left_end = ImGui::GetItemRectMax().x;
+			}
+		}
+
 		/* 轨道搜索就摆在切换左边：宽度吃剩下的空间，放不下就整块不画（先保切换和开关）；
 		 * 过滤中时右边多一枚清除按钮，搜索框跟着让位 */
 		const bool filtering = m_TrackFilter[0] != '\0';
 		const float clear_x = switch_x - style.ItemSpacing.x - control;
 		const float search_right = filtering ? clear_x - style.ItemSpacing.x * 0.5f
 			: switch_x - style.ItemSpacing.x * 2.0f;
-		const float search_width = std::min(160.0f, search_right - time_end - style.ItemSpacing.x);
+		const float search_width = std::min(160.0f, search_right - left_end - style.ItemSpacing.x);
 
 		if (search_width >= 70.0f)
 		{
@@ -1329,6 +1403,20 @@ namespace Helios
 
 		bool any = false;
 		const std::string needle = ToLowercase(m_AddTrackFilter);
+		const std::vector<AnimationTrack>* existing_tracks = (m_Clip != nullptr) ? &m_Clip->GetTracks() : nullptr;
+		/* 已经在轨道里的属性就置灰：点下去也只是切到那条轨道，没必要再选一次 */
+		const auto already_added = [existing_tracks](const TimelineModel::PropertyEntry& entry)
+		{
+			if (existing_tracks == nullptr)
+				return false;
+			return std::any_of(existing_tracks->begin(), existing_tracks->end(),
+				[&entry](const AnimationTrack& track)
+				{
+					return track.Path == entry.Path && track.Component == entry.Component
+						&& track.Property == entry.Property;
+				});
+		};
+
 		for (const TimelineModel::PropertyEntry& entry : m_AddTrackEntries)
 		{
 			const std::string owner = entry.Path.empty() ? animator_name : entry.Path;
@@ -1337,7 +1425,8 @@ namespace Helios
 				continue;
 
 			any = true;
-			if (PanelChrome::MenuItemWithIcon(TrackComponentIcon(entry.Component), label.c_str()))
+			if (PanelChrome::MenuItemWithIcon(TrackComponentIcon(entry.Component), label.c_str(),
+				nullptr, !already_added(entry)))
 			{
 				AddTrack(entry);
 				ImGui::CloseCurrentPopup();
@@ -1482,6 +1571,7 @@ namespace Helios
 
 		/* 选中帧的每帧插值：几帧不一致时不打勾 */
 		int common_interp = -2;
+		bool has_explicit_tangent = false;
 		for (const TimelineModel::KeyRef& selection_ref : m_Selection)
 		{
 			if (selection_ref.Track < 0 || selection_ref.Track >= GetTrackCount())
@@ -1496,6 +1586,8 @@ namespace Helios
 				common_interp = value;
 			else if (common_interp != value)
 				common_interp = -1;
+
+			has_explicit_tangent = has_explicit_tangent || selection_key.HasTangent;
 		}
 
 		if (ImGui::BeginMenu("Interpolation"))
@@ -1511,6 +1603,15 @@ namespace Helios
 			}
 			ImGui::EndMenu();
 		}
+
+		/* 手拖过的切线就不再跟自动切线走，这里给条回头的路 */
+		ImGui::BeginDisabled(!has_explicit_tangent);
+		if (ImGui::MenuItem("Reset tangents"))
+		{
+			ResetSelectedKeyTangents();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndDisabled();
 
 		ImGui::Separator();
 
@@ -2598,7 +2699,7 @@ namespace Helios
 			}
 		}
 
-		/* 贝塞尔手柄：Cubic、单帧、非四元数时显示选中帧的进出切线 */
+		/* 贝塞尔手柄：段是三次、单选、非四元数时显示选中帧的进出切线 */
 		struct TangentHandle
 		{
 			bool  Valid{ false };
@@ -2608,8 +2709,7 @@ namespace Helios
 		};
 		TangentHandle out_handle;
 		TangentHandle in_handle;
-		const bool tangent_capable = track->Interp == KeyInterp::Cubic
-			&& track->ValueType != TrackValueType::Quat
+		const bool tangent_capable = track->ValueType != TrackValueType::Quat
 			&& m_Selection.size() == 1
 			&& m_Selection.front().Track == m_SelectedTrack;
 
@@ -2622,18 +2722,22 @@ namespace Helios
 				const float key_value = KeyCurveValue(*track, key, component);
 				const glm::vec4 auto_tangent = AnimationClip::ComputeAutoTangent(track->Keys, key_index);
 
-				if (key_index + 1 < static_cast<int>(track->Keys.size()))
+				/* 出手柄管这一帧到下一帧的段，入手柄管上一帧传过来的段 */
+				const float out_weight = key.HasTangent ? key.OutTangentWeight[component] : 1.0f;
+				const float in_weight = key.HasTangent ? key.InTangentWeight[component] : 1.0f;
+				if (key_index + 1 < static_cast<int>(track->Keys.size())
+					&& SegmentInterp(*track, key_index) == KeyInterp::Cubic)
 				{
-					const float dt = (track->Keys[key_index + 1].Time - key.Time) / 3.0f;
+					const float dt = (track->Keys[key_index + 1].Time - key.Time) / 3.0f * out_weight;
 					if (dt > 1e-4f)
 					{
 						const float tangent = key.HasTangent ? key.OutTangent[component] : auto_tangent[component];
 						out_handle = { true, key.Time + dt, key_value + tangent * dt, true };
 					}
 				}
-				if (key_index > 0)
+				if (key_index > 0 && SegmentInterp(*track, key_index - 1) == KeyInterp::Cubic)
 				{
-					const float dt = (key.Time - track->Keys[key_index - 1].Time) / 3.0f;
+					const float dt = (key.Time - track->Keys[key_index - 1].Time) / 3.0f * in_weight;
 					if (dt > 1e-4f)
 					{
 						const float tangent = key.HasTangent ? key.InTangent[component] : auto_tangent[component];
@@ -2730,6 +2834,7 @@ namespace Helios
 				m_TangentTrack = m_SelectedTrack;
 				m_TangentKey = m_Selection.front().Key;
 				m_TangentOut = is_out;
+				m_TangentGrabDx = mouse.x - TimeToScreenX(handle.Time);
 				m_TangentGrabDy = mouse.y - value_to_y(handle.Value);
 				m_TangentValueMin = value_min;
 				m_TangentValueMax = value_max;
@@ -2794,7 +2899,7 @@ namespace Helios
 			}
 		}
 
-		/* 拖手柄：只改切线值，时间固定在各段 1/3 处 */
+		/* 拖手柄：横向定手柄长度（权重），纵向定斜率 */
 		if (m_DraggingTangent && ImGui::IsMouseDown(ImGuiMouseButton_Left))
 		{
 			if (m_TangentTrack >= 0 && m_TangentTrack < GetTrackCount())
@@ -2805,9 +2910,12 @@ namespace Helios
 					AnimationKey& tangent_key = tangent_track.Keys[m_TangentKey];
 					if (!tangent_key.HasTangent)
 					{
+						/* 从自动切线起步：权重回 1，免得带上一次拖出来的长度 */
 						const glm::vec4 auto_tangent = AnimationClip::ComputeAutoTangent(tangent_track.Keys, m_TangentKey);
 						tangent_key.InTangent = auto_tangent;
 						tangent_key.OutTangent = auto_tangent;
+						tangent_key.InTangentWeight = glm::vec4(1.0f);
+						tangent_key.OutTangentWeight = glm::vec4(1.0f);
 						tangent_key.HasTangent = true;
 					}
 
@@ -2820,20 +2928,37 @@ namespace Helios
 
 					if (dt > 1e-4f)
 					{
+						/* 横向拖出去多少 = 手柄拉多长；按屏幕比例换算，别用 XToTime（会夹进片长） */
+						const float pixels_per_second = std::max(
+							TimeToScreenX(1.0f) - TimeToScreenX(0.0f), 1e-4f);
+						const float handle_seconds = std::fabs(
+							mouse.x - m_TangentGrabDx - TimeToScreenX(tangent_key.Time)) / pixels_per_second;
+						const float weight = std::clamp(
+							handle_seconds / dt, kTangentWeightMin, kTangentWeightMax);
+
 						const float y = mouse.y - m_TangentGrabDy;
 						const float ratio = (area_bottom - y) / std::max(graph_height, 1e-4f);
 						const float value = m_TangentValueMin + ratio * (m_TangentValueMax - m_TangentValueMin);
-						const float tangent = (value - key_value) / dt;
+						const float tangent = m_TangentOut
+							? (value - key_value) / (dt * weight)
+							: (key_value - value) / (dt * weight);
 
 						if (m_TangentOut)
+						{
 							tangent_key.OutTangent[component] = tangent;
+							tangent_key.OutTangentWeight[component] = weight;
+						}
 						else
-							tangent_key.InTangent[component] = (key_value - value) / dt;
+						{
+							tangent_key.InTangent[component] = tangent;
+							tangent_key.InTangentWeight[component] = weight;
+						}
 
 						m_TangentChanged = true;
 						MarkClipChanged();
-						ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-						ImGui::SetTooltip("%s tangent = %.2f", m_TangentOut ? "Out" : "In", tangent);
+						ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+						ImGui::SetTooltip("%s tangent = %.2f  length = %.2f",
+							m_TangentOut ? "Out" : "In", tangent, weight);
 					}
 				}
 			}
@@ -3351,17 +3476,19 @@ namespace Helios
 				&& ref.Key >= 0 && ref.Key < static_cast<int>(m_Clip->GetTracks()[ref.Track].Keys.size());
 		}
 
-		/* 插值下拉：轨道属性，选中帧时和 Time 挤在同一行 */
-		const auto draw_interp = [&](float combo_width)
+		/* 覆盖值预览：跟轨道时带上轨道的实际值 */
+		const auto segment_preview = [&](int value, int track_interp, std::string& buffer) -> const char*
 		{
-			AnimationTrack& interp_track = m_Clip->GetTracks()[m_SelectedTrack];
-			int interp = static_cast<int>(interp_track.Interp);
-			const char* items[] = { "Step", "Linear", "Bezier" };
-			ImGui::SetNextItemWidth(combo_width);
-			if (ImGui::Combo("##TrackInterp", &interp, items, 3))
-				SetTrackInterp(static_cast<KeyInterp>(interp));
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Interpolation");
+			if (value > 0)
+				return kKeyInterpItems[value];
+			if (value < 0)
+				return "Mixed";
+
+			/* 值列窄，用短写法免得被裁掉 */
+			buffer = "Follow";
+			if (track_interp >= 0)
+				buffer += std::string(" (") + kTrackInterpItems[track_interp] + ")";
+			return buffer.c_str();
 		};
 
 		if (has_track)
@@ -3378,7 +3505,7 @@ namespace Helios
 				ImGui::PopTextWrapPos();
 			});
 
-			/* 时间与插值分两行：时间只放时间，插值单独一行，值列宽度也用满 */
+			/* 选中帧时时间也单独占一行 */
 			if (key_selected)
 			{
 				labeled_row("Time", EditorTheme::Token::TextDim, [&](float row_width)
@@ -3403,11 +3530,6 @@ namespace Helios
 						CommitEdit("Set Key Time");
 				});
 			}
-
-			labeled_row("Interp", EditorTheme::Token::TextDim, [&](float row_width)
-			{
-				draw_interp(row_width);
-			});
 		}
 		else
 		{
@@ -3425,13 +3547,22 @@ namespace Helios
 				{
 					AnimationKey& key = edited_track.Keys[value_ref.Key];
 
-					/* 这一帧到下一帧的插值方式：Follow 就跟着轨道设置走 */
-					labeled_row("Key", EditorTheme::Token::TextDim, [&](float row_width)
+					/* 这一帧到下一帧这一段怎么插：Follow 就跟着顶栏的轨道默认走 */
+					labeled_row("Override", EditorTheme::Token::TextDim, [&](float row_width)
 					{
 						ImGui::SetNextItemWidth(row_width);
-						int value = key.HasInterp ? static_cast<int>(key.Interp) + 1 : 0;
-						if (ImGui::Combo("##KeyInterp", &value, kKeyInterpItems, 4))
-							SetSelectedKeyInterp(value);
+						const int value = key.HasInterp ? static_cast<int>(key.Interp) + 1 : 0;
+						std::string preview;
+						if (ImGui::BeginCombo("##KeyInterp",
+							segment_preview(value, static_cast<int>(edited_track.Interp), preview)))
+						{
+							for (int index = 0; index < 4; ++index)
+							{
+								if (ImGui::Selectable(kKeyInterpItems[index], value == index))
+									SetSelectedKeyInterp(index);
+							}
+							ImGui::EndCombo();
+						}
 						if (ImGui::IsItemHovered())
 							ImGui::SetTooltip("Interpolation from this key to the next one");
 					});
@@ -3510,6 +3641,8 @@ namespace Helios
 
 			/* 多选时同样能改每帧插值：几帧设置不一致就显示 Mixed */
 			int common = -2;
+			/* 都跟轨道时，轨道默认未必一致，-1 表示几段落在不同轨道上 */
+			int common_track_interp = -2;
 			for (const TimelineModel::KeyRef& selection_ref : m_Selection)
 			{
 				if (selection_ref.Track < 0 || selection_ref.Track >= GetTrackCount())
@@ -3524,11 +3657,21 @@ namespace Helios
 					common = value;
 				else if (common != value)
 					common = -1;
+
+				if (!selection_key.HasInterp)
+				{
+					const int track_interp = static_cast<int>(selection_track.Interp);
+					if (common_track_interp == -2)
+						common_track_interp = track_interp;
+					else if (common_track_interp != track_interp)
+						common_track_interp = -1;
+				}
 			}
 
-			labeled_row("Key", EditorTheme::Token::TextDim, [&](float row_width)
+			labeled_row("Override", EditorTheme::Token::TextDim, [&](float row_width)
 			{
-				const char* preview = (common >= 0) ? kKeyInterpItems[common] : "Mixed";
+				std::string preview_text;
+				const char* preview = segment_preview(common, common_track_interp, preview_text);
 				ImGui::SetNextItemWidth(row_width);
 				if (ImGui::BeginCombo("##KeyInterpAll", preview))
 				{

@@ -171,6 +171,8 @@ namespace Helios
 		void DrawKeyContextMenu();
 		/* 设置选中帧的每帧插值：0 = 跟轨道，1..3 = Step / Linear / Bezier */
 		void SetSelectedKeyInterp(int value);
+		/* 清掉选中帧手拖过的切线，回到自动切线 */
+		void ResetSelectedKeyTangents();
 		/* keys_mode = 关键帧模式：画整行和关键帧；曲线模式只画左侧轨道列表。
 		 * row_right 是整行底色 / 分隔线画到哪（关键帧模式含操作列），关键帧只裁到 lane_right（时刻列）。 */
 		void DrawTrackRows(AnimatorComponent& animator, const ImVec2& origin, float lane_left, float lane_right,
@@ -349,6 +351,7 @@ namespace Helios
 		int   m_TangentTrack{ -1 };
 		int   m_TangentKey{ -1 };
 		bool  m_TangentOut{ true };
+		float m_TangentGrabDx{ 0.0f };
 		float m_TangentGrabDy{ 0.0f };
 		float m_TangentValueMin{ -1.0f };
 		float m_TangentValueMax{ 1.0f };

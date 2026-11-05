@@ -39,6 +39,9 @@ namespace Helios
 		glm::vec4 Value{ 0.0f };
 		glm::vec4 InTangent{ 0.0f };
 		glm::vec4 OutTangent{ 0.0f };
+		/* 手柄长度：1 = 段长的三分之一，越长这一段前半越平、后半越赶 */
+		glm::vec4 InTangentWeight{ 1.0f };
+		glm::vec4 OutTangentWeight{ 1.0f };
 		bool      HasTangent{ false };
 
 		/* 这一帧到下一帧的插值方式：HasInterp 为假时跟轨道走（旧文件没有这个属性） */

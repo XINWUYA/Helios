@@ -80,6 +80,12 @@ namespace Helios
 			}
 		}
 
+		/* 权重默认就是 1，没拉伸过的帧不写这个属性 */
+		bool IsUnitWeight(const glm::vec4& weight)
+		{
+			return weight.x == 1.0f && weight.y == 1.0f && weight.z == 1.0f && weight.w == 1.0f;
+		}
+
 		bool IsQuat(const AnimationTrack& track)
 		{
 			return track.ValueType == TrackValueType::Quat;
@@ -113,6 +119,37 @@ namespace Helios
 				+ (t3 - 2.0f * t2 + t) * m0
 				+ (-2.0f * t3 + 3.0f * t2) * p1
 				+ (t3 - t2) * m1;
+		}
+
+		/* 手柄长度参与时间分布的三次贝塞尔：x 和值都按 u 插，横向拉手柄才有变化。
+		 * 两侧手柄加起来超过段长时 x 会折返，二分仍给一个确定的解。 */
+		float BezierValue(float v0, float v1, float m0, float m1,
+			float h0, float h1, float span, float t)
+		{
+			const float b1x = h0;
+			const float b2x = span - h1;
+			const float b1y = v0 + m0 * h0;
+			const float b2y = v1 - m1 * h1;
+			const float target = t * span;
+
+			float low = 0.0f;
+			float high = 1.0f;
+			float u = 0.0f;
+			for (int iteration = 0; iteration < 16; ++iteration)
+			{
+				u = (low + high) * 0.5f;
+				const float inv = 1.0f - u;
+				const float x = 3.0f * inv * inv * u * b1x + 3.0f * inv * u * u * b2x
+					+ u * u * u * span;
+				if (x < target)
+					low = u;
+				else
+					high = u;
+			}
+
+			const float inv = 1.0f - u;
+			return inv * inv * inv * v0 + 3.0f * inv * inv * u * b1y
+				+ 3.0f * inv * u * u * b2y + u * u * u * v1;
 		}
 
 		/* 自动切线（Catmull-Rom 斜率，单位是"值 / 秒"）：缺切线时用它顶上。
@@ -219,9 +256,15 @@ namespace Helios
 			const float span = to.Time - from.Time;
 			glm::vec4 tangent_from = from.OutTangent;
 			glm::vec4 tangent_to = to.InTangent;
-			if (!from.HasTangent)
+			glm::vec4 weight_from(1.0f);
+			glm::vec4 weight_to(1.0f);
+			if (from.HasTangent)
+				weight_from = from.OutTangentWeight;
+			else
 				tangent_from = AutoTangentImpl(keys, from_index);
-			if (!to.HasTangent)
+			if (to.HasTangent)
+				weight_to = to.InTangentWeight;
+			else
 				tangent_to = AutoTangentImpl(keys, from_index + 1);
 
 			/* 旋转先把两端对齐到同一半球，再逐分量插值，避免绕远路 */
@@ -238,6 +281,20 @@ namespace Helios
 			}
 
 			glm::vec4 value;
+
+			/* 拉过的手柄长度管的是时间分布，得逐分量按贝塞尔求值 */
+			if (!IsQuat(track) && (!IsUnitWeight(weight_from) || !IsUnitWeight(weight_to)))
+			{
+				for (int component = 0; component < 4; ++component)
+				{
+					const float h0 = span / 3.0f * weight_from[component];
+					const float h1 = span / 3.0f * weight_to[component];
+					value[component] = BezierValue(from.Value[component], to_value[component],
+						tangent_from[component], tangent_to[component], h0, h1, span, t);
+				}
+				return value;
+			}
+
 			for (int component = 0; component < 4; ++component)
 			{
 				value[component] = Hermite(from.Value[component], to_value[component],
@@ -381,6 +438,12 @@ namespace Helios
 				{
 					key_element->SetAttribute("In", FormatValue(key.InTangent, component_count).c_str());
 					key_element->SetAttribute("Out", FormatValue(key.OutTangent, component_count).c_str());
+					if (!IsUnitWeight(key.InTangentWeight))
+						key_element->SetAttribute("InWeight",
+							FormatValue(key.InTangentWeight, component_count).c_str());
+					if (!IsUnitWeight(key.OutTangentWeight))
+						key_element->SetAttribute("OutWeight",
+							FormatValue(key.OutTangentWeight, component_count).c_str());
 				}
 				if (key.HasInterp)
 					key_element->SetAttribute("Interp", kInterpNames[static_cast<int>(key.Interp)]);
@@ -481,6 +544,10 @@ namespace Helios
 					key.OutTangent = ParseValue(out_text, component_count);
 					key.HasTangent = true;
 				}
+				if (const char* in_weight = key_element->Attribute("InWeight"); in_weight != nullptr)
+					key.InTangentWeight = ParseValue(in_weight, component_count);
+				if (const char* out_weight = key_element->Attribute("OutWeight"); out_weight != nullptr)
+					key.OutTangentWeight = ParseValue(out_weight, component_count);
 				if (const char* interp_text = key_element->Attribute("Interp"); interp_text != nullptr)
 				{
 					for (int index = 0; index < 3; ++index)
