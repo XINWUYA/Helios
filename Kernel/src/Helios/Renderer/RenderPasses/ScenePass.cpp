@@ -210,7 +210,7 @@ namespace Helios
 
 					/* 风场、脚印走 per-draw 覆盖（跟阴影投影共用同一份参数），
 					 * 之后再把「叶片 / 块底面」这组开关接上 */
-					DrawParams per_draw = GrassDraw::MakeDrawParams(grass, scene.GetGrassWindTime());
+					DrawParams per_draw = GrassDraw::MakeDrawParams(grass);
 					/* 叶片与块底面共用一个材质，靠这个开关分开画。
 					 * 调用方后面还会追加覆盖，所以这里记下标，不能用 back() */
 					const size_t flat_pad_index = per_draw.Overrides.size();
@@ -536,13 +536,13 @@ namespace Helios
 							Renderer::Submit(caster, mesh_object->MeshSegment->GetMeshPrimitive(), &per_draw);
 						}
 
-						/* 草：叶形在顶点里展开，得用上一帧的风时间才能算出上一帧在哪 */
-						const float prev_wind_time = scene->GetPrevGrassWindTime();
+						/* 草：叶形在顶点里展开，得用上一帧的风相位才能算出上一帧在哪 */
 						SubmitGrassDraws(*render_view, *scene,
 							[grass_material](const GrassComponent&) { return grass_material; },
-							[prev_wind_time](const GrassComponent& grass, DrawParams& per_draw_grass)
+							[](const GrassComponent& grass, DrawParams& per_draw_grass)
 							{
-								per_draw_grass.Overrides.emplace_back(ParamType::Float, "u_PrevWindTime", prev_wind_time);
+								per_draw_grass.Overrides.emplace_back(ParamType::Float,
+									"u_PrevWindPhase", grass.m_PrevWindPhase);
 								per_draw_grass.RasterStateOverride =
 									MakeVelocityRasterState(grass.GetMaterial()->GetRasterState());
 							});

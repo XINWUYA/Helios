@@ -18,10 +18,10 @@ uniform float u_WindCullDistance = 0.0f;
 
 uniform vec2 u_WindDirection = vec2(1.0f, 0.35f); // @group(Wind) @property
 uniform float u_WindStrength = 0.12f;              // @group(Wind) @property
-uniform float u_WindSpeed = 1.6f;                  // @group(Wind) @property
 uniform float u_WindSpatialScale = 0.25f;          // @group(Wind) @property
-/* 时间由提交时逐片写入，不进材质面板 */
-uniform float u_WindTime = 0.0f;
+/* 风相位由提交时逐片写入，不进材质面板。已经在 CPU 侧按 WindSpeed 积分过，
+ * 拖着速度滑条改不会让相位跳变 */
+uniform float u_WindPhase = 0.0f;
 uniform float u_BladeCurl = 0.55f;                 // @group(Blade shape) @property
 
 /* 脚印图：rg 是倒向、b 是压下的程度；xy 是图左下角的世界坐标，zw 是 1 / 覆盖尺寸 */
@@ -34,14 +34,14 @@ const float kGrassTwoPi = 6.2831853f;
 /* 风场：沿风向推进的波 + 低频阵风包络。
  * 相位取世界坐标而不是每株随机，整片草才会像同一阵风扫过去；
  * 每株的抖动只作为一点点毛边，由调用方叠加。
- * wind_time 由调用方给：可见着色传当前时间，运动矢量还要再传一次上一帧的。 */
-float GrassWind(vec2 world_xz, float wind_time, out vec2 wind_dir)
+ * wind_phase 由调用方给：可见着色传当前相位，运动矢量还要再传一次上一帧的。 */
+float GrassWind(vec2 world_xz, float wind_phase, out vec2 wind_dir)
 {
 	wind_dir = normalize(u_WindDirection + vec2(1e-5f));
 	const float along = dot(world_xz, wind_dir);
-	const float phase = along * u_WindSpatialScale - wind_time * u_WindSpeed;
+	const float phase = along * u_WindSpatialScale - wind_phase;
 	const float wave = sin(phase);
-	const float gust = sin(phase * 0.21f + wind_time * 0.37f) * 0.5f + 0.5f;
+	const float gust = sin(phase * 0.21f + wind_phase * 0.37f) * 0.5f + 0.5f;
 	return wave * mix(0.45f, 1.0f, gust);
 }
 
@@ -63,7 +63,7 @@ float GrassWindWeight(float distance)
 /* 把一个模板顶点（x ∈ [-1,1] 叶宽、y ∈ [0,1] 根到梢）展开成世界坐标。
  * base 是叶根、right/up/face 已经带好缩放；params 是实例参数（z 相位、w 色彩种子）。 */
 vec3 ExpandGrassBlade(vec3 template_pos, vec3 base, vec3 right, vec3 up, vec3 face,
-	vec4 params, float wind_weight, float wind_time, out vec3 blade_normal)
+	vec4 params, float wind_weight, float wind_phase, out vec3 blade_normal)
 {
 	const float height = max(length(up), 1e-4f);
 	const float t = template_pos.y;
@@ -79,8 +79,8 @@ vec3 ExpandGrassBlade(vec3 template_pos, vec3 base, vec3 right, vec3 up, vec3 fa
 	if (wind_weight > 0.0f)
 	{
 		vec2 wind_dir;
-		const float wind = GrassWind(base.xz, wind_time, wind_dir) * u_WindStrength;
-		const float flutter = sin(wind_time * u_WindSpeed * 4.7f + params.z * kGrassTwoPi)
+		const float wind = GrassWind(base.xz, wind_phase, wind_dir) * u_WindStrength;
+		const float flutter = sin(wind_phase * 4.7f + params.z * kGrassTwoPi)
 			* 0.12f * u_WindStrength;
 		const float bend = (wind + flutter) * t * t * wind_weight;
 		pos += vec3(wind_dir.x, 0.0f, wind_dir.y) * bend;

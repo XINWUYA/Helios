@@ -891,7 +891,7 @@ namespace Helios
 						grass_material->SetParameters(ParamType::Float, "u_GrassShadowFullRadius",
 							std::min(kGrassShadowFullRadius, fade_radius * 0.5f));
 
-						DrawParams per_draw = GrassDraw::MakeDrawParams(grass, scene->GetGrassWindTime());
+						DrawParams per_draw = GrassDraw::MakeDrawParams(grass);
 						/* 和可见着色一样按批提交。批比块大，盒外与远处的判定放宽了，
 						 * 多出来的株在着色器里按距离抽稀丢掉，不写深度 */
 						const auto& batches = grass.m_Field->GetBatches();

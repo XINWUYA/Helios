@@ -70,7 +70,7 @@ void main()
 
 	vec3 blade_normal;
 	const vec3 pos = ExpandGrassBlade(a_Position, base, right, up, face, a_InstanceParams,
-		GrassWindWeight(view_distance), u_WindTime, blade_normal);
+		GrassWindWeight(view_distance), u_WindPhase, blade_normal);
 	gl_Position = u_ViewProjectionMat * vec4(pos, 1.0f);
 
 	vert2frag.WorldNormal = blade_normal;

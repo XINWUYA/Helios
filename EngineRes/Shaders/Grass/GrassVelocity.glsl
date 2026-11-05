@@ -3,7 +3,7 @@
 
 /* 草的运动矢量：草没有逐实例矩阵，叶形是在顶点阶段展开的，
  * 所以当前帧与上一帧各展开一次——相机运动由两帧的视图投影体现，
- * 风摆动由两帧的风时间体现，两者合起来才是这东西真正在屏幕上的位移。 */
+ * 风摆动由两帧的风相位体现，两者合起来才是这东西真正在屏幕上的位移。 */
 layout(location = 0) in vec3 a_Position;
 
 layout(location = 5) in vec4 a_InstanceMatrix0;
@@ -17,8 +17,8 @@ layout(location = 9) in vec4 a_InstanceParams;
 
 /* 1 = 块底面（叶根下的草色垫层），0 = 叶片；与可见着色同名同值 */
 uniform int u_FlatPad = 0;              // @property
-/* 上一帧的风时间：重算叶片上一帧在哪 */
-uniform float u_PrevWindTime = 0.0f;
+/* 上一帧的风相位：重算叶片上一帧在哪 */
+uniform float u_PrevWindPhase = 0.0f;
 
 out vec4 v_CurClip;
 out vec4 v_PrevClip;
@@ -52,9 +52,9 @@ void main()
 		vec3 normal_cur;
 		vec3 normal_prev;
 		cur_pos = ExpandGrassBlade(a_Position, base, right, up, face, a_InstanceParams,
-			wind_weight, u_WindTime, normal_cur);
+			wind_weight, u_WindPhase, normal_cur);
 		prev_pos = ExpandGrassBlade(a_Position, base, right, up, face, a_InstanceParams,
-			wind_weight, u_PrevWindTime, normal_prev);
+			wind_weight, u_PrevWindPhase, normal_prev);
 	}
 
 	/* 位移用不带抖动的矩阵；光栅化照旧走带抖动的 */

@@ -128,11 +128,6 @@ namespace Helios
 		 * 场景里没有草地时尺寸为 0。 */
 		void GetPrimaryGrassArea(glm::vec2& area_min, glm::vec2& area_size) const;
 
-		/* 草地风场时间（秒，只增不减）：着色器按它推进行进波 */
-		[[nodiscard]] float GetGrassWindTime() const { return m_GrassWindTime; }
-		/* 上一帧的风场时间：草的运动矢量要用它重算叶片上一帧的位置 */
-		[[nodiscard]] float GetPrevGrassWindTime() const { return m_PrevGrassWindTime; }
-
 		/* 帧序号（每次 OnUpdate 递增）。同一帧里重复渲染时，跨帧状态据此只推进一次 */
 		[[nodiscard]] uint32_t GetFrameIndex() const { return m_FrameWorldStampNow; }
 
@@ -216,12 +211,6 @@ namespace Helios
 
 		/* 动画播放器：每帧在变换推送之前推进 */
 		AnimationRuntime m_AnimationRuntime;
-
-		/* 草地风场的累计时间：整场共用一份，各片草地的相位差由风向与位置决定 */
-		float m_GrassWindTime{ 0.0f };
-		/* 上一帧的风场时间（运动矢量的草地版本用） */
-		float m_PrevGrassWindTime{ 0.0f };
-
 
 		/* 脚本运行时：同样在变换推送之前 tick */
 		UniquePtr<ScriptRuntime> m_pScriptRuntime;

@@ -48,7 +48,7 @@ void main()
 	vec3 blade_normal;
 	const vec3 pos = ExpandGrassBlade(a_Position, a_InstanceMatrix3.xyz, a_InstanceMatrix0.xyz,
 		a_InstanceMatrix1.xyz, a_InstanceMatrix2.xyz, a_InstanceParams,
-		GrassWindWeight(length(a_InstanceMatrix3.xyz - u_GrassShadowEye)), u_WindTime, blade_normal);
+		GrassWindWeight(length(a_InstanceMatrix3.xyz - u_GrassShadowEye)), u_WindPhase, blade_normal);
 
 	const mat4 light_view_projection_mat = (u_CascadeIndex >= 0)
 		? u_LightViewProjectionMat[u_CascadeIndex]

@@ -449,6 +449,11 @@ namespace Helios
 		/* 叶片下面每块垫一张草色平面，叶子稀的地方不露底；贴着地形时本来就不画 */
 		bool m_DrawFlatUnderlay{ true };
 
+		/* 运行期：风相位逐帧累加（不序列化）。速度只决定累加多快，
+		 * 改 WindSpeed 时相位连续，草不会跟着跳 */
+		float m_WindPhase{ 0.0f };
+		float m_PrevWindPhase{ 0.0f };
+
 		/* 运行期：已经提示过"开了贴地但没找到地形"，避免每帧刷日志（不序列化） */
 		bool m_WarnedMissingTerrain{ false };
 

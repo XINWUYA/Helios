@@ -554,12 +554,14 @@ namespace Helios
 			terrain_component.m_Field->Rebuild(terrain_component, FrameWorldTransform(entity));
 		}
 
-		/* 草地：风场时间整场累加；叶片实例只在参数或变换变了才重建，
+		/* 草地：风相位逐片累加；叶片实例只在参数或变换变了才重建，
 		 * GPU 放置时在这里派发计算（还没开始画，命令缓冲借帧头那一份） */
-		m_PrevGrassWindTime = m_GrassWindTime;
-		m_GrassWindTime += delta_time;
 		for (auto [entity, grass_component] : m_Registry.view<GrassComponent>().each())
 		{
+			/* 相位由速度积分出来，不是直接乘时间：拖动 WindSpeed 只换推进快慢 */
+			grass_component.m_PrevWindPhase = grass_component.m_WindPhase;
+			grass_component.m_WindPhase += delta_time * grass_component.m_WindSpeed;
+
 			if (grass_component.GetMaterial() == nullptr)
 				continue;
 
