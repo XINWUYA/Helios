@@ -6,6 +6,7 @@
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/VirtualDevice/DeviceFrameBuffer.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
+#include "Helios/VirtualDevice/DeviceBuffer.h"
 
 namespace Helios
 {
@@ -19,6 +20,11 @@ namespace Helios
 	FrameGraphResourceHandleTyped<FrameGraphTexture> FrameGraphBuilder::CreateTexture(const std::string& name, const FrameGraphTexture::Descriptor& desc)
 	{
 		return m_FrameGraph.CreateResource<FrameGraphTexture>(name, desc);
+	}
+
+	FrameGraphResourceHandleTyped<FrameGraphBuffer> FrameGraphBuilder::CreateBuffer(const std::string& name, const FrameGraphBuffer::Descriptor& desc)
+	{
+		return m_FrameGraph.CreateResource<FrameGraphBuffer>(name, desc);
 	}
 
 	/* 使当前节点不会被优化掉，即使没有没使用到 */
@@ -225,6 +231,16 @@ namespace Helios
 		resource->GetResourceMutable().Texture = texture;
 		resource->GetResourceMutable().Imported = true;
 		return FrameGraphResourceHandleTyped<FrameGraphTexture>(AddResourceInternal(resource));
+	}
+
+	FrameGraphResourceHandleTyped<FrameGraphBuffer> FrameGraph::ImportBuffer(const std::string& name,
+		const SharedPtr<DeviceStorageBuffer>& buffer)
+	{
+		const FrameGraphBuffer::Descriptor desc{ buffer != nullptr ? buffer->GetDataSize() : 0u };
+		auto resource = CreateSharedPtr<Resource<FrameGraphBuffer>>(name, desc);
+		resource->GetResourceMutable().Buffer = buffer;
+		resource->GetResourceMutable().Imported = true;
+		return FrameGraphResourceHandleTyped<FrameGraphBuffer>(AddResourceInternal(resource));
 	}
 
 	/* 重置：黑板跟着清空，上一帧的句柄不能留到这一帧 */

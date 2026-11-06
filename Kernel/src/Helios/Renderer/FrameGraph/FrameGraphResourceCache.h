@@ -7,6 +7,7 @@
 #include "Helios/Common/Common.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/VirtualDevice/DeviceFrameBuffer.h"
+#include "Helios/VirtualDevice/DeviceBuffer.h"
 
 namespace Helios
 {
@@ -32,13 +33,21 @@ namespace Helios
 		 * 同槽位的那套附件纹理。 */
 		[[nodiscard]] SharedPtr<DeviceFrameBuffer> AcquireFrameBuffer(const std::string& name, const FrameBufferDesc& desc);
 
+		/* 从当前槽位的池里取一块同尺寸的空闲缓冲，没有就新建。
+		 * 取到的缓冲带着上一份内容，调用方必须整块重写。 */
+		[[nodiscard]] SharedPtr<DeviceStorageBuffer> AcquireStorageBuffer(const std::string& name, uint32_t size);
+		/* 归还缓冲：标记空闲，同帧后续 Pass 可以复用 */
+		void ReleaseStorageBuffer(uint32_t size, const SharedPtr<DeviceStorageBuffer>& buffer);
+
 		/* 统计（验证用）：实际发生的 GPU 资源创建 / 复用次数 */
 		struct Stats
 		{
 			uint32_t TextureCreations{ 0 };
 			uint32_t FrameBufferCreations{ 0 };
+			uint32_t StorageCreations{ 0 };
 			uint32_t TextureReuses{ 0 };
 			uint32_t FrameBufferReuses{ 0 };
+			uint32_t StorageReuses{ 0 };
 		};
 		[[nodiscard]] const Stats& GetStats() const { return m_Stats; }
 
@@ -75,6 +84,13 @@ namespace Helios
 			bool InUse{ false };
 		};
 
+		struct StorageEntry
+		{
+			SharedPtr<DeviceStorageBuffer> Buffer;
+			uint64_t LastUsedFrame{ 0 };
+			bool InUse{ false };
+		};
+
 		/* 当前帧使用的副本槽位 */
 		[[nodiscard]] uint32_t CurrentSlot() const
 		{
@@ -87,6 +103,8 @@ namespace Helios
 		/* 每个槽位一套：纹理按描述分池，FrameBuffer 按名字存 */
 		std::array<std::unordered_map<TextureKey, std::vector<TextureEntry>, TextureKeyHash>, kFrameCopyCount> m_TexturePools;
 		std::array<std::unordered_map<std::string, FrameBufferEntry>, kFrameCopyCount> m_FrameBuffers;
+		/* 计算缓冲按字节数分池 */
+		std::array<std::unordered_map<uint32_t, std::vector<StorageEntry>>, kFrameCopyCount> m_StoragePools;
 		uint64_t m_FrameCounter{ 0 };
 		Stats m_Stats;
 	};

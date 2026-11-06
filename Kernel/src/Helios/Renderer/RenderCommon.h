@@ -193,6 +193,16 @@ namespace Helios
 		Default = Sampleable | Uploadable
 	};
 
+	/* 计算缓冲的访问方式：依赖图据此判断谁是生产者、谁是消费者。
+	 * 与上面表示更新频率的 BufferUsage 是两回事。 */
+	enum class BufferAccess : uint8_t
+	{
+		None = 0x00,
+		Read = 0x01,
+		Write = 0x02,
+		Default = Read | Write
+	};
+
 	/* 是否为深度格式（含带深度分量的深度模板格式）。深度纹理只能按 depth2d 采样，
 	 * 与按浮点采样的普通纹理是两条路径（见 ShaderCompiler 的 @depth-texture 标注）。 */
 	[[nodiscard]] constexpr bool IsDepthFormat(TextureFormat format) noexcept
@@ -342,6 +352,8 @@ namespace Helios
 	struct EnableBitmaskOperators<TextureUsage> : public std::true_type {};
 	template<>
 	struct EnableBitmaskOperators<RenderBufferUsage> : public std::true_type {};
+	template<>
+	struct EnableBitmaskOperators<BufferAccess> : public std::true_type {};
 
 	/* 常量 */
 	static constexpr uint32_t MAX_COLOR_ATTACHMENT_NUM = 8;

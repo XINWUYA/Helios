@@ -47,6 +47,10 @@ namespace Helios
 		FrameGraphResourceHandleTyped<FrameGraphTexture> ImportTexture(const std::string& name,
 			const SharedPtr<class DeviceTexture>& texture);
 
+		/* 导入外部计算缓冲：规则同 ImportTexture。跨帧保留的剔除结果、调色板都走这条 */
+		FrameGraphResourceHandleTyped<FrameGraphBuffer> ImportBuffer(const std::string& name,
+			const SharedPtr<class DeviceStorageBuffer>& buffer);
+
 		/* 为RenderPass绑定输入资源 */
 		template<typename ResourceType>
 		void BindInputResource(const SharedPtr<RenderPassNode>& render_pass_node, FrameGraphResourceHandleTyped<ResourceType> handle, typename ResourceType::Usage usage = ResourceType::DefaultReadUsage)
@@ -159,6 +163,9 @@ namespace Helios
 
 		/* 根据描述创建一个纹理资源 */
 		FrameGraphResourceHandleTyped<FrameGraphTexture> CreateTexture(const std::string& name, const FrameGraphTexture::Descriptor& desc = {});
+
+		/* 根据描述创建一个计算缓冲资源 */
+		FrameGraphResourceHandleTyped<FrameGraphBuffer> CreateBuffer(const std::string& name, const FrameGraphBuffer::Descriptor& desc = {});
 
 		/* 为当前RenderPass绑定输入资源 */
 		template<typename ResourceType>

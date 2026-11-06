@@ -3,6 +3,29 @@
 
 namespace Helios
 {
+	namespace
+	{
+		/* 池按帧号淘汰并复位占用标记：纹理与计算缓冲同一套规则 */
+		template<typename Pools, typename Expired>
+		void ExpirePools(Pools& pools, Expired expired)
+		{
+			for (auto& pool : pools)
+			{
+				for (auto iter = pool.begin(); iter != pool.end();)
+				{
+					auto& entries = iter->second;
+					entries.erase(std::remove_if(entries.begin(), entries.end(),
+						[&expired](const auto& entry) { return expired(entry.LastUsedFrame); }), entries.end());
+
+					for (auto& entry : entries)
+						entry.InUse = false;
+
+					iter = entries.empty() ? pool.erase(iter) : std::next(iter);
+				}
+			}
+		}
+	}
+
 	FrameGraphResourceCache::TextureKey::TextureKey(const TextureDesc& desc)
 		: Width(desc.Width), Height(desc.Height), Depth(desc.Depth), MipLevels(desc.MipLevels),
 		Samples(desc.Samples), Format(desc.Format), Sampler(desc.SamplerType), Usage(desc.Usage)
@@ -45,19 +68,8 @@ namespace Helios
 			return last_used_frame + kFrameCopyCount + 1 <= m_FrameCounter;
 		};
 
-		for (auto& pools : m_TexturePools)
-		{
-			for (auto pool_iter = pools.begin(); pool_iter != pools.end();)
-			{
-				auto& entries = pool_iter->second;
-				entries.erase(std::remove_if(entries.begin(), entries.end(),
-					[&expired](const TextureEntry& entry) { return expired(entry.LastUsedFrame); }), entries.end());
-				for (auto& entry : entries)
-					entry.InUse = false;
-
-				pool_iter = entries.empty() ? pools.erase(pool_iter) : std::next(pool_iter);
-			}
-		}
+		ExpirePools(m_TexturePools, expired);
+		ExpirePools(m_StoragePools, expired);
 
 		for (auto& frame_buffers : m_FrameBuffers)
 		{
@@ -113,6 +125,51 @@ namespace Helios
 		for (auto& entry : pool_iter->second)
 		{
 			if (entry.Texture == texture)
+			{
+				entry.InUse = false;
+				return;
+			}
+		}
+	}
+
+	/* 取当前槽位池里第一块同尺寸的空闲缓冲（按插入顺序，同一张图每帧拿到的分配结果稳定） */
+	SharedPtr<DeviceStorageBuffer> FrameGraphResourceCache::AcquireStorageBuffer(const std::string& name, uint32_t size)
+	{
+		auto& entries = m_StoragePools[CurrentSlot()][size];
+		for (auto& entry : entries)
+		{
+			if (entry.InUse)
+				continue;
+
+			entry.InUse = true;
+			entry.LastUsedFrame = m_FrameCounter;
+			++m_Stats.StorageReuses;
+			return entry.Buffer;
+		}
+
+		auto buffer = DeviceStorageBuffer::Create(name, size);
+		if (buffer)
+		{
+			entries.push_back(StorageEntry{ buffer, m_FrameCounter, true });
+			++m_Stats.StorageCreations;
+		}
+		return buffer;
+	}
+
+	/* 归还缓冲 */
+	void FrameGraphResourceCache::ReleaseStorageBuffer(uint32_t size, const SharedPtr<DeviceStorageBuffer>& buffer)
+	{
+		if (!buffer)
+			return;
+
+		auto& pools = m_StoragePools[CurrentSlot()];
+		const auto pool_iter = pools.find(size);
+		if (pool_iter == pools.end())
+			return;
+
+		for (auto& entry : pool_iter->second)
+		{
+			if (entry.Buffer == buffer)
 			{
 				entry.InUse = false;
 				return;

@@ -4,6 +4,7 @@
 #include "Resource.h"
 #include "RenderPassNode.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
+#include "Helios/VirtualDevice/DeviceBuffer.h"
 
 namespace Helios
 {
@@ -87,5 +88,39 @@ namespace Helios
 		}
 
 		Texture = nullptr;
+	}
+
+	/* 创建 */
+	void FrameGraphBuffer::Create(const std::string& name, const Descriptor& desc, Usage /*usage*/, FrameGraphResourceCache* cache)
+	{
+		PROFILE_FUNCTION();
+
+		/* 导入的缓冲由导入方持有 */
+		if (Imported)
+			return;
+
+		/* 先从池里取同尺寸的空闲缓冲，池子分配失败时退回直接分配 */
+		if (cache)
+		{
+			Buffer = cache->AcquireStorageBuffer(name, desc.Size);
+			if (Buffer)
+				return;
+		}
+
+		Buffer = DeviceStorageBuffer::Create(name, desc.Size);
+	}
+
+	/* 销毁 */
+	void FrameGraphBuffer::Destroy(const std::string& /*name*/, const Descriptor& desc, Usage /*usage*/, FrameGraphResourceCache* cache)
+	{
+		PROFILE_FUNCTION();
+
+		if (Imported)
+			return;
+
+		if (cache && Buffer)
+			cache->ReleaseStorageBuffer(desc.Size, Buffer);
+
+		Buffer = nullptr;
 	}
 }
