@@ -16,6 +16,7 @@
 #include "Helios/Renderer/Frustum.h"
 #include "Helios/Renderer/RenderAPI.h"
 #include "Helios/Renderer/Renderer.h"
+#include "Helios/Renderer/RenderPasses/TerrainPasses.h"
 #include "Helios/VirtualDevice/DeviceFrameBuffer.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
@@ -1324,7 +1325,7 @@ namespace Helios
 		params.Extra = glm::vec4(m_Extent.x, static_cast<float>(m_MaxNodeLevel), static_cast<float>(kMaxPatches),
 			m_Extent.y);
 
-		const bool dispatched = Renderer::DispatchTerrainSelect(resources.Nodes, resources.Patches,
+		const bool dispatched = TerrainDraw::DispatchSelect(resources.Nodes, resources.Patches,
 			resources.Args, &params, static_cast<uint32_t>(sizeof(params)),
 			static_cast<uint32_t>(m_NodeTable.size()));
 		if (dispatched)

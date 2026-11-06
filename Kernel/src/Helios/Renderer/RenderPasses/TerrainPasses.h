@@ -8,6 +8,7 @@
 
 namespace Helios
 {
+	class DeviceStorageBuffer;
 	class Material;
 	class RenderView;
 	class Scene;
@@ -23,6 +24,14 @@ namespace Helios
 		 * 必须排在地形绘制之前注册，也要排在所有渲染 Pass 之前 —— 计算派发会把
 		 * 当前渲染编码器收掉，夹在渲染通道中间会把它们切碎 */
 		HELIOS_API void AddSelectPass(RenderView& view);
+
+		/* 地形 patch 的 GPU 选择：按 CPU 四叉树那套判据逐节点测视锥与 LOD 比例，
+		 * 选中的节点压成 patch 实例，顺带写好间接绘制参数与每边的 morph 掩码。
+		 * 节点表走 1 号槽，压实实例在 2 号、间接参数在 3 号，参数块在 4 号。 */
+		HELIOS_API bool DispatchSelect(const SharedPtr<DeviceStorageBuffer>& nodes,
+			const SharedPtr<DeviceStorageBuffer>& patches,
+			const SharedPtr<DeviceStorageBuffer>& args,
+			const void* param_data, uint32_t param_size, uint32_t node_count);
 
 		/* 延迟管线：在 G-Buffer pass 内、常规对象画完之后调用，附件已绑好 */
 		HELIOS_API void SubmitGBuffer(RenderView& view, Scene& scene);

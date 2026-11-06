@@ -157,11 +157,23 @@ namespace Helios
 		static void Clear(Scene& scene, entt::entity entity);
 
 	private:
+		/* GPU 蒙皮的一整套缓冲：绑定顶点 / 权重（8 float 每顶点）/ 上屏顶点 / 调色板 */
+		struct GpuSegment
+		{
+			SharedPtr<DeviceStorageBuffer> BindVertices;
+			SharedPtr<DeviceStorageBuffer> Weights;
+			SharedPtr<DeviceStorageBuffer> Skinned;
+			uint32_t VertexCount{ 0 };
+		};
+
 		/* 单个实体：解析关节、算调色板、重写动态顶点 */
 		void UpdatePose(Scene& scene, entt::entity owner);
 
 		/* CPU 蒙皮：按当前调色板重算一遍动态顶点并上传 */
 		void SkinOnCpu();
+
+		/* GPU 蒙皮：派发一次把这一段的顶点按调色板刷成当前姿势，后端不支持计算时返回 false */
+		bool DispatchSkin(const GpuSegment& segment);
 
 		/* 关节：从模型实体往下整棵子树按名字对上关节表 */
 		[[nodiscard]] std::vector<entt::entity> ResolveJoints(Scene& scene, entt::entity owner) const;
@@ -181,14 +193,6 @@ namespace Helios
 		/* 自动建关节只尝试一次（用户删掉关节后不再偷偷建回来） */
 		bool m_AutoBindTried{ false };
 
-		/* GPU 蒙皮的一整套缓冲：绑定顶点 / 权重（8 float 每顶点）/ 上屏顶点 / 调色板 */
-		struct GpuSegment
-		{
-			SharedPtr<DeviceStorageBuffer> BindVertices;
-			SharedPtr<DeviceStorageBuffer> Weights;
-			SharedPtr<DeviceStorageBuffer> Skinned;
-			uint32_t VertexCount{ 0 };
-		};
 		std::vector<GpuSegment> m_GpuSegments;
 		SharedPtr<DeviceStorageBuffer> m_GpuPalette;
 		bool m_GpuReady{ false };

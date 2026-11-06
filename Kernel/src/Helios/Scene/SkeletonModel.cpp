@@ -5,10 +5,13 @@
 #include "Components.h"
 #include "Mesh.h"
 #include "Model.h"
+#include "Helios/Core/AssetManager.h"
 #include "Helios/Renderer/Renderer.h"
+#include "Helios/Renderer/RenderAPI.h"
 #include "Helios/Renderer/RenderView.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
+#include "Helios/VirtualDevice/DeviceShader.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 #include <fstream>
 #include <functional>
@@ -661,8 +664,7 @@ namespace Helios
 
 		for (const GpuSegment& segment : m_GpuSegments)
 		{
-			if (!Renderer::DispatchSkin(m_GpuPalette, segment.BindVertices, segment.Weights,
-				segment.Skinned, segment.VertexCount))
+			if (!DispatchSkin(segment))
 			{
 				/* 后端不支持 / 着色器没编过：这一帧退回 CPU，顶点不至于停在旧姿势 */
 				SkinOnCpu();
@@ -671,6 +673,35 @@ namespace Helios
 		}
 
 		return true;
+	}
+
+	/* GPU 蒙皮：一次派发把一段顶点按调色板刷成当前姿势。
+	 * 绑定点跟 GPUSkin.glsl 的声明一致：0 调色板、1 绑定顶点、2 权重、3 上屏顶点，顶点数常量块在 4 号 */
+	bool SkeletonModel::DispatchSkin(const GpuSegment& segment)
+	{
+		const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI();
+		if (api == nullptr || segment.VertexCount == 0 || !api->SupportsCompute()
+			|| m_GpuPalette == nullptr || segment.BindVertices == nullptr
+			|| segment.Weights == nullptr || segment.Skinned == nullptr)
+			return false;
+
+		/* 确认后端能跑计算，再构造壳；Get 才真正加载 */
+		static BuiltinAsset<DeviceShader> s_skin_shader("Shaders/Compute/GPUSkin.glsl");
+		const SharedPtr<DeviceShader> shader = s_skin_shader.Get();
+		if (shader == nullptr || !shader->IsCompute())
+			return false;
+
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
+			{ 0, m_GpuPalette },
+			{ 1, segment.BindVertices },
+			{ 2, segment.Weights },
+			{ 3, segment.Skinned },
+		};
+
+		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
+		const uint32_t group_count = (segment.VertexCount + group_size - 1) / group_size;
+		return api->DispatchCompute(shader, buffers, 4, &segment.VertexCount,
+			static_cast<uint32_t>(sizeof(segment.VertexCount)), group_count);
 	}
 
 	/* CPU 蒙皮：按当前调色板把每个顶点算回模型空间，再上传到动态顶点缓冲 */

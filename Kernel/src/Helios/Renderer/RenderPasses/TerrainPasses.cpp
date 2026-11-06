@@ -429,6 +429,30 @@ namespace Helios::TerrainDraw
 		return false;
 	}
 
+	/* 节点表是输入，压实实例与间接参数是输出，参数块走 4 号槽 */
+	bool DispatchSelect(const SharedPtr<DeviceStorageBuffer>& nodes,
+		const SharedPtr<DeviceStorageBuffer>& patches,
+		const SharedPtr<DeviceStorageBuffer>& args,
+		const void* param_data, uint32_t param_size, uint32_t node_count)
+	{
+		const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI();
+		if (api == nullptr || nodes == nullptr || patches == nullptr || args == nullptr
+			|| node_count == 0 || !api->SupportsCompute())
+			return false;
+
+		static BuiltinAsset<DeviceShader> s_select_shader("Shaders/Terrain/TerrainSelect.glsl");
+		const SharedPtr<DeviceShader> shader = s_select_shader.Get();
+		if (shader == nullptr || !shader->IsCompute())
+			return false;
+
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
+			{ 1, nodes }, { 2, patches }, { 3, args },
+		};
+		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
+		const uint32_t group_count = (node_count + group_size - 1) / group_size;
+		return api->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);
+	}
+
 	void AddSelectPass(RenderView& view)
 	{
 		if (!TerrainField::IsGpuSelectionEnabled())

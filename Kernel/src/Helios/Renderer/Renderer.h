@@ -42,49 +42,6 @@ namespace Helios
 		/* 填充天空常量：日月方向、大气系数与曝光，天空类着色器只读它 */
 		static void SetSkyUniforms(const Sky::SkyState& state);
 
-		/* 草地间接绘制：先把每段参数块重置成「N 个索引 / 0 实例」，顺带清掉可见块计数。
-		 * 段数与每段占几个 uint 由调用方给，剔除着色器按同一份布局发号 */
-		static bool DispatchGrassArgsReset(const SharedPtr<class DeviceStorageBuffer>& args,
-			const SharedPtr<class DeviceStorageBuffer>& chunk_list,
-			uint32_t index_count, uint32_t segments, uint32_t args_stride);
-		/* 块级剔除：每个块测一次光源盒，通过的压进可见块表，
-		 * 顺带把逐株剔除的间接派发参数写好（由最后一个完成的线程写） */
-		static bool DispatchGrassChunkCull(const SharedPtr<class DeviceStorageBuffer>& chunk_bounds,
-			const SharedPtr<class DeviceStorageBuffer>& chunk_list,
-			const SharedPtr<class DeviceStorageBuffer>& args,
-			const void* param_data, uint32_t param_size, uint32_t thread_count);
-		/* 草地 GPU 剔除 + 实例压实：只扫可见块表里的株，通过的抄进目标缓冲。
-		 * dispatch_args 非空时按可见块数间接派发，后端不支持就退回按上界派发
-		 * （fallback_instance_count 是全体块的株数上界） */
-		static bool DispatchGrassCull(const SharedPtr<class DeviceStorageBuffer>& source,
-			const SharedPtr<class DeviceStorageBuffer>& target,
-			const SharedPtr<class DeviceStorageBuffer>& args,
-			const SharedPtr<class DeviceStorageBuffer>& chunk_list,
-			const void* param_data, uint32_t param_size, uint32_t fallback_instance_count,
-			const SharedPtr<class DeviceStorageBuffer>& dispatch_args = nullptr,
-			uint32_t dispatch_offset = 0);
-		/* 全量剔除：不压块表，每个实例自己测视锥。块掩码关掉时走这条 */
-		static bool DispatchGrassCullFull(const SharedPtr<class DeviceStorageBuffer>& source,
-			const SharedPtr<class DeviceStorageBuffer>& target,
-			const SharedPtr<class DeviceStorageBuffer>& args,
-			const SharedPtr<class DeviceStorageBuffer>& chunk_bounds,
-			const void* param_data, uint32_t param_size, uint32_t instance_count);
-
-		/* 地形 patch 的 GPU 选择：节点表进、压实的 patch 实例与间接参数出。
-		 * 参数块与 TerrainSelect.glsl 的 SelectBlock 对应；运行期不支持计算着色器时返回 false */
-		static bool DispatchTerrainSelect(const SharedPtr<class DeviceStorageBuffer>& nodes,
-			const SharedPtr<class DeviceStorageBuffer>& patches,
-			const SharedPtr<class DeviceStorageBuffer>& args,
-			const void* param_data, uint32_t param_size, uint32_t node_count);
-
-		/* 草地 GPU 放置：一次派发把整片草地的叶片实例算出来。运行期不支持计算着色器时返回 false */
-		/* 高度、块表、密度遮罩分别绑到 2、3、5 号槽；无遮罩用哑缓冲。 */
-		static bool DispatchGrassPlacement(const SharedPtr<class DeviceStorageBuffer>& instances,
-			const void* param_data, uint32_t param_size, uint32_t instance_count,
-			const SharedPtr<class DeviceStorageBuffer>& terrain_heights,
-			const SharedPtr<class DeviceStorageBuffer>& chunk_indices,
-			const SharedPtr<class DeviceStorageBuffer>& density_mask);
-
 		/* per_draw：单次绘制的覆盖参数（IBL 这类"每次绘制不同"的绑定）。
 	 * 只写当前绑定的 Shader 与纹理、不落材质对象 —— 共享材质因此保持只读。 */
 	static void Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
@@ -150,14 +107,6 @@ namespace Helios
 		static SharedPtr<Material> CreateFullScreenMaterial(const SharedPtr<DeviceShader>& shader, bool additive = false);
 
 		static void FillObjectUniformBuffer(const VisibleMeshObject& mesh_object);
-
-		/* GPU 蒙皮：一次 dispatch 把绑定顶点按调色板写进上屏缓冲。
-		 * 后端支持计算着色器（Metal / GL 4.3+）才成立；返回 false 时调用方退回 CPU 蒙皮。 */
-		static bool DispatchSkin(const SharedPtr<class DeviceStorageBuffer>& palette,
-			const SharedPtr<class DeviceStorageBuffer>& bind_vertices,
-			const SharedPtr<class DeviceStorageBuffer>& weights,
-			const SharedPtr<class DeviceStorageBuffer>& skinned,
-			uint32_t vertex_count);
 
 		/* 填充光照 UniformBuffer：light_vp_mats = 级联的光照视图投影矩阵数组，cascade_splits = 各级联
 		 * 的视图空间分割距离（远边界），cascade_depth_spans = 深度跨度（折算阴影偏移用，可空）。

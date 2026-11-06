@@ -9,6 +9,7 @@
 #include "Components.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderPasses/GrassDrawParams.h"
+#include "Helios/Renderer/RenderPasses/GrassPasses.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 
@@ -987,7 +988,7 @@ namespace Helios
 			params.TerrainGrowth = glm::vec4(m_TerrainGrowth, 0.0f);
 		}
 
-		if (Renderer::DispatchGrassPlacement(m_InstanceStorage, &params, sizeof(params), m_InstanceCount,
+		if (GrassDraw::DispatchPlacement(m_InstanceStorage, &params, sizeof(params), m_InstanceCount,
 			terrain_heights, m_ChunkIndexBuffer, m_DensityMaskStorage))
 			m_GpuDirty = false;
 	}
@@ -1176,16 +1177,16 @@ namespace Helios
 			glm::uvec4 Segments{ 0u };
 		};
 
-		if (!Renderer::DispatchGrassArgsReset(slot.Args, slot.ChunkList, kBladeIndexCount, segments,
+		if (!GrassDraw::DispatchArgsReset(slot.Args, slot.ChunkList, kBladeIndexCount, segments,
 			kIndirectArgsStride))
 			return;
 
 		if (chunk_mask)
 		{
-			if (!Renderer::DispatchGrassChunkCull(m_ChunkBoundsBuffer, slot.ChunkList, slot.Args,
+			if (!GrassDraw::DispatchChunkCull(m_ChunkBoundsBuffer, slot.ChunkList, slot.Args,
 				&chunk_params, sizeof(chunk_params), chunk_threads))
 				return;
-			if (!Renderer::DispatchGrassCull(m_InstanceStorage, slot.Storage, slot.Args, slot.ChunkList,
+			if (!GrassDraw::DispatchCull(m_InstanceStorage, slot.Storage, slot.Args, slot.ChunkList,
 				&params, sizeof(params), chunk_count * m_PerChunk, slot.Args,
 				(segments * kIndirectArgsStride + 4u) * static_cast<uint32_t>(sizeof(uint32_t))))
 				return;
@@ -1199,7 +1200,7 @@ namespace Helios
 			full_params.Extra = params.Extra;
 			full_params.Camera = params.Camera;
 			full_params.Segments = params.Segments;
-			if (!Renderer::DispatchGrassCullFull(m_InstanceStorage, slot.Storage, slot.Args,
+			if (!GrassDraw::DispatchCullFull(m_InstanceStorage, slot.Storage, slot.Args,
 				m_ChunkBoundsBuffer, &full_params, sizeof(full_params), m_InstanceCount))
 				return;
 		}
