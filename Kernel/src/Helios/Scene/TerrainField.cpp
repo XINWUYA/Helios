@@ -1248,8 +1248,7 @@ namespace Helios
 		return nullptr;
 	}
 
-	bool TerrainField::PrepareSelection(const glm::vec4 (&planes)[6], const glm::vec3& eye, uint32_t frame,
-		const RenderView* view)
+	bool TerrainField::AcquireSelectionResources(const RenderView* view, SelectionResources& out)
 	{
 		if (!s_GpuSelection || view == nullptr || m_NodeTable.empty() || m_HeightMap == nullptr)
 			return false;
@@ -1301,6 +1300,19 @@ namespace Helios
 		const uint32_t args[5] = { kPatchIndexCount, 0u, 0u, 0u, 0u };
 		slot->Args->SetData(args, sizeof(args));
 
+		out.Nodes = m_NodeStorage;
+		out.Patches = slot->Storage;
+		out.Args = slot->Args;
+		return true;
+	}
+
+	bool TerrainField::DispatchSelection(const SelectionResources& resources, const glm::vec4 (&planes)[6],
+		const glm::vec3& eye, uint32_t frame, const RenderView* view)
+	{
+		if (view == nullptr || m_NodeTable.empty()
+			|| resources.Nodes == nullptr || resources.Patches == nullptr || resources.Args == nullptr)
+			return false;
+
 		TerrainSelectParams params;
 		params.Model = m_World;
 		for (int index = 0; index < 6; ++index)
@@ -1312,11 +1324,14 @@ namespace Helios
 		params.Extra = glm::vec4(m_Extent.x, static_cast<float>(m_MaxNodeLevel), static_cast<float>(kMaxPatches),
 			m_Extent.y);
 
-		const bool dispatched = Renderer::DispatchTerrainSelect(m_NodeStorage, slot->Storage,
-			slot->Args, &params, static_cast<uint32_t>(sizeof(params)),
+		const bool dispatched = Renderer::DispatchTerrainSelect(resources.Nodes, resources.Patches,
+			resources.Args, &params, static_cast<uint32_t>(sizeof(params)),
 			static_cast<uint32_t>(m_NodeTable.size()));
 		if (dispatched)
-			slot->Frame = frame;
+		{
+			if (SelectionSlot* slot = FindSelection(view))
+				slot->Frame = frame;
+		}
 		return dispatched;
 	}
 

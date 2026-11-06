@@ -262,10 +262,6 @@ namespace Helios
 		if (const auto grass_scene = view->GetOwnerScene(); grass_scene != nullptr)
 			grass_scene->PrepareGrassIndirect(*view);
 
-		/* 地形 GPU 选择：同一个理由，计算派发会把渲染编码器收掉，不能放在通道里 */
-		if (const auto terrain_scene = view->GetOwnerScene(); terrain_scene != nullptr)
-			terrain_scene->PrepareTerrainSelection(*view);
-
 		/* 草地的世界范围：地面材质靠它在远处接管草色 */
 		if (const auto grass_scene = view->GetOwnerScene(); grass_scene != nullptr)
 		{

@@ -416,37 +416,6 @@ namespace Helios
 		}
 	}
 
-	void Scene::PrepareTerrainSelection(const RenderView& view)
-	{
-		if (!TerrainField::IsGpuSelectionEnabled())
-			return;
-
-		const Camera* camera = view.GetCullingCamera();
-		if (camera == nullptr)
-			return;
-
-		const Frustum frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
-		const glm::vec3 eye = camera->GetPosition();
-		for (auto [entity, terrain] : m_Registry.view<TerrainComponent>().each())
-		{
-			if (terrain.GetMaterial() == nullptr)
-				continue;
-			if (!IsEntityInView(entity, view.GetCullingMask()))
-				continue;
-
-			if (terrain.m_Field == nullptr)
-				terrain.m_Field = CreateSharedPtr<TerrainField>();
-
-			/* 高度图 / 节点表要与这一帧的变换对齐，之后提交时只查帧号 */
-			terrain.m_Field->Rebuild(terrain, GetRenderWorldTransform(entity));
-			if (terrain.m_Field->IsEmpty())
-				continue;
-
-			/* GPU 选择的结果按视图分开存：多视图同帧各画各的，互不覆盖 */
-			terrain.m_Field->PrepareSelection(frustum.Planes, eye, GetFrameIndex(), &view);
-		}
-	}
-
 	void Scene::GetPrimaryGrassArea(glm::vec2& area_min, glm::vec2& area_size) const
 	{
 		area_min = glm::vec2(0.0f);

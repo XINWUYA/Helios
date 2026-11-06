@@ -232,10 +232,6 @@ namespace Helios
 						const auto render_pass_info = resources.GetPassRenderTarget();
 						render_view.EmplacePassFrameBuffer("GBufferPass", render_pass_info);
 
-						/* 地形虚拟纹理：先把本帧缺的页烘进页池，再绑主通道（烘焙要切帧缓冲） */
-						if (const auto scene = render_view.GetOwnerScene())
-							TerrainDraw::BakeVirtualTextures(render_view, *scene);
-
 						render_pass_info->Bind();
 						{
 							Renderer::GetRenderAPI()->Clear();

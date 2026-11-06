@@ -41,13 +41,8 @@ namespace Helios
 		/* 高度数据重建过：页表清空，页池不重建（下一帧重新烘） */
 		void Reset();
 
-		/* 按本帧 patch 覆盖挑页：缺页按相机距离从近到远排，取预算内的那批。
+		/* 按视锥挑页：页网格与视锥求交，选出屏幕上可能用到的那一片。
 		 * frame 是场景帧号：同一帧里各视图用到的页都不会被挤掉 */
-		void Prepare(const TerrainField& field, const TerrainPatch* patches, size_t patch_count,
-			const glm::vec3& eye, uint32_t frame);
-
-		/* 按视锥挑页：patch 在 GPU 上选的时候 CPU 没有 patch 列表，
-		 * 改用页网格与视锥求交，覆盖范围与按 patch 挑是同一片可见区域 */
 		void PrepareFrustum(const TerrainField& field, const glm::vec4 (&planes)[6], const glm::vec3& eye,
 			uint32_t frame);
 

@@ -154,12 +154,22 @@ namespace Helios
 		[[nodiscard]] TerrainVirtualTexture& GetVirtualTexture() { return m_VirtualTexture; }
 		[[nodiscard]] const TerrainVirtualTexture& GetVirtualTexture() const { return m_VirtualTexture; }
 
-		/* GPU 选择：计算着色器按同一套四叉树判据选 patch 并压实，顺带写好间接参数。
-		 * 要在视图开始画之前派发（计算编码器会把当前渲染编码器收掉）。
+		/* GPU 选择要用的三块缓冲：节点表是输入，压实实例与间接参数是输出。
+		 * 建图阶段拿它去绑依赖，执行阶段再派发。 */
+		struct SelectionResources
+		{
+			SharedPtr<class DeviceStorageBuffer> Nodes;
+			SharedPtr<class DeviceStorageBuffer> Patches;
+			SharedPtr<class DeviceStorageBuffer> Args;
+		};
+
+		/* 建图阶段：节点表、压实缓冲、参数块都准备好，句柄可以直接绑进图。
 		 * 一帧可能有多个视图（编辑器 / 游戏 / 工具相机），每块地形按视图各存一份结果，
-		 * 否则后画的视图会把先准备的覆盖掉。不支持计算或没开开关时返回 false */
-		bool PrepareSelection(const glm::vec4 (&planes)[6], const glm::vec3& eye, uint32_t frame,
-			const RenderView* view);
+		 * 否则后画的视图会把先准备的覆盖掉。没开开关或不支持计算时返回 false */
+		bool AcquireSelectionResources(const RenderView* view, SelectionResources& out);
+		/* 执行阶段：用上面准备好的缓冲派发。成功才记成这一帧已选 */
+		bool DispatchSelection(const SelectionResources& resources, const glm::vec4 (&planes)[6],
+			const glm::vec3& eye, uint32_t frame, const RenderView* view);
 		/* 这个视图的这一帧已经由 GPU 选过 patch，提交时直接走间接绘制 */
 		[[nodiscard]] bool HasSelection(uint32_t frame, const RenderView* view) const;
 		/* GPU 选完的实例缓冲与间接参数：找不到该视图的选择结果时为空 */

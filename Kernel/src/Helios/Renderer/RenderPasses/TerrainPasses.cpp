@@ -3,6 +3,7 @@
 
 #include <Helios/Core/AssetManager.h>
 #include <Helios/Renderer/Frustum.h>
+#include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderPasses/DebugViewPasses.h>
 #include <Helios/Renderer/RenderView.h>
@@ -428,19 +429,79 @@ namespace Helios::TerrainDraw
 		return false;
 	}
 
-	void SubmitGBuffer(RenderView& view, Scene& scene)
+	void AddSelectPass(RenderView& view)
 	{
-		const FrameCache& frame = EnsureVisibleFrame(view, scene);
-		SubmitVisibleBatch(frame, false, DebugViewMode::None);
-	}
-
-	void BakeVirtualTextures(RenderView& view, Scene& scene)
-	{
-		if (!TerrainVirtualTexture::IsEnabled())
+		if (!TerrainField::IsGpuSelectionEnabled())
 			return;
 
-		const Camera* camera = view.GetCullingCamera();
-		if (camera == nullptr)
+		const SharedPtr<Scene> scene = view.GetOwnerScene();
+		if (scene == nullptr || view.GetCullingCamera() == nullptr)
+			return;
+
+		struct SelectPassData
+		{
+			TerrainField* Field{ nullptr };
+			TerrainField::SelectionResources Resources;
+		};
+
+		for (auto [entity, terrain] : scene->GetRegistry().view<TerrainComponent>().each())
+		{
+			if (terrain.GetMaterial() == nullptr || !scene->IsEntityInView(entity, view.GetCullingMask()))
+				continue;
+			if (terrain.m_Field == nullptr)
+				terrain.m_Field = CreateSharedPtr<TerrainField>();
+
+			/* 高度图与节点表要和这一帧的变换对齐，后面提交只查帧号 */
+			terrain.m_Field->Rebuild(terrain, scene->GetRenderWorldTransform(entity));
+			if (terrain.m_Field->IsEmpty())
+				continue;
+
+			TerrainField::SelectionResources resources;
+			if (!terrain.m_Field->AcquireSelectionResources(&view, resources))
+				continue;
+
+			const std::string pass_name = "TerrainSelectPass_" + std::to_string(static_cast<uint32_t>(entity));
+			TerrainField* field = terrain.m_Field.get();
+
+			view.GetFrameGraph()->AddPass<SelectPassData>(pass_name,
+				[&view, field, resources, pass_name](FrameGraphBuilder& builder, SelectPassData& data)
+				{
+					data.Field = field;
+					data.Resources = resources;
+
+					/* 节点表是输入，压实实例与间接参数是输出。三块都是跨帧保留的，
+					 * 用 Import 进来，图只记录谁写它们，帧末不回收 */
+					const SharedPtr<FrameGraph> frame_graph = view.GetFrameGraph();
+					const auto nodes = frame_graph->ImportBuffer(pass_name + "_Nodes", resources.Nodes);
+					const auto patches = frame_graph->ImportBuffer(pass_name + "_Patches", resources.Patches);
+					const auto args = frame_graph->ImportBuffer(pass_name + "_Args", resources.Args);
+
+					builder.BindInputResource(nodes, BufferAccess::Read);
+					builder.BindOutputResource(patches, BufferAccess::Write);
+					builder.BindOutputResource(args, BufferAccess::Write);
+
+					/* 绘制端还没把这几块缓冲绑成输入，先靠保活让 Pass 留下。
+					 * 计算 Pass 不绑默认渲染目标 */
+					builder.AsSideEffect();
+					builder.AsComputePass();
+				},
+				[&view, scene](const FrameGraphResources&, const SelectPassData& data)
+				{
+					const Camera* camera = view.GetCullingCamera();
+					if (camera == nullptr || data.Field == nullptr)
+						return;
+
+					const Frustum frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
+					data.Field->DispatchSelection(data.Resources, frustum.Planes, camera->GetPosition(),
+						scene->GetFrameIndex(), &view);
+				});
+		}
+	}
+
+	void BakeVirtualTextures(RenderView& view, Scene& scene, const TerrainField* only_field,
+		const SharedPtr<DeviceFrameBuffer>& page_frame)
+	{
+		if (!TerrainVirtualTexture::IsEnabled())
 			return;
 
 		const SharedPtr<Material> material = GetVirtualTextureBakeMaterial();
@@ -452,11 +513,10 @@ namespace Helios::TerrainDraw
 		if (frame.Batches.empty())
 			return;
 
-		const glm::vec3 eye = camera->GetPosition();
-		/* patch 在 GPU 上选的时候 CPU 没有覆盖列表，页改按视锥挑 */
-		const Frustum bake_frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
 		for (const TerrainBatch& batch : frame.Batches)
 		{
+			if (only_field != nullptr && batch.Field != only_field)
+				continue;
 			if (batch.Component == nullptr || batch.Field == nullptr)
 				continue;
 			/* GPU 选的那批 patch 数量在参数块里，CPU 侧 Count 是 0 */
@@ -493,16 +553,14 @@ namespace Helios::TerrainDraw
 				}
 			}
 
-			const uint32_t frame_index = scene.GetFrameIndex();
-			if (batch.Gpu)
-				virtual_texture.PrepareFrustum(*batch.Field, bake_frustum.Planes, eye, frame_index);
-			else
-				virtual_texture.Prepare(*batch.Field, frame.Patches.data() + batch.First, batch.Count, eye,
-					frame_index);
+			/* 缺页在建图阶段就挑好了，这里只负责烘 */
 			if (!virtual_texture.HasPending())
 				continue;
 
-			const SharedPtr<DeviceFrameBuffer>& frame_buffer = virtual_texture.GetBakeFrameBuffer();
+			/* 页池的一层当颜色附件：图里给了帧缓冲就用它的（页池已作为图资源），
+			 * 否则退回 VT 自己建的那份 */
+			const SharedPtr<DeviceFrameBuffer>& frame_buffer = page_frame != nullptr
+				? page_frame : virtual_texture.GetBakeFrameBuffer();
 			if (frame_buffer == nullptr)
 				continue;
 
@@ -534,6 +592,82 @@ namespace Helios::TerrainDraw
 			}
 
 			virtual_texture.Commit();
+		}
+	}
+
+	void SubmitGBuffer(RenderView& view, Scene& scene)
+	{
+		const FrameCache& frame = EnsureVisibleFrame(view, scene);
+		SubmitVisibleBatch(frame, false, DebugViewMode::None);
+	}
+
+	void AddVirtualTextureBakePass(RenderView& view)
+	{
+		if (!TerrainVirtualTexture::IsEnabled())
+			return;
+
+		const SharedPtr<Scene> scene = view.GetOwnerScene();
+		const Camera* camera = view.GetCullingCamera();
+		if (scene == nullptr || camera == nullptr)
+			return;
+
+		struct BakePassData
+		{
+			TerrainField* Field{ nullptr };
+		};
+
+		const uint32_t page_texels = TerrainVirtualTexture::GetPageTexels();
+		const uint32_t frame_index = scene->GetFrameIndex();
+		const glm::vec3 eye = camera->GetPosition();
+		const Frustum bake_frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
+
+		for (auto [entity, terrain] : scene->GetRegistry().view<TerrainComponent>().each())
+		{
+			if (terrain.GetMaterial() == nullptr || !scene->IsEntityInView(entity, view.GetCullingMask()))
+				continue;
+			if (terrain.m_Field == nullptr || terrain.m_Field->IsEmpty())
+				continue;
+
+			TerrainVirtualTexture& virtual_texture = terrain.m_Field->GetVirtualTexture();
+			if (!virtual_texture.EnsureResources() || virtual_texture.GetPool() == nullptr)
+				continue;
+
+			/* 挑页放在建图阶段：PrepareFrustum 只看视锥，不依赖 patch 列表，
+			 * 所以不用碰 EnsureVisibleFrame，也就不会把 GPU 选择的结果降级成 CPU 路径。
+			 * 执行阶段只烘不挑 —— 同一帧挑两次会让层分配漂移 */
+			virtual_texture.PrepareFrustum(*terrain.m_Field, bake_frustum.Planes, eye, frame_index);
+
+			/* 缺页和远景底图都没有要补的，就不占一个 Pass */
+			const bool need_pages = virtual_texture.HasPending();
+			const bool need_basemap = terrain.m_Field->EnsureBasemap()
+				&& terrain.m_Field->NeedsBasemap(terrain.GetMaterial()->GetRevision());
+			if (!need_pages && !need_basemap)
+				continue;
+
+			const std::string pass_name = "TerrainVTBakePass_" + std::to_string(static_cast<uint32_t>(entity));
+			TerrainField* field = terrain.m_Field.get();
+			const auto pool = view.GetFrameGraph()->ImportTexture(pass_name + "_Pool", virtual_texture.GetPool());
+
+			view.GetFrameGraph()->AddPass<BakePassData>(pass_name,
+				[pool, pass_name, page_texels](FrameGraphBuilder& builder, BakePassData& data)
+				{
+					data.Field = nullptr;
+
+					/* 页池作为颜色附件：一层一页，执行时按页号切层 */
+					FrameGraphPassInfo::Descriptor desc;
+					desc.Attachments.ColorAttachments(0) = pool;
+					desc.ViewportRegion = ViewportRegion{ 0, 0, page_texels, page_texels };
+					builder.CreateRenderPass(pass_name + "_Target", desc);
+					builder.BindOutputResource(pool, TextureUsage::ColorAttachment);
+
+					/* 页池跨帧保留、采样端在别的 Pass 里，先靠保活留下这一趟 */
+					builder.AsSideEffect();
+				},
+				[&view, scene, field](const FrameGraphResources& resources, const BakePassData&)
+				{
+					/* 图里给的帧缓冲指向这块地形的页池，按页号切层在内部做 */
+					BakeVirtualTextures(view, *scene, field, resources.GetPassRenderTarget());
+				});
 		}
 	}
 

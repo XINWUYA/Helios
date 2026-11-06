@@ -16,6 +16,7 @@
 #include <Helios/Scene/SkeletonModel.h>
 #include <Helios/Renderer/RenderPasses/DeferredPasses.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
+#include <Helios/Renderer/RenderPasses/TerrainPasses.h>
 
 namespace Helios
 {
@@ -729,6 +730,13 @@ namespace Helios
 		/* GPU 蒙皮排在最前：这一帧改过姿势的骨骼顶点先算出来，
 		 * 后面的阴影 / 场景 / 延迟 Pass 拿到的都是新顶点 */
 		SkeletonModel::AddGpuSkinPass(*this);
+
+		/* 地形选择紧随其后：同样是计算 Pass，必须排在所有渲染 Pass 之前，
+		 * 结果供后面的地形绘制走间接绘制 */
+		TerrainDraw::AddSelectPass(*this);
+
+		/* 虚拟纹理烘焙：页池进图，缺页要在场景绘制之前补上 */
+		TerrainDraw::AddVirtualTextureBakePass(*this);
 
 		/* 渲染图已销毁，旧的输出句柄随之失效。
 		 * 重置它，未重新指定输出的渲染图（如相机在视口尺寸无效时不组织渲染图）不会读到悬垂资源。 */
