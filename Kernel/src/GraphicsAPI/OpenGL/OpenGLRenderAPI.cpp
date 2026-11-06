@@ -331,6 +331,25 @@ namespace Helios
 		uint32_t param_binding, const void* param_data, uint32_t param_size,
 		uint32_t group_count)
 	{
+		return DispatchComputeImpl(shader, buffers, param_binding, param_data, param_size,
+			group_count, nullptr, 0);
+	}
+
+	bool OpenGLRenderAPI::DispatchComputeIndirect(const SharedPtr<DeviceShader>& shader,
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+		uint32_t param_binding, const void* param_data, uint32_t param_size,
+		const SharedPtr<DeviceStorageBuffer>& args, uint32_t args_offset)
+	{
+		return DispatchComputeImpl(shader, buffers, param_binding, param_data, param_size,
+			0, args, args_offset);
+	}
+
+	bool OpenGLRenderAPI::DispatchComputeImpl(const SharedPtr<DeviceShader>& shader,
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+		uint32_t param_binding, const void* param_data, uint32_t param_size,
+		uint32_t group_count, const SharedPtr<DeviceStorageBuffer>& indirect_args,
+		uint32_t indirect_offset)
+	{
 #ifdef __APPLE__
 		/* macOS 的 GL 只有 4.1，没有计算着色器 */
 		(void)shader;
@@ -339,12 +358,16 @@ namespace Helios
 		(void)param_data;
 		(void)param_size;
 		(void)group_count;
+		(void)indirect_args;
+		(void)indirect_offset;
 		return false;
 #else
 		PROFILE_FUNCTION();
 
 		auto* gl_shader = dynamic_cast<OpenGLShader*>(shader.get());
-		if (gl_shader == nullptr || !gl_shader->IsCompute() || group_count == 0)
+		if (gl_shader == nullptr || !gl_shader->IsCompute())
+			return false;
+		if (indirect_args == nullptr && group_count == 0)
 			return false;
 
 		/* 先把缓冲全部解析出来：半路失败不会留下改了一半的绑定 */
@@ -408,7 +431,19 @@ namespace Helios
 			GLState::BindBufferRange(GL_UNIFORM_BUFFER, param_binding, { m_ComputeParamBuffer, 0, block_size });
 		}
 
-		glDispatchCompute(group_count, 1, 1);
+		if (indirect_args != nullptr)
+		{
+			auto* storage = dynamic_cast<OpenGLStorageBuffer*>(indirect_args.get());
+			if (storage == nullptr || storage->GetBufferID() == 0 || glDispatchComputeIndirect == nullptr)
+				return false;
+			glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, storage->GetBufferID());
+			glDispatchComputeIndirect(static_cast<GLintptr>(indirect_offset));
+			glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, 0);
+		}
+		else
+		{
+			glDispatchCompute(group_count, 1, 1);
+		}
 		/* 结果要给后续的顶点拉取 / 存储缓冲读写用，等写入可见再往下走 */
 		glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
 

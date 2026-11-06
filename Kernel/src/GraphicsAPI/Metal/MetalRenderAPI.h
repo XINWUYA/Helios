@@ -101,6 +101,10 @@ namespace Helios
             const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
             uint32_t param_binding, const void* param_data, uint32_t param_size,
             uint32_t group_count) override;
+        bool DispatchComputeIndirect(const SharedPtr<DeviceShader>& shader,
+            const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+            uint32_t param_binding, const void* param_data, uint32_t param_size,
+            const SharedPtr<DeviceStorageBuffer>& args, uint32_t args_offset) override;
 
         /* 渲染通道管理。allow_merge：先不结束编码器，下一趟附件完全相同且全是 Load 时
          * 直接接着画，省掉一次附件写回再读入 */
@@ -132,6 +136,11 @@ namespace Helios
     private:
         /* 收掉当前渲染编码器（含挂起的），所有要换编码器的地方都走这里 */
         void CloseRenderEncoder();
+        /* 派发的公共实现：indirect_args 非空时工作组数从缓冲里读 */
+        bool DispatchComputeImpl(const SharedPtr<DeviceShader>& shader,
+            const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+            uint32_t param_binding, const void* param_data, uint32_t param_size,
+            uint32_t group_count, MTL::Buffer* indirect_args, NS::UInteger indirect_offset);
         /* 新通道能否接在挂起的编码器上继续画 */
         [[nodiscard]] bool CanResumeRenderPass(MTL::RenderPassDescriptor* descriptor) const;
         /* 记下当前编码器的附件身份，合并时拿来比对 */

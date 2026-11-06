@@ -1193,6 +1193,28 @@ namespace Helios
         uint32_t param_binding, const void* param_data, uint32_t param_size,
         uint32_t group_count)
     {
+        return DispatchComputeImpl(shader, buffers, param_binding, param_data, param_size,
+            group_count, nullptr, 0);
+    }
+
+    bool MetalRenderAPI::DispatchComputeIndirect(const SharedPtr<DeviceShader>& shader,
+        const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+        uint32_t param_binding, const void* param_data, uint32_t param_size,
+        const SharedPtr<DeviceStorageBuffer>& args, uint32_t args_offset)
+    {
+        auto* storage = args != nullptr
+            ? dynamic_cast<MetalStorageBuffer*>(args.get()) : nullptr;
+        if (storage == nullptr || storage->GetMetalBuffer() == nullptr)
+            return false;
+        return DispatchComputeImpl(shader, buffers, param_binding, param_data, param_size,
+            0, storage->GetMetalBuffer(), args_offset);
+    }
+
+    bool MetalRenderAPI::DispatchComputeImpl(const SharedPtr<DeviceShader>& shader,
+        const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+        uint32_t param_binding, const void* param_data, uint32_t param_size,
+        uint32_t group_count, MTL::Buffer* indirect_args, NS::UInteger indirect_offset)
+    {
         auto* compute_shader = dynamic_cast<MetalShader*>(shader.get());
         if (compute_shader == nullptr || !compute_shader->IsCompute())
             return false;
@@ -1258,8 +1280,11 @@ namespace Helios
         if (param_data != nullptr && param_size > 0)
             encoder->setBytes(param_data, param_size, to_buffer_index(param_binding));
 
-        encoder->dispatchThreadgroups(MTL::Size(group_count, 1, 1),
-            MTL::Size(compute_shader->GetThreadGroupSize(), 1, 1));
+        const MTL::Size threads_per_group(compute_shader->GetThreadGroupSize(), 1, 1);
+        if (indirect_args != nullptr)
+            encoder->dispatchThreadgroups(indirect_args, indirect_offset, threads_per_group);
+        else
+            encoder->dispatchThreadgroups(MTL::Size(group_count, 1, 1), threads_per_group);
         encoder->endEncoding();
         return true;
     }

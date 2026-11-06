@@ -56,6 +56,10 @@ namespace Helios
 			const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
 			uint32_t param_binding, const void* param_data, uint32_t param_size,
 			uint32_t group_count) override;
+		bool DispatchComputeIndirect(const SharedPtr<DeviceShader>& shader,
+			const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+			uint32_t param_binding, const void* param_data, uint32_t param_size,
+			const SharedPtr<DeviceStorageBuffer>& args, uint32_t args_offset) override;
 
 		void Flush() override;
 
@@ -82,6 +86,13 @@ namespace Helios
 		void EndDefaultRenderPass() override {}
 
 	private:
+		/* 派发的公共实现：indirect_args 非空时工作组数从缓冲里读 */
+		bool DispatchComputeImpl(const SharedPtr<DeviceShader>& shader,
+			const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
+			uint32_t param_binding, const void* param_data, uint32_t param_size,
+			uint32_t group_count, const SharedPtr<DeviceStorageBuffer>& indirect_args,
+			uint32_t indirect_offset);
+
 		/* 获取OpenGL支持的扩展 */
 		void InitOpenGLExtensions();
 

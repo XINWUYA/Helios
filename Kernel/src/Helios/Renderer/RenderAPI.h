@@ -88,6 +88,17 @@ namespace Helios
 			return false;
 		}
 
+		/* 计算派发（间接）：工作组数从 args 缓冲前三个 uint 读。
+		 * 调用方先把「这一档真正覆盖到哪些块」压成一块表，再按可见块数派发，
+		 * 近处级联只跑它自己的那一小片。不支持时返回 false，调用方按上界派发。 */
+		virtual bool DispatchComputeIndirect(const SharedPtr<DeviceShader>& /*shader*/,
+			const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& /*buffers*/,
+			uint32_t /*param_binding*/, const void* /*param_data*/, uint32_t /*param_size*/,
+			const SharedPtr<DeviceStorageBuffer>& /*args*/, uint32_t /*args_offset*/)
+		{
+			return false;
+		}
+
 		/* 给纹理生成 mipmap 并记录进当前帧的命令流。帧内调用（比如探针烘焙之后）必须用它 ——
 		 * DeviceTexture::GenerateMipmap 会独立提交命令缓冲区，先于还没提交的烘焙绘制执行、读到空纹理。 */
 		virtual void GenerateMipmap(const SharedPtr<DeviceTexture>& /*texture*/) {}
