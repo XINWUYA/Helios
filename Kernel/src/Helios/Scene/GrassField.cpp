@@ -8,6 +8,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "Components.h"
 #include "Helios/Renderer/Renderer.h"
+#include "Helios/Renderer/RenderPasses/GrassDrawParams.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 
@@ -30,6 +31,8 @@ namespace Helios
 		bool g_GpuPlacementEnabled = false;
 		bool g_IndirectDrawEnabled = false;
 		bool g_BatchingEnabled = true;
+		/* 块掩码剔除：先压可见块表再逐株扫，关掉退回逐实例自己测视锥 */
+		bool g_ChunkMaskEnabled = true;
 		/* 画质档的全局密度系数：0 是全关，1 是各片草地自己的设置 */
 		float g_DensityScale = 1.0f;
 
@@ -175,6 +178,16 @@ namespace Helios
 		return g_IndirectDrawEnabled;
 	}
 
+	void GrassField::SetGlobalChunkMaskEnabled(bool enabled)
+	{
+		g_ChunkMaskEnabled = enabled;
+	}
+
+	bool GrassField::IsGlobalChunkMaskEnabled()
+	{
+		return g_ChunkMaskEnabled;
+	}
+
 	void GrassField::SetGlobalBatchingEnabled(bool enabled)
 	{
 		g_BatchingEnabled = enabled;
@@ -285,9 +298,12 @@ namespace Helios
 		m_PackedChunkBounds.clear();
 		m_InstanceCount = 0;
 		m_GpuDirty = false;
-		/* 实例数变了，压实缓冲的大小要重来 */
-		m_IndirectDrawBuffer = nullptr;
-		m_IndirectDrawView = nullptr;
+		/* 实例数变了，压实结果作废：槽位清空，下次剔除之前绘制端走逐块 */
+		for (IndirectSlot& slot : m_Indirect)
+		{
+			slot.View = nullptr;
+			slot.SegmentCount = 0;
+		}
 
 		/* 区域按世界尺度展开：组件的范围是局部空间的，缩放挂在实体变换上 */
 		const glm::vec3 axis_x(world[0]);
@@ -976,53 +992,221 @@ namespace Helios
 			m_GpuDirty = false;
 	}
 
-	void GrassField::PrepareIndirect(const glm::vec4* planes, const glm::vec3& eye)
+	GrassField::IndirectSlot* GrassField::FindIndirectSlot(const RenderView* view, uint32_t slot)
 	{
-		m_IndirectPrepared = false;
-		if (!g_IndirectDrawEnabled || planes == nullptr || m_InstanceCount == 0
+		if (view == nullptr || slot >= kIndirectSlotCount)
+			return nullptr;
+
+		IndirectSlot& entry = m_Indirect[slot];
+		/* 槽位认视图：换了视图必须重新剔除，不能拿上一份结果画 */
+		return entry.View == view ? &entry : nullptr;
+	}
+
+	const GrassField::IndirectSlot* GrassField::FindIndirectSlot(const RenderView* view, uint32_t slot) const
+	{
+		return const_cast<GrassField*>(this)->FindIndirectSlot(view, slot);
+	}
+
+	bool GrassField::CanDrawIndirect(const RenderView* view, uint32_t slot) const
+	{
+		const IndirectSlot* entry = FindIndirectSlot(view, slot);
+		return entry != nullptr && entry->SegmentCount > 0
+			&& entry->Args != nullptr && entry->ViewBuffer != nullptr;
+	}
+
+	uint32_t GrassField::GetIndirectSegments(const RenderView* view, uint32_t slot) const
+	{
+		const IndirectSlot* entry = FindIndirectSlot(view, slot);
+		return entry != nullptr ? entry->SegmentCount : 0;
+	}
+
+	uint32_t GrassField::GetIndirectSegmentCapacity(const RenderView* view, uint32_t slot) const
+	{
+		const IndirectSlot* entry = FindIndirectSlot(view, slot);
+		return entry != nullptr ? entry->SegmentCapacity : 0;
+	}
+
+	const SharedPtr<DeviceStorageBuffer>& GrassField::GetIndirectArgs(
+		const RenderView* view, uint32_t slot) const
+	{
+		static const SharedPtr<DeviceStorageBuffer> s_Empty;
+		const IndirectSlot* entry = FindIndirectSlot(view, slot);
+		return entry != nullptr ? entry->Args : s_Empty;
+	}
+
+	const SharedPtr<DeviceVertexBuffer>& GrassField::GetIndirectDrawBuffer(
+		const RenderView* view, uint32_t slot) const
+	{
+		static const SharedPtr<DeviceVertexBuffer> s_Empty;
+		const IndirectSlot* entry = FindIndirectSlot(view, slot);
+		return entry != nullptr ? entry->ViewBuffer : s_Empty;
+	}
+
+	void GrassField::PrepareIndirect(const IndirectView& view)
+	{
+		if (view.Slot >= kIndirectSlotCount)
+			return;
+
+		IndirectSlot& slot = m_Indirect[view.Slot];
+		/* 先清归属：这次准备不成就退回逐块提交，别拿上一帧的结果画 */
+		slot.View = nullptr;
+		slot.SegmentCount = 0;
+
+		if (!g_IndirectDrawEnabled || view.View == nullptr || m_InstanceCount == 0
 			|| m_InstanceStorage == nullptr || m_ChunkBoundsBuffer == nullptr)
 			return;
 		if (Renderer::GetRenderAPI() == nullptr || !Renderer::GetRenderAPI()->SupportsCompute())
 			return;
 
-		const uint32_t bytes = m_InstanceCount * static_cast<uint32_t>(sizeof(GrassInstanceData));
-		if (m_IndirectDrawBuffer == nullptr || m_IndirectDrawBuffer->GetDataSize() < bytes)
+		/* 段预算：相机槽要全量，一段装完；级联槽按段数上限截断再均分。
+		 * 草影的投射物本来就被距离抽稀掉大半，按整片株数再备四份不划算 */
+		uint32_t segments = 1;
+		uint32_t capacity = m_InstanceCount;
+		if (view.Slot != 0)
 		{
-			m_IndirectDrawBuffer = DeviceStorageBuffer::Create("GrassIndirectDraw", bytes);
-			m_IndirectDrawView = m_IndirectDrawBuffer != nullptr
-				? DeviceVertexBuffer::CreateShared("GrassIndirectView", m_IndirectDrawBuffer, bytes)
-				: nullptr;
-			m_IndirectArgs = DeviceStorageBuffer::Create("GrassIndirectArgs", 5u * sizeof(uint32_t));
-			if (m_IndirectDrawView == nullptr || m_IndirectArgs == nullptr)
-			{
-				m_IndirectDrawBuffer = nullptr;
-				m_IndirectArgs = nullptr;
-				return;
-			}
+			const uint32_t budget = std::min(m_InstanceCount,
+				kIndirectSegmentInstances * kMaxIndirectSegments);
+			segments = (budget + kIndirectSegmentInstances - 1) / kIndirectSegmentInstances;
+			capacity = (budget + segments - 1) / segments;
 		}
 
-		/* 参数块与 GrassIndirectCull.glsl 的 std140 布局逐字节对应。
-		 * 块的包围球不在这里：它带地形高度，随重建一起进块包围球表 */
-		struct alignas(16) CullParams
+		const uint32_t bytes = capacity * segments * static_cast<uint32_t>(sizeof(GrassInstanceData));
+		if (slot.Storage == nullptr || slot.Storage->GetDataSize() < bytes)
+		{
+			slot.Storage = DeviceStorageBuffer::Create("GrassIndirectDraw", bytes);
+			slot.ViewBuffer = slot.Storage != nullptr
+				? DeviceVertexBuffer::CreateShared("GrassIndirectView", slot.Storage, bytes)
+				: nullptr;
+			/* 参数块按段排布，段数变了形状就变了，直接重建 */
+			slot.Args = nullptr;
+		}
+		if (slot.Storage == nullptr || slot.ViewBuffer == nullptr)
+		{
+			slot.Storage = nullptr;
+			slot.ViewBuffer = nullptr;
+			return;
+		}
+
+		const uint32_t chunk_count = static_cast<uint32_t>(m_PackedChunkBounds.size());
+		if (chunk_count == 0 || m_PerChunk == 0)
+			return;
+
+		const uint32_t args_bytes = (segments * kIndirectArgsStride + kIndirectHeader) * sizeof(uint32_t);
+		if (slot.Args == nullptr || slot.Args->GetDataSize() < args_bytes)
+			slot.Args = DeviceStorageBuffer::Create("GrassIndirectArgs", args_bytes);
+		if (slot.Args == nullptr)
+			return;
+
+		/* 可见块表：[0] 计数、[1..] 压实块号 */
+		const uint32_t list_bytes = (chunk_count + 1u) * sizeof(uint32_t);
+		if (slot.ChunkList == nullptr || slot.ChunkList->GetDataSize() < list_bytes)
+			slot.ChunkList = DeviceStorageBuffer::Create("GrassChunkList", list_bytes);
+		if (slot.ChunkList == nullptr)
+			return;
+
+		float full = m_StartCullDistance;
+		float fade = m_EndCullDistance;
+		float min_density = m_MinDensityScale;
+		float budget_scale = 1.0f;
+		if (view.Curve != 0)
+		{
+			fade = std::max(view.FadeRadius, 1.0f);
+			full = GrassDraw::ShadowFullRadius(fade);
+			min_density = 0.0f;
+
+			/* 容量不够时先按面积估一遍投影株数，把抽稀整体压下来：均匀丢株好过按序号截断。
+			 * 估的时候算上全局密度系数与余量，挤爆就只能按发号顺序丢，而发号顺序每帧不同，
+			 * 丢的株一换影子就闪。用的是光源盒的方形覆盖（4r²）而不是圆盘。 */
+			const float radius = std::min(view.Radius > 0.0f ? view.Radius : fade, fade);
+			const float area = std::max(4.0f * m_HalfX * m_HalfZ, 1e-3f);
+			const float density = static_cast<float>(m_InstanceCount) / area;
+			const float casters = std::min(static_cast<float>(m_InstanceCount),
+				4.0f * radius * radius * density) * std::max(g_DensityScale, 0.0f);
+			budget_scale = std::min(1.0f,
+				static_cast<float>(capacity * segments) / std::max(casters * 1.1f, 1.0f));
+		}
+
+		const bool chunk_mask = g_ChunkMaskEnabled;
+
+		/* 块级剔除的参数：视锥六个平面（CPU 侧已归一化）、观察点与抽稀终点。
+		 * 与 GrassChunkCull.glsl 的 std140 布局逐字节对应 */
+		struct alignas(16) ChunkCullParams
 		{
 			glm::vec4 Planes[6]{};
-			glm::vec4 Counts{ 0.0f };   /* x 每块株数、y 总株数、z 抽稀起点、w 剔除距离 */
-			glm::vec4 Extra{ 0.0f };    /* x 最小密度比例、y 全局密度系数 */
+			glm::vec4 Eye{ 0.0f };      /* xyz 观察点、w 抽稀终点 */
+			glm::uvec4 Counts{ 0u };    /* x 块数、y 每块株数、z 派发线程数、w 总株数 */
+			glm::uvec4 Layout{ 0u };    /* x 每段参数步长、y 段数、z 曲线 */
+		};
+
+		const uint32_t chunk_groups = (chunk_count + 63u) / 64u;
+		const uint32_t chunk_threads = chunk_groups * 64u;
+
+		ChunkCullParams chunk_params;
+		for (int index = 0; index < 6; ++index)
+			chunk_params.Planes[index] = view.Planes[index];
+		chunk_params.Eye = glm::vec4(view.Eye, fade);
+		chunk_params.Counts = glm::uvec4(chunk_count, m_PerChunk, chunk_threads, m_InstanceCount);
+		chunk_params.Layout = glm::uvec4(kIndirectArgsStride, segments,
+			view.Curve != 0 ? 1u : 0u, 0u);
+
+		/* 逐株剔除的参数：视锥已经由块表判完，这里只剩抽稀档位与段布局 */
+		struct alignas(16) CullParams
+		{
+			glm::vec4 Counts{ 0.0f };   /* x 每块株数、y 总株数、z 抽稀起点、w 抽稀终点 */
+			glm::vec4 Extra{ 0.0f };    /* x 最小密度比例、y 全局密度系数、z 预算系数、w 曲线 */
 			glm::vec4 Camera{ 0.0f };
+			glm::uvec4 Segments{ 0u };  /* x 段数、y 每段株数、z 参数步长 */
 		};
 
 		CullParams params;
-		for (int index = 0; index < 6; ++index)
-			params.Planes[index] = planes[index];
 		params.Counts = glm::vec4(static_cast<float>(m_PerChunk), static_cast<float>(m_InstanceCount),
-			m_StartCullDistance, m_EndCullDistance);
-		params.Extra = glm::vec4(m_MinDensityScale, g_DensityScale, 0.0f, 0.0f);
-		params.Camera = glm::vec4(eye, 0.0f);
+			full, fade);
+		params.Extra = glm::vec4(min_density, g_DensityScale, budget_scale,
+			view.Curve != 0 ? 1.0f : 0.0f);
+		params.Camera = glm::vec4(view.Eye, 0.0f);
+		params.Segments = glm::uvec4(segments, capacity, kIndirectArgsStride, 0u);
 
-		if (!Renderer::DispatchGrassArgsReset(m_IndirectArgs, kBladeIndexCount))
+		/* 掩码关掉时的参数：平面回到逐株剔除自己判，其余一样 */
+		struct alignas(16) FullCullParams
+		{
+			glm::vec4 Planes[6]{};
+			glm::vec4 Counts{ 0.0f };
+			glm::vec4 Extra{ 0.0f };
+			glm::vec4 Camera{ 0.0f };
+			glm::uvec4 Segments{ 0u };
+		};
+
+		if (!Renderer::DispatchGrassArgsReset(slot.Args, slot.ChunkList, kBladeIndexCount, segments,
+			kIndirectArgsStride))
 			return;
-		m_IndirectPrepared = Renderer::DispatchGrassCull(m_InstanceStorage, m_IndirectDrawBuffer,
-			m_IndirectArgs, m_ChunkBoundsBuffer, &params, sizeof(params), m_InstanceCount);
+
+		if (chunk_mask)
+		{
+			if (!Renderer::DispatchGrassChunkCull(m_ChunkBoundsBuffer, slot.ChunkList, slot.Args,
+				&chunk_params, sizeof(chunk_params), chunk_threads))
+				return;
+			if (!Renderer::DispatchGrassCull(m_InstanceStorage, slot.Storage, slot.Args, slot.ChunkList,
+				&params, sizeof(params), chunk_count * m_PerChunk, slot.Args,
+				(segments * kIndirectArgsStride + 4u) * static_cast<uint32_t>(sizeof(uint32_t))))
+				return;
+		}
+		else
+		{
+			FullCullParams full_params;
+			for (int index = 0; index < 6; ++index)
+				full_params.Planes[index] = view.Planes[index];
+			full_params.Counts = params.Counts;
+			full_params.Extra = params.Extra;
+			full_params.Camera = params.Camera;
+			full_params.Segments = params.Segments;
+			if (!Renderer::DispatchGrassCullFull(m_InstanceStorage, slot.Storage, slot.Args,
+				m_ChunkBoundsBuffer, &full_params, sizeof(full_params), m_InstanceCount))
+				return;
+		}
+
+		slot.View = view.View;
+		slot.SegmentCount = segments;
+		slot.SegmentCapacity = capacity;
 	}
 
 	bool GrassField::RaycastDensity(const glm::vec3& origin, const glm::vec3& direction,

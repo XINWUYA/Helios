@@ -42,12 +42,31 @@ namespace Helios
 		/* 填充天空常量：日月方向、大气系数与曝光，天空类着色器只读它 */
 		static void SetSkyUniforms(const Sky::SkyState& state);
 
-		/* 草地间接绘制：先把参数块重置成「N 个索引 / 0 实例」，再由剔除那一步累加实例数 */
-		static bool DispatchGrassArgsReset(const SharedPtr<class DeviceStorageBuffer>& args, uint32_t index_count);
-		/* 草地 GPU 剔除 + 实例压实：可见叶片抄进目标缓冲，实例数写进参数块。
-		 * chunk_bounds 是「压实块号 → 块包围球」（xyz 中心 + w 半径），贴地时中心带地形高度 */
+		/* 草地间接绘制：先把每段参数块重置成「N 个索引 / 0 实例」，顺带清掉可见块计数。
+		 * 段数与每段占几个 uint 由调用方给，剔除着色器按同一份布局发号 */
+		static bool DispatchGrassArgsReset(const SharedPtr<class DeviceStorageBuffer>& args,
+			const SharedPtr<class DeviceStorageBuffer>& chunk_list,
+			uint32_t index_count, uint32_t segments, uint32_t args_stride);
+		/* 块级剔除：每个块测一次光源盒，通过的压进可见块表，
+		 * 顺带把逐株剔除的间接派发参数写好（由最后一个完成的线程写） */
+		static bool DispatchGrassChunkCull(const SharedPtr<class DeviceStorageBuffer>& chunk_bounds,
+			const SharedPtr<class DeviceStorageBuffer>& chunk_list,
+			const SharedPtr<class DeviceStorageBuffer>& args,
+			const void* param_data, uint32_t param_size, uint32_t thread_count);
+		/* 草地 GPU 剔除 + 实例压实：只扫可见块表里的株，通过的抄进目标缓冲。
+		 * dispatch_args 非空时按可见块数间接派发，后端不支持就退回按上界派发
+		 * （fallback_instance_count 是全体块的株数上界） */
 		static bool DispatchGrassCull(const SharedPtr<class DeviceStorageBuffer>& source,
-			const SharedPtr<class DeviceStorageBuffer>& target, const SharedPtr<class DeviceStorageBuffer>& args,
+			const SharedPtr<class DeviceStorageBuffer>& target,
+			const SharedPtr<class DeviceStorageBuffer>& args,
+			const SharedPtr<class DeviceStorageBuffer>& chunk_list,
+			const void* param_data, uint32_t param_size, uint32_t fallback_instance_count,
+			const SharedPtr<class DeviceStorageBuffer>& dispatch_args = nullptr,
+			uint32_t dispatch_offset = 0);
+		/* 全量剔除：不压块表，每个实例自己测视锥。块掩码关掉时走这条 */
+		static bool DispatchGrassCullFull(const SharedPtr<class DeviceStorageBuffer>& source,
+			const SharedPtr<class DeviceStorageBuffer>& target,
+			const SharedPtr<class DeviceStorageBuffer>& args,
 			const SharedPtr<class DeviceStorageBuffer>& chunk_bounds,
 			const void* param_data, uint32_t param_size, uint32_t instance_count);
 
@@ -103,11 +122,13 @@ namespace Helios
 		static InstanceRange UploadObjectInstances(const ObjectInstanceData* instances, uint32_t count);
 		static InstanceRange UploadInstances(const void* data, uint32_t count, uint32_t stride);
 
-		/* 间接提交：实例数与索引数从 args 缓冲里读（GPU 剔除的产物），一笔画完 */
+		/* 间接提交：实例数与索引数从 args 缓冲里读（GPU 剔除的产物）。
+		 * 缓冲按段切时用两个偏移分别指向本段的参数和实例数据，0 就是从头开始 */
 		static void SubmitIndirect(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 			const SharedPtr<DeviceVertexBuffer>& instance_buffer,
 			const SharedPtr<class DeviceStorageBuffer>& args_buffer, const DrawParams* per_draw = nullptr,
-			const VertexBufferLayout* instance_layout = nullptr);
+			const VertexBufferLayout* instance_layout = nullptr,
+			uint32_t args_offset = 0, uint32_t instance_offset = 0);
 
 		/* 实例化提交：同材质同网格的一批对象合成一笔，实例数据从 first_instance 起连续 count 条 */
 		static void SubmitInstanced(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
@@ -121,7 +142,8 @@ namespace Helios
 			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance,
 			const DrawParams* per_draw, uint32_t index_count, uint32_t instance_count = 1,
 			const SharedPtr<class DeviceStorageBuffer>& indirect_args = nullptr,
-			const VertexBufferLayout* instance_layout = nullptr);
+			const VertexBufferLayout* instance_layout = nullptr,
+			uint32_t indirect_args_offset = 0, uint32_t indirect_instance_offset = 0);
 	public:
 
 		/* 全屏 Pass 的材质：不测深度也不写；additive 打开 One/One 加法混合 */

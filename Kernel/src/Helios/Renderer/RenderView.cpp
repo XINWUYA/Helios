@@ -15,6 +15,7 @@
 #include <Helios/Scene/ReflectionProbe.h>
 #include <Helios/Scene/SkeletonModel.h>
 #include <Helios/Renderer/RenderPasses/DeferredPasses.h>
+#include <Helios/Renderer/RenderPasses/GrassPasses.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
 #include <Helios/Renderer/RenderPasses/TerrainPasses.h>
 
@@ -737,6 +738,9 @@ namespace Helios
 
 		/* 虚拟纹理烘焙：页池进图，缺页要在场景绘制之前补上 */
 		TerrainDraw::AddVirtualTextureBakePass(*this);
+
+		/* 草地剔除：同样排在所有渲染 Pass 之前，级联矩阵到执行时已经定稿 */
+		GrassDraw::AddIndirectCullPass(*this);
 
 		/* 渲染图已销毁，旧的输出句柄随之失效。
 		 * 重置它，未重新指定输出的渲染图（如相机在视口尺寸无效时不组织渲染图）不会读到悬垂资源。 */

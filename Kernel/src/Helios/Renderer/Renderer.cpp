@@ -258,10 +258,6 @@ namespace Helios
 		/* 天空常量：跟着视图走（每个视图一份快照，探针烘焙也用当前帧这一份） */
 		SetSkyUniforms(view->GetSkyState());
 
-		/* 草地间接绘制：GPU 剔除要赶在这个视图开始画之前派发 */
-		if (const auto grass_scene = view->GetOwnerScene(); grass_scene != nullptr)
-			grass_scene->PrepareGrassIndirect(*view);
-
 		/* 草地的世界范围：地面材质靠它在远处接管草色 */
 		if (const auto grass_scene = view->GetOwnerScene(); grass_scene != nullptr)
 		{
@@ -427,15 +423,17 @@ namespace Helios
 	void Renderer::SubmitIndirect(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 		const SharedPtr<DeviceVertexBuffer>& instance_buffer,
 		const SharedPtr<DeviceStorageBuffer>& args_buffer, const DrawParams* per_draw,
-		const VertexBufferLayout* instance_layout)
+		const VertexBufferLayout* instance_layout, uint32_t args_offset, uint32_t instance_offset)
 	{
-		SubmitDraw(material, mesh_primitive, instance_buffer, 0, per_draw, 0, 0, args_buffer, instance_layout);
+		SubmitDraw(material, mesh_primitive, instance_buffer, 0, per_draw, 0, 0, args_buffer,
+			instance_layout, args_offset, instance_offset);
 	}
 
 	void Renderer::SubmitDraw(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance,
 		const DrawParams* per_draw, uint32_t index_count, uint32_t instance_count,
-		const SharedPtr<DeviceStorageBuffer>& indirect_args, const VertexBufferLayout* instance_layout)
+		const SharedPtr<DeviceStorageBuffer>& indirect_args, const VertexBufferLayout* instance_layout,
+		uint32_t indirect_args_offset, uint32_t indirect_instance_offset)
 	{
 		PROFILE_FUNCTION();
 
@@ -524,7 +522,7 @@ namespace Helios
 		{
 			/* 索引数与实例数都在参数缓冲里：一笔画完，CPU 不知道这次画了多少 */
 			m_pRenderAPI->DrawIndexedIndirect(mesh_primitive.PrimitiveType, mesh_primitive.VertexArray,
-				instance_buffer, 0, indirect_args, 0, layout);
+				instance_buffer, indirect_instance_offset, indirect_args, indirect_args_offset, layout);
 		}
 		else if (instance_buffer != nullptr)
 		{
@@ -624,25 +622,86 @@ namespace Helios
 
 	namespace
 	{
-		/* 草地间接绘制：重置参数 / 剔除压实，第一次用到时加载 */
+		/* 草地间接绘制：重置参数 / 块级剔除 / 逐株剔除压实，第一次用到时加载 */
 		BuiltinAsset<DeviceShader> s_GrassArgsResetShader("Shaders/Compute/GrassIndirectReset.glsl");
+		BuiltinAsset<DeviceShader> s_GrassChunkCullShader("Shaders/Compute/GrassChunkCull.glsl");
 		BuiltinAsset<DeviceShader> s_GrassCullShader("Shaders/Compute/GrassIndirectCull.glsl");
+		BuiltinAsset<DeviceShader> s_GrassCullFullShader("Shaders/Compute/GrassIndirectCullFull.glsl");
 	}
 
-	bool Renderer::DispatchGrassArgsReset(const SharedPtr<DeviceStorageBuffer>& args, uint32_t index_count)
+	bool Renderer::DispatchGrassArgsReset(const SharedPtr<DeviceStorageBuffer>& args,
+		const SharedPtr<DeviceStorageBuffer>& chunk_list,
+		uint32_t index_count, uint32_t segments, uint32_t args_stride)
 	{
-		if (m_pRenderAPI == nullptr || args == nullptr || !m_pRenderAPI->SupportsCompute())
+		if (m_pRenderAPI == nullptr || args == nullptr || chunk_list == nullptr
+			|| !m_pRenderAPI->SupportsCompute())
 			return false;
 
 		const SharedPtr<DeviceShader> shader = s_GrassArgsResetShader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
 
-		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = { { 3, args } };
-		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, &index_count, sizeof(index_count), 1);
+		const glm::uvec4 reset(index_count, segments, args_stride, 0u);
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
+			{ 3, args }, { 6, chunk_list },
+		};
+		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, &reset, sizeof(reset), 1);
+	}
+
+	bool Renderer::DispatchGrassChunkCull(const SharedPtr<DeviceStorageBuffer>& chunk_bounds,
+		const SharedPtr<DeviceStorageBuffer>& chunk_list, const SharedPtr<DeviceStorageBuffer>& args,
+		const void* param_data, uint32_t param_size, uint32_t thread_count)
+	{
+		if (m_pRenderAPI == nullptr || chunk_bounds == nullptr || chunk_list == nullptr
+			|| args == nullptr || thread_count == 0 || !m_pRenderAPI->SupportsCompute())
+			return false;
+
+		const SharedPtr<DeviceShader> shader = s_GrassChunkCullShader.Get();
+		if (shader == nullptr || !shader->IsCompute())
+			return false;
+
+		/* 5 号块包围球、6 号可见块表，参数块在 4 号 */
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
+			{ 3, args }, { 5, chunk_bounds }, { 6, chunk_list },
+		};
+		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
+		const uint32_t group_count = (thread_count + group_size - 1) / group_size;
+		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);
 	}
 
 	bool Renderer::DispatchGrassCull(const SharedPtr<DeviceStorageBuffer>& source,
+		const SharedPtr<DeviceStorageBuffer>& target, const SharedPtr<DeviceStorageBuffer>& args,
+		const SharedPtr<DeviceStorageBuffer>& chunk_list,
+		const void* param_data, uint32_t param_size, uint32_t fallback_instance_count,
+		const SharedPtr<DeviceStorageBuffer>& dispatch_args, uint32_t dispatch_offset)
+	{
+		if (m_pRenderAPI == nullptr || source == nullptr || target == nullptr || args == nullptr
+			|| chunk_list == nullptr || !m_pRenderAPI->SupportsCompute())
+			return false;
+
+		const SharedPtr<DeviceShader> shader = s_GrassCullShader.Get();
+		if (shader == nullptr || !shader->IsCompute())
+			return false;
+
+		/* 1 源、2 压实目标、3 间接参数、5 可见块表，参数块在 4 号 */
+		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
+			{ 1, source }, { 2, target }, { 3, args }, { 5, chunk_list },
+		};
+
+		/* 先按可见块数间接派发；后端没有间接派发就退回按上界派发 */
+		if (dispatch_args != nullptr
+			&& m_pRenderAPI->DispatchComputeIndirect(shader, buffers, 4, param_data, param_size,
+				dispatch_args, dispatch_offset))
+			return true;
+
+		if (fallback_instance_count == 0)
+			return false;
+		const uint32_t group_size = std::max(1u, shader->GetThreadGroupSize());
+		const uint32_t group_count = (fallback_instance_count + group_size - 1) / group_size;
+		return m_pRenderAPI->DispatchCompute(shader, buffers, 4, param_data, param_size, group_count);
+	}
+
+	bool Renderer::DispatchGrassCullFull(const SharedPtr<DeviceStorageBuffer>& source,
 		const SharedPtr<DeviceStorageBuffer>& target, const SharedPtr<DeviceStorageBuffer>& args,
 		const SharedPtr<DeviceStorageBuffer>& chunk_bounds,
 		const void* param_data, uint32_t param_size, uint32_t instance_count)
@@ -651,11 +710,11 @@ namespace Helios
 			|| chunk_bounds == nullptr || instance_count == 0 || !m_pRenderAPI->SupportsCompute())
 			return false;
 
-		const SharedPtr<DeviceShader> shader = s_GrassCullShader.Get();
+		const SharedPtr<DeviceShader> shader = s_GrassCullFullShader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
 
-		/* 5 号是块包围球表：4 号留给参数块，1-3 已分给源、目标与间接参数 */
+		/* 1 源、2 压实目标、3 间接参数、5 块包围球，参数块在 4 号 */
 		const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>> buffers = {
 			{ 1, source }, { 2, target }, { 3, args }, { 5, chunk_bounds },
 		};

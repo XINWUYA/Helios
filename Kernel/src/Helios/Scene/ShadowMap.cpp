@@ -27,9 +27,6 @@ namespace Helios
 {
 	namespace
 	{
-		/* 草影满密度半径：再远逐株变稀，最远距离跟着阴影距离走（见 submit_grass_casters） */
-		constexpr float kGrassShadowFullRadius = 20.0f;
-
 		/* 级联深度板里地形高度的采样上限（每轴）：只用来撑深度区间，不必逐纹素扫 */
 		constexpr uint32_t kTerrainDepthSamples = 96;
 
@@ -884,15 +881,38 @@ namespace Helios
 						copy_material_values(*grass.GetMaterial(), *grass_material);
 
 						/* 草影抽稀半径：默认跟阴影距离，组件上可手动收紧（取较小） */
-						const float fade_radius = (grass.m_ShadowFadeDistance > 0.0f)
-							? std::min(grass.m_ShadowFadeDistance, shadow_far)
-							: shadow_far;
+						const float fade_radius = GrassDraw::ShadowFadeRadius(grass, shadow_far);
 						grass_material->SetParameters(ParamType::Float, "u_GrassShadowFadeRadius", fade_radius);
 						grass_material->SetParameters(ParamType::Float, "u_GrassShadowFullRadius",
-							std::min(kGrassShadowFullRadius, fade_radius * 0.5f));
+							GrassDraw::ShadowFullRadius(fade_radius));
 
 						DrawParams per_draw = GrassDraw::MakeDrawParams(grass);
-						/* 和可见着色一样按批提交。批比块大，盒外与远处的判定放宽了，
+
+						/* 这一档级联已经按光源视锥剔好：逐段提交，不再回 CPU 按批挑。
+						 * 着色器自己的抽稀这时要关掉，否则同一株被抽两次 */
+						const uint32_t slot = static_cast<uint32_t>(cascade_id) + 1u;
+						if (grass.m_Field->CanDrawIndirect(render_view, slot))
+						{
+							grass_material->SetParameters(ParamType::Int, "u_GrassShadowGpuCulled", 1);
+							const uint32_t segments = grass.m_Field->GetIndirectSegments(render_view, slot);
+							const uint32_t capacity = grass.m_Field->GetIndirectSegmentCapacity(render_view, slot);
+							const uint32_t args_stride = GrassField::kIndirectArgsStride
+								* static_cast<uint32_t>(sizeof(uint32_t));
+							const uint32_t instance_stride = static_cast<uint32_t>(sizeof(GrassInstanceData));
+							for (uint32_t segment = 0; segment < segments; ++segment)
+							{
+								Renderer::SubmitIndirect(grass_material, blade,
+									grass.m_Field->GetIndirectDrawBuffer(render_view, slot),
+									grass.m_Field->GetIndirectArgs(render_view, slot), &per_draw,
+									&Renderer::GetGrassInstanceLayout(), segment * args_stride,
+									segment * capacity * instance_stride);
+								RenderStatistics::Instance().AddGrassDrawCall();
+							}
+							continue;
+						}
+						grass_material->SetParameters(ParamType::Int, "u_GrassShadowGpuCulled", 0);
+
+						/* 没剔成就按批提交。批比块大，盒外与远处的判定放宽了，
 						 * 多出来的株在着色器里按距离抽稀丢掉，不写深度 */
 						const auto& batches = grass.m_Field->GetBatches();
 						const bool use_batches = GrassField::IsGlobalBatchingEnabled() && !batches.empty();

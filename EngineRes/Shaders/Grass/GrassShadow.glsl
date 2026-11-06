@@ -17,19 +17,14 @@ uniform int u_CascadeIndex;
 uniform mat4 u_ShadowPassMat;
 
 /* 距离抽稀：叶根到相机的水平距离在 full 以内全画，往外按实例自带的随机数逐株丢掉，
- * fade 处密度归零。逐株判定而不是整块截断，相机移动时是慢慢变稀，不会成块跳 */
+ * fade 处密度归零。GPU 已经按同一条曲线剔除过时置 1，别再抽第二次 */
 uniform vec3 u_GrassShadowEye = vec3(0.0f);
 uniform float u_GrassShadowFullRadius = 20.0f;
 uniform float u_GrassShadowFadeRadius = 34.0f;
+uniform int u_GrassShadowGpuCulled = 0;
 
 #include "../Builtin/Uniforms.glsl"
 #include "../Builtin/GrassBlade.glsl"
-
-/* 实例的两个随机数（相位 / 色彩种子）凑一个 [0,1) 阈值：同一株每帧恒定，不会闪 */
-float GrassShadowDither(vec4 params)
-{
-	return fract(params.z * 91.37f + params.w * 47.11f);
-}
 
 /* 密度与阈值一起送给片元：丢叶子放在片元里做，不依赖各后端对裁剪体外顶点的处理 */
 out float v_GrassShadowDensity;
@@ -37,13 +32,12 @@ out float v_GrassShadowDither;
 
 void main()
 {
-	/* 距离抽稀：叶根到相机的水平距离在 full 以内全画，往外按实例自带的随机数逐株丢掉，
-	 * fade 处密度归零。逐株判定而不是整块截断，相机移动时是慢慢变稀，不会成块跳 */
 	const float distance = length(a_InstanceMatrix3.xz - u_GrassShadowEye.xz);
-	v_GrassShadowDensity = (1.0f
-		- smoothstep(u_GrassShadowFullRadius, u_GrassShadowFadeRadius, distance))
-		* u_BladeDensityScale;
-	v_GrassShadowDither = GrassShadowDither(a_InstanceParams);
+	v_GrassShadowDensity = (u_GrassShadowGpuCulled != 0)
+		? 1.0f
+		: GrassShadowWeight(distance, u_GrassShadowFullRadius, u_GrassShadowFadeRadius)
+			* u_BladeDensityScale;
+	v_GrassShadowDither = GrassDensityDither(a_InstanceParams);
 
 	vec3 blade_normal;
 	const vec3 pos = ExpandGrassBlade(a_Position, a_InstanceMatrix3.xyz, a_InstanceMatrix0.xyz,

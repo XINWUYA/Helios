@@ -1,10 +1,28 @@
 #pragma once
+#include <algorithm>
+
 #include "Helios/Scene/Components.h"
 #include "Helios/Scene/GrassField.h"
 #include "Helios/Scene/Material.h"
 
 namespace Helios::GrassDraw
 {
+	/* 草影的全密度半径：满密度圈以外逐株变稀，到最远距离归零 */
+	inline constexpr float kShadowFullRadius = 20.0f;
+
+	inline float ShadowFullRadius(float fade_radius)
+	{
+		return std::min(kShadowFullRadius, fade_radius * 0.5f);
+	}
+
+	/* 草影最远距离：组件设了就跟阴影距离取小，没设就跟随阴影距离。
+	 * 阴影着色、GPU 剔除、CPU 批筛选都按它算，三处口径必须一致 */
+	inline float ShadowFadeRadius(const GrassComponent& grass, float shadow_far)
+	{
+		return grass.m_ShadowFadeDistance > 0.0f
+			? std::min(grass.m_ShadowFadeDistance, shadow_far) : shadow_far;
+	}
+
 	/* 草地提交的逐绘制参数：风场（每片各不相同）、脚印图与覆盖范围。
 	 * 可见着色与阴影投影共用这一份，两边吃到同一阵风、同一个脚印，
 	 * 影子才跟得上草的动作。 */

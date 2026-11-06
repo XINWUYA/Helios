@@ -8,12 +8,14 @@
 #include "Components.h"
 #include "Entity.h"
 #include "Material.h"
+#include "ShadowMap.h"
 #include "Sky.h"
 #include "Helios/Common/Utils.h"
 #include "Helios/Common/Math.h"
 #include "Camera.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderView.h"
+#include "Helios/Renderer/RenderPasses/GrassDrawParams.h"
 #include "Helios/Renderer/PostProcess/PostProcessEffectRegistry.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Script/ScriptRuntime.h"
@@ -25,6 +27,13 @@ namespace Helios
 	{
 		/* 父链深度上限：兜住畸形场景文件里可能出现的环（正常层级远小于此） */
 		constexpr size_t kMaxHierarchyDepth = 64;
+
+		/* 视锥平面归一化：着色器按 dot(n, c) + w + r 判球，不用每个块再算一次 length() */
+		glm::vec4 NormalizePlane(const glm::vec4& plane)
+		{
+			const float normal_length = glm::length(glm::vec3(plane));
+			return normal_length > 1e-6f ? plane / normal_length : plane;
+		}
 	}
 
 	Scene::Scene()
@@ -400,19 +409,88 @@ namespace Helios
 		return *m_pScriptRuntime;
 	}
 
-	void Scene::PrepareGrassIndirect(const RenderView& view)
+	void Scene::PrepareGrassIndirect(RenderView& view)
 	{
 		const Camera* camera = view.GetCullingCamera();
 		if (camera == nullptr)
 			return;
 
+		/* 相机一档，方向光每档级联各一档。级联不是独立视图，但必须按它自己的
+		 * 光源视锥剔：画面外的草照样能把影子甩进来，按相机视锥选会漏掉一批 */
+		std::vector<GrassField::IndirectView> views;
+		views.reserve(GrassField::kIndirectSlotCount);
+
+		GrassField::IndirectView camera_view;
 		const Frustum frustum = Frustum::FromViewProjection(camera->GetViewProjectionMatrix());
-		const glm::vec3 eye = camera->GetPosition();
+		for (int plane = 0; plane < 6; ++plane)
+			camera_view.Planes[plane] = NormalizePlane(frustum.Planes[plane]);
+		camera_view.View = &view;
+		camera_view.Eye = camera->GetPosition();
+		camera_view.Slot = 0;
+		camera_view.Curve = 0;
+		views.push_back(camera_view);
+
+		float shadow_far = 0.0f;
+		const SharedPtr<ShadowMapManager>& manager = view.GetShadowMapManager();
+		if (view.HasShadowCast() && manager != nullptr)
+		{
+			const auto& cascades = manager->GetCascadeShadowMaps();
+			const glm::vec4& cascade_splits = manager->GetCascadeSplits();
+			if (!cascades.empty() && cascades[0]->GetLight() != nullptr)
+			{
+				const auto& info = cascades[0]->GetLight()->GetShadowMapInfo();
+				if (info != nullptr)
+					shadow_far = info->ShadowFar;
+			}
+
+			for (size_t index = 0; index < cascades.size() && views.size() < GrassField::kIndirectSlotCount;
+				++index)
+			{
+				GrassField::IndirectView shadow_view;
+				const Frustum light_frustum = Frustum::FromViewProjection(
+					cascades[index]->GetLightViewProjectionMat());
+				for (int plane = 0; plane < 6; ++plane)
+					shadow_view.Planes[plane] = NormalizePlane(light_frustum.Planes[plane]);
+				shadow_view.View = &view;
+				shadow_view.Eye = camera->GetPosition();
+				shadow_view.Slot = static_cast<uint32_t>(index) + 1u;
+				shadow_view.Curve = 1;
+				shadow_view.FadeRadius = shadow_far;
+				/* 这一档覆盖到相机的哪圈：预算估算按它算投影株数，
+				 * 比拿整条阴影距离去估准得多 */
+				const float split = index < 4 ? cascade_splits[static_cast<glm::length_t>(index)] : 0.0f;
+				shadow_view.Radius = split > 0.0f ? split : shadow_far;
+				views.push_back(shadow_view);
+			}
+		}
+
 		for (auto [entity, grass] : m_Registry.view<GrassComponent>().each())
 		{
-			if (grass.m_Field == nullptr)
+			if (grass.m_Field == nullptr || grass.m_Field->IsEmpty())
 				continue;
-			grass.m_Field->PrepareIndirect(frustum.Planes, eye);
+			if (!IsEntityInRenderView(entity, view.GetCullingMask()))
+				continue;
+
+			for (const GrassField::IndirectView& entry : views)
+			{
+				if (entry.Slot == 0)
+				{
+					grass.m_Field->PrepareIndirect(entry);
+					continue;
+				}
+
+				/* 不投影的草地不占级联槽位，省掉几次全量剔除 */
+				if (!grass.m_CastShadow || shadow_far <= 0.0f)
+					continue;
+
+				/* 最远距离跟阴影材质同一个口径：组件设了就取较小值。
+				 * 这边放宽会让影子拖得比材质允许的远，看起来又长又密 */
+				GrassField::IndirectView shadow_entry = entry;
+				shadow_entry.FadeRadius = GrassDraw::ShadowFadeRadius(grass, shadow_far);
+				if (shadow_entry.FadeRadius <= 0.0f)
+					continue;
+				grass.m_Field->PrepareIndirect(shadow_entry);
+			}
 		}
 	}
 

@@ -117,8 +117,9 @@ namespace Helios
 		AnimationRuntime& GetAnimationRuntime() { return m_AnimationRuntime; }
 
 		/* 逐视图给草地准备间接绘制数据（GPU 剔除 + 压实）。
+		 * 相机一档、方向光每档级联各一档，级联用它自己的光源视锥剔。
 		 * 会借当前帧的命令缓冲，必须在开始渲染这个视图之前调用 */
-		void PrepareGrassIndirect(const RenderView& view);
+		void PrepareGrassIndirect(RenderView& view);
 
 		/* 第一片草地的世界范围（xz 最小角与尺寸）：地面材质靠它决定在哪儿接管草色。
 		 * 场景里没有草地时尺寸为 0。 */

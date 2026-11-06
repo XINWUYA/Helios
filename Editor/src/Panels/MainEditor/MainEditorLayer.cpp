@@ -731,6 +731,16 @@ namespace Helios
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("On: grass is culled on the GPU and drawn with one indirect call. Off: one submit per chunk. Needs compute shader support");
 
+		/* 只影响间接路径的剔除层次：关掉退回逐实例自己测视锥，画面一致，用来对比 */
+		bool grass_chunk_mask = m_Settings.GpuGrassChunkMask;
+		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Grass Chunk Mask Culling", &grass_chunk_mask))
+		{
+			m_Settings.GpuGrassChunkMask = grass_chunk_mask;
+			apply_settings();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("On: visible chunks are compacted first and only those blades are scanned. Off: every blade tests the frustum itself. Same picture, for comparing the two-level cull");
+
 		/* 关掉就是逐块提交，用来对比 draw call */
 		bool grass_batching = m_Settings.GrassBatching;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Grass Block Batching", &grass_batching))

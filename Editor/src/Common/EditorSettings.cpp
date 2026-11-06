@@ -26,6 +26,7 @@ namespace Helios::EditorSettings
 		state.GPUSkinning = SkeletonModel::IsGlobalGpuSkinningEnabled();
 		state.GpuGrassPlacement = GrassField::IsGlobalGpuPlacementEnabled();
 		state.GpuGrassIndirect = GrassField::IsGlobalIndirectDrawEnabled();
+		state.GpuGrassChunkMask = GrassField::IsGlobalChunkMaskEnabled();
 		state.GrassBatching = GrassField::IsGlobalBatchingEnabled();
 		state.GrassDensityScale = GrassField::GetGlobalDensityScale();
 		state.TerrainVirtualTexture = TerrainVirtualTexture::IsEnabled();
@@ -52,6 +53,8 @@ namespace Helios::EditorSettings
 				state.GpuGrassPlacement = value;
 			else if (key == "GpuGrassIndirect")
 				state.GpuGrassIndirect = value;
+			else if (key == "GpuGrassChunkMask")
+				state.GpuGrassChunkMask = value;
 			else if (key == "GrassBatching")
 				state.GrassBatching = value;
 			else if (key == "TerrainVirtualTexture")
@@ -93,6 +96,7 @@ namespace Helios::EditorSettings
 		file << "GPUSkinning=" << (state.GPUSkinning ? 1 : 0) << "\n";
 		file << "GpuGrassPlacement=" << (state.GpuGrassPlacement ? 1 : 0) << "\n";
 		file << "GpuGrassIndirect=" << (state.GpuGrassIndirect ? 1 : 0) << "\n";
+		file << "GpuGrassChunkMask=" << (state.GpuGrassChunkMask ? 1 : 0) << "\n";
 		file << "GrassBatching=" << (state.GrassBatching ? 1 : 0) << "\n";
 		file << "GrassDensityScale=" << state.GrassDensityScale << "\n";
 		file << "TerrainVirtualTexture=" << (state.TerrainVirtualTexture ? 1 : 0) << "\n";
@@ -109,6 +113,7 @@ namespace Helios::EditorSettings
 		SkeletonModel::SetGlobalGpuSkinningEnabled(state.GPUSkinning);
 		GrassField::SetGlobalGpuPlacementEnabled(state.GpuGrassPlacement);
 		GrassField::SetGlobalIndirectDrawEnabled(state.GpuGrassIndirect);
+		GrassField::SetGlobalChunkMaskEnabled(state.GpuGrassChunkMask);
 		GrassField::SetGlobalBatchingEnabled(state.GrassBatching);
 		GrassField::SetGlobalDensityScale(state.GrassDensityScale);
 		TerrainVirtualTexture::SetEnabled(state.TerrainVirtualTexture);

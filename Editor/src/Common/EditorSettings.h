@@ -15,6 +15,8 @@ namespace Helios::EditorSettings
 		bool GpuGrassPlacement{ false };
 		/* 草地走 GPU 剔除 + 间接绘制（关掉退回逐块提交） */
 		bool GpuGrassIndirect{ false };
+		/* 顺带开启块掩码剔除：先压可见块表再逐株扫（关掉退回逐实例自己测视锥） */
+		bool GpuGrassChunkMask{ true };
 		/* 草地按批提交：连续块按实例预算合成一次绘制（关掉退回逐块提交） */
 		bool GrassBatching{ true };
 		/* 地形虚拟纹理：页池缓存地表颜色（关掉逐像素直接算） */

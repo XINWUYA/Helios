@@ -1,12 +1,11 @@
 #type compute
 #version 450 core
 
-/* 草地 GPU 剔除 + 实例压实：把可见的叶片抄进另一块缓冲，顺便把间接绘制参数写好。
- * 跟着色器无关的数学跟 ScenePass 的 GrassDensityScale 一致（同样的距离抽稀），
- * 所以开关前后画面应当完全一样。
+/* 草地 GPU 剔除 + 实例压实：把可见的叶片抄进目标缓冲，顺便把间接绘制参数写好。
+ * 相机和每一档级联各派发一次，各写各的槽位。
  *
- * 块的包围球从块包围球表里取，不在这里现推：贴地时块中心跟着地形起伏，
- * 按草地平面推出来的中心会比真实位置低几十米，视锥下边界会把近处的块整片判掉。
+ * 只扫块级剔除留下的可见块表：近处级联只跑它覆盖到的那几块，不再陪跑整片。
+ * 目标缓冲按段切分，一段装满换下一段，绘制端逐段提交。
  *
  * 参数块与 GrassField::PrepareIndirect 的 C++ 结构逐字节对应。 */
 
@@ -14,10 +13,10 @@ layout(local_size_x = 64) in;
 
 layout(std140, binding = 4) uniform GrassCullBlock
 {
-	vec4 u_Planes[6];   /* 视锥六个平面（未归一化，按支撑函数判） */
-	vec4 u_Counts;      /* x 每块株数、y 总株数、z 抽稀起点、w 剔除距离 */
-	vec4 u_Extra;       /* x 最小密度比例、y 全局密度系数 */
-	vec4 u_Camera;      /* xyz 相机位置 */
+	vec4 u_Counts;      /* x 每块株数、y 总株数、z 抽稀起点、w 抽稀终点 */
+	vec4 u_Extra;       /* x 最小密度比例、y 全局密度系数、z 预算系数、w 曲线 */
+	vec4 u_Camera;      /* xyz 观察点 */
+	uvec4 u_Segments;   /* x 段数、y 每段株数、z 参数步长 */
 };
 
 layout(std430, binding = 1) readonly buffer SourceInstances
@@ -30,59 +29,67 @@ layout(std430, binding = 2) writeonly buffer DrawInstances
 	vec4 u_Draw[];
 };
 
-/* 间接参数：count / instanceCount / firstIndex / baseVertex / baseInstance */
+/* 间接参数：每段 5 个 uint，段后跟发号计数、完成计数与派发参数 */
 layout(std430, binding = 3) buffer DrawArgs
 {
-	uint u_Args[5];
+	uint u_Args[];
 };
 
-/* 压实块号 → 块包围球：xyz 中心（已带地形高度）、w 半径 */
-layout(std430, binding = 5) readonly buffer ChunkBounds
+/* 可见块表：[0] 可见块数、[1..] 压实块号 */
+layout(std430, binding = 5) readonly buffer ChunkList
 {
-	vec4 u_ChunkBounds[];
+	uint u_Chunks[];
 };
 
-/* 抽稀曲线与可见着色共用一份，两边丢的是同一批株 */
+/* 抽稀曲线与可见着色、阴影着色共用一份，几边丢的是同一批株 */
 #include "../Builtin/GrassDensity.glsl"
 
 void main()
 {
-	const uint instance = gl_GlobalInvocationID.x;
+	const uint per_chunk = max(uint(u_Counts.x), 1u);
+	const uint index = gl_GlobalInvocationID.x;
+	const uint chunk_slot = index / per_chunk;
+
+	/* 派发按可见块数算，尾部的组会落在这里直接退掉 */
+	if (chunk_slot >= u_Chunks[0])
+		return;
+
+	const uint instance = u_Chunks[chunk_slot + 1u] * per_chunk + index % per_chunk;
 	if (instance >= uint(u_Counts.y))
 		return;
 
-	const uint per_chunk = uint(u_Counts.x);
-	const uint packed_chunk = instance / per_chunk;
-	const vec4 bounds = u_ChunkBounds[packed_chunk];
-	const vec3 center = bounds.xyz;
-	const float radius = bounds.w;
-
-	/* 视锥剔除：平面没归一化，按 |n| * r 判 */
-	for (int plane = 0; plane < 6; ++plane)
-	{
-		const vec3 normal = u_Planes[plane].xyz;
-		if (dot(normal, center) + u_Planes[plane].w + length(normal) * radius < 0.0f)
-			return;
-	}
-
-	/* 距离按到块表面的最近距离算：整块都在剔除距离之外才丢。
-	 * 块内的稀稠不在这里截断，改由下面逐株判 */
-	if (max(length(u_Camera.xyz - center) - radius, 0.0f) >= u_Counts.w)
-		return;
-
 	const uint source_base = instance * 5u;
-
-	/* 距离抽稀逐株判：块内密度连续，块边界不出台阶。可见着色里还有同样的一次，
-	 * 两边用同一条曲线；这里先丢一遍是为了缩小压实后的缓冲 */
 	const vec3 blade_base = u_Source[source_base + 3u].xyz;
-	const float blade_distance = length(u_Camera.xyz - blade_base);
-	if (GrassDensityKeep(blade_distance, GrassDensityDither(u_Source[source_base + 4u]),
-			u_Counts.z, u_Counts.w, u_Extra.x, u_Extra.y) < 0.5f)
+	const float dither = GrassDensityDither(u_Source[source_base + 4u]);
+
+	/* 逐株判：块内密度连续，块边界不出台阶。
+	 * 绘制端还会用同一条曲线再判一次，两边丢的是同一批株 */
+	float weight;
+	if (u_Extra.w > 0.5f)
+	{
+		weight = GrassShadowWeight(length(u_Camera.xz - blade_base.xz), u_Counts.z, u_Counts.w)
+			* u_Extra.y * u_Extra.z;
+	}
+	else
+	{
+		weight = GrassDensityWeight(length(u_Camera.xyz - blade_base), u_Counts.z, u_Counts.w,
+			u_Extra.x) * u_Extra.y;
+	}
+	if (dither > weight)
 		return;
 
-	/* 压实：原子计数器给出这一条在目标缓冲里的位置 */
-	const uint slot = atomicAdd(u_Args[1], 1u);
-	const uint draw_base = slot * 5u;
+	/* 分段：一个计数器从前往后发号，装满一段换下一段，段内不留空洞 */
+	const uint segments = max(u_Segments.x, 1u);
+	const uint capacity = max(u_Segments.y, 1u);
+	const uint stride = u_Segments.z;
+	const uint ticket = atomicAdd(u_Args[segments * stride], 1u);
+	const uint segment = ticket / capacity;
+	if (segment >= segments)
+		return;
+
+	/* 压实：段内偏移由号数取余给出，实例数按段各自累加 */
+	const uint draw_base = (segment * capacity + ticket % capacity) * 5u;
 	for (uint item = 0u; item < 5u; ++item)
 		u_Draw[draw_base + item] = u_Source[source_base + item];
+	atomicAdd(u_Args[segment * stride + 1u], 1u);
 }

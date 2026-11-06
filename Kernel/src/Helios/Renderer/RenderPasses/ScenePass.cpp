@@ -243,12 +243,24 @@ namespace Helios
 						per_draw.Overrides[flat_pad_index].Value = 0;
 					}
 
-					/* 间接路径：GPU 已经剔除并压实好，整片草地一笔画完 */
-					if (grass.m_Field->CanDrawIndirect())
+					/* 间接路径：GPU 已经剔除并压实好，按段提交。相机槽只备一段 */
+					constexpr uint32_t kCameraSlot = 0;
+					if (grass.m_Field->CanDrawIndirect(&render_view, kCameraSlot))
 					{
-						Renderer::SubmitIndirect(material, blade, grass.m_Field->GetIndirectDrawBuffer(),
-							grass.m_Field->GetIndirectArgs(), &per_draw, &Renderer::GetGrassInstanceLayout());
-						RenderStatistics::Instance().AddGrassDrawCall();
+						const uint32_t segments = grass.m_Field->GetIndirectSegments(&render_view, kCameraSlot);
+						const uint32_t capacity = grass.m_Field->GetIndirectSegmentCapacity(&render_view, kCameraSlot);
+						const uint32_t args_stride = GrassField::kIndirectArgsStride
+							* static_cast<uint32_t>(sizeof(uint32_t));
+						const uint32_t instance_stride = static_cast<uint32_t>(sizeof(GrassInstanceData));
+						for (uint32_t segment = 0; segment < segments; ++segment)
+						{
+							Renderer::SubmitIndirect(material, blade,
+								grass.m_Field->GetIndirectDrawBuffer(&render_view, kCameraSlot),
+								grass.m_Field->GetIndirectArgs(&render_view, kCameraSlot), &per_draw,
+								&Renderer::GetGrassInstanceLayout(), segment * args_stride,
+								segment * capacity * instance_stride);
+							RenderStatistics::Instance().AddGrassDrawCall();
+						}
 						continue;
 					}
 

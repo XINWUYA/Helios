@@ -14,6 +14,7 @@ namespace Helios
 {
 	struct GrassComponent;
 	class TerrainField;
+	class RenderView;
 	class DeviceVertexBuffer;
 	class DeviceStorageBuffer;
 	class DeviceTexture;
@@ -68,25 +69,57 @@ namespace Helios
 		static void SetGlobalIndirectDrawEnabled(bool enabled);
 		[[nodiscard]] static bool IsGlobalIndirectDrawEnabled();
 
+		/* 块掩码剔除的开关：开 = 先压可见块表再逐株扫；关 = 每个实例自己测视锥。
+		 * 关掉只是少了这一层，画面应当完全一致，用来对比两层剔除的收益 */
+		static void SetGlobalChunkMaskEnabled(bool enabled);
+		[[nodiscard]] static bool IsGlobalChunkMaskEnabled();
+
 		/* 批表提交的全局开关：开 = 按批提交，关 = 逐块提交（对照组） */
 		static void SetGlobalBatchingEnabled(bool enabled);
 		[[nodiscard]] static bool IsGlobalBatchingEnabled();
 
-		/* 本片草地这次能不能走间接路径：资源齐了、并且这个视图已经剔除过。
-		 * 开关关掉时 PrepareIndirect 不会把标记置起来，所以这里不用再判开关；
-		 * 少了视图标记会拿上一个视图的压实结果去画 */
-		[[nodiscard]] bool CanDrawIndirect() const
+		/* 一个间接剔除视图：相机与每一档级联各算一份，绘制端按 slot 取结果。
+		 * 级联不是独立的 RenderView，所以除了视图指针还要带槽位和它自己的抽稀曲线 */
+		struct IndirectView
 		{
-			return m_IndirectPrepared && m_IndirectArgs != nullptr && m_IndirectDrawBuffer != nullptr;
-		}
+			const RenderView* View{ nullptr };
+			glm::vec4 Planes[6]{};
+			glm::vec3 Eye{ 0.0f };
+			uint32_t Slot{ 0 };           /* 0 相机视图，1..4 级联 */
+			/* 0 按组件的相机距离抽稀，1 按草影 full/fade 的水平距离抽稀 */
+			uint32_t Curve{ 0 };
+			/* Curve = 1 时的草影最远距离（已经跟阴影距离取过较小值） */
+			float FadeRadius{ 0.0f };
+			/* 这个视图覆盖的半径（米，绕观察点）：只用来估预算够不够。
+			 * 0 表示按抽稀终点现算 */
+			float Radius{ 0.0f };
+		};
 
-		/* 逐视图剔除：可见实例压实进绘制缓冲，参数写进 args。
-		 * 会借当前帧的命令缓冲，必须在开始渲染这个视图之前调用 */
-		void PrepareIndirect(const glm::vec4* planes, const glm::vec3& eye);
+		/* 槽位与分段预算：相机要全量一段；级联按株数截断再切段，
+		 * 缓冲不按整片株数照抄四份。多出来的株由抽稀丢掉，影子本来就稀 */
+		static constexpr uint32_t kIndirectSlotCount = 5;
+		static constexpr uint32_t kMaxIndirectSegments = 4;
+		/* 每段株数：一档 4 段就是 98304 株，压实缓冲每档 8MB 左右。
+		 * 再大近处的草影就撑不住，再小远处会稀到看不见 */
+		static constexpr uint32_t kIndirectSegmentInstances = 24576;
+		/* 每段参数占 8 个 uint：5 个给绘制，其余留出 32 字节对齐 */
+		static constexpr uint32_t kIndirectArgsStride = 8;
+		/* 参数块尾部：段发号计数、块表计数、完成计数，然后是间接派发参数（4 个） */
+		static constexpr uint32_t kIndirectHeader = 8;
 
-		[[nodiscard]] const SharedPtr<DeviceStorageBuffer>& GetIndirectArgs() const { return m_IndirectArgs; }
+		/* 这个视图的槽位能不能走间接：资源齐了、而且确实为它剔除过。
+		 * 拿别的视图的结果去画会把整片草画错，所以视图和槽位必须都对上 */
+		[[nodiscard]] bool CanDrawIndirect(const RenderView* view, uint32_t slot) const;
+		[[nodiscard]] uint32_t GetIndirectSegments(const RenderView* view, uint32_t slot) const;
+		[[nodiscard]] uint32_t GetIndirectSegmentCapacity(const RenderView* view, uint32_t slot) const;
+		[[nodiscard]] const SharedPtr<DeviceStorageBuffer>& GetIndirectArgs(const RenderView* view, uint32_t slot) const;
 		/* 压实后的实例数据（顶点视图），画的时候用它 */
-		[[nodiscard]] const SharedPtr<DeviceVertexBuffer>& GetIndirectDrawBuffer() const { return m_IndirectDrawView; }
+		[[nodiscard]] const SharedPtr<DeviceVertexBuffer>& GetIndirectDrawBuffer(
+			const RenderView* view, uint32_t slot) const;
+
+		/* 逐视图剔除：可见实例压实进该槽位的绘制缓冲，参数写进它的 args。
+		 * 会借当前帧的命令缓冲，必须在开始渲染这个视图之前调用 */
+		void PrepareIndirect(const IndirectView& view);
 
 		/* 重建实例数据（参数与变换都没变时直接返回）。ground 非空时叶片贴到地形表面，
 		 * 块底面不再生成（草下就是地形）。
@@ -211,10 +244,21 @@ namespace Helios
 		/* 实例数据的存储缓冲：顶点缓冲是它的一块视图（CreateShared），
 		 * GPU 放置与间接剔除都吃这一份，省一次拷贝 */
 		SharedPtr<DeviceStorageBuffer> m_InstanceStorage;
-		/* 间接绘制：压实后的实例 + 参数块 */
-		SharedPtr<DeviceStorageBuffer> m_IndirectDrawBuffer;
-		SharedPtr<DeviceVertexBuffer> m_IndirectDrawView;
-		SharedPtr<DeviceStorageBuffer> m_IndirectArgs;
+		/* 间接绘制：每个视图槽位一份压实后的实例与参数块。
+		 * 参数块按段排布，每段自带一套间接参数；块表存这一档可见的块号 */
+		struct IndirectSlot
+		{
+			const RenderView* View{ nullptr };
+			SharedPtr<DeviceStorageBuffer> Storage;
+			SharedPtr<DeviceVertexBuffer> ViewBuffer;
+			SharedPtr<DeviceStorageBuffer> Args;
+			SharedPtr<DeviceStorageBuffer> ChunkList;
+			uint32_t SegmentCount{ 0 };
+			uint32_t SegmentCapacity{ 0 };
+		};
+		IndirectSlot m_Indirect[kIndirectSlotCount];
+		[[nodiscard]] IndirectSlot* FindIndirectSlot(const RenderView* view, uint32_t slot);
+		[[nodiscard]] const IndirectSlot* FindIndirectSlot(const RenderView* view, uint32_t slot) const;
 		SharedPtr<DeviceVertexBuffer> m_GpuVertexView;   /* 同一块显存的顶点视图 */
 		SharedPtr<DeviceVertexBuffer> m_PadBuffer;
 		SharedPtr<DeviceTexture> m_TrampleTexture;
@@ -278,7 +322,6 @@ namespace Helios
 		bool m_ReceiveShadow{ true };
 		bool m_GpuDirty{ false };
 		bool m_UsingGpuPlacement{ false };
-		bool m_IndirectPrepared{ false };
 		uint64_t m_BuildKey{ 0 };
 	};
 }

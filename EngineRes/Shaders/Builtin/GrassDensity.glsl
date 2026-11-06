@@ -24,16 +24,30 @@ float GrassDensityCurve(float t, float min_scale)
 	return body * (1.0f - t * t);
 }
 
+/* 这一株的保留概率：不含随机判定，GPU 剔除要往上乘预算系数，所以单独拆一份 */
+float GrassDensityWeight(float distance, float full_distance, float fade_distance,
+	float min_scale)
+{
+	if (distance <= full_distance)
+		return 1.0f;
+	return GrassDensityCurve(clamp((distance - full_distance)
+		/ max(fade_distance - full_distance, 1e-3f), 0.0f, 1.0f), min_scale);
+}
+
 /* 这一株留不留：distance 是叶根到相机的距离，参数含义与 GrassComponent 一致。
  * density_scale 是画质档的全局系数，乘在阈值上，0 就是整片不画 */
 float GrassDensityKeep(float distance, float random_value, float full_distance,
 	float fade_distance, float min_scale, float density_scale)
 {
-	const float keep = (distance <= full_distance)
-		? 1.0f
-		: GrassDensityCurve(clamp((distance - full_distance)
-			/ max(fade_distance - full_distance, 1e-3f), 0.0f, 1.0f), min_scale);
-	return random_value < keep * max(density_scale, 0.0f) ? 1.0f : 0.0f;
+	return random_value < GrassDensityWeight(distance, full_distance, fade_distance, min_scale)
+		* max(density_scale, 0.0f) ? 1.0f : 0.0f;
+}
+
+/* 草影的保留概率：按水平距离，full 以内全留，fade 处归零。
+ * 阴影着色与 GPU 剔除共用这一条，影子的疏密只有一个来源 */
+float GrassShadowWeight(float distance, float full_distance, float fade_distance)
+{
+	return 1.0f - smoothstep(full_distance, max(fade_distance, full_distance + 1e-3f), distance);
 }
 
 #endif // GRASS_DENSITY_GLSL
