@@ -19,6 +19,11 @@ namespace Helios::GrassDraw
 		if (!GrassField::IsGlobalIndirectDrawEnabled())
 			return;
 
+		/* 开关是意图，后端跑不了计算就别挂这个 Pass：挂了也只是空跑一趟，
+		 * 绘制端会退回批表，面板上的数字对不上 */
+		if (Renderer::GetRenderAPI() == nullptr || !Renderer::GetRenderAPI()->SupportsCompute())
+			return;
+
 		const SharedPtr<Scene> scene = view.GetOwnerScene();
 		if (scene == nullptr || view.GetCullingCamera() == nullptr)
 			return;

@@ -7,6 +7,7 @@
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "Components.h"
+#include "Helios/Profiler/Profiler.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderPasses/GrassDrawParams.h"
 #include "Helios/Renderer/RenderPasses/GrassPasses.h"
@@ -202,7 +203,7 @@ namespace Helios
 	void GrassField::Rebuild(const GrassComponent& component, const glm::mat4& world,
 		const TerrainField* ground, const glm::vec2& focus_min, const glm::vec2& focus_max)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* 构建键：参数、变换、放置方式都算进来，没变就整段跳过 */
 		uint64_t key = 0xcbf29ce484222325ull;
@@ -370,6 +371,8 @@ namespace Helios
 		if (m_HalfX <= 0.0f || m_HalfZ <= 0.0f || density <= 0.0f || m_Height <= 0.0f)
 		{
 			m_InstanceBuffer = nullptr;
+			m_InstanceBufferCount = 0;
+			m_Placement = Placement::Pending;
 			m_InstanceStorage = nullptr;
 			m_GpuVertexView = nullptr;
 			m_PadBuffer = nullptr;
@@ -494,6 +497,8 @@ namespace Helios
 		if (m_InstanceCount == 0)
 		{
 			m_InstanceBuffer = nullptr;
+			m_InstanceBufferCount = 0;
+			m_Placement = Placement::Pending;
 			m_InstanceStorage = nullptr;
 			m_GpuVertexView = nullptr;
 			m_PadBuffer = nullptr;
@@ -587,20 +592,34 @@ namespace Helios
 		const bool shared_ok = m_InstanceStorage != nullptr && m_GpuVertexView != nullptr;
 		/* 贴地时把地形高度上传成 storage buffer；建不出来就退回 CPU 路径 */
 		const bool ground_ready = m_Ground == nullptr || m_Ground->GetHeightStorage() != nullptr;
-		const bool gpu_path = ground_ready && g_GpuPlacementEnabled && shared_ok
-			&& m_ChunkIndexBuffer != nullptr
-			&& Renderer::GetRenderAPI() != nullptr && Renderer::GetRenderAPI()->SupportsCompute();
-		m_UsingGpuPlacement = gpu_path;
+
+		/* 判定顺序就是退回顺序，缺哪样记哪样 */
+		m_Placement = Placement::CpuDisabled;
+		if (g_GpuPlacementEnabled)
+		{
+			const SharedPtr<RenderAPI> api = Renderer::GetRenderAPI();
+			if (api == nullptr || !api->SupportsCompute())
+				m_Placement = Placement::CpuNoCompute;
+			else if (!shared_ok)
+				m_Placement = Placement::CpuNoSharedBuffer;
+			else if (m_ChunkIndexBuffer == nullptr)
+				m_Placement = Placement::CpuNoChunkTable;
+			else if (!ground_ready)
+				m_Placement = Placement::CpuNoGroundHeight;
+			else
+				m_Placement = Placement::Gpu;
+		}
+		const bool gpu_path = m_Placement == Placement::Gpu;
 		if (gpu_path)
 		{
 			m_InstanceBuffer = m_GpuVertexView;
+			m_InstanceBufferCount = m_InstanceCount;
 			m_CapacityBytes = bytes;
 			m_GpuDirty = true;
 		}
 		else if (shared_ok)
 		{
-			/* 株数多的时候把生成丢后台：拖地形笔刷会反复触发重建，同步算会卡主线程。
-			 * 算完之前不画草（旧缓冲长度对不上新株数，留着会越界） */
+			/* 株数多的时候把生成丢后台：拖地形笔刷会反复触发重建，同步算会卡主线程 */
 			constexpr uint32_t kAsyncThreshold = 20000;
 			if (m_InstanceCount >= kAsyncThreshold && Jobs::IsInitialized() && m_AsyncBuild == nullptr)
 			{
@@ -620,8 +639,13 @@ namespace Helios
 					state->Done.store(true, std::memory_order_release);
 				});
 
-				m_InstanceBuffer = nullptr;
-				m_CapacityBytes = 0;
+				/* 旧缓冲装得下就先接着画，等后台算完再换；装不下只能空着等 */
+				if (m_InstanceBufferCount < m_InstanceCount)
+				{
+					m_InstanceBuffer = nullptr;
+					m_InstanceBufferCount = 0;
+					m_CapacityBytes = 0;
+				}
 				UploadTrample();
 				return;
 			}
@@ -751,7 +775,7 @@ namespace Helios
 	std::vector<GrassInstanceData> GrassField::GenerateInstances(const BuildParams& params,
 		const std::function<bool()>& should_cancel)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		std::vector<GrassInstanceData> instances(params.InstanceCount);
 		const float* heights = params.GroundHeights.empty() ? nullptr : params.GroundHeights.data();
@@ -923,6 +947,7 @@ namespace Helios
 		{
 			m_InstanceBuffer = DeviceVertexBuffer::Create("GrassFieldInstances", instances.data(), bytes);
 		}
+		m_InstanceBufferCount = static_cast<uint32_t>(instances.size());
 		m_CapacityBytes = bytes;
 	}
 
@@ -1180,6 +1205,11 @@ namespace Helios
 			glm::vec4 Camera{ 0.0f };
 			glm::uvec4 Segments{ 0u };
 		};
+
+		/* 计时树按槽位分组：四步派发名字一样，靠这层区分相机与各级联 */
+		PROFILE_GPU_SCOPE(view.Slot == 0
+			? std::string("Grass Camera")
+			: "Grass Cascade " + std::to_string(view.Slot));
 
 		if (!GrassDraw::DispatchArgsReset(slot.Args, slot.ChunkList, kBladeIndexCount, segments,
 			kIndirectArgsStride))

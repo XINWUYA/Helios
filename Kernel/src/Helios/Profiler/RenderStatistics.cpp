@@ -40,9 +40,20 @@ namespace Helios
 		m_Pending.Instances += instances;
 	}
 
-	void RenderStatistics::AddGrassDrawCall()
+	void RenderStatistics::AddGrassDrawCall(GrassPass pass)
 	{
-		++m_Pending.GrassDrawCalls;
+		switch (pass)
+		{
+		case GrassPass::Visible:
+			++m_Pending.GrassVisibleDrawCalls;
+			break;
+		case GrassPass::Shadow:
+			++m_Pending.GrassShadowDrawCalls;
+			break;
+		case GrassPass::Velocity:
+			++m_Pending.GrassVelocityDrawCalls;
+			break;
+		}
 	}
 
 	void RenderStatistics::EndFrame()

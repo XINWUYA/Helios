@@ -907,7 +907,7 @@ namespace Helios
 									grass.m_Field->GetIndirectArgs(render_view, slot), &per_draw,
 									&Renderer::GetGrassInstanceLayout(), segment * args_stride,
 									segment * capacity * instance_stride);
-								RenderStatistics::Instance().AddGrassDrawCall();
+								RenderStatistics::Instance().AddGrassDrawCall(RenderStatistics::GrassPass::Shadow);
 							}
 							continue;
 						}
@@ -931,7 +931,7 @@ namespace Helios
 
 								Renderer::SubmitInstanced(grass_material, blade, instance_buffer,
 									batch.First, batch.Count, &per_draw, 0, &Renderer::GetGrassInstanceLayout());
-								RenderStatistics::Instance().AddGrassDrawCall();
+								RenderStatistics::Instance().AddGrassDrawCall(RenderStatistics::GrassPass::Shadow);
 							}
 							continue;
 						}
@@ -954,7 +954,7 @@ namespace Helios
 
 							Renderer::SubmitInstanced(grass_material, blade, instance_buffer,
 								chunk.First, chunk.Count, &per_draw, 0, &Renderer::GetGrassInstanceLayout());
-							RenderStatistics::Instance().AddGrassDrawCall();
+							RenderStatistics::Instance().AddGrassDrawCall(RenderStatistics::GrassPass::Shadow);
 						}
 					}
 				};

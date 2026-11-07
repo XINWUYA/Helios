@@ -18,8 +18,15 @@ namespace Helios
 		/* 一笔绘制：instances 传实例化绘制的实例数（非实例化传 0） */
 		void AddDrawCall(PrimitiveType type, uint64_t element_count, uint32_t instances, bool indirect);
 
-		/* 草地的一笔提交：不参与几何量折算，只单独记笔数 */
-		void AddGrassDrawCall();
+		/* 草叶提交按通道分开记：可见着色、阴影投射、速度图各一格。
+		 * 块底面不计入这里，它的笔数并进 Draw Calls 就好 */
+		enum class GrassPass : uint8_t
+		{
+			Visible,
+			Shadow,
+			Velocity,
+		};
+		void AddGrassDrawCall(GrassPass pass);
 
 		/* 帧边界：累计值结算成快照，随后清零 */
 		void EndFrame();

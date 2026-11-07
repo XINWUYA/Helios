@@ -94,6 +94,103 @@ namespace Helios
 				ImGui::SetTooltip("White is full density, black is bare ground\nTop is -Z, right is +X");
 		}
 
+		/* 放置路径只在这里显示：菜单那个开关是「想用 GPU」，
+		 * 后端不支持计算、实例缓冲没有共享视图、地形高度没传上 GPU 时都会退回 CPU */
+		void DrawPlacementRow(const GrassComponent& component)
+		{
+			GrassField::Placement placement = GrassField::Placement::Pending;
+			if (component.m_Field != nullptr)
+				placement = component.m_Field->GetPlacement();
+
+			const char* text = "Placement: pending";
+			const char* hint = "Instances are generated on the next update";
+			ImVec4 color = EditorTheme::Token::TextDim;
+			switch (placement)
+			{
+			case GrassField::Placement::Gpu:
+				text = "Placement: GPU";
+				hint = "Blade positions come from the compute shader";
+				color = EditorTheme::Token::Text;
+				break;
+			case GrassField::Placement::CpuDisabled:
+				text = "Placement: CPU (switch off)";
+				hint = "Turn on GPU Grass Placement in the Rendering menu";
+				break;
+			case GrassField::Placement::CpuNoCompute:
+				text = "Placement: CPU (no compute support)";
+				hint = "This backend cannot run compute shaders";
+				color = EditorTheme::Token::Warning;
+				break;
+			case GrassField::Placement::CpuNoSharedBuffer:
+				text = "Placement: CPU (no shared buffer)";
+				hint = "The instance buffer has no shared vertex view on this backend";
+				color = EditorTheme::Token::Warning;
+				break;
+			case GrassField::Placement::CpuNoChunkTable:
+				text = "Placement: CPU (chunk table missing)";
+				hint = "The chunk index table was not created";
+				color = EditorTheme::Token::Warning;
+				break;
+			case GrassField::Placement::CpuNoGroundHeight:
+				text = "Placement: CPU (terrain heights not on GPU)";
+				hint = "Grass conforms to terrain but the height buffer is missing";
+				color = EditorTheme::Token::Warning;
+				break;
+			case GrassField::Placement::Pending:
+			default:
+				break;
+			}
+
+			ImGui::TextColored(color, "%s", text);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", hint);
+		}
+
+		/* 这一帧实际怎么提交的：开关只是意图，退回批表的原因也在这里，
+		 * 面板和 Geometry 卡上的笔数能对着看 */
+		void DrawSubmitRow(const GrassComponent& component)
+		{
+			GrassField::DrawPath path = GrassField::DrawPath::Pending;
+			if (component.m_Field != nullptr)
+				path = component.m_Field->GetDrawPath();
+
+			const char* text = "Submit: pending";
+			const char* hint = "Grass has not been submitted yet";
+			ImVec4 color = EditorTheme::Token::TextDim;
+			switch (path)
+			{
+			case GrassField::DrawPath::Indirect:
+				text = "Submit: indirect";
+				hint = "GPU culled, segments drawn with indirect args";
+				color = EditorTheme::Token::Text;
+				break;
+			case GrassField::DrawPath::BatchingSwitchOff:
+				text = "Submit: batched (indirect off)";
+				hint = "Turn on GPU Grass Indirect Draw to cull on the GPU";
+				break;
+			case GrassField::DrawPath::BatchingNoCompute:
+				text = "Submit: batched (no compute support)";
+				hint = "This backend cannot run compute shaders";
+				color = EditorTheme::Token::Warning;
+				break;
+			case GrassField::DrawPath::BatchingNoSlot:
+				text = "Submit: batched (cull not ready)";
+				hint = "The instance buffer or chunk table was not ready this frame";
+				color = EditorTheme::Token::Warning;
+				break;
+			case GrassField::DrawPath::Chunk:
+				text = "Submit: per chunk (batching off)";
+				hint = "Grass Block Batching is off, one submit per chunk";
+				break;
+			default:
+				break;
+			}
+
+			ImGui::TextColored(color, "%s", text);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("%s", hint);
+		}
+
 		/* 草地只有一个材质槽：行版式与模型槽共用，这里只管语义 ——
 		 * 清掉就没有资产来源，回内建默认外观；Reset 从来源 .mtl 重新克隆。
 		 * 返回是否改动：换材质要生成快照命令（撤销与场景脏标记都靠它） */
@@ -101,6 +198,8 @@ namespace Helios
 		{
 			auto& component = *static_cast<GrassComponent*>(raw);
 			MaterialSlotOverride& slot = component.m_MaterialSlot;
+			DrawPlacementRow(component);
+			DrawSubmitRow(component);
 			if (MaterialParamUI::BeginPropertyGroup("##DensityPaint", "Density paint"))
 			{
 				auto& settings = GrassPaint::GetSettings();

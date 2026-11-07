@@ -138,7 +138,7 @@ namespace Helios
 
 	/* 几何统计卡的行内容（纯函数）：未结算时都是占位；间接绘制并进 Draw Calls 行 ——
 	 * 它的元素数与实例数在 GPU 参数块里，混进顶点 / 三角形会让这两行的口径失真。
-	 * Grass Draws 是草地的可见加阴影提交数，对照批表开关用 */
+	 * 草的提交按通道拆三行：颜色、阴影、速度各算各的，别拿总数猜是哪一趟。 */
 	void RenderStatsPanel::BuildGeometryRows(const RenderStatisticsSnapshot& stats,
 		std::vector<GeometryRow>& out_rows)
 	{
@@ -146,11 +146,13 @@ namespace Helios
 
 		if (!stats.Valid)
 		{
-			out_rows.push_back({ "Draw Calls", kNoDataText });
-			out_rows.push_back({ "Grass Draws", kNoDataText });
-			out_rows.push_back({ "Triangles", kNoDataText });
-			out_rows.push_back({ "Vertices", kNoDataText });
-			out_rows.push_back({ "Instances", kNoDataText });
+			out_rows.push_back({ "Draw Calls", kNoDataText, {} });
+			out_rows.push_back({ "Grass Visible", kNoDataText, {} });
+			out_rows.push_back({ "Grass Shadow", kNoDataText, {} });
+			out_rows.push_back({ "Grass Velocity", kNoDataText, {} });
+			out_rows.push_back({ "Triangles", kNoDataText, {} });
+			out_rows.push_back({ "Vertices", kNoDataText, {} });
+			out_rows.push_back({ "Instances", kNoDataText, {} });
 			return;
 		}
 
@@ -161,21 +163,26 @@ namespace Helios
 		{
 			std::snprintf(draw_calls_text, sizeof(draw_calls_text), "%s (%llu indirect)", count_text,
 				static_cast<unsigned long long>(stats.IndirectDrawCalls));
-			out_rows.push_back({ "Draw Calls", draw_calls_text });
 		}
 		else
 		{
-			out_rows.push_back({ "Draw Calls", count_text });
+			std::snprintf(draw_calls_text, sizeof(draw_calls_text), "%s", count_text);
 		}
-
-		/* 草地的笔数单列一行：切批表开关时盯这一项，别看总数猜 */
-		char grass_text[24];
-		out_rows.push_back({ "Grass Draws", FormatCount(stats.GrassDrawCalls, grass_text, sizeof(grass_text)) });
+		out_rows.push_back({ "Draw Calls", draw_calls_text,
+			"Indirect calls include grass and its shadows. Their element counts sit in the GPU args, "
+			"so they stay out of the rows below" });
 
 		char value_text[24];
-		out_rows.push_back({ "Triangles", FormatCount(stats.Triangles, value_text, sizeof(value_text)) });
-		out_rows.push_back({ "Vertices", FormatCount(stats.Vertices, value_text, sizeof(value_text)) });
-		out_rows.push_back({ "Instances", FormatCount(stats.Instances, value_text, sizeof(value_text)) });
+		out_rows.push_back({ "Grass Visible", FormatCount(stats.GrassVisibleDrawCalls, value_text, sizeof(value_text)),
+			"Blade submits in the color pass. The flat underlay is not counted" });
+		out_rows.push_back({ "Grass Shadow", FormatCount(stats.GrassShadowDrawCalls, value_text, sizeof(value_text)),
+			"One submit per cascade segment. Empty segments still count" });
+		out_rows.push_back({ "Grass Velocity", FormatCount(stats.GrassVelocityDrawCalls, value_text, sizeof(value_text)),
+			"Blade submits in the velocity pass. Only present while TAA is on" });
+
+		out_rows.push_back({ "Triangles", FormatCount(stats.Triangles, value_text, sizeof(value_text)), {} });
+		out_rows.push_back({ "Vertices", FormatCount(stats.Vertices, value_text, sizeof(value_text)), {} });
+		out_rows.push_back({ "Instances", FormatCount(stats.Instances, value_text, sizeof(value_text)), {} });
 	}
 
 	/* 面板自身的开销不计入采集树：这一段里把 Editor 通道关掉（其它子系统照常收）。
@@ -259,7 +266,14 @@ namespace Helios
 			std::vector<GeometryRow> rows;
 			BuildGeometryRows(Profiler::Instance().GetRenderStatistics(), rows);
 			for (const GeometryRow& row : rows)
+			{
+				/* 整行当命中区：数字本身没交互，悬停看口径 */
+				ImGui::BeginGroup();
 				ImGuiExt::DrawCommonTextUI(row.Label, row.Value);
+				ImGui::EndGroup();
+				if (!row.Tooltip.empty() && ImGui::IsItemHovered())
+					ImGui::SetTooltip("%s", row.Tooltip.c_str());
+			}
 		}
 
 		PanelChrome::EndCard(card);

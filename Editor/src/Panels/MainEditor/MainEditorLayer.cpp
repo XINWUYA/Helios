@@ -731,25 +731,34 @@ namespace Helios
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("On: grass is culled on the GPU and drawn with one indirect call. Off: one submit per chunk. Needs compute shader support");
 
-		/* 只影响间接路径的剔除层次：关掉退回逐实例自己测视锥，画面一致，用来对比 */
+		/* 只影响间接路径的剔除层次：间接关着时切它没有任何效果，直接置灰 */
+		const bool grass_indirect_on = m_Settings.GpuGrassIndirect;
+		ImGui::BeginDisabled(!grass_indirect_on);
 		bool grass_chunk_mask = m_Settings.GpuGrassChunkMask;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Grass Chunk Mask Culling", &grass_chunk_mask))
 		{
 			m_Settings.GpuGrassChunkMask = grass_chunk_mask;
 			apply_settings();
 		}
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("On: visible chunks are compacted first and only those blades are scanned. Off: every blade tests the frustum itself. Same picture, for comparing the two-level cull");
+		if (ImGui::IsItemHovered(grass_indirect_on ? 0 : ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip(grass_indirect_on
+				? "On: visible chunks are compacted first and only those blades are scanned. Off: every blade tests the frustum itself. Same picture, for comparing the two-level cull"
+				: "Only used by GPU Grass Indirect Draw. Turn that on first");
+		ImGui::EndDisabled();
 
-		/* 关掉就是逐块提交，用来对比 draw call */
+		/* 间接开着时由它接管提交，批表开关不起作用：置灰说明原因 */
+		ImGui::BeginDisabled(grass_indirect_on);
 		bool grass_batching = m_Settings.GrassBatching;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Grass Block Batching", &grass_batching))
 		{
 			m_Settings.GrassBatching = grass_batching;
 			apply_settings();
 		}
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("On: adjacent chunks are merged into one draw by instance budget. Off: one submit per chunk. No effect while indirect draw is on");
+		if (ImGui::IsItemHovered(grass_indirect_on ? ImGuiHoveredFlags_AllowWhenDisabled : 0))
+			ImGui::SetTooltip(grass_indirect_on
+				? "Indirect draw takes over the submission while it is on. Turn it off to compare batching"
+				: "On: adjacent chunks are merged into one draw by instance budget. Off: one submit per chunk");
+		ImGui::EndDisabled();
 
 		/* 草密度：连续值留在编辑器设置里，菜单只给三档 */
 		if (BeginBarSubmenu("Grass Density"))

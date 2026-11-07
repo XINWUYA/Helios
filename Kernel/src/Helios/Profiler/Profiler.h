@@ -227,7 +227,8 @@ namespace Helios
 
 	/* 一帧的渲染统计快照：提交次数与几何吞吐量（面板只读，不参与任何渲染决策）。
 	 * 口径 —— 顶点 / 三角形按「这一笔提交了多少元素」折算，实例化乘实例数；
-	 * 间接绘制（草地）的元素与实例数在 GPU 侧，只计入调用数，几何量不计。 */
+	 * 间接绘制（草地）的元素与实例数在 GPU 侧，只计入调用数，几何量不计。
+	 * 草的提交按通道分三类：同一份剔除结果会被多个 Pass 各提交一遍，混在一起看不出是谁。 */
 	struct RenderStatisticsSnapshot
 	{
 		uint64_t DrawCalls{ 0 };
@@ -235,7 +236,9 @@ namespace Helios
 		uint64_t Vertices{ 0 };
 		uint64_t Instances{ 0 };
 		uint64_t IndirectDrawCalls{ 0 };
-		uint64_t GrassDrawCalls{ 0 };
+		uint64_t GrassVisibleDrawCalls{ 0 };
+		uint64_t GrassShadowDrawCalls{ 0 };
+		uint64_t GrassVelocityDrawCalls{ 0 };
 		bool Valid{ false };
 	};
 

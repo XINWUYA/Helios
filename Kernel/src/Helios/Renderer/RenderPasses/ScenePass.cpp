@@ -178,10 +178,23 @@ namespace Helios
 				}
 			}
 
+			/* 退回批表的原因：开关关着、后端跑不了计算、或者这一帧没备出剔除结果。
+			 * 面板照这个显示，不用自己去猜 */
+			GrassField::DrawPath GrassFallbackPath()
+			{
+				if (!GrassField::IsGlobalIndirectDrawEnabled())
+					return GrassField::DrawPath::BatchingSwitchOff;
+				const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI();
+				if (api == nullptr || !api->SupportsCompute())
+					return GrassField::DrawPath::BatchingNoCompute;
+				return GrassField::DrawPath::BatchingNoSlot;
+			}
+
 			/* 逐片草地的绘制：块底面先、叶片后（抽稀 / 剔除 / 间接），材质与逐绘制参数
-			 * 由调用方准备 —— 可见着色与调试重绘共用这一套提交。 */
+			 * 由调用方准备 —— 可见着色与调试重绘共用这一套提交。
+			 * pass 只用来分通道记笔数：同一份剔除结果会被颜色 / 速度各提交一遍。 */
 			template <typename GetMaterial, typename PrepareDraw>
-			void SubmitGrassDraws(RenderView& render_view, Scene& scene,
+			void SubmitGrassDraws(RenderView& render_view, Scene& scene, RenderStatistics::GrassPass pass,
 				GetMaterial&& get_material, PrepareDraw&& prepare_draw)
 			{
 				const Camera* camera = render_view.GetCullingCamera();
@@ -247,6 +260,7 @@ namespace Helios
 					constexpr uint32_t kCameraSlot = 0;
 					if (grass.m_Field->CanDrawIndirect(&render_view, kCameraSlot, scene.GetFrameIndex()))
 					{
+						grass.m_Field->SetDrawPath(GrassField::DrawPath::Indirect);
 						const uint32_t segments = grass.m_Field->GetIndirectSegments(&render_view, kCameraSlot);
 						const uint32_t capacity = grass.m_Field->GetIndirectSegmentCapacity(&render_view, kCameraSlot);
 						const uint32_t args_stride = GrassField::kIndirectArgsStride
@@ -259,7 +273,7 @@ namespace Helios
 								grass.m_Field->GetIndirectArgs(&render_view, kCameraSlot), &per_draw,
 								&Renderer::GetGrassInstanceLayout(), segment * args_stride,
 								segment * capacity * instance_stride);
-							RenderStatistics::Instance().AddGrassDrawCall();
+							RenderStatistics::Instance().AddGrassDrawCall(pass);
 						}
 						continue;
 					}
@@ -269,6 +283,7 @@ namespace Helios
 					const auto& batches = grass.m_Field->GetBatches();
 					if (GrassField::IsGlobalBatchingEnabled() && !batches.empty())
 					{
+						grass.m_Field->SetDrawPath(GrassFallbackPath());
 						for (const GrassField::Batch& batch : batches)
 						{
 							if (cull && frustum.IsOutside(batch.Center, batch.Extent))
@@ -281,11 +296,12 @@ namespace Helios
 
 							Renderer::SubmitInstanced(material, blade, instance_buffer, batch.First, batch.Count,
 								&per_draw, 0, &Renderer::GetGrassInstanceLayout());
-							RenderStatistics::Instance().AddGrassDrawCall();
+							RenderStatistics::Instance().AddGrassDrawCall(pass);
 						}
 						continue;
 					}
 
+					grass.m_Field->SetDrawPath(GrassField::DrawPath::Chunk);
 					for (const GrassField::Chunk& chunk : chunks)
 					{
 						/* 按观察点裁剪掉的块（Count = 0）不生成实例，也别画 */
@@ -306,7 +322,7 @@ namespace Helios
 						 * 按块截断实例数会在块边界上留台阶 */
 						Renderer::SubmitInstanced(material, blade, instance_buffer, chunk.First, chunk.Count,
 							&per_draw, 0, &Renderer::GetGrassInstanceLayout());
-						RenderStatistics::Instance().AddGrassDrawCall();
+						RenderStatistics::Instance().AddGrassDrawCall(pass);
 					}
 				}
 			}
@@ -355,7 +371,7 @@ namespace Helios
 			FillGrassLightUniform(render_view);
 
 			const auto probe_manager = scene.GetReflectionProbeManager();
-			SubmitGrassDraws(render_view, scene,
+			SubmitGrassDraws(render_view, scene, RenderStatistics::GrassPass::Visible,
 				[](const GrassComponent& grass) { return grass.GetMaterial(); },
 				[probe_manager, &render_view, debug_view](const GrassComponent& grass, DrawParams& per_draw)
 				{
@@ -381,7 +397,7 @@ namespace Helios
 		{
 			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
-			SubmitGrassDraws(render_view, scene,
+			SubmitGrassDraws(render_view, scene, RenderStatistics::GrassPass::Visible,
 				[&material](const GrassComponent&) { return material; },
 				[](const GrassComponent& grass, DrawParams& per_draw)
 				{
@@ -549,7 +565,7 @@ namespace Helios
 						}
 
 						/* 草：叶形在顶点里展开，得用上一帧的风相位才能算出上一帧在哪 */
-						SubmitGrassDraws(*render_view, *scene,
+						SubmitGrassDraws(*render_view, *scene, RenderStatistics::GrassPass::Velocity,
 							[grass_material](const GrassComponent&) { return grass_material; },
 							[](const GrassComponent& grass, DrawParams& per_draw_grass)
 							{

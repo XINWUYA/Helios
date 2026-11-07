@@ -56,6 +56,31 @@ namespace Helios
 			uint32_t ChunkCount{ 0 };   /* 这批合了几块 */
 		};
 
+		/* 实例实际由谁生成：开关只是意图，后端或缓冲不满足时会退回 CPU。
+		 * 退回原因留在这里，面板照着提示，不用猜「开关开着怎么还是 CPU」 */
+		enum class Placement : uint8_t
+		{
+			Pending,            /* 还没生成过 */
+			Gpu,
+			CpuDisabled,        /* 菜单开关关着 */
+			CpuNoCompute,       /* 后端不支持计算着色器 */
+			CpuNoSharedBuffer,  /* 实例缓冲建不出共享视图 */
+			CpuNoChunkTable,    /* 块映射表没建出来 */
+			CpuNoGroundHeight,  /* 地形高度没传上 GPU */
+		};
+
+		/* 这一帧实际走哪条提交路径：开关只是意图，退回原因由绘制端记下来，
+		 * 面板照它显示，不用猜开关有没有生效 */
+		enum class DrawPath : uint8_t
+		{
+			Pending,             /* 还没画过 */
+			Indirect,            /* GPU 剔除 + 分段间接 */
+			BatchingSwitchOff,   /* 间接开关关着，按批提交 */
+			BatchingNoCompute,   /* 后端不支持计算着色器，按批提交 */
+			BatchingNoSlot,      /* 这一帧没备出剔除结果，按批提交 */
+			Chunk,               /* 批表也关着，逐块提交 */
+		};
+
 		/* GPU 放置的全局开关：关掉就退回 CPU 逐株生成 */
 		static void SetGlobalGpuPlacementEnabled(bool enabled);
 		[[nodiscard]] static bool IsGlobalGpuPlacementEnabled();
@@ -161,7 +186,11 @@ namespace Helios
 		/* 最近一次生成时退化掉的株数，包含坡度和生长权重。 */
 		[[nodiscard]] uint32_t GetSlopeCulledCount() const { return m_SlopeCulledCount; }
 		[[nodiscard]] bool IsEmpty() const { return m_InstanceCount == 0; }
-		[[nodiscard]] bool UsesGpuPlacement() const { return m_UsingGpuPlacement; }
+		[[nodiscard]] Placement GetPlacement() const { return m_Placement; }
+		[[nodiscard]] bool UsesGpuPlacement() const { return m_Placement == Placement::Gpu; }
+		/* 最近一次提交走的路径：面板照它显示，不用猜开关有没有生效 */
+		void SetDrawPath(DrawPath path) { m_DrawPath = path; }
+		[[nodiscard]] DrawPath GetDrawPath() const { return m_DrawPath; }
 		[[nodiscard]] const TerrainField* GetGround() const { return m_Ground; }
 		[[nodiscard]] glm::vec3 GetPaintAxisX() const { return m_Right; }
 		[[nodiscard]] glm::vec3 GetPaintAxisZ() const { return m_Forward; }
@@ -313,6 +342,8 @@ namespace Helios
 		SharedPtr<DeviceStorageBuffer> m_DensityMaskStorage;
 		bool m_StablePlacement{ false };
 		uint32_t m_InstanceCount{ 0 };
+		/* 实例缓冲里现有的株数：重建还没算完时靠它判断旧缓冲能不能先顶着画 */
+		uint32_t m_InstanceBufferCount{ 0 };
 		float m_InstanceMinY{ 0.0f };
 		float m_InstanceMaxY{ 0.0f };
 		uint32_t m_SlopeCulledCount{ 0 };
@@ -323,7 +354,8 @@ namespace Helios
 		uint32_t m_CapacityBytes{ 0 };
 		bool m_ReceiveShadow{ true };
 		bool m_GpuDirty{ false };
-		bool m_UsingGpuPlacement{ false };
+		Placement m_Placement{ Placement::Pending };
+		DrawPath m_DrawPath{ DrawPath::Pending };
 		uint64_t m_BuildKey{ 0 };
 	};
 }

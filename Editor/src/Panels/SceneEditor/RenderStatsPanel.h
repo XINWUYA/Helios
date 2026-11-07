@@ -40,15 +40,17 @@ namespace Helios
 		 * 百万以上 4.56M —— 值列只有一两百像素，全位数既放不下也没人会去数 */
 		static const char* FormatCount(uint64_t value, char* out, size_t out_size);
 
-		/* 几何统计卡的一行（纯数据；headless 断言显示语义用） */
+		/* 几何统计卡的一行（纯数据；headless 断言显示语义用）。
+		 * Tooltip 只给口径容易看错的几行填，空的就不弹 */
 		struct GeometryRow
 		{
 			std::string Label;
 			std::string Value;
+			std::string Tooltip;
 		};
 
-		/* 几何统计卡的行内容（纯函数，headless 可断言）：未结算时四行都是占位；
-		 * 有间接绘制时并进 Draw Calls 行显示，不额外占一行 */
+		/* 几何统计卡的行内容（纯函数，headless 可断言）：未结算时七行都是占位；
+		 * 草按通道拆三行 —— 同一份剔除结果会被颜色 / 速度 / 阴影各提交一遍 */
 		static void BuildGeometryRows(const RenderStatisticsSnapshot& stats,
 			std::vector<GeometryRow>& out_rows);
 
