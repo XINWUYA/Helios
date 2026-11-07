@@ -892,7 +892,7 @@ namespace Helios
 						/* 这一档级联已经按光源视锥剔好：逐段提交，不再回 CPU 按批挑。
 						 * 着色器自己的抽稀这时要关掉，否则同一株被抽两次 */
 						const uint32_t slot = static_cast<uint32_t>(cascade_id) + 1u;
-						if (grass.m_Field->CanDrawIndirect(render_view, slot))
+						if (grass.m_Field->CanDrawIndirect(render_view, slot, scene->GetFrameIndex()))
 						{
 							grass_material->SetParameters(ParamType::Int, "u_GrassShadowGpuCulled", 1);
 							const uint32_t segments = grass.m_Field->GetIndirectSegments(render_view, slot);

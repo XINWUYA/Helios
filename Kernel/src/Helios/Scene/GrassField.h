@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <glm/glm.hpp>
@@ -107,9 +108,8 @@ namespace Helios
 		/* 参数块尾部：段发号计数、块表计数、完成计数，然后是间接派发参数（4 个） */
 		static constexpr uint32_t kIndirectHeader = 8;
 
-		/* 这个视图的槽位能不能走间接：资源齐了、而且确实为它剔除过。
-		 * 拿别的视图的结果去画会把整片草画错，所以视图和槽位必须都对上 */
-		[[nodiscard]] bool CanDrawIndirect(const RenderView* view, uint32_t slot) const;
+		/* 开关关着，或槽位不是当帧剔的，都不能拿来画 */
+		[[nodiscard]] bool CanDrawIndirect(const RenderView* view, uint32_t slot, uint32_t frame) const;
 		[[nodiscard]] uint32_t GetIndirectSegments(const RenderView* view, uint32_t slot) const;
 		[[nodiscard]] uint32_t GetIndirectSegmentCapacity(const RenderView* view, uint32_t slot) const;
 		[[nodiscard]] const SharedPtr<DeviceStorageBuffer>& GetIndirectArgs(const RenderView* view, uint32_t slot) const;
@@ -117,9 +117,9 @@ namespace Helios
 		[[nodiscard]] const SharedPtr<DeviceVertexBuffer>& GetIndirectDrawBuffer(
 			const RenderView* view, uint32_t slot) const;
 
-		/* 逐视图剔除：可见实例压实进该槽位的绘制缓冲，参数写进它的 args。
-		 * 会借当前帧的命令缓冲，必须在开始渲染这个视图之前调用 */
-		void PrepareIndirect(const IndirectView& view);
+		/* 逐视图剔除：可见实例压实进槽位，参数写进 args，并记下帧号。
+		 * 必须在开始渲染这个视图之前调用 */
+		void PrepareIndirect(const IndirectView& view, uint32_t frame);
 
 		/* 重建实例数据（参数与变换都没变时直接返回）。ground 非空时叶片贴到地形表面，
 		 * 块底面不再生成（草下就是地形）。
@@ -249,6 +249,8 @@ namespace Helios
 		struct IndirectSlot
 		{
 			const RenderView* View{ nullptr };
+			/* 哪一帧剔的：不是当帧就作废，别拿旧结果画 */
+			uint32_t Frame{ std::numeric_limits<uint32_t>::max() };
 			SharedPtr<DeviceStorageBuffer> Storage;
 			SharedPtr<DeviceVertexBuffer> ViewBuffer;
 			SharedPtr<DeviceStorageBuffer> Args;

@@ -415,6 +415,8 @@ namespace Helios
 		if (camera == nullptr)
 			return;
 
+		const uint32_t frame = GetFrameIndex();
+
 		/* 相机一档，方向光每档级联各一档。级联不是独立视图，但必须按它自己的
 		 * 光源视锥剔：画面外的草照样能把影子甩进来，按相机视锥选会漏掉一批 */
 		std::vector<GrassField::IndirectView> views;
@@ -475,7 +477,7 @@ namespace Helios
 			{
 				if (entry.Slot == 0)
 				{
-					grass.m_Field->PrepareIndirect(entry);
+					grass.m_Field->PrepareIndirect(entry, frame);
 					continue;
 				}
 
@@ -489,7 +491,7 @@ namespace Helios
 				shadow_entry.FadeRadius = GrassDraw::ShadowFadeRadius(grass, shadow_far);
 				if (shadow_entry.FadeRadius <= 0.0f)
 					continue;
-				grass.m_Field->PrepareIndirect(shadow_entry);
+				grass.m_Field->PrepareIndirect(shadow_entry, frame);
 			}
 		}
 	}

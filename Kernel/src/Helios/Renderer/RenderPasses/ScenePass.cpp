@@ -245,7 +245,7 @@ namespace Helios
 
 					/* 间接路径：GPU 已经剔除并压实好，按段提交。相机槽只备一段 */
 					constexpr uint32_t kCameraSlot = 0;
-					if (grass.m_Field->CanDrawIndirect(&render_view, kCameraSlot))
+					if (grass.m_Field->CanDrawIndirect(&render_view, kCameraSlot, scene.GetFrameIndex()))
 					{
 						const uint32_t segments = grass.m_Field->GetIndirectSegments(&render_view, kCameraSlot);
 						const uint32_t capacity = grass.m_Field->GetIndirectSegmentCapacity(&render_view, kCameraSlot);

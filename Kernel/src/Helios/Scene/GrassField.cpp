@@ -1008,10 +1008,13 @@ namespace Helios
 		return const_cast<GrassField*>(this)->FindIndirectSlot(view, slot);
 	}
 
-	bool GrassField::CanDrawIndirect(const RenderView* view, uint32_t slot) const
+	bool GrassField::CanDrawIndirect(const RenderView* view, uint32_t slot, uint32_t frame) const
 	{
+		if (!g_IndirectDrawEnabled)
+			return false;
+
 		const IndirectSlot* entry = FindIndirectSlot(view, slot);
-		return entry != nullptr && entry->SegmentCount > 0
+		return entry != nullptr && entry->Frame == frame && entry->SegmentCount > 0
 			&& entry->Args != nullptr && entry->ViewBuffer != nullptr;
 	}
 
@@ -1043,7 +1046,7 @@ namespace Helios
 		return entry != nullptr ? entry->ViewBuffer : s_Empty;
 	}
 
-	void GrassField::PrepareIndirect(const IndirectView& view)
+	void GrassField::PrepareIndirect(const IndirectView& view, uint32_t frame)
 	{
 		if (view.Slot >= kIndirectSlotCount)
 			return;
@@ -1051,6 +1054,7 @@ namespace Helios
 		IndirectSlot& slot = m_Indirect[view.Slot];
 		/* 先清归属：这次准备不成就退回逐块提交，别拿上一帧的结果画 */
 		slot.View = nullptr;
+		slot.Frame = std::numeric_limits<uint32_t>::max();
 		slot.SegmentCount = 0;
 
 		if (!g_IndirectDrawEnabled || view.View == nullptr || m_InstanceCount == 0
@@ -1206,6 +1210,7 @@ namespace Helios
 		}
 
 		slot.View = view.View;
+		slot.Frame = frame;
 		slot.SegmentCount = segments;
 		slot.SegmentCapacity = capacity;
 	}
