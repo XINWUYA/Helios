@@ -38,6 +38,15 @@ float CascadeTexelWorldSize(int cascade_id, int shadow_size)
 	return 2.0f / max(scale_x * float(shadow_size), 1e-6f);
 }
 
+/* 该级联正交投影的深度跨度（世界单位）：投影矩阵 z 项是 1 / 跨度（ZO），乘上视图矩阵的
+ * 第三行（单位向量）后长度不变，取光照矩阵这一行的模长再取倒数就还原得出来。
+ * 太阳贴近地平线时跨度能涨到几百米，斜率偏移折成 NDC 必须除以它。 */
+float CascadeDepthSpan(int cascade_id)
+{
+	const mat4 light_vp = u_LightViewProjectionMat[cascade_id];
+	return 1.0f / max(length(vec3(light_vp[0][2], light_vp[1][2], light_vp[2][2])), 1e-6f);
+}
+
 /* 单层级联采样：返回遮挡比例（0 受光，1 全遮挡）；inside 表示该点是否落在该级联的正交盒内。
  * world_pos 已做过法线偏移，normal 已归一化。 */
 float SampleCascadeShadow(sampler2DArray shadowMap, int cascade_id, vec3 world_pos, vec3 normal, vec3 light_dir, out bool inside)
@@ -55,13 +64,23 @@ float SampleCascadeShadow(sampler2DArray shadowMap, int cascade_id, vec3 world_p
 	if (!inside)
 		return 0.0f;
 
-	/* Reversed-Z 下自阴影偏移方向反转：接收点深度加 bias 后更靠近光源（值更大） */
+	/* Reversed-Z 下自阴影偏移方向反转：接收点深度加 bias 后更靠近光源（值更大）。
+	 * 斜率项按世界尺寸算（1.5 × 单纹素世界尺寸 × tanθ），再除以本级联深度跨度折成 NDC，
+	 * 不能直接拿纹素比例当 NDC 偏移 —— 太阳贴近地平线时跨度有几百米，草影会整段脱开。 */
 	const float ndl = clamp(dot(normal, light_dir), 0.0f, 1.0f);
 	const float slope_tan = sqrt(max(1.0f - ndl * ndl, 0.0f)) / max(ndl, 1e-3f);
-	const float slope_bias = min(0.02f, 1.5f * slope_tan / float(textureSize(shadowMap, 0).x));
+	const float texel_world = CascadeTexelWorldSize(cascade_id, textureSize(shadowMap, 0).x);
+	const float slope_bias = min(1.5f * slope_tan, 32.0f) * texel_world / CascadeDepthSpan(cascade_id);
 	current_depth += slope_bias + u_CascadeShadowBias[cascade_id];
 
 	return SampleShadowPCF(shadowMap, shadow_uv, float(cascade_id), current_depth);
+}
+
+/* 太阳贴到地平线时，级联的深度跨度会涨到几百米，掠射面上的接触也撑不住。
+ * 这段窗口的光本来就快没了，影子跟着一起淡掉，比留一道断开的影子干净：5° 开始收，1° 归零。 */
+float HorizonShadowFade(vec3 to_light)
+{
+	return smoothstep(0.0175f, 0.0872f, to_light.y);
 }
 
 /* 级联阴影计算（前向 / 延迟通用）：依赖 LightUniformBuffer 里的级联数 / 矩阵 / 分割距离 /
@@ -105,7 +124,8 @@ float CalculateShadow(sampler2DArray shadowMap, vec3 world_pos, vec3 view_pos, v
 		}
 	}
 
-	return factor;
+	/* 影子随太阳高度角淡出：低角这段的级联本来就不值得修，让影子先退场 */
+	return factor * HorizonShadowFade(normalize(light_dir));
 }
 
 

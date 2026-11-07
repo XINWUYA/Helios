@@ -28,9 +28,6 @@ namespace Helios
 {
 	namespace
 	{
-		/* 级联深度板里地形高度的采样上限（每轴）：只用来撑深度区间，不必逐纹素扫 */
-		constexpr uint32_t kTerrainDepthSamples = 96;
-
 		struct GroundBounds
 		{
 			glm::vec3 Min{ 0.0f };
@@ -487,24 +484,11 @@ namespace Helios
 				ls_depth_z_max = std::max(ls_depth_z_max, geometry_z_max);
 			}
 
-			/* 地形不参与 XY 拟合，高度得并进深度板：视锥外的山体照样能把影子甩进画面，
-			 * 只按投射物列表取近端，远山的影子会被近平面裁掉 */
+			/* 地形不参与 XY 拟合，但山体的影子会甩进画面，深度板必须盖住这一带的地形。
+			 * 直接拿世界包围盒八个角在光空间取 AABB 求交，别反算世界矩形：太阳贴近地平线时
+			 * z = 0 那张面近乎竖直，反算出的 xz 范围退化成一条线，地形会整片被近远平面裁掉。 */
 			if (scene != nullptr)
 			{
-				/* 正交盒的四个角反变换回世界，取 xz 范围再跟地形求交 */
-				const glm::mat4 inverse_light_view = glm::inverse(light_view_mat);
-				glm::vec2 rect_min(std::numeric_limits<float>::max());
-				glm::vec2 rect_max(-std::numeric_limits<float>::max());
-				const glm::vec2 corner_xy[4] = {
-					{ ortho_left,  ortho_bottom }, { ortho_right, ortho_bottom },
-					{ ortho_right, ortho_top },    { ortho_left,  ortho_top } };
-				for (const glm::vec2& corner : corner_xy)
-				{
-					const glm::vec3 world = glm::vec3(inverse_light_view * glm::vec4(corner.x, corner.y, 0.0f, 1.0f));
-					rect_min = glm::min(rect_min, glm::vec2(world.x, world.z));
-					rect_max = glm::max(rect_max, glm::vec2(world.x, world.z));
-				}
-
 				for (auto [entity, terrain] : scene->GetRegistry().view<TerrainComponent>().each())
 				{
 					if (!terrain.m_CastShadow || !scene->IsEntityInRenderView(entity, culling_mask))
@@ -517,28 +501,29 @@ namespace Helios
 
 					const glm::vec3 origin = terrain.m_Field->GetOrigin();
 					const glm::vec2 half = terrain.m_Field->GetWorldHalfExtent();
-					const glm::vec2 lo = glm::max(rect_min,
-						glm::vec2(origin.x - half.x, origin.z - half.y));
-					const glm::vec2 hi = glm::min(rect_max,
-						glm::vec2(origin.x + half.x, origin.z + half.y));
-					if (lo.x >= hi.x || lo.y >= hi.y)
-						continue;
+					const float height_min = terrain.m_Field->GetMinWorldHeight();
+					const float height_max = terrain.m_Field->GetMaxWorldHeight();
 
-					float height_min = 0.0f;
-					float height_max = 0.0f;
-					if (!terrain.m_Field->GetHeightRange(lo, hi, height_min, height_max, kTerrainDepthSamples))
-						continue;
-
+					glm::vec3 ls_min(std::numeric_limits<float>::max());
+					glm::vec3 ls_max(-std::numeric_limits<float>::max());
 					for (int corner = 0; corner < 8; ++corner)
 					{
 						const glm::vec3 world(
-							(corner & 1) ? hi.x : lo.x,
+							origin.x + ((corner & 1) ? half.x : -half.x),
 							(corner & 2) ? height_max : height_min,
-							(corner & 4) ? hi.y : lo.y);
+							origin.z + ((corner & 4) ? half.y : -half.y));
 						const glm::vec3 ls = glm::vec3(light_view_mat * glm::vec4(world, 1.0f));
-						ls_depth_z_min = std::min(ls_depth_z_min, ls.z);
-						ls_depth_z_max = std::max(ls_depth_z_max, ls.z);
+						ls_min = glm::min(ls_min, ls);
+						ls_max = glm::max(ls_max, ls);
 					}
+
+					/* 正交盒外的地形写不进这张图，跳过 */
+					if (ls_max.x < ortho_left || ls_min.x > ortho_right
+						|| ls_max.y < ortho_bottom || ls_min.y > ortho_top)
+						continue;
+
+					ls_depth_z_min = std::min(ls_depth_z_min, ls_min.z);
+					ls_depth_z_max = std::max(ls_depth_z_max, ls_max.z);
 				}
 			}
 
