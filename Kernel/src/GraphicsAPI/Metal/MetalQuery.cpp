@@ -18,7 +18,7 @@ namespace Helios
 
     MetalQueryBuffer::MetalQueryBuffer()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         MTL::Device* device = MetalRuntime::Device();
         if (!device)
@@ -230,15 +230,30 @@ namespace Helios
         }
 
         /* 0 = 通道内没有对应阶段的工作（如无绘制的清屏通道）；
-         * ~0 = 采样错误值（MTLCounterErrorValue）—— 都按"该阶段无数据"处理（时长记 0）。 */
-        const auto stage_duration_us = [](uint64_t begin, uint64_t end) -> double
-        {
-            if (begin == 0 || begin == INVALID_QUERY_TIME || end == 0 || end == INVALID_QUERY_TIME || end < begin)
-                return 0.0;
-            return static_cast<double>(end - begin) * NanosecondsToMicroseconds;
-        };
-
+         * ~0 = 采样错误值（MTLCounterErrorValue）—— 换算时都落成 0，等于该阶段无数据。 */
         const auto* samples = static_cast<const uint64_t*>(resolved->bytes());
+
+        /* 帧内原点取本帧最小的有效采样点，各通道的时间戳都在同一个计数器上 */
+        uint64_t frame_origin = INVALID_QUERY_TIME;
+        for (uint32_t slot = 0; slot < m_PassCount; ++slot)
+        {
+            const uint64_t* stage = samples + slot * SAMPLES_PER_PASS;
+            const uint32_t sample_count = m_SlotIsCompute[slot] ? 2 : SAMPLES_PER_PASS;
+            for (uint32_t index = 0; index < sample_count; ++index)
+            {
+                const uint64_t value = stage[index];
+                if (value != 0 && value != INVALID_QUERY_TIME && value < frame_origin)
+                    frame_origin = value;
+            }
+        }
+
+        const auto to_frame_us = [frame_origin](uint64_t value) -> double
+        {
+            if (value == 0 || value == INVALID_QUERY_TIME
+                || frame_origin == INVALID_QUERY_TIME || value < frame_origin)
+                return 0.0;
+            return static_cast<double>(value - frame_origin) * NanosecondsToMicroseconds;
+        };
 
         /* 片元阶段在 TBDR 上是串行的，但 startOfFragment 采样点在"片元管线就绪"时就打点 —— 紧跟在
          * 重通道后面的通道会把这时间算进自己的 f（实测膨胀 4~5 倍）。修正：f 的起点不早于"本通道
@@ -261,23 +276,28 @@ namespace Helios
             /* 计算通道：编码器首尾一对采样点即可，没有 v/f 之分 */
             if (m_SlotIsCompute[slot])
             {
-                timestamps[slot].ComputeUs = stage_duration_us(stage[0], stage[1]);
+                timestamps[slot].ComputeBeginUs = to_frame_us(stage[0]);
+                timestamps[slot].ComputeEndUs = to_frame_us(stage[1]);
                 continue;
             }
 
-            timestamps[slot].VertexUs = stage_duration_us(stage[0], stage[1]);
+            timestamps[slot].VertexBeginUs = to_frame_us(stage[0]);
+            timestamps[slot].VertexEndUs = to_frame_us(stage[1]);
 
             uint64_t fragment_begin = stage[2];
             const uint64_t fragment_end = stage[3];
-            if (fragment_begin != 0 && fragment_begin != INVALID_QUERY_TIME
-                && fragment_end != 0 && fragment_end != INVALID_QUERY_TIME && fragment_end >= fragment_begin)
+            const bool fragment_valid = fragment_begin != 0 && fragment_begin != INVALID_QUERY_TIME
+                && fragment_end != 0 && fragment_end != INVALID_QUERY_TIME && fragment_end >= fragment_begin;
+            if (fragment_valid)
             {
                 const auto it = std::lower_bound(fragment_ends.begin(), fragment_ends.end(), fragment_end);
                 const uint64_t prev_end = (it != fragment_ends.begin()) ? *(it - 1) : 0;
                 if (prev_end > fragment_begin)
                     fragment_begin = prev_end;
 
-                timestamps[slot].FragmentUs = static_cast<double>(fragment_end - fragment_begin) * NanosecondsToMicroseconds;
+                /* 起点用修正后的值：排队等待不算这个通道在干活 */
+                timestamps[slot].FragmentBeginUs = to_frame_us(fragment_begin);
+                timestamps[slot].FragmentEndUs = to_frame_us(fragment_end);
             }
         }
 
@@ -297,7 +317,7 @@ namespace Helios
 
     void MetalQueryNode::Begin()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         /* 每帧重新绑定：本帧没有渲染通道经过时保持"无数据" */
         m_PassSlots.clear();
@@ -321,11 +341,13 @@ namespace Helios
 
     bool MetalQueryNode::GetQueryResult()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         HasValidSamples = false;
         ResultTimeBegin = 0.0;
         ResultTimeEnd = 0.0;
+        ResultVertexUs = 0.0;
+        ResultFragmentUs = 0.0;
         ResultComputeUs = 0.0;
 
         if (m_pPassTimestamps == nullptr || m_PassSlots.empty())
@@ -333,31 +355,46 @@ namespace Helios
 
         const std::vector<GPUPassTimestamp>& pass_timestamps = *m_pPassTimestamps;
 
-        /* 作用域耗时 = 本帧绑定的全部通道的 stage 时长之和（空通道自动为 0）：
-         * 工作量口径、各作用域可加（父 = Σ子 + 自身通道）—— 不含通道间空闲/等待 */
-        double total_us = 0.0;
-        double vertex_us = 0.0;
-        double fragment_us = 0.0;
-        double compute_us = 0.0;
+        /* 作用域占用取绑定通道的阶段窗口并集：相邻通道的顶点与片元在 TBDR 上交叠，
+         * 逐个相加会重复计同一段时间；通道首尾跨度里还夹着排队空档，也不能用。
+         * 并集单调，父作用域恒不小于子作用域，树根就是帧合计。 */
+        std::vector<std::pair<double, double>> spans;
+        std::vector<std::pair<double, double>> vertex_spans;
+        std::vector<std::pair<double, double>> fragment_spans;
+        std::vector<std::pair<double, double>> compute_spans;
+        spans.reserve(m_PassSlots.size() * 2);
         for (const uint32_t slot : m_PassSlots)
         {
-            if (slot < pass_timestamps.size())
+            if (slot >= pass_timestamps.size())
+                continue;
+
+            const GPUPassTimestamp& pass = pass_timestamps[slot];
+            if (pass.HasVertex())
             {
-                total_us += pass_timestamps[slot].DurationUs();
-                vertex_us += pass_timestamps[slot].VertexUs;
-                fragment_us += pass_timestamps[slot].FragmentUs;
-                compute_us += pass_timestamps[slot].ComputeUs;
+                spans.emplace_back(pass.VertexBeginUs, pass.VertexEndUs);
+                vertex_spans.emplace_back(pass.VertexBeginUs, pass.VertexEndUs);
+            }
+            if (pass.HasFragment())
+            {
+                spans.emplace_back(pass.FragmentBeginUs, pass.FragmentEndUs);
+                fragment_spans.emplace_back(pass.FragmentBeginUs, pass.FragmentEndUs);
+            }
+            if (pass.HasCompute())
+            {
+                spans.emplace_back(pass.ComputeBeginUs, pass.ComputeEndUs);
+                compute_spans.emplace_back(pass.ComputeBeginUs, pass.ComputeEndUs);
             }
         }
 
+        const double total_us = UnionSpanUs(std::move(spans));
         if (total_us <= 0.0)
-            return true; /* 绑定通道都没有有效阶段时长：无数据 */
+            return true; /* 绑定通道都没有有效阶段窗口：无数据 */
 
-        /* 下游按 end - begin 取值：begin 恒 0，end 即时长和 */
+        /* 下游按 end - begin 取值：begin 恒 0，end 即占用时长 */
         ResultTimeEnd = total_us;
-        ResultVertexUs = vertex_us;
-        ResultFragmentUs = fragment_us;
-        ResultComputeUs = compute_us;
+        ResultVertexUs = UnionSpanUs(std::move(vertex_spans));
+        ResultFragmentUs = UnionSpanUs(std::move(fragment_spans));
+        ResultComputeUs = UnionSpanUs(std::move(compute_spans));
         HasValidSamples = true;
         return true;
     }

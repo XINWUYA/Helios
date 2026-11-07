@@ -7,7 +7,7 @@ namespace Helios
 	OpenGLVertexBuffer::OpenGLVertexBuffer(const std::string& name, uint32_t size)
 		: m_DataSize(size)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 #ifdef __APPLE__
 		// macOS: Use traditional functions (OpenGL 4.1 compatible)
@@ -27,7 +27,7 @@ namespace Helios
 	OpenGLVertexBuffer::OpenGLVertexBuffer(const std::string& name, const void* vertices, uint32_t size)
 		: m_DataSize(size)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 #ifdef __APPLE__
 		// macOS: Use traditional functions (OpenGL 4.1 compatible)
@@ -48,14 +48,14 @@ namespace Helios
 	OpenGLVertexBuffer::OpenGLVertexBuffer(const std::string& name, uint32_t buffer_id, uint32_t size)
 		: m_VertexBufferId(buffer_id), m_DataSize(size), m_OwnsBuffer(false)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		(void)name;
 	}
 
 	OpenGLVertexBuffer::~OpenGLVertexBuffer()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_OwnsBuffer)
 			glDeleteBuffers(1, &m_VertexBufferId);
@@ -64,7 +64,7 @@ namespace Helios
 	/* 绑定顶点数据 */
 	void OpenGLVertexBuffer::Bind() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glBindBuffer(GL_ARRAY_BUFFER, m_VertexBufferId);
 	}
@@ -72,7 +72,7 @@ namespace Helios
 	/* 解绑顶点数据 */
 	void OpenGLVertexBuffer::Unbind() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 	}
@@ -80,7 +80,7 @@ namespace Helios
 	/* 设置顶点数据 */
 	void OpenGLVertexBuffer::SetData(const void* data, uint32_t size, uint32_t offset)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 #ifdef __APPLE__
 		// macOS: Use traditional functions
@@ -99,7 +99,7 @@ namespace Helios
 	/* 获取顶点数量 */
 	uint32_t OpenGLVertexBuffer::GetVertexCount() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		ASSERT(!(m_DataSize % m_Layout.GetStride()), "VertexBuffer data is not complete!");
 		return m_DataSize / m_Layout.GetStride();
@@ -108,7 +108,7 @@ namespace Helios
 	OpenGLIndexBuffer::OpenGLIndexBuffer(const std::string& name, const void* indices, uint32_t count, IndexType type)
 		: m_Count(count), m_IndexType(type)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const uint32_t index_size = (type == IndexType::UInt16) ? sizeof(uint16_t) : sizeof(uint32_t);
 		const uint32_t size_in_bytes = count * index_size;
@@ -134,7 +134,7 @@ namespace Helios
 	OpenGLIndexBuffer::OpenGLIndexBuffer(const std::string& name, uint32_t count, IndexType type)
 		: m_Count(count), m_IndexType(type)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const uint32_t index_size = (type == IndexType::UInt16) ? sizeof(uint16_t) : sizeof(uint32_t);
 		const uint32_t size_in_bytes = count * index_size;
@@ -155,7 +155,7 @@ namespace Helios
 
 	OpenGLIndexBuffer::~OpenGLIndexBuffer()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glDeleteBuffers(1, &m_IndexBufferId);
 	}
@@ -163,7 +163,7 @@ namespace Helios
 	/* 绑定索引数据 */
 	void OpenGLIndexBuffer::Bind() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_IndexBufferId);
 	}
@@ -171,7 +171,7 @@ namespace Helios
 	/* 解绑索引数据 */
 	void OpenGLIndexBuffer::Unbind() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 	}
@@ -179,7 +179,7 @@ namespace Helios
 	/* 更新索引数据 */
 	void OpenGLIndexBuffer::SetData(const void* data, uint32_t size)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 #ifdef __APPLE__
 		// macOS: Use traditional functions
@@ -200,7 +200,7 @@ namespace Helios
 	OpenGLStorageBuffer::OpenGLStorageBuffer(const std::string& name, const void* data, uint32_t size)
 		: m_Size(size)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glCreateBuffers(1, &m_BufferID);
 		glNamedBufferData(m_BufferID, size, data, GL_DYNAMIC_DRAW);
@@ -211,14 +211,14 @@ namespace Helios
 
 	OpenGLStorageBuffer::~OpenGLStorageBuffer()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glDeleteBuffers(1, &m_BufferID);
 	}
 
 	void OpenGLStorageBuffer::SetData(const void* data, uint32_t size)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_BufferID == 0 || data == nullptr || size > m_Size)
 			return;
@@ -230,7 +230,7 @@ namespace Helios
 	 * 每次读进镜像再返回（这条路径只在检查 / 工具里用） */
 	void* OpenGLStorageBuffer::GetMappedData()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_BufferID == 0 || m_Size == 0)
 			return nullptr;

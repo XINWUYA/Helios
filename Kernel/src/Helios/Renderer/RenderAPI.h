@@ -10,6 +10,7 @@ namespace Helios
 	class DeviceTexture;
 	class DeviceShader;
 	class DeviceStorageBuffer;
+	class GPUScopeInterface;
 
 	class RenderAPI
 	{
@@ -127,6 +128,15 @@ namespace Helios
 		virtual void PushDebugGroup(const char* name) = 0;
 		virtual void PopDebugGroup() = 0;
 
+		/* GPU 作用域接口：性能计时器在这里挂时间戳采样。默认 nullptr = 不采集，
+		 * 后端只认这个接口，不 include profiler。 */
+		void SetGPUScopeInterface(GPUScopeInterface* scope_interface) { m_pGPUScopeInterface = scope_interface; }
+		[[nodiscard]] GPUScopeInterface* GetGPUScopeInterface() const { return m_pGPUScopeInterface; }
+
+		/* 计时是否在采样：决定后端要不要为计算通道建描述符、编码器能不能合并 */
+		void SetGpuTimingActive(bool active) { m_GpuTimingActive = active; }
+		[[nodiscard]] bool IsGpuTimingActive() const { return m_GpuTimingActive; }
+
 	/* 默认RT上开始/结束一帧渲染通道（Metal等显式RenderPass后端需要实现）。
 	 * preserve_content = true 表示不加载清除色、保留颜色附件已有内容，
 	 * 供叠加层（如 ImGui）在前序 Pass 的绘制结果之上继续渲染。 */
@@ -166,6 +176,9 @@ namespace Helios
 		ViewportRegion m_AppliedScissor{ 0, 0, 0, 0 };
 		bool m_HasAppliedViewport{ false };
 		bool m_HasAppliedScissor{ false };
+
+		GPUScopeInterface* m_pGPUScopeInterface{ nullptr };
+		bool m_GpuTimingActive{ false };
 	};
 }
 

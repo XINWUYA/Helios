@@ -14,7 +14,7 @@ namespace Helios
 	OpenGLUniformBuffer::OpenGLUniformBuffer(uint32_t size, uint32_t binding_point)
 		: m_BindingPoint(binding_point)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		GLint alignment = 256;
 		glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
@@ -32,14 +32,14 @@ namespace Helios
 
 	OpenGLUniformBuffer::~OpenGLUniformBuffer()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glDeleteBuffers(1, &m_UniformBufferId);
 	}
 
 	void OpenGLUniformBuffer::SetData(const void* data, uint32_t size, uint32_t offset)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (data == nullptr || offset + size > m_Shadow.size())
 			return;

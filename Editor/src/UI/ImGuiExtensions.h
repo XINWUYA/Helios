@@ -105,6 +105,10 @@ namespace ImGuiExt
 	};
 
 	AssetRefRowResult DrawAssetRefRow(const AssetRefRowOptions& options);
+
+	/* 同行内绝对定位到「行首起 offset 处」：SameLine 与 SetCursorPosX 的基准是窗口外缘
+	 *（不含缩进），这里补上 Indent + ColumnsOffset，与普通行首同基准。 */
+	void SameLineAt(float offset_from_line_start);
 }
 
 }

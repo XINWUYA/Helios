@@ -26,7 +26,7 @@ namespace Helios
     MetalTexture::MetalTexture(const std::string& name, const TextureDesc& texture_desc)
         : DeviceTexture(name, texture_desc)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         CreateTexture(texture_desc);
 
@@ -40,14 +40,14 @@ namespace Helios
     MetalTexture::MetalTexture(const std::string& path, const TextureLoadConfig& load_config)
         : DeviceTexture(path, TextureDesc{})
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         LoadFromFile(path, load_config);
     }
 
     MetalTexture::~MetalTexture()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (m_Texture)
         {
@@ -64,7 +64,7 @@ namespace Helios
 
     void MetalTexture::Bind(uint32_t slot)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         MTL::RenderCommandEncoder* encoder = MetalRuntime::Encoder();
         if (!encoder)
@@ -102,7 +102,7 @@ namespace Helios
 
     void MetalTexture::GenerateMipmap()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_Texture || m_Texture->mipmapLevelCount() <= 1)
             return;
@@ -139,7 +139,7 @@ namespace Helios
     void MetalTexture::SetData(void* data, const PixelDesc& pixel_desc, uint32_t level,
         uint32_t offset_x, uint32_t offset_y, uint32_t offset_z)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_Texture || !data)
             return;
@@ -220,7 +220,7 @@ namespace Helios
 
     bool MetalTexture::ReadbackPixels(std::vector<uint8_t>& out_data, uint32_t mip_level, uint32_t layer)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_Texture)
             return false;
@@ -463,7 +463,7 @@ namespace Helios
 
     void MetalTexture::LoadFromFile(const std::string& path, const TextureLoadConfig& load_config)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         m_Path = path;
         m_TextureLoadConfig = load_config;

@@ -32,7 +32,7 @@ namespace Helios
 
 	void Material::SetShader(const SharedPtr<DeviceShader>& shader)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		if (m_pShader == shader)
 			return;
@@ -130,7 +130,7 @@ namespace Helios
 
 	void Material::SetParameters(ParamType type, const std::string& name, const std::any& param)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		if (type == ParamType::Texture)
 		{
@@ -146,7 +146,7 @@ namespace Helios
 
 	void Material::SetTexture(const std::string& name, const SharedPtr<DeviceTexture>& texture)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		if (!texture)
 			return;
@@ -299,7 +299,7 @@ namespace Helios
 	/* 绑定材质中的各参数 */
 	void Material::Bind(uint8_t fill_missing)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* Shader 重载换代后反射可能变了（加一个采样器，后面的槽位整体位移），
 		 * 这里比一次版本号，变了就重解析贴图绑定点。O(1)，不必遍历材质表 */
@@ -422,7 +422,7 @@ namespace Helios
 	/* 创建材质 */
 	SharedPtr<Material> Material::Create(const SharedPtr<DeviceShader>& shader)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		auto material = CreateSharedPtr<Material>();
 		material->SetShader(shader);
@@ -458,7 +458,7 @@ namespace Helios
 	/* 克隆一个材质实例 */
 	SharedPtr<Material> Material::Clone() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		auto clone = CreateSharedPtr<Material>();
 		clone->m_pShader = m_pShader;
@@ -491,7 +491,7 @@ namespace Helios
 	/* 只保留当前 Shader 声明的参数 */
 	void Material::RetainShaderDeclaredParams()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		const ShaderReflectionData* reflection = (m_pShader != nullptr)
 			? &m_pShader->GetReflectionData() : nullptr;
@@ -536,7 +536,7 @@ namespace Helios
 	/* 收集"Shader 已声明、本材质没有写"的值参数及其默认值 */
 	std::vector<MaterialParamInfo> Material::CollectMissingValueParamDefaults() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		std::vector<MaterialParamInfo> fills;
 		if (m_pShader == nullptr)
@@ -559,7 +559,7 @@ namespace Helios
 	/* 收集"Shader 已声明、本材质没有写"的贴图参数及其默认贴图 */
 	std::vector<MaterialParamInfo> Material::CollectMissingTextureParamDefaults() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		std::vector<MaterialParamInfo> fills;
 		if (m_pShader == nullptr)
@@ -582,7 +582,7 @@ namespace Helios
 	 * 外部维度不在材质里取，留给绘制端补。 */
 	ShaderVariantDefines Material::CollectVariantDefines() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		ShaderVariantDefines defines;
 		if (m_pShader == nullptr)
@@ -626,7 +626,7 @@ namespace Helios
 
 	SharedPtr<DeviceTexture> Material::DefaultTextureForSampler(const std::string& sampler_name)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* 注意：Ambient 不能用黑 —— 缺贴图的材质走 "albedo × 0.3" 回退环境项，
 		 * 黑贴图会让延迟端在没有探针时把这个环境项丢掉。 */

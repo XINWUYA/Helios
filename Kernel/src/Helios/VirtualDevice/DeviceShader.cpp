@@ -104,7 +104,7 @@ namespace Helios
 	/* 热重载：就地建一份新的再换进来，两步都走构造链路的同一份代码 */
 	bool DeviceShader::Reload()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_Path.empty())
 		{

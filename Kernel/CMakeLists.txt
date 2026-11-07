@@ -19,11 +19,13 @@ set(PCH_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/Pch.h")
 
 # Copy TracyClient.cpp before build and insert Pch.h
 set(TRACY_CLIENT_SRC "${HELIOS_ENGINE_ROOT}/Libraries/ThirdParty/tracy/public/TracyClient.cpp")
-set(TRACY_CLIENT_DST "${CMAKE_CURRENT_SOURCE_DIR}/src/Helios/Tracy/TracyClient.cpp")
+set(TRACY_CLIENT_DST "${CMAKE_CURRENT_SOURCE_DIR}/src/Helios/Profiler/Tracy/TracyClient.cpp")
 
+# DEPENDS 不能省：只写 OUTPUT 时文件存在就不再拷贝，升级 Tracy 后会停在旧版本编不过。
 add_custom_command(
     OUTPUT ${TRACY_CLIENT_DST}
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TRACY_CLIENT_SRC} ${TRACY_CLIENT_DST}
+    DEPENDS ${TRACY_CLIENT_SRC}
     COMMENT "Copying TracyClient.cpp"
 )
 

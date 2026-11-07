@@ -53,7 +53,7 @@ namespace Helios
 	FrameGraph::FrameGraph(const std::string& name)
 		: m_DebugName(name)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 		m_RenderPassNodes.reserve(100);
 		m_Resources.reserve(128);
 		m_ResourceNodes.reserve(128);
@@ -110,7 +110,7 @@ namespace Helios
 	/* 构建FrameGraph */
 	void FrameGraph::Build() noexcept
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		CullRenderPassNodes();
 
@@ -171,7 +171,7 @@ namespace Helios
 	/* 执行FrameGraph */
 	void FrameGraph::Execute() noexcept
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 帧入口：推进跨帧缓存的帧号并做淘汰 —— 即使本帧没有 Pass 也要发生，
 		 * 否则空图期间缓存永不收缩 */
@@ -324,7 +324,7 @@ namespace Helios
 	/* 剔除掉无效的RenderPassNode */
 	void FrameGraph::CullRenderPassNodes()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 更新依赖图中的引用计数 */
 		m_DependencyGraph.UpdateRefCount();

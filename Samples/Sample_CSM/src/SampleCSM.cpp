@@ -120,7 +120,7 @@ void SampleCSM::OnDetached()
 
 void SampleCSM::OnUpdate(float delta_time)
 {
-	PROFILE_FUNCTION();
+	PROFILE_CPU_FUNCTION();
 
 	m_pCameraController->OnUpdate(delta_time);
 
@@ -130,7 +130,7 @@ void SampleCSM::OnUpdate(float delta_time)
 
 void SampleCSM::OnImGuiRender()
 {
-	PROFILE_FUNCTION();
+	PROFILE_CPU_FUNCTION();
 
 	ImGui::Begin("Stats");
 	ImGui::Text("Sample CSM:");

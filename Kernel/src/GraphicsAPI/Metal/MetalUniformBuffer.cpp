@@ -73,7 +73,7 @@ namespace Helios
     MetalUniformBuffer::MetalUniformBuffer(uint32_t size, uint32_t binding_point)
         : m_Size(size), m_BindingPoint(binding_point)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (size == 0)
         {
@@ -115,7 +115,7 @@ namespace Helios
 
     MetalUniformBuffer::~MetalUniformBuffer()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (m_Buffer)
         {
@@ -126,7 +126,7 @@ namespace Helios
 
     void MetalUniformBuffer::SetData(const void* data, uint32_t size, uint32_t offset)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!data || size == 0)
             return;
@@ -146,7 +146,7 @@ namespace Helios
 
     void MetalUniformBuffer::Bind()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         MTL::RenderCommandEncoder* encoder = MetalRuntime::Encoder();
         if (!encoder)

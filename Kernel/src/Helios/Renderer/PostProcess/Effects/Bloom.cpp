@@ -49,7 +49,7 @@ namespace Helios
 			 * 未启用 / 视口过小 → 原样返回 input（不建任何 Pass）。 */
 			TextureHandle BuildBloom(RenderView& render_view, TextureHandle input)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				const BloomSettings* settings = render_view.GetPostProcessState().Get<BloomSettings>();
 				if (settings == nullptr || !settings->Enabled)

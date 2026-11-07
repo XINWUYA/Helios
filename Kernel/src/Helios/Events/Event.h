@@ -2,7 +2,7 @@
 #include <functional>
 #include <sstream>
 #include "Helios/Common/Common.h"
-#include "Helios/Core/Profiler.h"
+#include "Helios/Profiler/Profiler.h"
 
 namespace Helios
 {

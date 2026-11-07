@@ -1,16 +1,15 @@
 #include "Pch.h"
-#include "CPUTimerProfiler.h"
-#include <cstring>
+#include "CPUTimeScopeTree.h"
 
 namespace Helios
 {
-	CPUTimerProfiler& CPUTimerProfiler::Instance()
+	CPUTimeScopeTree& CPUTimeScopeTree::Instance()
 	{
-		static CPUTimerProfiler instance;
+		static CPUTimeScopeTree instance;
 		return instance;
 	}
 
-	void CPUTimerProfiler::SetEnabled(bool enabled)
+	void CPUTimeScopeTree::SetEnabled(bool enabled)
 	{
 		if (m_Enabled == enabled)
 			return;
@@ -23,27 +22,31 @@ namespace Helios
 			m_FrameBegun = false;
 			m_OpenIndices.clear();
 			m_UsedNodeCount = 0;
-			m_RealtimeRoot = ResultCPUTimerNode{};
+			m_FramesSinceSettle = 0;
+			m_RealtimeRoot = CPUTimeScopeNode{};
 		}
 	}
 
-	void CPUTimerProfiler::BeginFrame()
+	void CPUTimeScopeTree::BeginFrame()
 	{
+		/* 帧号无条件递增：面板按帧号对齐 CPU / GPU 两条录制，且与 Renderer 的
+		 * FrameCounter 逐帧同步 —— 计时关掉再打开也不会错位 */
+		++m_FrameId;
+
 		if (!m_Enabled)
 			return;
 
 		m_OwnerThread = std::this_thread::get_id();
-		++m_FrameId;
 		m_FrameBegun = true;
 		m_UsedNodeCount = 0;
 		m_OpenIndices.clear();
 		m_FrameStart = std::chrono::steady_clock::now();
 
 		/* 帧根：栈空时的第一个作用域（节点 0）——合成节点，无插桩点位置 */
-		BeginScope("FrameTotal", nullptr, 0);
+		BeginScope("FrameTotal", ProfileHash::Hash("FrameTotal"), ProfileChannel::General, nullptr, 0);
 	}
 
-	void CPUTimerProfiler::EndFrame()
+	void CPUTimeScopeTree::EndFrame()
 	{
 		if (!m_Enabled || !m_FrameBegun)
 			return;
@@ -54,31 +57,86 @@ namespace Helios
 
 		if (m_UsedNodeCount > 0)
 		{
-			SettleRealtime(m_RealtimeRoot, 0);
-			if (ResultCPUTimerNode* record_root = m_Recorder.BeginFrame(m_FrameId))
+			/* 等 GPU：先只写录制，那一帧的 GPU 结果到了由 SettleRealtimeFrame 补结算；
+			 * 连续超过 kSettleTimeout 帧都没等到（GPU 计时关掉 / 结果卡住）就按当前帧兜底，
+			 * 别让实时树停住 —— 计数清零后下一轮还能再兜 */
+			++m_FramesSinceSettle;
+			if (!m_WaitForGpu || m_FramesSinceSettle > kSettleTimeout)
+			{
+				SettleRealtime(m_RealtimeRoot, 0);
+				m_FramesSinceSettle = 0;
+			}
+
+			if (CPUTimeScopeNode* record_root = m_Recorder.BeginFrame(m_FrameId))
 				SettleRaw(*record_root, 0);
 		}
 
 		m_FrameBegun = false;
 	}
 
-	uint32_t CPUTimerProfiler::BeginScope(const char* label, const char* file, uint32_t line)
+	/* 等 GPU 时的补结算：把某一帧的原始树并进实时树（EMA 口径与 SettleRealtime 一致）。
+	 * 结构对不上（节点换了位置）时该子树直接落到原始值，不混不同函数的数据。 */
+	void CPUTimeScopeTree::SettleRealtimeFrame(uint32_t frame_id)
 	{
-		/* 帧外（启动 / 静态初始化）与非 owner 线程（worker）静默跳过，避免池竞争 */
-		if (!m_FrameBegun || std::this_thread::get_id() != m_OwnerThread)
-			return INVALID_CPU_SCOPE_INDEX;
+		if (!m_Enabled)
+			return;
 
-		const uint32_t parent_index = m_OpenIndices.empty()
-			? INVALID_CPU_SCOPE_INDEX : m_OpenIndices.back();
+		const uint32_t index = m_Recorder.FindIndexByFrameId(frame_id);
+		if (index == CPUTimeScopeRecorder::INVALID_FRAME_INDEX)
+			return; /* 已经不在环形窗口里：跳过 */
 
-		uint32_t index = INVALID_CPU_SCOPE_INDEX;
-		if (parent_index == INVALID_CPU_SCOPE_INDEX)
-			index = AllocNode(label, file, line, INVALID_CPU_SCOPE_INDEX);  /* 帧根 */
+		MergeRealtime(m_RealtimeRoot, m_Recorder.GetFrame(index));
+		m_FramesSinceSettle = 0;
+	}
+
+	void CPUTimeScopeTree::MergeRealtime(CPUTimeScopeNode& out, const CPUTimeScopeNode& raw)
+	{
+		const bool same_node = out.HasData && out.Label == raw.Label;
+		if (same_node)
+		{
+			out.TotalUs = out.TotalUs * 0.9 + raw.TotalUs * 0.1;
+			out.SelfUs = out.SelfUs * 0.9 + raw.SelfUs * 0.1;
+		}
 		else
 		{
-			index = FindChild(parent_index, label);
-			if (index == INVALID_CPU_SCOPE_INDEX)
-				index = AllocNode(label, file, line, parent_index);
+			out.TotalUs = raw.TotalUs;
+			out.SelfUs = raw.SelfUs;
+		}
+
+		out.Label = raw.Label;
+		out.File = raw.File;
+		out.Channel = raw.Channel;
+		out.Line = raw.Line;
+		out.BeginUs = raw.BeginUs;
+		out.EndUs = raw.EndUs;
+		out.CallCount = raw.CallCount;
+		out.HasData = raw.HasData;
+
+		out.Children.resize(raw.Children.size());
+		for (size_t index = 0; index < raw.Children.size(); ++index)
+			MergeRealtime(out.Children[index], raw.Children[index]);
+	}
+
+	uint32_t CPUTimeScopeTree::BeginScope(const char* label, uint64_t id, ProfileChannel channel,
+		const char* file, uint32_t line)
+	{
+		/* 帧外（启动 / 静态初始化）、非 owner 线程（worker）、通道关掉的插桩点：
+		 * 静默跳过 —— 不建节点也不进栈 */
+		if (!m_FrameBegun || std::this_thread::get_id() != m_OwnerThread
+			|| !HasChannel(m_ChannelMask, channel))
+			return INVALID_SCOPE_INDEX;
+
+		const uint32_t parent_index = m_OpenIndices.empty()
+			? INVALID_SCOPE_INDEX : m_OpenIndices.back();
+
+		uint32_t index = INVALID_SCOPE_INDEX;
+		if (parent_index == INVALID_SCOPE_INDEX)
+			index = AllocNode(label, id, file, line, channel, INVALID_SCOPE_INDEX);  /* 帧根 */
+		else
+		{
+			index = FindChild(parent_index, id);
+			if (index == INVALID_SCOPE_INDEX)
+				index = AllocNode(label, id, file, line, channel, parent_index);
 		}
 
 		ScopeNode& node = m_ScopeNodes[index];
@@ -95,7 +153,7 @@ namespace Helios
 		return index;
 	}
 
-	void CPUTimerProfiler::EndScope(uint32_t node_index)
+	void CPUTimeScopeTree::EndScope(uint32_t node_index)
 	{
 		/* 栈顶校验：帧被重置（关闭 / 跨帧乱序析构）后旧 scope 静默忽略 */
 		if (m_OpenIndices.empty() || m_OpenIndices.back() != node_index)
@@ -113,7 +171,8 @@ namespace Helios
 			node.AccumulatedUs += now_us - node.EntryUs;
 	}
 
-	uint32_t CPUTimerProfiler::AllocNode(const char* label, const char* file, uint32_t line, uint32_t parent_index)
+	uint32_t CPUTimeScopeTree::AllocNode(const char* label, uint64_t id, const char* file, uint32_t line,
+		ProfileChannel channel, uint32_t parent_index)
 	{
 		if (m_UsedNodeCount >= m_ScopeNodes.size())
 			m_ScopeNodes.emplace_back();
@@ -121,8 +180,10 @@ namespace Helios
 		const uint32_t index = m_UsedNodeCount++;
 		ScopeNode& node = m_ScopeNodes[index];
 		node.Label = label;
+		node.Id = id;
 		node.File = file;
 		node.Line = line;
+		node.Channel = channel;
 		node.ParentIndex = parent_index;
 		node.ChildrenIndices.clear();
 		node.AccumulatedUs = 0.0;
@@ -130,24 +191,22 @@ namespace Helios
 		node.ActiveCount = 0;
 		node.CallCount = 0;
 
-		if (parent_index != INVALID_CPU_SCOPE_INDEX)
+		if (parent_index != INVALID_SCOPE_INDEX)
 			m_ScopeNodes[parent_index].ChildrenIndices.emplace_back(index);
 		return index;
 	}
 
-	uint32_t CPUTimerProfiler::FindChild(uint32_t parent_index, const char* label) const
+	uint32_t CPUTimeScopeTree::FindChild(uint32_t parent_index, uint64_t id) const
 	{
-		const ScopeNode& parent = m_ScopeNodes[parent_index];
-		for (const uint32_t child_index : parent.ChildrenIndices)
+		for (const uint32_t child_index : m_ScopeNodes[parent_index].ChildrenIndices)
 		{
-			const char* child_label = m_ScopeNodes[child_index].Label;
-			if (child_label == label || std::strcmp(child_label, label) == 0)
+			if (m_ScopeNodes[child_index].Id == id)
 				return child_index;
 		}
-		return INVALID_CPU_SCOPE_INDEX;
+		return INVALID_SCOPE_INDEX;
 	}
 
-	double CPUTimerProfiler::ElapsedUs() const
+	double CPUTimeScopeTree::ElapsedUs() const
 	{
 		return std::chrono::duration<double, std::micro>(
 			std::chrono::steady_clock::now() - m_FrameStart).count();
@@ -155,7 +214,7 @@ namespace Helios
 
 	/* 递归结算（先父后子）：EMA 只对有效样本累积；节点标签换位（结构变化）时
 	 * 整棵子树作废重来，避免把不同函数的值混在一起 */
-	void CPUTimerProfiler::SettleRealtime(ResultCPUTimerNode& out, uint32_t index) const
+	void CPUTimeScopeTree::SettleRealtime(CPUTimeScopeNode& out, uint32_t index) const
 	{
 		const ScopeNode& raw = m_ScopeNodes[index];
 
@@ -186,6 +245,7 @@ namespace Helios
 			out.SelfUs = out.SelfUs * 0.9 + self * 0.1;
 		}
 		out.File = raw.File;
+		out.Channel = raw.Channel;
 		out.Line = raw.Line;
 		out.BeginUs = raw.BeginUs;
 		out.EndUs = raw.EndUs;
@@ -197,7 +257,7 @@ namespace Helios
 	}
 
 	/* 原始值结算（录制版；逐帧回放要真值，不做任何平滑） */
-	void CPUTimerProfiler::SettleRaw(ResultCPUTimerNode& out, uint32_t index) const
+	void CPUTimeScopeTree::SettleRaw(CPUTimeScopeNode& out, uint32_t index) const
 	{
 		const ScopeNode& raw = m_ScopeNodes[index];
 
@@ -214,6 +274,7 @@ namespace Helios
 		out.BeginUs = raw.BeginUs;
 		out.EndUs = raw.EndUs;
 		out.File = raw.File;
+		out.Channel = raw.Channel;
 		out.Line = raw.Line;
 		out.CallCount = raw.CallCount;
 		out.HasData = true;
@@ -221,21 +282,5 @@ namespace Helios
 		out.Children.resize(raw.ChildrenIndices.size());
 		for (size_t i = 0; i < raw.ChildrenIndices.size(); ++i)
 			SettleRaw(out.Children[i], raw.ChildrenIndices[i]);
-	}
-
-	ScopedCPUTimerScope::ScopedCPUTimerScope(const char* label, const char* file, uint32_t line)
-	{
-		CPUTimerProfiler& profiler = CPUTimerProfiler::Instance();
-		if (!profiler.IsEnabled())
-			return;
-
-		m_NodeIndex = profiler.BeginScope(label, file, line);
-	}
-
-	ScopedCPUTimerScope::~ScopedCPUTimerScope()
-	{
-		if (m_NodeIndex == INVALID_CPU_SCOPE_INDEX)
-			return;
-		CPUTimerProfiler::Instance().EndScope(m_NodeIndex);
 	}
 }

@@ -393,7 +393,7 @@ namespace Helios
 
 	void TimelinePanel::OnImGuiRender(Scene* scene, const Entity& selected_entity, CommandStack* command_stack, bool& visible)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_IsVisible = visible;
 		if (!visible)

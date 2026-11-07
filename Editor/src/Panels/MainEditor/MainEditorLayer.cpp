@@ -24,12 +24,12 @@ namespace Helios
 	MainEditorLayer::MainEditorLayer()
 		: ILayer("MainEditorLayer")
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 	}
 
 	void MainEditorLayer::OnAttached()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 资源浏览器要跟同一条编辑历史打交道：它的文件操作（新建 / 重命名 / 删除）
 		 * 要进这条历史，菜单与主工具栏的撤销 / 重做才管得着它们。
@@ -62,14 +62,14 @@ namespace Helios
 
 	void MainEditorLayer::OnDetached()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ILayer::OnDetached();
 	}
 
 	void MainEditorLayer::OnImGuiRender()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 还原上次关闭时的停靠前台页签：须在任何窗口提交之前（节点回写读当前焦点窗口） */
 		m_LayoutRestore.Update();
@@ -102,7 +102,7 @@ namespace Helios
 
 	void MainEditorLayer::OnEvent(IEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!event)
 			return;
@@ -114,7 +114,7 @@ namespace Helios
 
 	bool MainEditorLayer::OnKeyPressed(KeyPressedEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* ImGui 正收键盘（输入框激活等）时快捷键让位（键进编辑框，不进命令） */
 		if (ImGui::GetIO().WantCaptureKeyboard)
@@ -184,7 +184,7 @@ namespace Helios
 
 	bool MainEditorLayer::OnMouseButtonPressed(MouseButtonPressedEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		return false;
 	}
 
@@ -271,7 +271,7 @@ namespace Helios
 	 * DockSpace 节点、或者用户主动重置时才构建；resize 由 ImGui 按比例自适应。 */
 	void MainEditorLayer::BuildDefaultLayout(ImGuiID dockspace_id, const ImVec2& size)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ImGui::DockBuilderRemoveNode(dockspace_id);
 		ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
@@ -344,7 +344,7 @@ namespace Helios
 
 	void MainEditorLayer::ShowMenuUI()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 宿主窗口铺满主视口、不参与停靠：菜单栏与工具栏都挂在它下面 */
 		const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -720,7 +720,7 @@ namespace Helios
 			apply_settings();
 		}
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("On: blade positions are generated in a compute shader. Off: back to per-blade CPU placement. Needs compute shader support");
+			ImGui::SetTooltip("On: blade positions are generated in a compute shader. Off: back to per-blade CPU placement. Needs compute shader support\nA grass component shows which path it actually runs");
 
 		bool gpu_grass_indirect = m_Settings.GpuGrassIndirect;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "GPU Grass Indirect Draw", &gpu_grass_indirect))
@@ -885,7 +885,7 @@ namespace Helios
 	/* 顶部工具栏依次排列文件操作和变换工具，运行按钮居中，视图工具贴右。 */
 	void MainEditorLayer::ShowToolbarUI()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float kToolbarHeight = Scaled(34.0f);
 		const float kButtonSize    = Scaled(24.0f);
@@ -1189,7 +1189,7 @@ namespace Helios
 
 	void MainEditorLayer::OnUpdate(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* IDE 那边编好的脚本产物自动跟上：轮询产物时间戳，编译成功才重载 */
 		m_ScriptModule.TickAutoReload(delta_time);

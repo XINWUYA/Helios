@@ -1,10 +1,11 @@
 ﻿#include "Pch.h"
 #include "Helios/Core/AssetManager.h"
+#include "Helios/Profiler/CPUTimeScopeTree.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Renderer.h"
-#include "RenderStatistics.h"
+#include "Helios/Profiler/RenderStatistics.h"
 #include "RenderView.h"
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
@@ -154,7 +155,6 @@ namespace Helios
 	static RenderData s_RenderData;
 
 	SharedPtr<RenderAPI> Renderer::m_pRenderAPI = nullptr;
-	ResultGPUTimerNode Renderer::m_GPUTimerRoot{};
 	SharedPtr<DeviceTexture> Renderer::m_pCurrentShadowMap{};
 
 	namespace
@@ -182,7 +182,7 @@ namespace Helios
 
 	void Renderer::Init()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_pRenderAPI = RenderAPI::Create();
 		m_pRenderAPI->Init();
@@ -196,43 +196,42 @@ namespace Helios
 
 	void Renderer::Update()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
-		RenderQueryProfiler::Instance().EndFrame();
-		RenderQueryProfiler::Instance().PrepareQueryResult(m_GPUTimerRoot);
+		/* 收掉上一帧的 GPU 查询、解析结果，并把同一帧的 CPU 数据一起发布；
+		 * 同时结算几何统计。帧号在门面内部与 CPU 采集对齐。 */
+		Profiler::Instance().EndGPUFrame();
 
-		/* 上一帧的绘制已经全部提交：结算几何统计，与 GPU 计时器同一帧边界 */
-		RenderStatistics::Instance().EndFrame();
-
+		/* 逐帧递增，与 CPU 采集的帧号同步：面板按帧号对齐 CPU / GPU 两条录制 */
 		s_RenderData.ViewUniformData.FrameCounter++;
-		RenderQueryProfiler::Instance().BeginFrame(s_RenderData.ViewUniformData.FrameCounter);
+		Profiler::Instance().BeginGPUFrame(s_RenderData.ViewUniformData.FrameCounter);
 	}
 
 	void Renderer::Release()
 	{
-		PROFILE_FUNCTION();
-		RenderQueryProfiler::Instance().Release();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
+		GPUTimeScopeTree::Instance().Release();
 		RenderStatistics::Instance().Reset();
 		s_RenderData.Instances = InstanceRing{};
 	}
 
 	void Renderer::SetViewport(uint32_t x_start, uint32_t y_start, uint32_t width, uint32_t height)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_pRenderAPI->SetViewport(x_start, y_start, width, height);
 	}
 
 	void Renderer::SetClearColor(const glm::vec4& color)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_pRenderAPI->SetClearColor(color);
 	}
 
 	void Renderer::Clear()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_pRenderAPI->Clear();
 	}
@@ -240,7 +239,7 @@ namespace Helios
 	/* 绘制一个视图 */
 	void Renderer::RenderAView(RenderView* view)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 抖动只改动渲染用的投影矩阵；是否启用由后处理注册表回答，
 		 * 渲染器本身不认识具体效果 */
@@ -275,9 +274,9 @@ namespace Helios
 		 * 在统计树里按相机分组，而不是全部平铺在帧根下 */
 		const Camera* view_camera = view->GetCullingCamera();
 		const std::string view_label = view_camera ? view_camera->GetDebugName() : std::string("View");
-		RenderQueryProfiler::Instance().BeginGPUScope(view_label.c_str());
+		GPUTimeScopeTree::Instance().BeginGPUScope(view_label.c_str());
 		view->Execute();
-		RenderQueryProfiler::Instance().EndGPUScope();
+		GPUTimeScopeTree::Instance().EndGPUScope();
 	}
 
 	void Renderer::SetGrassArea(const glm::vec2& area_min, const glm::vec2& area_size)
@@ -310,7 +309,7 @@ namespace Helios
 	}
 
 	void Renderer::SetViewUniforms(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& view_pos)	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		s_RenderData.ViewUniformData.ViewMatrix = view;
 		s_RenderData.ViewUniformData.ProjectionMatrix = projection;
@@ -366,7 +365,7 @@ namespace Helios
 
 	Renderer::InstanceRange Renderer::UploadInstances(const void* data, uint32_t count, uint32_t stride)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		InstanceRing& ring = s_RenderData.Instances;
 		const uint32_t frame = s_RenderData.ViewUniformData.FrameCounter;
@@ -435,7 +434,7 @@ namespace Helios
 		const SharedPtr<DeviceStorageBuffer>& indirect_args, const VertexBufferLayout* instance_layout,
 		uint32_t indirect_args_offset, uint32_t indirect_instance_offset)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const VertexBufferLayout& layout = (instance_layout != nullptr)
 			? *instance_layout : GetObjectInstanceLayout();
@@ -561,7 +560,7 @@ namespace Helios
 
 	SharedPtr<DeviceVertexArray> Renderer::GetFullScreenVertexArray()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 全屏 VAO 只建一次：原实现每次调用都新建并销毁 VAO 与顶点/索引缓冲 */
 		static const SharedPtr<DeviceVertexArray> s_FullScreenVertexArray = []()

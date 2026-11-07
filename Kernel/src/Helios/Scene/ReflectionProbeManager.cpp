@@ -24,7 +24,7 @@ namespace Helios
 {
     void ReflectionProbeManager::RegisterProbe(const SharedPtr<ReflectionProbe>& probe)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         if (!probe)
             return;
@@ -34,7 +34,7 @@ namespace Helios
 
     void ReflectionProbeManager::UnregisterProbe(const SharedPtr<ReflectionProbe>& probe)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         auto it = std::find(m_RegisteredProbes.begin(), m_RegisteredProbes.end(), probe);
         if (it != m_RegisteredProbes.end())
@@ -43,7 +43,7 @@ namespace Helios
 
     void ReflectionProbeManager::ClearProbes()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         m_RegisteredProbes.clear();
         m_NeedBakeProbes.clear();
@@ -86,7 +86,7 @@ namespace Helios
     SharedPtr<ReflectionProbe> ReflectionProbeManager::GetClostedReflectionProbe(const glm::vec3& target_pos,
         LayerMask culling_mask) const
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         const bool blend_enabled = IsProbeBlendingEnabled(culling_mask);
 
@@ -124,7 +124,7 @@ namespace Helios
 
     bool ReflectionProbeManager::IsProbeBlendingEnabled(LayerMask culling_mask) const
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         for (const auto& probe : m_RegisteredProbes)
         {
@@ -140,7 +140,7 @@ namespace Helios
     std::vector<SharedPtr<ReflectionProbe>> ReflectionProbeManager::CollectClosestBakedProbes(
         const glm::vec3& target_pos, size_t max_count, LayerMask culling_mask) const
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         std::vector<SharedPtr<ReflectionProbe>> usable;
         usable.reserve(m_RegisteredProbes.size());
@@ -164,7 +164,7 @@ namespace Helios
 
     void ReflectionProbeManager::Prepare()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         m_NeedBakeProbes.clear();
 
@@ -193,7 +193,7 @@ namespace Helios
 
     void ReflectionProbeManager::RequestBakeCacheWrites(const std::string& scene_path)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         /* 同一场景允许存在重名探针（复制实体不会自动改名）：按登记顺序给重名者的
          * 缓存文件加 _2 / _3 … 序号，否则它们会互相覆盖彼此的烘焙结果。
@@ -231,7 +231,7 @@ namespace Helios
 
     void ReflectionProbeManager::AddBakeReflectionProbePass(RenderView* render_view)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         if (!render_view)
             return;
@@ -280,7 +280,7 @@ namespace Helios
     /* 烘焙BRDF查找表 */
     void ReflectionProbeManager::BakeBRDFLutMap()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         constexpr uint32_t BRDF_LUT_SIZE = 512;
 

@@ -7,9 +7,10 @@
 #include "MetalCommon.h"
 #include "MetalTexture.h"
 #include "MetalVertexArray.h"
+#include "Helios/Profiler/Profiler.h"
+#include "Helios/Renderer/GPUScopeInterface.h"
 #include "Helios/VirtualDevice/DeviceVertexArray.h"
 #include "Helios/Renderer/Renderer.h"
-#include "Helios/Renderer/RenderQuery.h"
 
 namespace Helios
 {
@@ -135,7 +136,7 @@ namespace Helios
 
     void MetalRenderAPI::Init()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         /* 创建Metal设备 */
         m_Device = MTL::CreateSystemDefaultDevice();
@@ -173,7 +174,7 @@ namespace Helios
 
     void MetalRenderAPI::SetViewport(uint32_t x_start, uint32_t y_start, uint32_t width, uint32_t height)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         ApplyViewport(x_start, y_start, width, height);
     }
@@ -214,7 +215,7 @@ namespace Helios
      * 原点在左上，需要翻转（否则裁剪框上下镜像、内容被剔掉）。转换只在本后端内部完成。 */
     void MetalRenderAPI::SetScissor(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (m_CurrentRenderEncoder && !m_EncoderSuspended)
         {
@@ -257,7 +258,7 @@ namespace Helios
 
     void MetalRenderAPI::ApplyRasterState(RenderRasterState raster_state)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         m_CurrentRasterState = raster_state;
 
@@ -491,7 +492,7 @@ namespace Helios
         uint32_t instance_count, const VertexBufferLayout& /*instance_layout*/,
         uint32_t index_count, uint32_t index_offset)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 
         if (!m_CurrentRenderEncoder || m_EncoderSuspended)
@@ -558,7 +559,7 @@ namespace Helios
         const SharedPtr<DeviceStorageBuffer>& args_buffer, uint32_t args_offset_bytes,
         const VertexBufferLayout& /*instance_layout*/)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_CurrentRenderEncoder || m_EncoderSuspended)
         {
@@ -608,7 +609,7 @@ namespace Helios
         const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
         uint32_t instance_count, const VertexBufferLayout& /*instance_layout*/)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_CurrentRenderEncoder || m_EncoderSuspended)
         {
@@ -668,7 +669,7 @@ namespace Helios
 
     void MetalRenderAPI::Flush()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         /* 命令缓冲区在本帧所有 Pass 记录完成后由 Present 统一提交。
          * 中途 commit 会切断后续 Pass 的编码，故此处不做提交。 */
@@ -676,7 +677,7 @@ namespace Helios
 
     void MetalRenderAPI::GenerateMipmap(const SharedPtr<DeviceTexture>& texture)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         auto metal_texture = std::dynamic_pointer_cast<MetalTexture>(texture);
         if (!metal_texture || !metal_texture->GetMetalTexture())
@@ -708,7 +709,7 @@ namespace Helios
 
     SharedPtr<DeviceTexture> MetalRenderAPI::AcquireDefaultTargetSnapshot(bool& top_down)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (m_CurrentDrawable == nullptr || m_CurrentDrawable->texture() == nullptr)
             return nullptr;
@@ -787,7 +788,7 @@ namespace Helios
 
     void MetalRenderAPI::WaitForGPU()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (m_LastSubmittedCommandBuffer)
             m_LastSubmittedCommandBuffer->waitUntilCompleted();
@@ -796,7 +797,7 @@ namespace Helios
     void MetalRenderAPI::CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst,
         uint32_t src_layer)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         auto metal_src = std::dynamic_pointer_cast<MetalTexture>(src);
         auto metal_dst = std::dynamic_pointer_cast<MetalTexture>(dst);
@@ -843,7 +844,7 @@ namespace Helios
 
     void MetalRenderAPI::Present()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         /* 仍有未结束（或挂起等合并）的 Pass 时先收束，避免命令缓冲区漏记整个 Pass */
         CloseRenderEncoder();
@@ -888,7 +889,7 @@ namespace Helios
 
     void MetalRenderAPI::PrepareNextDrawable()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_MetalLayer)
         {
@@ -1111,7 +1112,7 @@ namespace Helios
 
     void MetalRenderAPI::BeginDefaultRenderPass(bool preserve_content)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_RenderPassDescriptor)
         {
@@ -1152,7 +1153,7 @@ namespace Helios
 
     void MetalRenderAPI::EndDefaultRenderPass()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
         EndRenderPass();
     }
 
@@ -1162,7 +1163,10 @@ namespace Helios
     void MetalRenderAPI::PushDebugGroup(const char* name)
     {
         if (name)
-            RenderQueryProfiler::Instance().BeginGPUScope(name);
+        {
+            if (GPUScopeInterface* scope_interface = GetGPUScopeInterface())
+                scope_interface->OnGpuDebugGroupBegin(name);
+        }
 
         /* 组名留一份：随后创建的编码器拿它当标签 */
         m_DebugGroupStack.emplace_back(name ? name : "");
@@ -1176,7 +1180,8 @@ namespace Helios
 
     void MetalRenderAPI::PopDebugGroup()
     {
-        RenderQueryProfiler::Instance().EndGPUScope();
+        if (GPUScopeInterface* scope_interface = GetGPUScopeInterface())
+            scope_interface->OnGpuDebugGroupEnd();
 
         if (!m_DebugGroupStack.empty())
             m_DebugGroupStack.pop_back();
@@ -1252,14 +1257,20 @@ namespace Helios
             resolved.emplace_back(to_buffer_index(binding), storage->GetMetalBuffer());
         }
 
+        /* GPU 计时（计算通道）：作用域先于采样点开 —— 通道号只派发给已打开的作用域，
+         * 反过来的话这次派发就没有自己的节点。中途建不出编码器也由它自动配对。 */
+        const std::string timer_label = std::string("Compute ") + compute_shader->GetDebugName();
+        PROFILE_GPU_SCOPE(timer_label);
+
         /* GPU 计时（通道采样）：计算通道同样要挂时间戳采样点 —— Apple GPU 只在通道
          * 边界采样，不挂的话纯计算的 Pass（如 GPU 蒙皮）在统计面板里永远没有数据。
          * 描述符每次派发新建，所以只有计时开着才建。 */
         MTL::ComputePassDescriptor* compute_descriptor = nullptr;
-        if (RenderQueryProfiler::Instance().IsEnabled())
+        if (IsGpuTimingActive())
         {
             compute_descriptor = MTL::ComputePassDescriptor::computePassDescriptor();
-            RenderQueryProfiler::Instance().OnComputePassBegin(compute_descriptor);
+            if (GPUScopeInterface* scope_interface = GetGPUScopeInterface())
+                scope_interface->OnGpuComputePassBegin(compute_descriptor);
         }
 
         MTL::ComputeCommandEncoder* encoder = compute_descriptor != nullptr
@@ -1270,7 +1281,7 @@ namespace Helios
         if (encoder == nullptr)
             return false;
 
-        SetMetalEncoderLabel(encoder, std::string("Compute ") + compute_shader->GetDebugName());
+        SetMetalEncoderLabel(encoder, timer_label);
 
         encoder->setComputePipelineState(pipeline);
         for (const auto& [index, buffer] : resolved)
@@ -1291,7 +1302,7 @@ namespace Helios
 
     void MetalRenderAPI::BeginRenderPass(MTL::RenderPassDescriptor* renderPassDescriptor)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_Device || !m_CommandQueue)
         {
@@ -1355,7 +1366,8 @@ namespace Helios
         /* GPU 计时（通道采样）：把本通道的一对时间戳采样下标挂到通道描述符上。
          * 必须在创建编码器之前完成（附件在创建时被读取）；无论是否在计时都调用
          * —— 描述符跨帧复用，残留的旧附件由查询缓冲负责清理。 */
-        RenderQueryProfiler::Instance().OnRenderPassBegin(renderPassDescriptor);
+        if (GPUScopeInterface* scope_interface = GetGPUScopeInterface())
+            scope_interface->OnGpuRenderPassBegin(renderPassDescriptor);
 
         /* 创建渲染命令编码器 */
         m_ActiveRenderPassDescriptor = renderPassDescriptor;
@@ -1398,7 +1410,7 @@ namespace Helios
 
     void MetalRenderAPI::EndRenderPass(bool allow_merge)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (m_CurrentRenderEncoder == nullptr || m_EncoderSuspended)
             return;
@@ -1412,7 +1424,7 @@ namespace Helios
 
         /* 可以合并就先挂着，等下一趟来接；接不上的话由下一次换编码器时统一收掉。
          * 计时开着时每趟都要独立的通道采样，不挂起 */
-        if (allow_merge && m_EncoderDebugGroupDepth == 0 && !RenderQueryProfiler::Instance().IsEnabled())
+        if (allow_merge && m_EncoderDebugGroupDepth == 0 && !IsGpuTimingActive())
         {
             m_EncoderSuspended = true;
             MetalRuntime::SetEncoder(nullptr);
@@ -1429,7 +1441,8 @@ namespace Helios
             if (m_ResumeDebugGroupOpen)
                 m_CurrentRenderEncoder->popDebugGroup();
             m_CurrentRenderEncoder->endEncoding();
-            RenderQueryProfiler::Instance().OnRenderPassEnd();
+            if (GPUScopeInterface* scope_interface = GetGPUScopeInterface())
+                scope_interface->OnGpuRenderPassEnd();
             m_CurrentRenderEncoder = nullptr;
             MetalRuntime::SetEncoder(nullptr);
         }

@@ -126,12 +126,12 @@ namespace Helios
 	SceneEditorLayer::SceneEditorLayer()
 		: ILayer("SceneEditorLayer")
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 	}
 
 	void SceneEditorLayer::OnAttached()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		
 		// Camera
 		m_pEditorCamera = CreateUniquePtr<EditorCamera>(30.0f);
@@ -158,7 +158,7 @@ namespace Helios
 	/* 上次打开的场景优先，其次是项目配的启动场景：文件被删或移走就顺位往下退 */
 	void SceneEditorLayer::OpenStartupScene()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const ProjectConfig config = LoadProjectConfig();
 
@@ -183,7 +183,7 @@ namespace Helios
 
 	void SceneEditorLayer::OnDetached()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 关编辑器前把当前场景的视角落盘，下次打开还是这一眼 */
 		CaptureViewState();
@@ -219,7 +219,7 @@ namespace Helios
 
 	void SceneEditorLayer::OnImGuiRender()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 统计信息 */
 		ShowStatisticInfoUI();
@@ -258,7 +258,7 @@ namespace Helios
 
 	void SceneEditorLayer::OnEvent(IEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!event)
 			return;
@@ -272,7 +272,7 @@ namespace Helios
 
 	void SceneEditorLayer::UpdateViewport()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		//const FrameBufferDescription desc = m_pFrameBuffer->GetDescription();
 		if (m_ViewportRegion.Width > 0 && m_ViewportRegion.Height > 0/* && (desc.Width != m_ViewportRegion.Width() || desc.Height != m_ViewportRegion.Height())*/)
@@ -294,7 +294,7 @@ namespace Helios
 	 * 都会自动跟上。 */
 	void SceneEditorLayer::UpdateSceneCameraViewports()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_pMainScene)
 			return;
@@ -320,7 +320,7 @@ namespace Helios
 
 	void SceneEditorLayer::UpdateSceneCameraRendering()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_pMainScene)
 			return;
@@ -376,7 +376,7 @@ namespace Helios
 
 	bool SceneEditorLayer::OnKeyPressed(KeyPressedEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* ImGui 正收键盘（输入框激活等）时快捷键让位——否则改名框里按 Ctrl+Z 会连场景
 		 * 一起撤销；消费掉，兜底层（主编辑器）也不会再响应同一批快捷键 */
@@ -437,7 +437,7 @@ namespace Helios
 
 	bool SceneEditorLayer::OnMouseButtonPressed(MouseButtonPressedEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (event->GetMouseButton() == Mouse::ButtonLeft)
 		{
@@ -467,7 +467,7 @@ namespace Helios
 	 * 其余窗口的滚轮留给 ImGui 自己处理。 */
 	bool SceneEditorLayer::OnMouseScrolled(MouseScrolledEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_PlayMode != PlayMode::Edit || !m_IsViewportHovered)
 			return false;
@@ -487,7 +487,7 @@ namespace Helios
 	/* 响应拖拽资源到主窗口（资源浏览器内部拖拽）：.scn 打开场景，模型文件走导入 / 收录 */
 	void SceneEditorLayer::OnDragItemToScene(const std::filesystem::path& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const auto extension = PathToUtf8(path.extension());
 
@@ -505,7 +505,7 @@ namespace Helios
 	/* 响应系统文件拖入：指针落在场景视口上才算「拖进场景」，其余位置不处理 */
 	bool SceneEditorLayer::OnFileDrop(WindowFileDropEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (event == nullptr || !Panel::IsVisible(Panel::kScene))
 			return false;
@@ -537,7 +537,7 @@ namespace Helios
 	 * .mesh + .mtl（已在项目里就原地转换），.mesh 直接收进项目引用；然后建实体。 */
 	bool SceneEditorLayer::ImportModelFile(const std::filesystem::path& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_pMainScene == nullptr || path.empty())
 			return false;
@@ -596,7 +596,7 @@ namespace Helios
 	/* 建一个挂指定 .mesh 的模型实体：拖入与导入共用，加载失败不留空实体 */
 	Entity SceneEditorLayer::CreateModelEntity(const std::string& absolute_mesh_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_pMainScene == nullptr)
 			return {};
@@ -624,7 +624,7 @@ namespace Helios
 
 	void SceneEditorLayer::SetActiveScenePath(const std::string& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_ActiveScenePath = path;
 		m_ActiveSceneKey = path.empty() ? std::string() : ViewKey(path);
@@ -666,7 +666,7 @@ namespace Helios
 	 *   Pivot=x y z / Angles=yaw pitch / Distance=d */
 	void SceneEditorLayer::LoadViewStates()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_ViewStatesLoaded)
 			return;
@@ -721,7 +721,7 @@ namespace Helios
 
 	void SceneEditorLayer::StoreViewStates()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_ViewStatesDirty)
 			return;
@@ -752,7 +752,7 @@ namespace Helios
 
 	void SceneEditorLayer::CaptureViewState()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 新建还没保存的场景没有名字，没处记 */
 		if (m_ActiveSceneKey.empty() || m_pEditorCamera == nullptr)
@@ -768,7 +768,7 @@ namespace Helios
 
 	void SceneEditorLayer::ApplyViewState()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 新建还没保存的场景没有名字，也就没有记录可找 */
 		if (m_ActiveSceneKey.empty())
@@ -788,7 +788,7 @@ namespace Helios
 	 * 被系统直接退出也不至于丢掉这一段导航 */
 	void SceneEditorLayer::UpdateViewStateAutosave(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_ActiveSceneKey.empty() || m_pEditorCamera == nullptr)
 			return;
@@ -813,7 +813,7 @@ namespace Helios
 
 	void SceneEditorLayer::SetActiveScene(const SharedPtr<Scene>& scene, const std::string& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 旧场景的视角先记下来，等新场景接好再一起落盘 */
 		FinishGrassPaint();
@@ -859,7 +859,7 @@ namespace Helios
 
 	void SceneEditorLayer::NewScene()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		SetActiveScene(CreateSharedPtr<Scene>(), std::string());
 	}
@@ -868,7 +868,7 @@ namespace Helios
 	 * 对话框 / 拖入 / 资源浏览器双击三条入口共用这一处，行为保持一致。 */
 	void SceneEditorLayer::OpenScene(const std::string& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		SharedPtr<Scene> scene = CreateSharedPtr<Scene>();
 		if (!scene->Deserializer(path))
@@ -885,7 +885,7 @@ namespace Helios
 
 	void SceneEditorLayer::OpenAnimationClip(const std::string& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		auto clip = AssetManager::Instance().GetOrLoad<AnimationClip>(path);
 		if (clip == nullptr)
@@ -902,7 +902,7 @@ namespace Helios
 
 	void SceneEditorLayer::ImportScene()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const auto file_path = FileDialog::OpenFile("scene(*.scn)\0*.scn\0");
 		if (file_path.empty())
@@ -1135,7 +1135,7 @@ namespace Helios
 
 	void SceneEditorLayer::SaveScene()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		FinishGrassPaint();
 
 		/* 若当前场景从未保存过，需要先确定一个保存路径 */
@@ -1161,7 +1161,7 @@ namespace Helios
 	/* 保存场景到指定路径 */
 	void SceneEditorLayer::SaveSceneAs()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const std::string file_path = FileDialog::SaveFile("scene(*.scn)\0*.scn\0");
 
@@ -1184,21 +1184,21 @@ namespace Helios
 
 	bool SceneEditorLayer::Undo()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		FinishGrassPaint();
 		return m_CommandStack.Undo();
 	}
 
 	bool SceneEditorLayer::Redo()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		FinishGrassPaint();
 		return m_CommandStack.Redo();
 	}
 
 	void SceneEditorLayer::ShowSceneViewportUI()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		//m_ViewportRegion = { 268, 2188, 317, 1371 };
 		static ImGuiWindowFlags tab_bar_flags = ImGuiWindowFlags_NoFocusOnAppearing;
@@ -1222,7 +1222,6 @@ namespace Helios
 			/* 若当前ImGui窗口不是主窗口，应阻塞事件传递 */
 			m_IsViewportFocused = ImGui::IsWindowFocused();
 			m_IsViewportHovered = ImGui::IsWindowHovered();
-			// Application::Instance()->GetImGuiLayer()->BlockEvents(!m_IsViewportFocused && !m_IsViewportHovered);
 
 			/* 绘制场景 */
 			auto output_rt = m_pEditorCamera->GetRenderView()->GetRenderTarget();
@@ -1273,7 +1272,7 @@ namespace Helios
 
 	void SceneEditorLayer::ShowStatisticInfoUI()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 绘制逻辑在面板自身（每帧 CPU / GPU 耗时 + GPU 计时树；改动必跑 UI 冒烟检查） */
 		m_RenderStatsPanel.OnImGuiRender();
@@ -1281,7 +1280,7 @@ namespace Helios
 
 	void SceneEditorLayer::ShowOperationGizmoUI()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 手柄是实体网格、由渲染 Pass 画（见 SceneGizmos::SubmitTransformGizmo）：
 		 * 这里只做"本帧布局 + 命中 + 拖拽"，把结果写进 GetTransformGizmoState()。 */
@@ -1559,7 +1558,7 @@ namespace Helios
 	 * 本函数只管交互。 */
 	void SceneEditorLayer::ShowViewGizmoUI()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 运行模式下编辑器相机不响应输入，指示器一并停用 */
 		if (m_PlayMode != PlayMode::Edit)
@@ -1637,7 +1636,7 @@ namespace Helios
 
 	void SceneEditorLayer::CheckMouseSelectEntity()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		auto [mouse_x, mouse_y] = ImGui::GetMousePos();
 		mouse_x -= m_ViewportRegion.MinX;
@@ -1832,7 +1831,7 @@ namespace Helios
 	 * 半径按世界米给，进地形前按实体缩放换成局部米，笔刷在屏幕上的大小才稳定 */
 	void SceneEditorLayer::UpdateTerrainSculpt(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const TerrainSculpt::Settings& settings = TerrainSculpt::GetSettings();
 		const bool painting = settings.Brush != TerrainSculpt::Mode::None
@@ -2076,7 +2075,7 @@ namespace Helios
 	/* 把轨道中心定位到实体，并按包围球取景（F 键与层级树双击共用） */
 	void SceneEditorLayer::FocusEntity(const Entity& entity)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_PlayMode != PlayMode::Edit || !entity || m_pMainScene == nullptr
 			|| !entity.HasComponent<TransformComponent>())
@@ -2109,7 +2108,7 @@ namespace Helios
 
 	void SceneEditorLayer::OnUpdate(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		UpdateViewport();
 		UpdateSceneCameraViewports();

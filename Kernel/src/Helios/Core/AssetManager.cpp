@@ -1,6 +1,6 @@
 ﻿#include "Pch.h"
 #include "AssetManager.h"
-#include "Profiler.h"
+#include "Helios/Profiler/Profiler.h"
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/Scene/Model.h>
 #include <Helios/Scene/Material.h>
@@ -66,7 +66,7 @@ namespace Helios
 	template<typename AssetType, typename LoadConfig>
 	SharedPtr<AssetType> AssetStore<AssetType, LoadConfig>::GetOrLoadInternal(const std::string& path, const LoadConfig& load_config)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Assets);
 
 		LoadConfig effective = load_config;
 		if constexpr (requires { AssetFactory<AssetType>::ResolveConfig(path, load_config); })

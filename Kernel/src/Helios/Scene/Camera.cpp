@@ -9,7 +9,7 @@ namespace Helios
 	Camera::Camera(CameraProjectionType type, float fov, float aspect_ratio, float near_clip, float far_clip)
 		: m_ProjectionType(type), m_Fov(fov), m_AspectRatio(aspect_ratio), m_NearClip(near_clip), m_FarClip(far_clip)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		m_pRenderView = CreateUniquePtr<RenderView>(this);
 		m_IsDirty = true;
@@ -18,7 +18,7 @@ namespace Helios
 	/* 更新时间戳 */
 	void Camera::OnUpdate(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		UpdateViewMatrix();
 		UpdateProjectionMatrix();
@@ -33,7 +33,7 @@ namespace Helios
 	/* 根据世界变换矩阵更新相机位置、朝向和视图矩阵 */
 	void Camera::SetTransform(const glm::mat4& transform)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		m_Position = glm::vec3(transform[3]);
 
@@ -70,7 +70,7 @@ namespace Helios
 	/* 更新视图矩阵 */
 	void Camera::UpdateViewMatrix()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		m_ViewMatrix = glm::lookAt(m_Position, m_Position + m_ForwardDirection, m_UpDirection);
 	}
@@ -79,7 +79,7 @@ namespace Helios
 
 	void Camera::UpdateProjectionMatrix()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		if (!m_IsDirty)
 			return;

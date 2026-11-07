@@ -389,7 +389,7 @@ namespace Helios
 		void SetEntityVisibility(const SharedPtr<Scene>& scene, CommandStack* command_stack,
 			Entity entity, bool visible)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION();
 
 			if (scene == nullptr || !scene->IsEntityValid(entity))
 				return;
@@ -405,14 +405,14 @@ namespace Helios
 
 	SceneHierarchy::SceneHierarchy()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		BindTreeState();
 	}
 
 	SceneHierarchy::SceneHierarchy(const SharedPtr<Scene>& scene)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		BindTreeState();
 		SetOwnerScene(scene);
@@ -484,7 +484,7 @@ namespace Helios
 
 	void SceneHierarchy::OnImGuiRender()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 场景实体列表 */
 		ShowSceneHierarchyUI();
@@ -509,7 +509,7 @@ namespace Helios
 
 	void SceneHierarchy::ShowSceneHierarchyUI()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 删除请求延后到遍历结束后执行：在 each 中销毁当前实体并不安全 */
 		Entity pending_delete{};
@@ -655,7 +655,7 @@ namespace Helios
 	 * 分组条目折叠成子菜单（与顶栏下拉共用 BuildEntityMenuEntries 的折叠规则）。 */
 	void SceneHierarchy::ShowCreateEntityMenu()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (ImGui::BeginMenu("New A Entity"))
 		{
@@ -690,7 +690,7 @@ namespace Helios
 	 * 放不下就压窄搜索框）。筛选是纯图标按钮，点击弹类型单选菜单，生效时高亮。 */
 	void SceneHierarchy::ShowHierarchyTopBar()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 		PanelChrome::HeaderRow row = PanelChrome::BeginHeaderRow(Icons::Id::None);
@@ -756,7 +756,7 @@ namespace Helios
 	 * 笔账）。计数含"为挂住命中项而留下的祖先"—— 它就是屏幕上真能数出来的行数。 */
 	void SceneHierarchy::ShowHierarchyFooter(int shown_count, int total_count)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		char count_text[48] = {};
 		if (shown_count != total_count)
@@ -860,7 +860,7 @@ namespace Helios
 	 * 有搜索词就平铺列出全部匹配条目，组名也参与匹配。 */
 	void SceneHierarchy::DrawNewEntityMenu()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* BeginPopupEx 不会自动加 NoTitleBar（BeginPopup 才加）——漏了弹层顶上
 		 * 会多出一条空标题栏与折叠钮。 */
@@ -934,7 +934,7 @@ namespace Helios
 	 * 收起弹层（方便连点切换、留在原地），收起靠点外部 / Esc；弹层锚在按钮正下方、右缘对齐。 */
 	void SceneHierarchy::DrawTypeFilterMenu()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ImGui::SetNextWindowPos(ImVec2(m_PopupTypeFilterAnchor.x, m_PopupTypeFilterAnchor.y + Scaled(4.0f)),
 			ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
@@ -1036,7 +1036,7 @@ namespace Helios
 	 * （"与"的关系，跟资源浏览器一致）；沿父链往上倒就行。 */
 	void SceneHierarchy::CollectFilteredEntities(FilterSet& out) const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		out.clear();
 		if (m_pOwnerScene == nullptr || !HasActiveFilter())
@@ -1079,7 +1079,7 @@ namespace Helios
 	void SceneHierarchy::ShowSceneRootNode(const std::vector<Entity>& roots, const EntityChildren& children,
 	                                       Entity& pending_delete, const FilterSet* filter)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 固定 str_id：另存为改名的时候，展开状态不该被重置。SpanFullWidth：选中 / 悬停高亮连
 		 * 缩进区一起铺满整行（SpanAvailWidth 只铺到文字右侧、左边留一块缺口；跟资源浏览器目录树同一档）。 */
@@ -1132,7 +1132,7 @@ namespace Helios
 	/* 一次遍历同时得到根节点与 父->子 列表 */
 	void SceneHierarchy::BuildHierarchy(EntityChildren& children, std::vector<Entity>& roots) const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		children.clear();
 		roots.clear();
@@ -1169,7 +1169,7 @@ namespace Helios
 	                                    Entity& pending_delete, const FilterSet* filter, uint64_t parent_key,
 	                                    bool parent_hidden)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 过滤时：不在可见集合里的实体整棵子树都不画 */
 		if (filter != nullptr && filter->find(entity) == filter->end())
@@ -1392,7 +1392,7 @@ namespace Helios
 	/* 改变父节点：父子关系与本地变换一起改（保持世界位置），有命令栈时可撤销 */
 	void SceneHierarchy::ReparentEntity(Entity entity, entt::entity parent)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_pOwnerScene == nullptr || !m_pOwnerScene->IsEntityValid(entity))
 			return;

@@ -12,7 +12,7 @@ namespace Helios
 
 	OpenGLWindow::OpenGLWindow(const WindowDesc& desc)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		Build(desc);
 	}
@@ -25,7 +25,7 @@ namespace Helios
 	/* 更新，交换一帧 */
 	void OpenGLWindow::OnUpdate()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glfwPollEvents();
 		m_pRenderContext->SwapBuffers();
@@ -55,13 +55,13 @@ namespace Helios
 	/* 创建窗口；创建上下文；绑定响应事件 */
 	void OpenGLWindow::Build(const WindowDesc& desc)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_WindowInfo.Descriptor = desc;
 
 		if (s_GLFWWindowCnt == 0)
 		{
-			PROFILE_SCOPE("glfwInit()");
+			PROFILE_CPU_SCOPE("glfwInit()");
 
 			// 初始化GLFW
 			int success = glfwInit();
@@ -89,7 +89,7 @@ namespace Helios
 
 		// 创建 GLFW 窗口（引擎只使用物理像素一套尺寸；macOS 的点/像素换算在窗口实现内部完成）
 		{
-			PROFILE_SCOPE("glfwCreateWindow");
+			PROFILE_CPU_SCOPE("glfwCreateWindow");
 
 			float monitor_scale_x = 1.0f;
 			float monitor_scale_y = 1.0f;
@@ -324,7 +324,7 @@ namespace Helios
 	/* 销毁窗口 */
 	void OpenGLWindow::Destroy()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glfwDestroyWindow(m_pGLFWWindow);
 		m_pGLFWWindow = nullptr;

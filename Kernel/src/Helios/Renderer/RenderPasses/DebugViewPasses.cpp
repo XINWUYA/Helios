@@ -153,7 +153,7 @@ namespace Helios
 			 * 该像素被写过的次数（饱和），显示层由合成 Pass 的热力图承担。 */
 			FrameGraphResourceHandleTyped<FrameGraphTexture> AddOverdrawPass(RenderView& render_view)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -253,7 +253,7 @@ namespace Helios
 			 * 颜色清空后只落线框（背景停在清空色，纯结构视图）。 */
 			void AddWireframePass(RenderView& render_view, const Target& target)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -315,7 +315,7 @@ namespace Helios
 			 * 合成端相除得到平均可见度。权重只取"这盏灯够不够得着"，不掺光照公式。 */
 			FrameGraphResourceHandleTyped<FrameGraphTexture> AddShadowAccumulatePass(RenderView& render_view)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -413,7 +413,7 @@ namespace Helios
 			 * 每笔输出累加编码（首笔覆盖、其余加法叠加），自带深度。天空不画，背景留给合成时保留 */
 			FrameGraphResourceHandleTyped<FrameGraphTexture> AddForwardShadowAccumulatePass(RenderView& render_view)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -485,7 +485,7 @@ namespace Helios
 				FrameGraphResourceHandleTyped<FrameGraphTexture> overdraw_count,
 				FrameGraphResourceHandleTyped<FrameGraphTexture> shadow_accumulate)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -580,7 +580,7 @@ namespace Helios
 			 * （背景交给天空 / 清屏色）。 */
 			void AddDebugMaterialPass(RenderView& render_view, const Target& target, DebugViewMode mode)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -660,7 +660,7 @@ namespace Helios
 		 * 只能在这之后补一笔。深度沿用 G-Buffer，被场景几何挡住的草照常剔除。 */
 		void AddGrassOverlayPass(RenderView& render_view, const Target& target, DebugViewMode mode)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 			const auto scene = render_view.GetOwnerScene();
 			if (scene == nullptr || !Forward::HasVisibleGrassFields(*scene, render_view.GetCullingMask()))
@@ -770,7 +770,7 @@ namespace Helios
 
 		void AddDebugViewPasses(RenderView& render_view, const Target& target)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 			const DebugViewMode mode = render_view.GetDebugViewMode();
 

@@ -216,7 +216,7 @@ namespace Helios
 
 	SceneInspector::SceneInspector()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 组件卡的自定义编辑（资源引用、材质槽…）由编辑器侧装配进注册表 */
 		InstallComponentEditors();
@@ -246,7 +246,7 @@ namespace Helios
 
 	void SceneInspector::OnImGuiRender(const Entity& entity)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_Entity = entity;
 
@@ -281,7 +281,7 @@ namespace Helios
 	 * 实体名与可见性也不再单独占卡（同一条信息只说一次，见 IsEditedInPanelHeader）。 */
 	void SceneInspector::ShowPropertiesHeader()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 行首给可见性开关留一格（控件高见方）：可见性是这个实体最直接的状态，
 		 * 直接画在标题栏左边 —— 与层级行右端是同一枚眼睛、同一套交互。 */
@@ -339,7 +339,7 @@ namespace Helios
 	/* 没有选中实体时的提示：空面板要说清"为什么是空的、该怎么办" */
 	void SceneInspector::ShowEmptyPropertiesHint()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		static constexpr const char* kHint = "Select an entity to edit its components, or an asset to inspect it";
 
@@ -555,7 +555,7 @@ namespace Helios
 
 	void SceneInspector::ShowAssetProperties()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 头部：资源图标 + 名字（只读 —— 改名走资源浏览器的右键菜单，资源名不是实体名） */
 		const AssetSelectionEntry& first = m_AssetSelection.front();
@@ -734,7 +734,7 @@ namespace Helios
 
 	void SceneInspector::DrawAssetDetailsCard(const AssetSelectionEntry& entry)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const std::filesystem::path absolute_path = ResolveAssetPath(PathFromUtf8(entry.Path));
 		const PanelChrome::Card card = PanelChrome::BeginCard(
@@ -955,7 +955,7 @@ namespace Helios
 	 * 自绘不进排版，超长路径由窗口裁掉、撑不出横滑）。项目里的那条点了在资源浏览器里定位。 */
 	void SceneInspector::DrawShaderIncludeRow(const ShaderIncludeRow& include)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 		const float icon_size = ImGui::GetFontSize();
@@ -986,7 +986,7 @@ namespace Helios
 
 	void SceneInspector::DrawMultiAssetCard()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const PanelChrome::Card card = PanelChrome::BeginCard("Assets", Icons::Id::File);
 
@@ -1028,7 +1028,7 @@ namespace Helios
 
 	void SceneInspector::RefreshAssetDetailRows(const AssetSelectionEntry& entry)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 深挖详情要打开文件（图片读文件头 / 场景解析 XML），不必每帧做：
 		 * 只在选中项或它的写入时间变化时重算。 */
@@ -1864,7 +1864,7 @@ namespace Helios
 	 * 画在所在卡片的卡身末尾，铺满内容宽 —— 实体侧是 Model 组件卡，资源侧是详情卡。 */
 	void SceneInspector::DrawOpenInModelEditorButton(const std::string& absolute_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (absolute_path.empty())
 			return;
@@ -1877,7 +1877,7 @@ namespace Helios
 	/* Model 的材质卡：每槽一张，排在 Model 组件卡之后同级平铺。 */
 	void SceneInspector::DrawModelMaterialCards(Entity entity, ModelComponent& component)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (component.m_Model == nullptr)
 			return;
@@ -1950,7 +1950,7 @@ namespace Helios
 	 * 来源 .mtl 与其它草地不受影响；Reset 在组件卡的材质行里。 */
 	void SceneInspector::DrawGrassMaterialCard(Entity entity, GrassComponent& component)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (component.GetMaterial() == nullptr)
 			return;
@@ -2097,7 +2097,7 @@ namespace Helios
 
 	void SceneInspector::DrawCameraPreviewCard(CameraComponent& component)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const SharedPtr<Camera>& camera = component.m_Camera;
 		if (camera == nullptr || m_pOwnerScene == nullptr)
@@ -2144,7 +2144,7 @@ namespace Helios
 	 * on_edit：任何改动走这里 —— 调用方记脏并做热更新（同步缓存里的共享材质）。 */
 	void SceneInspector::DrawAssetMaterialBody(Material& material, const std::function<void()>& on_edit)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* Shader 行（与模型编辑器共用同一控件）：点开菜单换 Shader，选中后记脏 + 热更新 */
 		if (MaterialParamUI::DrawMaterialShaderRow(material))
@@ -2186,7 +2186,7 @@ namespace Helios
 	/* 单条材质资产：卡身 + Apply */
 	void SceneInspector::DrawAssetMaterialCards(const std::filesystem::path& absolute_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_AssetMaterial == nullptr)
 			return;
@@ -2221,7 +2221,7 @@ namespace Helios
 	/* 「Apply」：保存修改并序列化到本地，再同步共享材质缓存 */
 	void SceneInspector::ApplyAssetMaterialEdits(const std::filesystem::path& absolute_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_AssetMaterial == nullptr)
 			return;
@@ -2242,7 +2242,7 @@ namespace Helios
 	 * 无组件先补组件（AddComponentCommand）、再设模型（组件快照命令）——两步都可撤销。 */
 	void SceneInspector::ApplyDroppedMeshToEntity(Entity entity, const std::string& absolute_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		SharedPtr<Model> loaded_model = Model::Create(absolute_path);
 		if (loaded_model == nullptr)
@@ -2286,7 +2286,7 @@ namespace Helios
 	void SceneInspector::DrawComponentBlock(const ComponentDesc& desc, Entity& entity, void* component,
 		int order_index, int order_count, const ComponentCardFooter* footer, const std::function<bool()>& body)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 外层已 PushID(组件类型)，卡片的展开状态键因此天然按组件分开 */
 		const PanelChrome::Card card = PanelChrome::BeginCard(desc.Name,
@@ -2519,7 +2519,7 @@ namespace Helios
 
 	void SceneInspector::ShowEntityComponents()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_LastCardRects.clear();
 
@@ -2585,7 +2585,7 @@ namespace Helios
 	 * 图标是全编辑器「新建 / 添加」入口统一的那枚加号。 */
 	void SceneInspector::ShowAddComponentButton()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float button_size = ImGui::GetFrameHeight();
 		if (Icons::IconButton(Icons::Id::NewAsset, ImVec2(button_size, button_size), false, "Add Component"))

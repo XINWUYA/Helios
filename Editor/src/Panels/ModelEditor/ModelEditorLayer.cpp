@@ -141,12 +141,12 @@ namespace Helios
 	ModelEditorLayer::ModelEditorLayer()
 		: ILayer("ModelEditorLayer")
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 	}
 
 	void ModelEditorLayer::OnAttached()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_pEditorCamera = CreateUniquePtr<EditorCamera>();
 		/* 模型预览用聚焦模式：左键直接绕模型旋转 + 滚轮缩放，平移 / 飞行不参与 */
@@ -190,7 +190,7 @@ namespace Helios
 
 	void ModelEditorLayer::OnDetached()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 相机先于场景销毁：按登记契约摘除 */
 		if (m_pDefaultScene && m_pEditorCamera)
@@ -201,7 +201,7 @@ namespace Helios
 
 	void ModelEditorLayer::OnUpdate(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!Panel::IsVisible(Panel::kModel))
 			return;
@@ -246,7 +246,7 @@ namespace Helios
 
 	void ModelEditorLayer::OnImGuiRender()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 预览与材质参数在同一个窗口（参数是可折叠浮层） */
 		ShowModelWindowUI();
@@ -254,7 +254,7 @@ namespace Helios
 
 	void ModelEditorLayer::OnEvent(IEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!event)
 			return;
@@ -266,7 +266,7 @@ namespace Helios
 	/* 滚轮：指针在视口上时拉近拉远（聚焦模式的缩放通道） */
 	bool ModelEditorLayer::OnMouseScrolled(MouseScrolledEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_IsViewportHovered)
 			return false;
@@ -284,7 +284,7 @@ namespace Helios
 	 * 恢复入口在 View 菜单，与 Frame Graph / Log 同一约定。 */
 	void ModelEditorLayer::ShowModelWindowUI()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 窗口已关闭：不提交也不画；悬停授权与高亮一并清掉，不留指向已关窗口的残影 */
 		if (!Panel::IsVisible(Panel::kModel))
@@ -404,7 +404,7 @@ namespace Helios
 	 * 收起时只留右上角开关，开关画在视口上（没有子窗口遮挡，父窗口的控件可点）。 */
 	void ModelEditorLayer::ShowMaterialParamsPane()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_IsParamsPanelOpen)
 		{
@@ -465,7 +465,7 @@ namespace Helios
 	 * 屏幕位置按父窗口内容区算 —— 打开态在面板里画，坐标也得用父窗口的角 */
 	bool ModelEditorLayer::DrawParamsPaneToggle()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ImGuiWindow* window = ImGui::GetCurrentWindow();
 		if (window->ParentWindow != nullptr)
@@ -486,7 +486,7 @@ namespace Helios
 	 * 也不随面板收起，始终画在父窗口上；按钮悬停会挡掉视口悬停（见 ShowModelWindowUI 帧末结算） */
 	void ModelEditorLayer::ShowPreviewTools()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ImGuiWindow* window = ImGui::GetCurrentWindow();
 		if (window->ParentWindow != nullptr)
@@ -542,7 +542,7 @@ namespace Helios
 	/* 基本信息：整份模型的路径、包围盒与规模 */
 	void ModelEditorLayer::ShowModelBaseInfoCard()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const PanelChrome::Card card = PanelChrome::BeginCard("Base Info", Icons::Id::Model);
 
@@ -567,7 +567,7 @@ namespace Helios
 	 * 左上角的一键保存是整包（.mesh + .mtl + 贴图 + 片段），这里用于单独出一份资产 */
 	void ModelEditorLayer::ShowExportCard()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_pModel == nullptr || m_pModelInfo == nullptr)
 			return;
@@ -688,7 +688,7 @@ namespace Helios
 	 * 模型没带片段（组件没挂）时整张卡不出现 */
 	void ModelEditorLayer::ShowAnimationCard()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		AnimatorComponent* animator = GetPreviewAnimator();
 		if (animator == nullptr || m_AnimationClips.empty())
@@ -792,7 +792,7 @@ namespace Helios
 	 * 悬停卡头 = 该子模型的网格段在预览里高亮（多个子网格时才做：单网格没有"哪一段"的歧义）。 */
 	void ModelEditorLayer::ShowSubModelCards()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const bool allow_highlight = m_pModelInfo->m_SubModelInfos.size() > 1;
 
@@ -924,7 +924,7 @@ namespace Helios
 	/* 挂材质资产：记成槽覆盖（共享引用）；改参数时由 MaterialSlotEditing 自动转实例 */
 	bool ModelEditorLayer::AssignSubModelMaterial(size_t index, const std::string& absolute_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const MaterialSlot* slot = m_pModel->GetSlotForSegment(index);
 		if (slot == nullptr)
@@ -962,7 +962,7 @@ namespace Helios
 	 * 按视口区域居中（在视口输入区之前画 —— 输入区占满整块，画在它之后文字会被挤出可见区） */
 	void ModelEditorLayer::ShowEmptyModelHint(const ImVec2& area_min, const ImVec2& area_size)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		static constexpr const char* kHint = "Drag a model file into the viewport to open it";
 
@@ -982,7 +982,7 @@ namespace Helios
 	/* 响应拖拽文件到主窗口 */
 	void ModelEditorLayer::OnDragItemToScene(const std::filesystem::path& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		LoadModelFile(PathToUtf8(path));
 	}
@@ -990,7 +990,7 @@ namespace Helios
 	/* 导入模型：弹窗选文件 */
 	void ModelEditorLayer::ImportModel()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const auto file_path = FileDialog::OpenFile(
 			"Model(*.mesh;*.obj;*.fbx;*.gltf;*.glb;*.dae;*.stl)\0*.mesh;*.obj;*.fbx;*.gltf;*.glb;*.dae;*.stl\0");
@@ -1007,7 +1007,7 @@ namespace Helios
 	/* 打开模型（属性面板 / 资源面板入口） */
 	void ModelEditorLayer::OpenModel(const std::string& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!LoadModelFile(path))
 			return;
@@ -1021,7 +1021,7 @@ namespace Helios
 	 * 转换链，材质与贴图一并带过来。转换落在资产目录的 Cache 工作区（不进资源树、可重复覆盖）。 */
 	bool ModelEditorLayer::LoadModelFile(const std::string& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (path.empty())
 			return false;
@@ -1053,7 +1053,7 @@ namespace Helios
 	 * 资产本身；编辑落在槽覆盖上（改参数自动转实例），几何不重建。 */
 	bool ModelEditorLayer::LoadMeshModel(const std::string& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		EDITOR_LOG_DEBUG("Open model asset: {}.", path);
 
@@ -1095,7 +1095,7 @@ namespace Helios
 	 * 按文件名排序，首个就是默认播的那个 */
 	void ModelEditorLayer::CollectAnimationClips(const std::string& mesh_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_AnimationClips.clear();
 		m_SelectedClip = -1;
@@ -1120,7 +1120,7 @@ namespace Helios
 	/* 一键保存模型（.model + .mesh + .mtl + .anim）：弹窗预填当前模型的文件名 */
 	void ModelEditorLayer::ExportMeshAndMtl()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_pModelInfo || !m_pModel)
 			return;
@@ -1139,7 +1139,7 @@ namespace Helios
 	 * 内嵌 / 改过参数的条目生成 <stem>_materials/<Slot>.mtl；纯引用保留原路径。 */
 	bool ModelEditorLayer::SaveModelTo(const std::string& model_file_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_pModelInfo || !m_pModel)
 			return false;
@@ -1273,7 +1273,7 @@ namespace Helios
 	/* 单独导出模型：只拷 .mesh（骨骼段原样带走），不写材质与片段 */
 	bool ModelEditorLayer::ExportModelTo(const std::string& mesh_file_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_pModelInfo || !m_pModel)
 			return false;
@@ -1300,7 +1300,7 @@ namespace Helios
 	/* 单独导出材质：只写选中槽的 .mtl（内嵌定义全量写） */
 	bool ModelEditorLayer::ExportMaterialTo(const std::string& material_file_path, int slot_index)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_pModelInfo || !m_pModel || m_pModel->GetMaterialSlots().empty())
 			return false;
@@ -1321,7 +1321,7 @@ namespace Helios
 	/* 单独导出动画：只写当前选中片段的 .anim（轨道与事件原样落盘） */
 	bool ModelEditorLayer::ExportAnimationTo(const std::string& animation_file_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_SelectedClip < 0 || m_SelectedClip >= static_cast<int>(m_AnimationClips.size()))
 			return false;
@@ -1346,7 +1346,7 @@ namespace Helios
 	 * （m_AutoFocusPending → FocusOn，见 ShowModelWindowUI） */
 	void ModelEditorLayer::ShowModelInScene()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 先销毁上一个预览实体：Scene::DestroyEntity 会把骨骼模型的关节实体一并清掉。
 		 * 只清组件的话关节树会留在场景里，换个模型就多存一棵。 */

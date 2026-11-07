@@ -31,7 +31,7 @@ namespace Helios
 
     void ReflectionProbe::Bake(RenderView* render_view)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         const bool realtime = NeedsRealtimeBake();
         const bool need_bake = realtime
@@ -356,7 +356,7 @@ namespace Helios
 
     bool ReflectionProbe::SaveBakeCache(const std::string& path)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         if (path.empty())
             return false;
@@ -416,7 +416,7 @@ namespace Helios
 
     bool ReflectionProbe::LoadBakeCache(const std::string& path)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         ReflectionProbeBakeCache::Data data;
         if (!ReflectionProbeBakeCache::Read(path, data))

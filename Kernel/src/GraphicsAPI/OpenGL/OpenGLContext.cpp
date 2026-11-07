@@ -37,7 +37,7 @@ namespace Helios
 
 	void OpenGLContext::Init()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glfwMakeContextCurrent(m_pGLFWWindow);
 
@@ -132,7 +132,7 @@ namespace Helios
 
 	void OpenGLContext::SwapBuffers()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glfwSwapBuffers(m_pGLFWWindow);
 	}

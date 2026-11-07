@@ -4,8 +4,9 @@
 #include "OpenGLCommon.h"
 #include "OpenGLShader.h"
 #include "OpenGLTexture.h"
+#include <Helios/Profiler/Profiler.h>
+#include <Helios/Renderer/GPUScopeInterface.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
-#include <Helios/Renderer/RenderQuery.h>
 #include <glad/glad.h>
 
 namespace Helios
@@ -37,7 +38,7 @@ namespace Helios
 
 	void OpenGLRenderAPI::Init()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 #ifdef HELIOS_DEBUG
 #ifndef __APPLE__
@@ -104,7 +105,7 @@ namespace Helios
 
 	void OpenGLRenderAPI::ApplyRasterState(RenderRasterState raster_state)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const bool first = !m_HasAppliedRasterState;
 		const RenderRasterState& applied = m_AppliedRasterState;
@@ -211,7 +212,7 @@ namespace Helios
 
 	void OpenGLRenderAPI::DrawIndexed(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array, uint32_t index_count, uint32_t index_offset)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const uint32_t count = index_count ? index_count : vertex_array->GetVertexCount();
 
@@ -230,7 +231,7 @@ namespace Helios
 
 	void OpenGLRenderAPI::DrawArrays(PrimitiveType type, const SharedPtr<DeviceVertexArray>& vertex_array)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const auto count = vertex_array->GetVertexCount();
 		glDrawArrays(TranslateToOpenGLPrimitiveType(type), 0, count);
@@ -268,7 +269,7 @@ namespace Helios
 		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t instance_offset_bytes,
 		uint32_t instance_count, const VertexBufferLayout& instance_layout)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		BindInstanceAttributes(vertex_array, instance_buffer, instance_offset_bytes, instance_layout);
 		glDrawArraysInstanced(TranslateToOpenGLPrimitiveType(type), 0,
@@ -282,7 +283,7 @@ namespace Helios
 		const SharedPtr<DeviceStorageBuffer>& args_buffer, uint32_t args_offset_bytes,
 		const VertexBufferLayout& instance_layout)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		auto* storage = dynamic_cast<OpenGLStorageBuffer*>(args_buffer.get());
 		if (storage == nullptr || storage->GetBufferID() == 0)
@@ -310,7 +311,7 @@ namespace Helios
 		uint32_t instance_count, const VertexBufferLayout& instance_layout,
 		uint32_t index_count, uint32_t index_offset)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		BindInstanceAttributes(vertex_array, instance_buffer, instance_offset_bytes, instance_layout);
 
@@ -362,7 +363,7 @@ namespace Helios
 		(void)indirect_offset;
 		return false;
 #else
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		auto* gl_shader = dynamic_cast<OpenGLShader*>(shader.get());
 		if (gl_shader == nullptr || !gl_shader->IsCompute())
@@ -431,6 +432,10 @@ namespace Helios
 			GLState::BindBufferRange(GL_UNIFORM_BUFFER, param_binding, { m_ComputeParamBuffer, 0, block_size });
 		}
 
+		/* 计时作用域：按着色器命名，派发耗时在面板里单独一项 */
+		const std::string timer_label = std::string("Compute ") + shader->GetDebugName();
+		PROFILE_GPU_SCOPE(timer_label);
+
 		if (indirect_args != nullptr)
 		{
 			auto* storage = dynamic_cast<OpenGLStorageBuffer*>(indirect_args.get());
@@ -461,7 +466,7 @@ namespace Helios
 
 	void OpenGLRenderAPI::GenerateMipmap(const SharedPtr<DeviceTexture>& texture)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* OpenGL 的命令是立即执行的，烘焙后的绘制已经生效，直接生成即可 */
 		if (texture)
@@ -470,7 +475,7 @@ namespace Helios
 
 	SharedPtr<DeviceTexture> OpenGLRenderAPI::AcquireDefaultTargetSnapshot(bool& top_down)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 默认目标的区域 = 当前视口（后端记着，不用查驱动）：渲染到默认目标的 Pass 已把视口
 		 * 设成它的目标区域。没设过视口或尺寸为 0 视为无可用目标、静默跳过 */
@@ -525,7 +530,7 @@ namespace Helios
 	void OpenGLRenderAPI::CopyTexture(const SharedPtr<DeviceTexture>& src, const SharedPtr<DeviceTexture>& dst,
 		uint32_t src_layer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const auto open_gl_src = std::dynamic_pointer_cast<OpenGLTexture>(src);
 		const auto open_gl_dst = std::dynamic_pointer_cast<OpenGLTexture>(dst);
@@ -633,10 +638,13 @@ namespace Helios
 	 * 作用域无条件配对，不依赖 KHR_debug 是否可用（作用域树与抓帧组解耦）。 */
 	void OpenGLRenderAPI::PushDebugGroup(const char* name)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (name)
-			RenderQueryProfiler::Instance().BeginGPUScope(name);
+		{
+			if (GPUScopeInterface* scope_interface = GetGPUScopeInterface())
+				scope_interface->OnGpuDebugGroupBegin(name);
+		}
 
 		if (m_SupportedExtensions.KHR_debug)
 			glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 0, -1, name);
@@ -644,9 +652,10 @@ namespace Helios
 
 	void OpenGLRenderAPI::PopDebugGroup()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
-		RenderQueryProfiler::Instance().EndGPUScope();
+		if (GPUScopeInterface* scope_interface = GetGPUScopeInterface())
+			scope_interface->OnGpuDebugGroupEnd();
 
 		if (m_SupportedExtensions.KHR_debug)
 			glPopDebugGroup();
@@ -655,7 +664,7 @@ namespace Helios
 	/* 获取OpenGL支持的扩展 */
 	void OpenGLRenderAPI::InitOpenGLExtensions()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 获取扩展数 */
 		GLint num = 0;

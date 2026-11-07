@@ -1,24 +1,59 @@
 #pragma once
+#include <algorithm>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace Helios
 {
-	/* 一个通道的 GPU 实际工作时长（通道采样模型；单位 us）：取"各 stage 内的 work 时长"、
-	 * 而不是"通道首尾跨度"（TBDR 上阶段会交叠，首尾会把流水线等待算进来）；跟 Xcode 抓帧同口径、
-	 * 各作用域可以加。FragmentUs 含排队修正；0 = 没有采样数据。
-	 * 计算通道只有一段（ComputeUs，顶点 / 片元恒 0），与渲染通道分开记以免互相污染。 */
+	/* 一个通道的采样结果：各阶段在帧内的绝对起止，单位 us，帧首为 0，没采到样就是 0。
+	 * 作用域耗时由这些窗口求并集，不另存时长结论。片元起点已做排队修正，可直接用。 */
 	struct GPUPassTimestamp
 	{
-		double VertexUs{ 0.0 };
-		double FragmentUs{ 0.0 };
-		double ComputeUs{ 0.0 };
-		double DurationUs() const { return VertexUs + FragmentUs + ComputeUs; }
+		double VertexBeginUs{ 0.0 };
+		double VertexEndUs{ 0.0 };
+		double FragmentBeginUs{ 0.0 };
+		double FragmentEndUs{ 0.0 };
+		double ComputeBeginUs{ 0.0 };
+		double ComputeEndUs{ 0.0 };
+
+		bool HasVertex() const { return VertexEndUs > VertexBeginUs; }
+		bool HasFragment() const { return FragmentEndUs > FragmentBeginUs; }
+		bool HasCompute() const { return ComputeEndUs > ComputeBeginUs; }
 	};
+
+	/* 求一组时间窗口的并集，重叠的段只算一次。
+	 * 相邻通道的顶点与片元会交叠，逐个相加会把同一段时间重复计。允许乱序，内部排序。 */
+	inline double UnionSpanUs(std::vector<std::pair<double, double>> spans)
+	{
+		if (spans.empty())
+			return 0.0;
+
+		std::sort(spans.begin(), spans.end());
+
+		double union_us = 0.0;
+		double run_begin = spans.front().first;
+		double run_end = spans.front().second;
+		for (size_t index = 1; index < spans.size(); ++index)
+		{
+			const auto& [begin, end] = spans[index];
+			if (begin <= run_end)
+			{
+				if (end > run_end)
+					run_end = end;
+				continue;
+			}
+
+			union_us += run_end - run_begin;
+			run_begin = begin;
+			run_end = end;
+		}
+		return union_us + (run_end - run_begin);
+	}
 
 	/* 一帧 GPU 时间戳的后端存放处（通道采样模型）：每个通道占四个采样下标
 	 * （顶点与片元各起止，计算通道只用前两个），开始时挂描述符、结束后解析成表。
-	 * Apple GPU 只在通道边界采样，耗时按通道收集再求和；GL 用时间戳查询，Create 返回空。 */
+	 * Apple GPU 只在通道边界采样，耗时要靠区间并集合成；GL 用时间戳查询，Create 返回空。 */
 	class DeviceQueryBuffer
 	{
 	public:

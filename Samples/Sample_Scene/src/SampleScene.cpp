@@ -11,7 +11,7 @@ SampleSceneLayer::SampleSceneLayer() : ILayer("SampleSceneLayer")
 
 void SampleSceneLayer::OnAttached()
 {
-	PROFILE_FUNCTION();
+	PROFILE_CPU_FUNCTION();
 
 	m_pScene = CreateSharedPtr<Scene>();
 	const std::string scene_path = ABSOLUTE_PATH("Scenes/test.scn");
@@ -41,7 +41,7 @@ void SampleSceneLayer::OnAttached()
 
 void SampleSceneLayer::OnUpdate(float delta_time)
 {
-	PROFILE_FUNCTION();
+	PROFILE_CPU_FUNCTION();
 
 	m_pCameraController->OnUpdate(delta_time);
 	m_pScene->OnUpdate(delta_time);

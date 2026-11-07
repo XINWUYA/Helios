@@ -54,7 +54,7 @@ namespace Helios
 	OpenGLTexture::OpenGLTexture(const std::string& name, const TextureDesc& texture_desc)
 		: DeviceTexture(name, texture_desc), m_InternalFormat(TranslateToOpenGLTextureFormat(texture_desc.Format))
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (!!(m_TextureDesc.Usage & TextureUsage::Sampleable))
 		{
@@ -195,7 +195,7 @@ namespace Helios
 	OpenGLTexture::OpenGLTexture(const std::string& path, const TextureLoadConfig& load_config)
 		: m_Path(path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		stbi_set_flip_vertically_on_load(load_config.IsFlipV);
 
@@ -349,7 +349,7 @@ namespace Helios
 
 	OpenGLTexture::~OpenGLTexture()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (!!(m_TextureDesc.Usage & TextureUsage::Sampleable)) /* 作为普通Texture */
 		{
@@ -393,7 +393,7 @@ namespace Helios
 	/* 绑定当前纹理 */
 	void OpenGLTexture::Bind(uint32_t slot)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		ActiveTexture(slot);
 		BindTexture(m_TextureTarget, m_TextureId);
@@ -408,7 +408,7 @@ namespace Helios
 	/* 解绑纹理 */
 	void OpenGLTexture::Unbind()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		BindTexture(m_TextureTarget, 0);
 	}
@@ -416,7 +416,7 @@ namespace Helios
 	/* 生成 mipmap */
 	void OpenGLTexture::GenerateMipmap()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* glGenerateMipmap 作用于"当前绑定在该 target 上的纹理"，因此必须先绑定自身：
 		 * 帧内被 RenderAPI::GenerateMipmap 调用时，当前绑定的很可能是别的纹理。 */
@@ -426,7 +426,7 @@ namespace Helios
 
 	void OpenGLTexture::SetData(void* data, const PixelDesc& pixel_desc, uint32_t level, uint32_t offset_x, uint32_t offset_y, uint32_t offset_z)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		BindTexture(m_TextureTarget, m_TextureId);
 
@@ -511,7 +511,7 @@ namespace Helios
 
 	bool OpenGLTexture::ReadbackPixels(std::vector<uint8_t>& out_data, uint32_t mip_level, uint32_t layer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_TextureId == 0 || mip_level >= m_TextureDesc.MipLevels)
 			return false;

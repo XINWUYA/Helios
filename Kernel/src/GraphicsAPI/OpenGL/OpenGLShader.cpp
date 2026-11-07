@@ -128,7 +128,7 @@ namespace Helios
 	OpenGLShader::OpenGLShader(const std::string& filepath)
 		: DeviceShader(filepath)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_DebugName = ExtractFilename(filepath);
 
@@ -154,7 +154,7 @@ namespace Helios
 	OpenGLShader::OpenGLShader(std::string name, const std::string& vertex_src, const std::string& pixel_src)
 		: DeviceShader(""), m_DebugName(std::move(name))
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		std::unordered_map<ShaderCompiler::ShaderStage, std::string> stage_sources{
 			{ ShaderCompiler::ShaderStage::Vertex, vertex_src },
@@ -167,7 +167,7 @@ namespace Helios
 
 	bool OpenGLShader::ApplyPrepared(DeviceShader& prepared)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		auto* fresh = dynamic_cast<OpenGLShader*>(&prepared);
 		if (fresh == nullptr)
@@ -227,7 +227,7 @@ namespace Helios
 
 	OpenGLShader::~OpenGLShader()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_ProgramID != 0)
 		{
@@ -242,7 +242,7 @@ namespace Helios
 
 	void OpenGLShader::Bind()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 第一次绑定才执行 link，保证 link 时 GL 状态与绘制时一致（见 LazyLink） */
 		if (!m_IsLinked)
@@ -298,7 +298,7 @@ namespace Helios
 
 	void OpenGLShader::SetInt(const std::string& name, int value)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const GLint location = FindUniformLocation(name);
 		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
@@ -307,7 +307,7 @@ namespace Helios
 
 	void OpenGLShader::SetIntArray(const std::string& name, int* values, uint32_t count)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const GLint location = FindUniformLocation(name);
 		if (location < 0) return;
@@ -316,7 +316,7 @@ namespace Helios
 
 	void OpenGLShader::SetFloat(const std::string& name, float value)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const GLint location = FindUniformLocation(name);
 		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
@@ -325,7 +325,7 @@ namespace Helios
 
 	void OpenGLShader::SetFloat2(const std::string& name, const glm::vec2& value)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const GLint location = FindUniformLocation(name);
 		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
@@ -334,7 +334,7 @@ namespace Helios
 
 	void OpenGLShader::SetFloat3(const std::string& name, const glm::vec3& value)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const GLint location = FindUniformLocation(name);
 		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
@@ -343,7 +343,7 @@ namespace Helios
 
 	void OpenGLShader::SetFloat4(const std::string& name, const glm::vec4& value)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const GLint location = FindUniformLocation(name);
 		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
@@ -352,7 +352,7 @@ namespace Helios
 
 	void OpenGLShader::SetMat4(const std::string& name, const glm::mat4& value)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const GLint location = FindUniformLocation(name);
 		if (location < 0 || IsUniformUnchanged(location, &value, sizeof(value))) return;
@@ -550,7 +550,7 @@ namespace Helios
 #endif
 	void OpenGLShader::CreateShaderProgram()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		// Create shader program
 		GLuint program = glCreateProgram();
@@ -661,7 +661,7 @@ namespace Helios
 
 	void OpenGLShader::LazyLink()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_IsLinked)
 			return;

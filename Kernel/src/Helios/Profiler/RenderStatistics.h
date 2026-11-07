@@ -1,25 +1,10 @@
 #pragma once
 #include <cstdint>
-#include "RenderCommon.h"
+#include "Helios/Profiler/Profiler.h"
+#include "Helios/Renderer/RenderCommon.h"
 
 namespace Helios
 {
-	/* 一帧的渲染统计快照：提交次数与几何吞吐量（面板只读，不参与任何渲染决策）。
-	 * 口径 —— 顶点 / 三角形按“这一笔提交了多少元素”折算，实例化乘实例数；
-	 * 间接绘制（草地）的元素与实例数在 GPU 侧，只计入调用数，几何量不计。 */
-	struct HELIOS_API RenderStatisticsSnapshot
-	{
-		uint64_t DrawCalls{ 0 };         /* 绘制调用数（普通 + 实例化 + 间接） */
-		uint64_t Triangles{ 0 };         /* 三角形数 */
-		uint64_t Vertices{ 0 };          /* 顶点数（索引绘制按索引数，即顶点着色器的调用量） */
-		uint64_t Instances{ 0 };         /* 实例化绘制覆盖的实例总数 */
-		uint64_t IndirectDrawCalls{ 0 }; /* 其中的间接绘制数 */
-		/* 草地可见与阴影路径的提交总数，含间接绘制。 */
-		uint64_t GrassDrawCalls{ 0 };
-		/* 是否结算过至少一帧：刚启动 / 释放后为 false，面板据此显示占位 */
-		bool Valid{ false };
-	};
-
 	/* 元素数折算成三角形数（纯函数，headless 可断言）：非三角形图元记 0 */
 	[[nodiscard]] HELIOS_API uint64_t CountTriangles(PrimitiveType type, uint64_t element_count);
 

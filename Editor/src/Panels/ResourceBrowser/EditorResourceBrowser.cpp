@@ -490,7 +490,7 @@ namespace Helios
 	 * 过滤词为空时全部命中 —— 于是「不显示」只有"不在集合里"这一条判据。 */
 	void EditorResourceBrowser::FillBrowserFilter()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 过滤词和目录树都没变就沿用上次的结果 */
 		if (!m_FilterDirty && m_FilterText == m_Filter)
@@ -558,7 +558,7 @@ namespace Helios
 
 	void EditorResourceBrowser::OnImGuiRenderer()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 缩略图尺寸是"用户偏好"、以 ImGui 单位存：初值 0 表示尚未按当前缩放落定，
 		 * 首次进 UI 帧时按设计值 64 折算（见头文件成员说明）。之后由滑动条按用户所见改。 */
@@ -750,7 +750,7 @@ namespace Helios
 	 * 为界（窗口的 WorkRect / Indent），不套子窗口的话它会横跨整个面板、压到目录树上。 */
 	void EditorResourceBrowser::ShowBrowserBody()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 		const ImVec2 pane_padding = style.WindowPadding;
@@ -1006,7 +1006,7 @@ namespace Helios
 	 * （与新建项选中同一个通道 —— m_PendingSelectPath）。 */
 	void EditorResourceBrowser::RevealAsset(const std::string& relative_path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (relative_path.empty())
 			return;
@@ -1523,7 +1523,7 @@ namespace Helios
 	 * 不收起弹层，收起靠点外部 / Esc；弹层锚在按钮下方、右缘对齐，勾选列对齐在同一条基线。 */
 	void EditorResourceBrowser::DrawTypeFilterMenu()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ImGui::SetNextWindowPos(ImVec2(m_FilterMenuAnchor.x, m_FilterMenuAnchor.y + 4.0f),
 			ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
@@ -1931,7 +1931,7 @@ namespace Helios
 	 * 四枚不参与退让。筛选是纯图标按钮，点击弹类型单选菜单，生效时高亮。 */
 	void EditorResourceBrowser::ShowBrowserTopBar()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 
@@ -2039,7 +2039,7 @@ namespace Helios
 	 * 点面包屑上一段就行（那枚图标白占行首一格）。 */
 	void EditorResourceBrowser::ShowBrowserFooter()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 		ImGuiWindow* window = ImGui::GetCurrentWindow();
@@ -2336,7 +2336,7 @@ namespace Helios
 	/* 主体：缩略图够大就用网格，否则退回详细列表 */
 	void EditorResourceBrowser::ShowBrowserContent()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float panel_width = ImGui::GetContentRegionAvail().x;
 		/* 内容区左上角（绝对屏幕坐标）：网格的横向起点按它算 ——

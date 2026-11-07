@@ -13,7 +13,7 @@ SampleIBLLayer::SampleIBLLayer() : ILayer("SampleIBLLayer")
 
 void SampleIBLLayer::OnAttached()
 {
-	PROFILE_FUNCTION();
+	PROFILE_CPU_FUNCTION();
 
 	m_pScene = CreateSharedPtr<Scene>();
 
@@ -117,7 +117,7 @@ void SampleIBLLayer::OnDetached()
 
 void SampleIBLLayer::OnUpdate(float delta_time)
 {
-	PROFILE_FUNCTION();
+	PROFILE_CPU_FUNCTION();
 
 	m_pCameraController->OnUpdate(delta_time);
 	m_pScene->OnUpdate(delta_time);
@@ -126,7 +126,7 @@ void SampleIBLLayer::OnUpdate(float delta_time)
 
 void SampleIBLLayer::OnImGuiRender()
 {
-	PROFILE_FUNCTION();
+	PROFILE_CPU_FUNCTION();
 
 	ImGui::Begin("Stats");
 	ImGui::Text("Sample IBL:");

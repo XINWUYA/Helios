@@ -50,4 +50,4 @@
 #include "Helios/Common/Common.h"
 #include "Helios/Common/Assert.h"
 #include "Helios/Core/Logger.h"
-#include "Helios/Core/Profiler.h"
+#include "Helios/Profiler/Profiler.h"

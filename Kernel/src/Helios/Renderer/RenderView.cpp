@@ -24,7 +24,7 @@ namespace Helios
 	RenderView::RenderView(Camera* owner_camera)
 		: m_pOwnerCamera(owner_camera)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_pFrameGraph = CreateSharedPtr<FrameGraph>(m_pOwnerCamera->GetDebugName() + "_FrameGraph");
 		m_pShadowMapManager = CreateSharedPtr<ShadowMapManager>();
@@ -32,7 +32,7 @@ namespace Helios
 
 	RenderView::~RenderView()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_SceneMeshObjects.clear();
 		m_VisibleMeshObjects.clear();
@@ -41,7 +41,7 @@ namespace Helios
 	/* 设置视口区域 */
 	void RenderView::SetViewportRegion(const ViewportRegion& region)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		ASSERT(region.Width > 0 && region.Height > 0, "ViewprotRegion's width or height is invaild.");
 		m_ViewportRegion = region;
@@ -49,7 +49,7 @@ namespace Helios
 
 	SharedPtr<DeviceTexture> RenderView::GetRenderTarget() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (!m_RenderTargetHandle.IsInitialized())
 			return nullptr;
@@ -61,14 +61,14 @@ namespace Helios
 	/* 存储各Pass的FrameBuffer */
 	void RenderView::EmplacePassFrameBuffer(const std::string& name, const SharedPtr<DeviceFrameBuffer>& frame_buffer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_PassFrameBuffers[name] = frame_buffer;
 	}
 
 	const SharedPtr<DeviceFrameBuffer>& RenderView::GetPassFrameBuffer(const std::string& name) const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const auto it = m_PassFrameBuffers.find(name);
 		if (it != m_PassFrameBuffers.end())
@@ -84,7 +84,7 @@ namespace Helios
 	 * 本视图有投影光源时再生成真实阴影图；句柄都落进 Blackboard 的 "ShadowMapHandle"。 */
 	void RenderView::AddShadowMapPasses()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_pShadowMapManager->AddNoShadowMapPass(*m_pFrameGraph);
 		if (m_IsHasShadowCast)
@@ -102,7 +102,7 @@ namespace Helios
 	/* 准备一帧的RenderView数据 */
 	void RenderView::Prepare()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		
 	}
@@ -110,7 +110,7 @@ namespace Helios
 	/* 执行渲染当前View */
 	void RenderView::Execute()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const auto owner_scene = m_pOwnerScene.lock();
 		if (!owner_scene)
@@ -146,7 +146,7 @@ namespace Helios
 	void RenderView::BuildMeshObjects(const Scene& scene, const std::vector<entt::entity>& entities,
 		std::vector<VisibleMeshObject>& out) const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		out.reserve(out.size() + entities.size());
 		for (const entt::entity entity : entities)
@@ -195,7 +195,7 @@ namespace Helios
 	/* 全量收集（没有空间索引可用时的兜底：没走 OnUpdate 的检查程序、新建的空场景） */
 	void RenderView::CollectVisibleMeshObjects(LayerMask culling_mask, std::vector<VisibleMeshObject>& out) const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		const auto owner_scene = m_pOwnerScene.lock();
 		if (!owner_scene)
@@ -312,7 +312,7 @@ namespace Helios
 	/* 视锥体剔除：空间索引按视锥查候选，再逐个组装成可绘制对象 */
 	void RenderView::PrepareVisibleObjects()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_SceneMeshObjects.clear();
 		m_VisibleMeshObjects.clear();
@@ -470,7 +470,7 @@ namespace Helios
 	/* 准备光源信息 */
 	void RenderView::PrepareLights()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_ValidLights.clear();
 		m_IsHasShadowCast = false;
@@ -549,7 +549,7 @@ namespace Helios
 	 * 一个模型的多个网格段共享同一个矩阵，按 ObjectId 存一份就够 */
 	void RenderView::PreparePreviousTransforms()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (!m_IsTemporalEnabled)
 		{
@@ -620,7 +620,7 @@ namespace Helios
 
 	void RenderView::BeginTemporalFrame(bool jitter_enabled)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_IsTemporalEnabled = jitter_enabled && m_pOwnerCamera != nullptr;
 
@@ -700,7 +700,7 @@ namespace Helios
 	SharedPtr<DeviceTexture> RenderView::AcquireHistory(const std::string& key, uint32_t width, uint32_t height,
 		TextureFormat format)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		HistoryTexture& entry = m_HistoryTextures[key];
 		if (entry.Texture != nullptr && entry.Width == width && entry.Height == height && entry.Format == format)
@@ -723,7 +723,7 @@ namespace Helios
 
 	/* 更新FrameGraph */
 	void RenderView::UpdateFrameGraph()	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 重置FrameGraph */
 		m_pFrameGraph->Reset();

@@ -7,7 +7,7 @@ namespace Helios
 /* 根据指定变换恢复出平移、旋转和缩放 */
 bool DecomposeTransform(const glm::mat4& transform, glm::vec3& translation, glm::vec3& rotation, glm::vec3& scale)
 {
-	PROFILE_FUNCTION();
+	PROFILE_CPU_FUNCTION();
 
 	/* Ref: glm::decompose() */
 

@@ -8,7 +8,7 @@
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/PostProcess/PostProcessPasses.h>
 #include <Helios/Renderer/RenderView.h>
-#include <Helios/Renderer/RenderStatistics.h>
+#include <Helios/Profiler/RenderStatistics.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Scene/Camera.h>
 #include <Helios/Scene/Components.h>
@@ -350,7 +350,7 @@ namespace Helios
 
 		void SubmitGrassFields(RenderView& render_view, Scene& scene, DebugViewMode debug_view)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 			FillGrassLightUniform(render_view);
 
@@ -379,7 +379,7 @@ namespace Helios
 
 		void SubmitGrassDebug(RenderView& render_view, Scene& scene, const SharedPtr<Material>& material)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 			SubmitGrassDraws(render_view, scene,
 				[&material](const GrassComponent&) { return material; },
@@ -440,7 +440,7 @@ namespace Helios
 		void AddVelocityPass(RenderView* render_view, SubmitBatch batch,
 			FrameGraphResourceHandleTyped<FrameGraphTexture> target)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 			if (render_view == nullptr) return;
 			auto& frame_graph = render_view->GetFrameGraph();

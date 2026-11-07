@@ -5,10 +5,11 @@
 #include <cstring>
 #include <glm/gtc/type_ptr.hpp>
 #include <Helios/Common/Math.h>
-#include <Helios/Renderer/RenderStatistics.h>
+#include <Helios/Profiler/RenderStatistics.h>
 #include <Helios/VirtualDevice/DeviceTexture.h>
 #include <Helios/Renderer/FrameGraph/FrameGraph.h>
 #include <Helios/Renderer/RenderView.h>
+#include <Helios/Profiler/Profiler.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderPasses/ObjectSorting.h>
 #include <Helios/Renderer/RenderPasses/GrassDrawParams.h>
@@ -1075,7 +1076,7 @@ namespace Helios
 							continue;
 
 						const uint8_t cascade_id = cascade_shadow_map->GetLayer();
-						render_api->PushDebugGroup(layer_names[cascade_id].c_str());
+						PROFILE_GPU_SCOPE(layer_names[cascade_id]);
 
 						auto shadow_material = make_caster_material();
 						shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", static_cast<int>(cascade_id));
@@ -1085,8 +1086,6 @@ namespace Helios
 						render_shadow_layer(cascade_id, shadow_material,
 							cascade_shadow_map->HasCasterList() ? &cascade_shadow_map->GetCasterIndices() : nullptr,
 							true, &light_view_projection);
-
-						render_api->PopDebugGroup();
 					}
 				}
 
@@ -1098,7 +1097,7 @@ namespace Helios
 				for (const auto& punctual_shadow_map : m_PunctualShadowMaps)
 				{
 					const uint8_t layer = punctual_shadow_map->GetLayer();
-					render_api->PushDebugGroup(layer_names[layer].c_str());
+					PROFILE_GPU_SCOPE(layer_names[layer]);
 
 					auto shadow_material = make_caster_material();
 					shadow_material->SetParameters(ParamType::Int, "u_CascadeIndex", -1);
@@ -1115,7 +1114,6 @@ namespace Helios
 							face_casters.push_back(index);
 					}
 					render_shadow_layer(layer, shadow_material, &face_casters, false, nullptr);
-					render_api->PopDebugGroup();
 				}
 			});
 

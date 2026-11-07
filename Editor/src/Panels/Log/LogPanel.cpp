@@ -151,7 +151,7 @@ namespace Helios
 
 	void LogPanel::OnImGuiRender(bool& visible)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 隐藏时不提交 Begin（本仓 ImGui 的 p_open 只做写回不做隐藏；
 		 * 恢复入口在 View 菜单，与 Frame Graph 同一约定） */

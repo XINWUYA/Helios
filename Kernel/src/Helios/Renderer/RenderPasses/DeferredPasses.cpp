@@ -134,7 +134,7 @@ namespace Helios
 			 * 普通材质在提交前转换为 GBuffer.glsl 对应的临时材质。 */
 			void AddGBufferPass(RenderView& render_view)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -332,7 +332,7 @@ namespace Helios
 			 * 返回光照结果句柄（视图输出）。 */
 			FrameGraphResourceHandleTyped<FrameGraphTexture> AddLightingPass(RenderView& render_view)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -508,7 +508,7 @@ namespace Helios
 			 * 放在天空之后：背景先铺好，深度沿用 G-Buffer 的场景深度（反向 Z，GreaterEqual 比较）。 */
 			void AddForwardOpaquePass(RenderView& render_view)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -574,7 +574,7 @@ namespace Helios
 			 * ObjectId 一并写入，像素拾取跟前向管线一致。 */
 			void AddForwardTransparentPass(RenderView& render_view)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -636,7 +636,7 @@ namespace Helios
 			 * 叠加层之前。 */
 			void AddSkyPass(RenderView& render_view)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
@@ -694,7 +694,7 @@ namespace Helios
 
 		void AddDeferredPasses(RenderView* render_view)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 			if (render_view == nullptr)
 				return;

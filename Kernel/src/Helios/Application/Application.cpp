@@ -1,8 +1,7 @@
 ﻿#include "Pch.h"
 #include "Application.h"
 #include <GLFW/glfw3.h>
-#include "Helios/Core/CPUTimerProfiler.h"
-#include "Helios/Core/FrameTimeProfiler.h"
+#include "Helios/Profiler/CPUTimeScopeTree.h"
 #include "Helios/Core/Jobs.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/ImGui/ImGuiLayer.h"
@@ -16,7 +15,7 @@ namespace Helios
 	Application::Application(const std::string& window_title, uint32_t width, uint32_t height, bool start_maximized,
 		ImGuiLayer::StyleInstaller ui_style_installer, const std::string& config_name)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ASSERT(!s_pInstance, "Application already exist!");
 		s_pInstance = this;
@@ -41,7 +40,7 @@ namespace Helios
 
 	Application::~Application()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 先收线程：后台任务可能还拿着场景或资源，拆层之前必须停干净 */
 		Jobs::Shutdown();
@@ -57,13 +56,11 @@ namespace Helios
 
 	void Application::Run()
 	{
-		PROFILE_FUNCTION();
-
-		FrameTimeProfiler& frame_profiler = FrameTimeProfiler::Instance();
+		PROFILE_CPU_FUNCTION();
 
 		while (m_IsRunning)
 		{
-			PROFILE_SCOPE("Running Loops");
+			PROFILE_CPU_SCOPE("Running Loops");
 
 			const float time = static_cast<float>(glfwGetTime());
 			const float delta_time = time - m_LastFrameTime;
@@ -77,7 +74,7 @@ namespace Helios
 
 			if (!m_IsMinimized)
 			{
-				frame_profiler.BeginFrame();
+				Profiler::Instance().BeginFrame();
 
 				/* 帧开始时准备本帧的默认渲染目标（显式交换链后端在此取得 drawable，
 				 * 直接绘制到默认帧缓冲的后端为空实现），调用方无需区分平台。
@@ -89,11 +86,10 @@ namespace Helios
 
 				/* CPU 函数级采集的帧边界：在垂直同步等待之后 —— 与 Frame 卡的
 				 * CPU 口径一致（FrameTotal 不含等待） */
-				CPUTimerProfiler::Instance().BeginFrame();
+				Profiler::Instance().BeginCPUTiming();
 
 				{
-					const ScopedFrameStage update_stage(FrameTimeProfiler::Stage::Update);
-					const ScopedCPUTimerScope cpu_update_scope("Update", __FILE__, __LINE__);
+					PROFILE_CPU_SCOPE_CH(ProfileChannel::Scene, "Update");
 
 					/* 帧级渲染准备：GPU 计时器的帧边界。
 					 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
@@ -103,20 +99,19 @@ namespace Helios
 					Jobs::DrainMain(2000);
 
 					/* 先更新逻辑层和渲染层 */
-					PROFILE_SCOPE("Update Layers");
+					PROFILE_CPU_SCOPE("Update Layers");
 
 					for (const auto& layer : m_LayerStack)
 						layer->OnUpdate(delta_time);
 				}
 
 				{
-					const ScopedFrameStage ui_stage(FrameTimeProfiler::Stage::UI);
-					const ScopedCPUTimerScope cpu_ui_scope("UI", __FILE__, __LINE__);
+					PROFILE_CPU_SCOPE_CH(ProfileChannel::UI, "UI");
 
 					/* 后更新UI */
 					m_pImGuiLayer->Begin();
 					{
-						PROFILE_SCOPE("Update ImGui Layers");
+						PROFILE_CPU_SCOPE("Update ImGui Layers");
 
 						for (const auto& layer : m_LayerStack)
 							layer->OnImGuiRender();
@@ -129,18 +124,15 @@ namespace Helios
 			}
 
 			{
-				const ScopedFrameStage present_stage(FrameTimeProfiler::Stage::Present);
-				const ScopedCPUTimerScope cpu_present_scope("Present", __FILE__, __LINE__);
+				PROFILE_CPU_SCOPE_CH(ProfileChannel::Render, "Present");
 
 				// SwapBuffer，显示帧画面到屏幕
 				m_pWindow->OnUpdate();
 			}
 
-			/* 结算本帧：GPU 总耗时来自计时器根节点（计时未启用 / 本帧无数据时无效） */
-			const ResultGPUTimerNode& gpu_timer_root = Renderer::GetGPUTimerRoot();
-			frame_profiler.EndFrame(gpu_timer_root.HasData,
-				static_cast<float>(gpu_timer_root.GPUTime * 0.001)); /* us → ms */
-			CPUTimerProfiler::Instance().EndFrame();
+			/* 结算本帧的 CPU 侧数据；GPU 结果解析出来后由渲染器在 EndGPUFrame 里
+			 * 统一发布同一帧的两半 */
+			Profiler::Instance().EndFrame();
 		}
 	}
 
@@ -151,35 +143,36 @@ namespace Helios
 
 	void Application::PushLayer(const SharedPtr<ILayer>& layer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_LayerStack.PushLayer(layer);
 	}
 
 	void Application::PushOverlay(const SharedPtr<ILayer>& layer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_LayerStack.PushOverlay(layer);
 	}
 
+
 	void Application::PopLayer(const SharedPtr<ILayer>& layer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_LayerStack.PopLayer(layer);
 	}
 
 	void Application::PopOverlay(const SharedPtr<ILayer>& layer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_LayerStack.PopOverlay(layer);
 	}
 
 	void Application::OnEvent(IEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		//CORE_LOG_INFO("{0}", *event);
 
@@ -207,7 +200,7 @@ namespace Helios
 
 	bool Application::OnHandleWindowResizeEvent(IEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const auto resize_event = dynamic_cast<WindowResizeEvent*>(event);
 		if (resize_event->GetWidth() == 0 || resize_event->GetHeight() == 0)
@@ -231,7 +224,7 @@ namespace Helios
 	 * 因此不能靠"0 尺寸"推断最小化，否则两端行为不一致（Windows 派发 0×0、macOS 不派发）。 */
 	bool Application::OnHandleWindowIconifyEvent(IEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const auto iconify_event = static_cast<WindowIconifyEvent*>(event);
 		m_IsMinimized = iconify_event->IsIconified();
@@ -244,7 +237,7 @@ namespace Helios
 	 * 真正的重建由 ImGuiLayer 承担（重建字体图集 + 重算 style）。与其它窗口事件一致返回 false。 */
 	bool Application::OnHandleContentScaleChangedEvent(IEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		return false;
 	}

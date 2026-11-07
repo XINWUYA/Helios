@@ -3,6 +3,7 @@
 #include "SceneCommon.h"
 #include "Helios/Renderer/FrameGraph/FrameGraph.h"
 #include <Helios/Renderer/RenderView.h>
+#include <Helios/Profiler/Profiler.h>
 #include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderCommon.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
@@ -27,7 +28,7 @@ namespace Helios
     /* 构造一个带 Color0(立方体贴图) + Depth 的离屏帧缓冲，用于把场景渲染到立方体贴图的某一面。 */
     SharedPtr<DeviceFrameBuffer> ReflectionProbe::MakeSceneCaptureFrameBuffer(const SharedPtr<DeviceTexture>& color_target, const SharedPtr<DeviceTexture>& depth_target, uint32_t size)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         RenderBufferInfo color_info;
         color_info.RenderTarget = color_target;
@@ -68,10 +69,10 @@ namespace Helios
 
     void ReflectionProbe::BakeEnvCubemap(RenderView* render_view, int32_t face)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         const std::string label = GetDebugName() + "_BakeEnvCubemap";
-        Renderer::GetRenderAPI()->PushDebugGroup(label.c_str());
+        PROFILE_GPU_SCOPE(label);
 
         /* face < 0：整轮 6 面（一次性烘焙 / 首轮 / 刚重烘焙）；否则只捕获这一面，
          * 其余面沿用上一轮，实时探针每帧只付一张面的场景绘制成本 */
@@ -114,7 +115,6 @@ namespace Helios
             }
             capture_fb->Unbind();
 
-            Renderer::GetRenderAPI()->PopDebugGroup();
             return;
         }
 
@@ -188,15 +188,14 @@ namespace Helios
             }
         }
 
-        Renderer::GetRenderAPI()->PopDebugGroup();
     }
 
     void ReflectionProbe::BakeIrradianceMapFace(uint32_t face)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         const std::string label = GetDebugName() + "_BakeIrradianceMap";
-        Renderer::GetRenderAPI()->PushDebugGroup(label.c_str());
+        PROFILE_GPU_SCOPE(label);
 
         const uint32_t size = m_BakeConfig.IrradianceSize;
         if (!m_BakeResult.IrradianceMap || m_BakeResult.IrradianceMap->GetWidth() != size || m_BakeResult.IrradianceMap->GetHeight() != size)
@@ -231,15 +230,14 @@ namespace Helios
         Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
         fb->Unbind();
 
-        Renderer::GetRenderAPI()->PopDebugGroup();
     }
 
     void ReflectionProbe::BakePrefilterMapFace(uint32_t face)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
         const std::string label = GetDebugName() + "_BakePrefilterMap";
-        Renderer::GetRenderAPI()->PushDebugGroup(label.c_str());
+        PROFILE_GPU_SCOPE(label);
 
         const uint32_t size = m_BakeConfig.PrefilterSize;
         const uint32_t mip_levels = m_BakeConfig.PrefilterMipLevels > 0
@@ -287,6 +285,5 @@ namespace Helios
         }
         fb->Unbind();
 
-        Renderer::GetRenderAPI()->PopDebugGroup();
     }
 }

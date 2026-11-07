@@ -745,7 +745,7 @@ namespace Helios
 
     std::string ShaderCompiler::ReadFile(const std::string& filepath, IncludeContext& context)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         /* 同一文件被包含两次照样展开两次，只有出现在当前 include 链上才算循环 */
         const std::string key = std::filesystem::path(filepath).lexically_normal().generic_string();
@@ -805,7 +805,7 @@ namespace Helios
     void ShaderCompiler::PreProcessShaderSrc(const std::string& source,
         std::unordered_map<ShaderStage, std::string>& shader_sources)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         const char* type_token = "#type";
         const size_t type_token_length = strlen(type_token);
@@ -1288,7 +1288,7 @@ namespace Helios
     bool ShaderCompiler::CompileGLSLToSPIRV(const std::string& glsl_source, ShaderStage stage,
         std::vector<uint32_t>& spirv, std::string& processed_source, std::string& error_msg)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         using namespace glslang;
 
@@ -1607,7 +1607,7 @@ namespace Helios
     bool ShaderCompiler::SPIRVToTarget(const std::vector<uint32_t>& spirv, const std::string& glsl_source,
         ShaderStage stage, ShaderTarget target, std::string& output, std::string& error_msg)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (target != ShaderTarget::Metal)
         {

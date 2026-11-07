@@ -50,7 +50,7 @@ namespace Helios
 	/* 创建 */
 	void FrameGraphTexture::Create(const std::string& name, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 外部导入的纹理由导入方创建好了，渲染图不碰 */
 		if (Imported)
@@ -74,7 +74,7 @@ namespace Helios
 	/* 销毁 */
 	void FrameGraphTexture::Destroy(const std::string& /*name*/, const Descriptor& desc, Usage usage, FrameGraphResourceCache* cache)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 导入的纹理不属于池子，也不该在这里放手（下一帧还要接着用） */
 		if (Imported)
@@ -93,7 +93,7 @@ namespace Helios
 	/* 创建 */
 	void FrameGraphBuffer::Create(const std::string& name, const Descriptor& desc, Usage /*usage*/, FrameGraphResourceCache* cache)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 导入的缓冲由导入方持有 */
 		if (Imported)
@@ -113,7 +113,7 @@ namespace Helios
 	/* 销毁 */
 	void FrameGraphBuffer::Destroy(const std::string& /*name*/, const Descriptor& desc, Usage /*usage*/, FrameGraphResourceCache* cache)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (Imported)
 			return;

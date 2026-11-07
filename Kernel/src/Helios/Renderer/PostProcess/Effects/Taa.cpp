@@ -42,7 +42,7 @@ namespace Helios
 
 			TextureHandle BuildTaa(RenderView& render_view, TextureHandle input)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				const TaaSettings* settings = render_view.GetPostProcessState().Get<TaaSettings>();
 				if (settings == nullptr || !settings->Enabled)

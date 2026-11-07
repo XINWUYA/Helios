@@ -50,7 +50,7 @@ namespace Helios
 
 	void AnimationRuntime::Tick(Scene& scene, float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		entt::registry& registry = scene.GetRegistry();
 

@@ -48,7 +48,7 @@ namespace Helios
 	OpenGLFrameBuffer::OpenGLFrameBuffer(const std::string& name, const FrameBufferDesc& desc)
 		: DeviceFrameBuffer(name, desc)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 	/* 1. 创建FrameBuffer */
 		glGenFramebuffers(1, &m_FrameBufferId);
@@ -197,7 +197,7 @@ namespace Helios
 
 	void OpenGLFrameBuffer::Bind(const FrameBufferBindInfo& bind_info)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		GLState::BindFramebuffer(m_FrameBufferId);
 
@@ -261,7 +261,7 @@ namespace Helios
 
 	void OpenGLFrameBuffer::Unbind()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_ResolveFrameBufferId != 0)
 			ResolveMultisample();
@@ -270,7 +270,7 @@ namespace Helios
 
 	void OpenGLFrameBuffer::Resize(uint32_t width, uint32_t height)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (width == 0 || height == 0 || width > MAX_FRAME_TARGET_SIZE || height > MAX_FRAME_TARGET_SIZE)
 		{
@@ -285,7 +285,7 @@ namespace Helios
 	/* 获取指定附件x, y像素位置的颜颜色值 */
 	void OpenGLFrameBuffer::ReadPixel(uint32_t attachment_index, int x, int y, const PixelDesc& pixel_desc, void* data)
     {
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		ASSERT(attachment_index < m_FrameBufferDesc.ColorRenderBuffers.size());
 
@@ -303,7 +303,7 @@ namespace Helios
 	/* 指定某个ColorAttachment */
 	void OpenGLFrameBuffer::ClearAttachment(uint32_t attachment_index, int level, const PixelDesc& pixel_desc, void* data)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		ASSERT(attachment_index < m_FrameBufferDesc.ColorRenderBuffers.size());
 
@@ -378,7 +378,7 @@ namespace Helios
 	/* 绑定一个RenderBuffer到FrameBuffer */
 	void OpenGLFrameBuffer::AttachARenderBuffer(const RenderBufferInfo& render_buffer_info, GLenum attachment)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 获取此RenderBuffer的Usage */
 		RenderBufferUsage render_buffer_usage{};
@@ -435,7 +435,7 @@ namespace Helios
 		/* 非多重采样 */
 		if (texture->m_TextureDesc.Samples <= 1)
 		{
-			PROFILE_SCOPE("Attach RenderBuffer");
+			PROFILE_CPU_SCOPE_CH(ProfileChannel::Render, "Attach RenderBuffer");
 			
 			/* 数组 */
 			if (texture_target == GL_TEXTURE_2D_ARRAY)
@@ -444,7 +444,7 @@ namespace Helios
 			}
 			else /* GL_TEXTURE_2D/GL_TEXTURE_2D_MULTISAMPLE/GL_TEXTURE_CUBE_MAP_POSITIVE_X... */
 			{
-				PROFILE_SCOPE("FrameBuffer RenderBuffer");
+				PROFILE_CPU_SCOPE_CH(ProfileChannel::Render, "FrameBuffer RenderBuffer");
 
 				if(!!(texture->m_TextureDesc.Usage & TextureUsage::Sampleable))
 				{
@@ -489,7 +489,7 @@ namespace Helios
 
 	void OpenGLFrameBuffer::SetAttachmentLayer(FrameBufferAttachment attachment, uint16_t attachment_index, uint16_t layer, uint16_t mip_level)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 解析目标附件的 RenderBufferInfo 与 GL attachment 枚举 */
 		const RenderBufferInfo* target_info{ nullptr };

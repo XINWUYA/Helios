@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <utility>
 #include "RenderAPI.h"
-#include "RenderQuery.h"
+#include "Helios/Profiler/GPUTimeScopeTree.h"
 #include "Helios/Scene/Sky.h"
 
 namespace Helios
@@ -58,7 +58,6 @@ namespace Helios
 		/* 当前生效的采样数：关闭时为 1，所有渲染通道与默认目标共用这一个值 */
 		[[nodiscard]] static uint8_t GetMSAASampleCount();
 
-		static const ResultGPUTimerNode& GetGPUTimerRoot() { return m_GPUTimerRoot; }
 
 		static SharedPtr<DeviceVertexArray> GetFullScreenVertexArray();
 
@@ -126,7 +125,6 @@ namespace Helios
 		static SharedPtr<DeviceTexture> ExchangeCurrentShadowMap(SharedPtr<DeviceTexture> shadow_map);
 		friend class ScopedShadowMapBinding;
 		static SharedPtr<RenderAPI> m_pRenderAPI;
-		static ResultGPUTimerNode m_GPUTimerRoot;
 		static SharedPtr<DeviceTexture> m_pCurrentShadowMap;
 	};
 

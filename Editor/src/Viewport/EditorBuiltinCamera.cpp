@@ -30,7 +30,7 @@ namespace Helios
 	EditorCamera::EditorCamera(float fov, float aspect_ratio, float near_clip, float far_clip)
 		: Camera(CameraProjectionType::Perspective, fov, aspect_ratio, near_clip, far_clip)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 编辑器视口缺省走延迟管线（可在 View 菜单切前向 / 延迟） */
 		SetRenderPipeline(RenderPipeline::Deferred);
@@ -48,7 +48,7 @@ namespace Helios
 
 	void EditorCamera::OnUpdate(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		Camera::OnUpdate(delta_time);
 
@@ -61,7 +61,7 @@ namespace Helios
 	 * 授权）；起手后就锁定到那次按键松开 —— 拖拽中指针移出视口、松开修饰键，都不中断。 */
 	void EditorCamera::UpdateNavigation(float delta_time, bool allow_new_gesture)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const bool is_alt_pressed = Input::IsKeyPressed(Key::LeftAlt) || Input::IsKeyPressed(Key::RightAlt);
 		const bool is_lmb_pressed = Input::IsMouseButtonPressed(Mouse::ButtonLeft);
@@ -149,7 +149,7 @@ namespace Helios
 	 * 退出飞行后轨道中心就是当时的视线落点，无需交接。 */
 	void EditorCamera::UpdateFly(const glm::vec2& mouse_delta, float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (mouse_delta.x != 0.0f || mouse_delta.y != 0.0f)
 		{
@@ -199,7 +199,7 @@ namespace Helios
 	/* 设置视口区域 */
 	void EditorCamera::SetViewportRegion(const ViewportRegion& region)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_ViewportRegion = region;
 		m_pRenderView->SetViewportRegion(region);
@@ -213,7 +213,7 @@ namespace Helios
 	 * 当前视口尺寸重建。 */
 	bool EditorCamera::ConstructRenderView(RenderView& render_view)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 视口尺寸无效时不组织渲染图：这里必须返回 true（表示"本相机负责组织"），
 		 * 否则会回落到默认前向图并沿用 0 尺寸的渲染目标。渲染图为空时输出为空。 */
@@ -336,7 +336,7 @@ namespace Helios
 
 	void EditorCamera::SetViewMatrix(const glm::mat4& view_mat)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (view_mat != m_ViewMatrix)
 		{
@@ -358,7 +358,7 @@ namespace Helios
 	 * 位置是派生量，下一帧自动落到"枢轴 - 前向 × 距离"的新视点 */
 	void EditorCamera::SetOrbitAngles(float yaw, float pitch)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_Yaw = yaw;
 		m_Pitch = glm::clamp(pitch, -kMaxPitch, kMaxPitch);
@@ -370,21 +370,21 @@ namespace Helios
 	/* 视图指示器拖拽：像素增量走与鼠标轨道相同的灵敏度与速度系数（手感一致） */
 	void EditorCamera::OrbitByPixelDelta(const glm::vec2& pixel_delta)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		OnMouseRotate(pixel_delta * kMouseSensitivity);
 	}
 
 	void EditorCamera::UpdateProjectionMatrix()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_ProjectionMatrix = MakeReversedZProjection(glm::perspective(glm::radians(m_Fov), m_AspectRatio, m_NearClip, m_FarClip));
 	}
 
 	void EditorCamera::UpdateViewMatrix()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_IsDirty)
 		{
@@ -399,7 +399,7 @@ namespace Helios
 
 	void EditorCamera::UpdateCameraDirections()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const auto orientation = GetOrientation();
 		m_UpDirection = glm::rotate(orientation, glm::vec3(0.0f, 1.0f, 0.0f));
@@ -409,7 +409,7 @@ namespace Helios
 
 	void EditorCamera::OnMousePan(const glm::vec2& delta)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const auto speed = PanSpeed();
 		m_FocalPoint += -GetRightDir() * delta.x * speed.x * m_Distance;
@@ -420,7 +420,7 @@ namespace Helios
 
 	void EditorCamera::OnMouseRotate(const glm::vec2& delta)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float yaw_sign = GetUpDir().y < 0 ? -1.0f : 1.0f;
 		m_Yaw += yaw_sign * delta.x * RotateSpeed();
@@ -433,7 +433,7 @@ namespace Helios
 
 	void EditorCamera::OnMouseZoom(float delta)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_Distance = glm::clamp(m_Distance - delta * ZoomSpeed(), kMinDistance, kMaxDistance);
 
@@ -443,7 +443,7 @@ namespace Helios
 	/* 滚轮缩放：乘性步进（滚一格约 ±10%），触控板的小增量也能平滑生效 */
 	void EditorCamera::OnMouseWheelZoom(float wheel)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_Distance = glm::clamp(m_Distance * std::pow(kWheelZoomStep, wheel), kMinDistance, kMaxDistance);
 
@@ -453,7 +453,7 @@ namespace Helios
 	/* 滚轮调飞行的起始速度（飞行中）：乘性步进 + 上下限 */
 	void EditorCamera::AdjustMoveSpeed(float wheel)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_MoveSpeed = glm::clamp(m_MoveSpeed * std::pow(kWheelSpeedStep, wheel), kMinFlySpeed, kMaxFlySpeed);
 	}
@@ -461,7 +461,7 @@ namespace Helios
 	/* 聚焦：轨道中心移到目标点，距离按包围球半径取景（水平 / 垂直视场角取紧的一侧，含边距） */
 	void EditorCamera::FocusOn(const glm::vec3& target, float radius)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_FocalPoint = target;
 
@@ -475,7 +475,7 @@ namespace Helios
 
 	glm::vec2 EditorCamera::PanSpeed() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float x = std::min(m_ViewportRegion.Width / 1000.0f, 2.4f); // max = 2.4f
 		const float speed_x = 0.0366f * (x * x) - 0.1778f * x + 0.3021f;
@@ -493,7 +493,7 @@ namespace Helios
 
 	float EditorCamera::ZoomSpeed() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		float distance = m_Distance * 0.2f;
 		distance = std::max(distance, 0.0f);

@@ -63,7 +63,7 @@ namespace Helios
     MetalFrameBuffer::MetalFrameBuffer(const std::string& name, const FrameBufferDesc& desc)
         : DeviceFrameBuffer(name, desc)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         m_RenderPassDescriptor = MTL::RenderPassDescriptor::alloc()->init();
 
@@ -76,7 +76,7 @@ namespace Helios
 
     MetalFrameBuffer::~MetalFrameBuffer()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         ReleaseAttachments();
 
@@ -89,7 +89,7 @@ namespace Helios
 
     void MetalFrameBuffer::Bind(const FrameBufferBindInfo& bind_info)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_RenderPassDescriptor)
             return;
@@ -107,7 +107,7 @@ namespace Helios
 
     void MetalFrameBuffer::Unbind()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         /* 叠加 Pass 结束时先不收编码器：紧跟着的同附件叠加 Pass 可以接着画 */
         auto* render_api = dynamic_cast<MetalRenderAPI*>(Renderer::GetRenderAPI().get());
@@ -117,7 +117,7 @@ namespace Helios
 
     void MetalFrameBuffer::Resize(uint32_t width, uint32_t height)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (width == 0 || height == 0 || width > 8192 || height > 8192)
         {
@@ -142,7 +142,7 @@ namespace Helios
     void MetalFrameBuffer::ReadPixel(uint32_t attachment_index, int x, int y,
         const PixelDesc& pixel_desc, void* data)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!data || attachment_index >= m_ColorAttachments.size())
             return;
@@ -195,7 +195,7 @@ namespace Helios
     void MetalFrameBuffer::ClearAttachment(uint32_t attachment_index, int level,
         const PixelDesc& pixel_desc, void* data)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         auto* render_api = dynamic_cast<MetalRenderAPI*>(Renderer::GetRenderAPI().get());
         if (!render_api)

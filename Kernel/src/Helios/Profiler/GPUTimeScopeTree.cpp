@@ -1,11 +1,12 @@
 ﻿#include "Pch.h"
-#include "RenderQuery.h"
+#include "GPUTimeScopeTree.h"
+#include <Helios/Renderer/Renderer.h>
 
 namespace Helios
 {
-	void RenderQueryContext::Init()
+	void GPUQueryContext::Init()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		m_QueryNodes.reserve(DEFAULT_QUERY_COUNT);
 		for (uint8_t index = 0; index < DEFAULT_QUERY_COUNT; ++index)
 			m_QueryNodes.emplace_back(DeviceQueryNode::Create());
@@ -13,9 +14,9 @@ namespace Helios
 		m_pQueryBuffer = DeviceQueryBuffer::Create();
 	}
 
-	void RenderQueryContext::Destroy()
+	void GPUQueryContext::Destroy()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		for (auto& query : m_QueryNodes)
 			delete query;
@@ -26,9 +27,9 @@ namespace Helios
 		m_pQueryBuffer = nullptr;
 	}
 
-	void RenderQueryContext::BeginFrame(uint32_t frame_id)
+	void GPUQueryContext::BeginFrame(uint32_t frame_id)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		m_IsValid = true;
 		m_RootNodeIndex = INVALID_QUERY_NODE_INDEX;
@@ -56,17 +57,17 @@ namespace Helios
 		BeginGPUScope("FrameTotal");
 	}
 
-	void RenderQueryContext::EndFrame()
+	void GPUQueryContext::EndFrame()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		while (m_CurrentNodeIndex ^ INVALID_QUERY_NODE_INDEX)
 			EndGPUScope();
 	}
 
-	void RenderQueryContext::BeginGPUScope(const char* label)
+	void GPUQueryContext::BeginGPUScope(const char* label)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_UsedNodeIndex >= m_QueryNodes.size())
 		{
@@ -105,9 +106,9 @@ namespace Helios
 		}
 	}
 
-	void RenderQueryContext::EndGPUScope()
+	void GPUQueryContext::EndGPUScope()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_CurrentNodeIndex ^ INVALID_QUERY_NODE_INDEX)
 		{
@@ -122,9 +123,9 @@ namespace Helios
 	/* 渲染通道开始：给通道分配一对采样下标并挂到描述符上，再把它通知给各打开的作用域。
 	 * clear_only（计时停用 / 未使用）时只清残留 —— 描述符跨帧复用，不清的话本通道会
 	 * 继续往上一帧的缓冲里写。 */
-	void RenderQueryContext::OnRenderPassBegin(void* native_render_pass_descriptor, bool clear_only)
+	void GPUQueryContext::OnRenderPassBegin(void* native_render_pass_descriptor, bool clear_only)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_pQueryBuffer == nullptr || native_render_pass_descriptor == nullptr)
 			return;
@@ -143,9 +144,9 @@ namespace Helios
 			m_QueryNodes[node_index]->OnRenderPassBegin(pass_slot);
 	}
 
-	void RenderQueryContext::OnRenderPassEnd()
+	void GPUQueryContext::OnRenderPassEnd()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_pQueryBuffer != nullptr)
 			m_pQueryBuffer->OnRenderPassEnd();
@@ -153,9 +154,9 @@ namespace Helios
 
 	/* 计算通道开始：分配采样槽位并挂到描述符上，再把它通知给各打开的作用域。
 	 * 描述符每次派发新建，没有跨帧残留可清 —— 停用 / 不可用时直接不采样。 */
-	void RenderQueryContext::OnComputePassBegin(void* native_compute_pass_descriptor, bool clear_only)
+	void GPUQueryContext::OnComputePassBegin(void* native_compute_pass_descriptor, bool clear_only)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_pQueryBuffer == nullptr || native_compute_pass_descriptor == nullptr)
 			return;
@@ -171,9 +172,9 @@ namespace Helios
 			m_QueryNodes[node_index]->OnRenderPassBegin(pass_slot);
 	}
 
-	bool RenderQueryContext::PrepareQueryResult()
+	bool GPUQueryContext::PrepareQueryResult()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (m_RootNodeIndex == INVALID_QUERY_NODE_INDEX)
 			return false;
@@ -199,62 +200,85 @@ namespace Helios
 		return true;
 	}
 
-	RenderQueryProfiler::~RenderQueryProfiler()
+	GPUTimeScopeTree::~GPUTimeScopeTree()
 	{
+		/* 后端不持有时序保证，退出前先把监听摘掉 */
+		if (const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI())
+			api->SetGPUScopeInterface(nullptr);
+
 		Release();
 	}
 
-	RenderQueryProfiler& RenderQueryProfiler::Instance()
+	void GPUTimeScopeTree::SetEnabled(bool enabled)
 	{
-		static RenderQueryProfiler instance;
+		m_IsEnabled = enabled;
+
+		/* 立即同步给设备层：关掉后后端不再上报通道事件、也不再为计算通道建描述符 */
+		if (const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI())
+		{
+			api->SetGPUScopeInterface(enabled ? static_cast<GPUScopeInterface*>(this) : nullptr);
+			api->SetGpuTimingActive(enabled);
+		}
+	}
+
+	GPUTimeScopeTree& GPUTimeScopeTree::Instance()
+	{
+		static GPUTimeScopeTree instance;
 		return instance;
 	}
 
-	void RenderQueryProfiler::Release()
+	void GPUTimeScopeTree::Release()
 	{
 		for (auto& context : m_QueryContexts)
 			context.Destroy();
 	}
 
-	void RenderQueryProfiler::BeginFrame(uint32_t frame_id)
+	void GPUTimeScopeTree::BeginFrame(uint32_t frame_id)
 	{
+		/* 每帧对齐设备层状态：设备可能在本帧重建，监听指针要重新挂上 */
+		if (const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI())
+		{
+			api->SetGPUScopeInterface(m_IsEnabled ? static_cast<GPUScopeInterface*>(this) : nullptr);
+			api->SetGpuTimingActive(m_IsEnabled);
+		}
+
 		if (!m_IsEnabled)
 			return;
 
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		auto& currentContext = m_QueryContexts[m_WriteContextId];
 		currentContext.BeginFrame(frame_id);
 	}
 
-	void RenderQueryProfiler::EndFrame()
+	void GPUTimeScopeTree::EndFrame()
 	{
 		if (!m_IsEnabled)
 			return;
 
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		auto& currentContext = m_QueryContexts[m_WriteContextId];
 		currentContext.EndFrame();
 	}
 
-	void RenderQueryProfiler::BeginGPUScope(const char* label)
+	void GPUTimeScopeTree::BeginGPUScope(const char* label)
 	{
 		if (!m_IsEnabled)
 			return;
 
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		auto& currentContext = m_QueryContexts[m_WriteContextId];
 		currentContext.BeginGPUScope(label);
 	}
 
-	void RenderQueryProfiler::EndGPUScope()
+	void GPUTimeScopeTree::EndGPUScope()
 	{
 		if (!m_IsEnabled)
 			return;
 
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		auto& currentContext = m_QueryContexts[m_WriteContextId];
 		currentContext.EndGPUScope();
@@ -262,32 +286,32 @@ namespace Helios
 
 	/* 渲染通道即将开始：转发给写 Context（计入本帧）。计时停用时也调用 ——
 	 * 后端实现负责清掉描述符上的残留附件。 */
-	void RenderQueryProfiler::OnRenderPassBegin(void* native_render_pass_descriptor)
+	void GPUTimeScopeTree::OnRenderPassBegin(void* native_render_pass_descriptor)
 	{
 		auto& writeContext = m_QueryContexts[m_WriteContextId];
 		writeContext.OnRenderPassBegin(native_render_pass_descriptor, /*clear_only=*/!m_IsEnabled);
 	}
 
 	/* 渲染通道结束（编码器已关闭）：清掉写 Context 的"打开通道"标记 */
-	void RenderQueryProfiler::OnRenderPassEnd()
+	void GPUTimeScopeTree::OnRenderPassEnd()
 	{
 		m_QueryContexts[m_WriteContextId].OnRenderPassEnd();
 	}
 
-	void RenderQueryProfiler::OnComputePassBegin(void* native_compute_pass_descriptor)
+	void GPUTimeScopeTree::OnComputePassBegin(void* native_compute_pass_descriptor)
 	{
 		m_QueryContexts[m_WriteContextId].OnComputePassBegin(native_compute_pass_descriptor,
 			/*clear_only=*/!m_IsEnabled);
 	}
 
-	bool RenderQueryProfiler::PrepareQueryResult(ResultGPUTimerNode& root_node)
+	bool GPUTimeScopeTree::PrepareQueryResult()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		if (!m_IsEnabled)
 		{
 			/* 关闭时清空结果，避免UI显示旧数据 */
-			root_node = ResultGPUTimerNode{};
+			m_RealtimeRoot = GPUTimeScopeNode{};
 			return false;
 		}
 
@@ -295,8 +319,8 @@ namespace Helios
 
 		if (readContext.PrepareQueryResult())
 		{
-			std::function<void(ResultGPUTimerNode&, DeviceQueryNode*, ResultGPUTimerNode*)> FillResultGPUTimeRecursively;
-			FillResultGPUTimeRecursively = [&FillResultGPUTimeRecursively, &readContext](ResultGPUTimerNode& timerNode, DeviceQueryNode* queryNode, ResultGPUTimerNode* recordNode)
+			std::function<void(GPUTimeScopeNode&, DeviceQueryNode*, GPUTimeScopeNode*)> FillResultTotalUsRecursively;
+			FillResultTotalUsRecursively = [&FillResultTotalUsRecursively, &readContext](GPUTimeScopeNode& timerNode, DeviceQueryNode* queryNode, GPUTimeScopeNode* recordNode)
 				{
 					timerNode.Label = queryNode->Label;
 					timerNode.QueryIndex = queryNode->NodeIndex;
@@ -307,10 +331,10 @@ namespace Helios
 					timerNode.HasStageSplit = queryNode->SupportsStageSplit();
 					if (queryNode->HasValidSamples)
 					{
-						timerNode.GPUTime = timerNode.GPUTime * 0.9 + (queryNode->ResultTimeEnd - queryNode->ResultTimeBegin) *0.1;
-						timerNode.GPUTimeVertex = timerNode.GPUTimeVertex * 0.9 + queryNode->ResultVertexUs * 0.1;
-						timerNode.GPUTimeFragment = timerNode.GPUTimeFragment * 0.9 + queryNode->ResultFragmentUs * 0.1;
-						timerNode.GPUTimeCompute = timerNode.GPUTimeCompute * 0.9 + queryNode->ResultComputeUs * 0.1;
+						timerNode.TotalUs = timerNode.TotalUs * 0.9 + (queryNode->ResultTimeEnd - queryNode->ResultTimeBegin) *0.1;
+						timerNode.StageVertexUs = timerNode.StageVertexUs * 0.9 + queryNode->ResultVertexUs * 0.1;
+						timerNode.StageFragmentUs = timerNode.StageFragmentUs * 0.9 + queryNode->ResultFragmentUs * 0.1;
+						timerNode.StageComputeUs = timerNode.StageComputeUs * 0.9 + queryNode->ResultComputeUs * 0.1;
 					}
 
 					/* 录制树（可选）：写入当帧原始值 —— 逐帧回放要看每帧真值，不做平滑 */
@@ -322,10 +346,10 @@ namespace Helios
 						recordNode->HasStageSplit = queryNode->SupportsStageSplit();
 						if (queryNode->HasValidSamples)
 						{
-							recordNode->GPUTime = queryNode->ResultTimeEnd - queryNode->ResultTimeBegin;
-							recordNode->GPUTimeVertex = queryNode->ResultVertexUs;
-							recordNode->GPUTimeFragment = queryNode->ResultFragmentUs;
-							recordNode->GPUTimeCompute = queryNode->ResultComputeUs;
+							recordNode->TotalUs = queryNode->ResultTimeEnd - queryNode->ResultTimeBegin;
+							recordNode->StageVertexUs = queryNode->ResultVertexUs;
+							recordNode->StageFragmentUs = queryNode->ResultFragmentUs;
+							recordNode->StageComputeUs = queryNode->ResultComputeUs;
 						}
 					}
 
@@ -337,17 +361,18 @@ namespace Helios
 					{
 						auto& childTimerNode = timerNode.Children[i];
 						auto* childQueryNode = readContext.m_QueryNodes[queryNode->ChildrenNodeIndices[i]];
-						FillResultGPUTimeRecursively(childTimerNode, childQueryNode,
+						FillResultTotalUsRecursively(childTimerNode, childQueryNode,
 							recordNode != nullptr ? &recordNode->Children[i] : nullptr);
 					}
 				};
 
 			auto* rootQueryNode = readContext.m_QueryNodes[readContext.m_RootNodeIndex];
 			/* 录制：与显示同一次遍历，另填一棵逐帧原始值树（未在录制时为空指针） */
-			ResultGPUTimerNode* record_root = m_Recorder.BeginFrame(readContext.m_FrameIndex);
-			FillResultGPUTimeRecursively(root_node, rootQueryNode, record_root);
+			GPUTimeScopeNode* record_root = m_Recorder.BeginFrame(readContext.m_FrameIndex);
+			FillResultTotalUsRecursively(m_RealtimeRoot, rootQueryNode, record_root);
 
 			/* 当一帧数据准备完成时，再切换Context，否则下一帧继续尝试，避免出现刚读完就被刷进新的Query */
+			m_ResultFrameId = readContext.m_FrameIndex;
 			m_WriteContextId = (m_WriteContextId + 1) % MAX_CONTEXTS;
 			m_ReadContextId = (m_ReadContextId + 1) % MAX_CONTEXTS;
 			return true;
@@ -362,11 +387,11 @@ namespace Helios
 		return false;
 	}
 
-	RenderQueryProfiler::RenderQueryProfiler()
+	GPUTimeScopeTree::GPUTimeScopeTree()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
-		/* 初始化RenderQueryContext */
+		/* 初始化GPUQueryContext */
 		m_QueryContexts.resize(MAX_CONTEXTS);
 		for (auto& context : m_QueryContexts)
 			context.Init();

@@ -77,7 +77,7 @@ namespace Helios
 			FrameGraphResourceHandleTyped<FrameGraphTexture> output,
 			FrameGraphResourceHandleTyped<FrameGraphTexture> object_id)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION();
 
 			if (selection_id < 0 || !output || !object_id)
 				return;

@@ -49,7 +49,7 @@ namespace Helios
 	/* 清楚所有节点和连线 */
 	void DependencyGraph::Clear()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		m_Nodes.clear();
 		m_Connections.clear();
@@ -60,7 +60,7 @@ namespace Helios
 	/* 更新节点的引用计数 */
 	void DependencyGraph::UpdateRefCount()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 更新节点的引用计数 */
 		for (const auto& connection : m_Connections)

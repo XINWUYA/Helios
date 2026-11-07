@@ -6,7 +6,7 @@ namespace Helios
 	SampleCameraController::SampleCameraController(const Entity& camera_entity, bool is_focus)
 		: m_CameraEntity(camera_entity), m_IsFocus(is_focus)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const auto& camera_component = camera_entity.GetComponent<CameraComponent>();
 		m_pCamera = camera_component.m_Camera;
@@ -14,7 +14,7 @@ namespace Helios
 
 	void SampleCameraController::OnUpdate(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		auto position = m_pCamera->GetPosition();
 		auto forward = m_pCamera->GetForwardDir();
@@ -109,7 +109,7 @@ namespace Helios
 
 	void SampleCameraController::OnMousePan(const glm::vec2& delta)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		if (!m_pCamera) return;
 
 		const auto speed = PanSpeed();
@@ -119,7 +119,7 @@ namespace Helios
 
 	void SampleCameraController::OnMouseRotate(const glm::vec2& delta)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		if (!m_pCamera) return;
 
 		const float yaw_sign = m_pCamera->GetUpDir().y < 0 ? -1.0f : 1.0f;
@@ -130,7 +130,7 @@ namespace Helios
 
 	void SampleCameraController::OnMouseZoom(float delta)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 		if (!m_pCamera) return;
 
 		m_FocalDistance -= delta * ZoomSpeed();
@@ -143,7 +143,7 @@ namespace Helios
 
 	glm::vec2 SampleCameraController::PanSpeed() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float x = std::min(m_ViewportRegion.Width / 1000.0f, 2.4f); // max = 2.4f
 		const float speed_x = 0.0366f * (x * x) - 0.1778f * x + 0.3021f;
@@ -161,7 +161,7 @@ namespace Helios
 
 	float SampleCameraController::ZoomSpeed() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		float distance = m_FocalDistance * 0.2f;
 		distance = std::max(distance, 0.0f);

@@ -57,7 +57,7 @@ namespace Helios
 		FrameGraphResourceHandleTyped<FrameGraphTexture> AddPostProcessPasses(
 			RenderView& render_view, FrameGraphResourceHandleTyped<FrameGraphTexture> source)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 			auto output = source;
 
@@ -78,7 +78,7 @@ namespace Helios
 		void AddPresentToDefaultTarget(
 			RenderView& render_view, FrameGraphResourceHandleTyped<FrameGraphTexture> source)
 		{
-			PROFILE_FUNCTION();
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 			auto& frame_graph = render_view.GetFrameGraph();
 

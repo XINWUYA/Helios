@@ -4,40 +4,37 @@
 #include <unordered_set>
 #include <vector>
 #include "Common/EditorCommon.h"
-#include "Helios/Core/CPUTimerProfiler.h"
-#include "Helios/Renderer/RenderQuery.h"
-#include "Helios/Renderer/RenderStatistics.h"
+#include "Helios/Profiler/Profiler.h"
+#include "UI/Widgets/SlidingTabs.h"
+#include "UI/Widgets/TimingChart.h"
 
 namespace Helios
 {
-	class GPUTimerRecorder;
-
 	/* 「Render Stats」面板：每帧 CPU / GPU 性能统计。三张卡 —— Frame（FPS / 帧间隔 /
-	 * CPU 阶段 / GPU 合计 + 三线历史曲线）、CPU Timings（函数级作用域：Live / 录制回放
-	 * + 树表 / Treemap / 火焰图三种视图）和 GPU Timings（录制 / 逐帧回放 / 导出 CSV +
-	 * 耗时树）。数据源 = FrameTimeProfiler + CPUTimerProfiler + RenderQueryProfiler。 */
+	 * CPU 阶段 / GPU 合计 + 三线历史曲线）、Timings（一套 Live / 录制回放，树按 CPU / GPU
+	 * 源页签切换，共用一条时间轴）和 Geometry（提交次数与几何吞吐）。
+	 * 数据源 = FrameTimeProfiler + CPUTimeScopeTree + GPUTimeScopeTree + RenderStatistics。 */
 	class RenderStatsPanel
 	{
 	public:
-		/* CPU 卡的图表视图（公开供自检断言） */
-		enum class CpuChartView : uint8_t
+		/* 用户选的采集通道：渲染时临时去掉 Editor 位，析构恢复由 ScopedChannelMask 负责，
+		 * 所以选择必须存在面板自己这里，不能被那层 RAII 覆盖 */
+		ProfileChannel m_ChannelFilter{ ProfileChannel::All };
+		float m_SwitcherWidth{ 0.0f };
+
+		/* 图表状态在共享组件里，面板只保留别名 */
+		using TimingChartView = TimingChart::ChartView;
+		using TimingViewState = TimingChart::ViewState;
+
+		/* 计时卡看哪棵树：两条采集都在后台常开，这里只决定显示哪个 */
+		enum class TimingSource : uint8_t
 		{
-			Tree = 0,  /* 树表：调用结构 + total / self */
-			Treemap,   /* 函数热力：面积 = 耗时占比，点击下钻 */
-			Flame,     /* 时间轴火焰图：块 = 帧内区间（横向 = 时间） */
-			Count
+			CPU = 0,
+			GPU
 		};
+
 		/* 画整个面板（含停靠窗口的 Begin/End） */
 		void OnImGuiRender();
-
-		/* GPU 录制导出为 CSV 文本（宽表：一行一帧 —— 帧号 / 根节点总耗时 + 顶点 / 片元
-		 * 细分 / 每个作用域节点两列：总耗时 + 顶点细分，片元 = 总 − 顶点；节点列名 =
-		 * 标签路径，集合按帧取并集、缺列留空）。纯函数（不做任何 IO），headless 检查断言。 */
-		static std::string BuildRecordingCsv(const GPUTimerRecorder& recorder);
-
-		/* 导出落盘的路径收尾：系统保存框不保证补后缀（macOS 面板不会自动加）——名称未以
-		 * ".csv"（大小写不敏感）结尾时补上，已有则不重复；空路径（取消）原样返回。 */
-		static std::string EnsureRecordingExtension(const std::string& path);
 
 		/* 几何统计的数字显示（纯函数，headless 可断言）：万以下原样、再往上 12.3k、
 		 * 百万以上 4.56M —— 值列只有一两百像素，全位数既放不下也没人会去数 */
@@ -55,45 +52,30 @@ namespace Helios
 		static void BuildGeometryRows(const RenderStatisticsSnapshot& stats,
 			std::vector<GeometryRow>& out_rows);
 
-		/* Treemap 布局块（纯数据；headless 检查断言用） */
-		struct TreemapBlock
-		{
-			const ResultCPUTimerNode* Node{ nullptr };
-			bool IsSelf{ false };       /* true = 节点自身代码段块（不可下钻） */
-			float X{ 0.0f };
-			float Y{ 0.0f };
-			float Width{ 0.0f };
-			float Height{ 0.0f };
-			int32_t ParentBlock{ -1 };  /* 包含它的父块下标（-1 = 显示根） */
-		};
+		/* 图表的数据类型与布局在共享组件里，面板只保留别名 */
+		using TreemapBlock = TimingChart::TreemapBlock;
+		using FlameBlock = TimingChart::FlameBlock;
+		using GpuTreemapBlock = TimingChart::GpuTreemapBlock;
+		using GpuFlameBlock = TimingChart::GpuFlameBlock;
 
 		/* Treemap 布局（squarified；纯函数，headless 可断言）：把 root 的子树铺进
 		 * width × height —— 每层 =「自身 self 块 + 子节点块」（权重 = 各自动耗时），
 		 * 面积与耗时成正比、父块包含子块、父块先序输出。inset = 每层向内留边。 */
-		static void LayoutTreemap(const ResultCPUTimerNode& root, float width, float height,
+		static void LayoutTreemap(const CPUTimeScopeNode& root, float width, float height,
 			float inset, std::vector<TreemapBlock>& out_blocks);
+		static void LayoutTreemap(const GPUTimeScopeNode& root, float width, float height,
+			float inset, std::vector<GpuTreemapBlock>& out_blocks);
 
-		/* 火焰图块（纯数据；headless 检查断言用）：X0/X1 = 根宽归一化（0..1）的左右边界；
-		 * 子块按起始时间排、宽度按总耗时占比铺满父块（父子直接相连、收起时其余块位置不变）。
-		 * Depth = 调用深度（一行一深度）；ParentBlock = 先序父块下标（-1 = 显示根）；
-		 * Collapsed = 子树已收起（右端标「＋」，点击展开） */
-		struct FlameBlock
-		{
-			const ResultCPUTimerNode* Node{ nullptr };
-			uint32_t Depth{ 0 };
-			double X0{ 0.0 };
-			double X1{ 1.0 };
-			int32_t ParentBlock{ -1 };
-			bool Collapsed{ false };
-		};
-
-		/* 火焰图布局（时间序嵌套；纯函数，headless 可断言）：块 = 调用区间聚合 —— 横向 =
-		 * 帧内时间序（子块按起始时间排、宽度按总耗时占比铺满父块），纵向 = 调用深度
-		 *（帧根在最上，每深度一行）。折叠命中的节点「本块保留、不再下钻」；显示根不折。
+		/* 火焰图布局（嵌套；纯函数，headless 可断言）：块 = 作用域聚合 —— 横向 = 帧内顺序
+		 *（CPU 按起始时间排、GPU 按提交顺序），纵向 = 调用深度（帧根在最上，每深度一行）。
+		 * 折叠命中的节点「本块保留、不再下钻」；显示根不折。
 		 * root_path = 显示根的绝对 label 链（收起键的前缀基准）。 */
-		static void LayoutFlame(const ResultCPUTimerNode& root,
+		static void LayoutFlame(const CPUTimeScopeNode& root,
 			const std::unordered_set<std::string>* collapsed, const std::string& root_path,
 			std::vector<FlameBlock>& out_blocks);
+		static void LayoutFlame(const GPUTimeScopeNode& root,
+			const std::unordered_set<std::string>* collapsed, const std::string& root_path,
+			std::vector<GpuFlameBlock>& out_blocks);
 
 		/* ---- 计时树搜索（CPU / GPU 卡共用的纯函数，headless 可断言）----
 		 * filter 须已小写化；空串 = 全部命中。NodeMatches = 自身标签命中（大小写无关子串）；
@@ -131,137 +113,156 @@ namespace Helios
 		 * 命中计数在树表绘制时结算（非树视图 / 无数据时保持旧值）。 */
 		void SetCPUTimingSearchFilter(const std::string& filter);
 		void SetGPUTimingSearchFilter(const std::string& filter);
-		[[nodiscard]] const std::string& GetCPUTimingSearchFilter() const { return m_CpuTimingSearchFilter; }
-		[[nodiscard]] const std::string& GetGPUTimingSearchFilter() const { return m_GpuTimingSearchFilter; }
-		[[nodiscard]] uint32_t GetCPUTimingSearchMatchCount() const { return m_CpuTimingSearchMatchCount; }
-		[[nodiscard]] uint32_t GetGPUTimingSearchMatchCount() const { return m_GpuTimingSearchMatchCount; }
+		[[nodiscard]] const std::string& GetCPUTimingSearchFilter() const { return m_CpuView.Filter; }
+		[[nodiscard]] const std::string& GetGPUTimingSearchFilter() const { return m_GpuView.Filter; }
+		[[nodiscard]] uint32_t GetCPUTimingSearchMatchCount() const { return m_CpuView.MatchCount; }
+		[[nodiscard]] uint32_t GetGPUTimingSearchMatchCount() const { return m_GpuView.MatchCount; }
 
 		/* 追踪文本开关（录制期同步写盘的偏好；自检 / 外部驱动用）：未录制时只记偏好，
 		 * 实际写盘会话与录制同起同停（SyncCPUTraceTextSession） */
 		void SetCPUTraceTextEnabled(bool enabled) { m_CpuTraceTextEnabled = enabled; }
 		[[nodiscard]] bool IsCPUTraceTextEnabled() const { return m_CpuTraceTextEnabled; }
 
-		/* CPU 卡的当前图表视图 / Treemap 下钻深度 / 火焰图折叠数 / 放大窗口开关（自检用只读） */
-		[[nodiscard]] CpuChartView GetCpuChartView() const { return m_CpuChartView; }
-		/* 放大窗口的图表视图（与卡片独立 —— 弹窗切图不动卡片；自检用只读） */
-		[[nodiscard]] CpuChartView GetCpuChartViewWindow() const { return m_CpuChartViewWindow; }
+		/* 计时卡看哪棵树（自检 / 外部驱动用） */
+		void SetTimingSource(TimingSource source) { m_TimingSource = source; }
+		[[nodiscard]] TimingSource GetTimingSource() const { return m_TimingSource; }
+		/* 时间轴当前落在哪一帧（自检用只读） */
+		[[nodiscard]] uint32_t GetResolvedFrameId() const { return ResolveCaptureFrameId(); }
+
+		/* 图表视图 / 下钻深度 / 折叠数 / 缩放（自检用只读；卡片与弹窗各自的视图页） */
+		[[nodiscard]] TimingChartView GetCpuChartView() const { return m_CpuView.View; }
+		[[nodiscard]] TimingChartView GetCpuChartViewWindow() const { return m_CpuView.WindowView; }
+		[[nodiscard]] TimingChartView GetGpuChartView() const { return m_GpuView.View; }
+		/* 冻结 / 解冻当前帧：抓帧按钮与自检共用 */
+		void ToggleCaptureFrame(TimingSource source);
+
+		/* 开关一路采集通道：下拉点击与自检共用 */
+		void ToggleChannel(uint32_t index);
+		[[nodiscard]] ProfileChannel GetChannelFilter() const { return m_ChannelFilter; }
+
+		/* 最近一帧三格切换器的实际宽度：行尾按钮会挤它，自检按这个算点击位置 */
+		[[nodiscard]] float GetSwitcherWidth() const { return m_SwitcherWidth; }
+
+		/* 按标签路径设置 Treemap 下钻深度：点击命中、面包屑、键盘导航共用这条入口，
+		 * 外部驱动（自检）也不依赖画布坐标。空路径 = 回根。 */
+		void SetCpuTreemapZoom(const std::vector<std::string>& path);
+		void SetGpuTreemapZoom(const std::vector<std::string>& path);
+
+		[[nodiscard]] uint32_t GetCpuTreemapZoomDepth() const
+		{
+			return static_cast<uint32_t>(m_CpuView.TreemapZoom.size());
+		}
+		[[nodiscard]] uint32_t GetGpuTreemapZoomDepth() const
+		{
+			return static_cast<uint32_t>(m_GpuView.TreemapZoom.size());
+		}
+		[[nodiscard]] uint32_t GetCpuFlameCollapsedCount() const
+		{
+			return static_cast<uint32_t>(m_CpuView.FlameCollapsed.size());
+		}
+		[[nodiscard]] uint32_t GetGpuFlameCollapsedCount() const
+		{
+			return static_cast<uint32_t>(m_GpuView.FlameCollapsed.size());
+		}
+		[[nodiscard]] float GetCpuFlameZoom() const { return m_CpuView.FlameZoom; }
+		[[nodiscard]] float GetCpuFlamePan() const { return m_CpuView.FlamePan; }
+
 		/* 抓取当前帧（实时视图冻结中；自检用只读） */
 		[[nodiscard]] bool IsCpuFrameFrozen() const { return m_CpuFrozen; }
 		[[nodiscard]] bool IsGpuFrameFrozen() const { return m_GpuFrozen; }
 		/* 抓取时刻的帧号（冻结期间弹窗浮标显示它，不再随实时跳动；自检用只读） */
 		[[nodiscard]] uint32_t GetCpuFrozenFrameId() const { return m_CpuFrozenFrameId; }
-		[[nodiscard]] uint32_t GetCpuTreemapZoomDepth() const { return static_cast<uint32_t>(m_CpuTreemapZoom.size()); }
-		[[nodiscard]] uint32_t GetCpuFlameCollapsedCount() const { return static_cast<uint32_t>(m_CpuFlameCollapsed.size()); }
-		/* 火焰图视图窗口（缩放 / 平移；自检用只读）：缩放 ≥ 1、平移 = 归一化左缘 */
-		[[nodiscard]] float GetCpuFlameZoom() const { return m_CpuFlameZoom; }
-		[[nodiscard]] float GetCpuFlamePan() const { return m_CpuFlamePan; }
-		[[nodiscard]] bool IsCpuChartWindowOpen() const { return m_CpuChartWindowOpen; }
-		[[nodiscard]] bool IsCpuChartWindowMaximized() const { return m_CpuChartWindowMaximized; }
+
+		/* 图表弹窗：开着没 / 最大化没 / 跟着哪个源（自检用只读） */
+		[[nodiscard]] bool IsChartWindowOpen() const { return m_ChartWindowOpen; }
+		[[nodiscard]] bool IsChartWindowMaximized() const { return m_ChartWindowMaximized; }
+		[[nodiscard]] TimingSource GetChartWindowSource() const { return m_ChartWindowSource; }
 
 	private:
 		void ShowFrameStatsCard();
-		void ShowCPUTimingsCard();
-		void ShowGPUTimingsCard();
+		/* 计时卡：CPU / GPU 两条采集共用一个卡 —— 一套 Live/Record 模式、一条时间轴，
+		 * 树按 TimingSource 切换 */
+		void ShowTimingsCard();
+		/* 计时区：按源取显示根，再交给同一份图表区（工具条 + 三种视图） */
+		void ShowTimingArea();
+		/* 图表区本体（一个源）：树表 / 矩形图 / 火焰图，CPU 与 GPU 只差在 cpp 里的 traits。
+		 * in_window = 画在弹窗里（视图页与卡片独立、尺寸铺满窗口、条目附耗时） */
+		template <typename NodeT>
+		void ShowTimingAreaBody(TimingSource source, const NodeT& root, TimingViewState& state,
+			bool in_window);
+		/* 工具条（卡 / 弹窗、CPU / GPU 同款）：视图三格 + [帧号] + 搜索 + [抓取] + 行尾钮 */
+		void ShowChartBar(TimingSource source, TimingViewState& state, bool in_window);
+		/* 两棵树的树表视图（列与悬浮读数各按自己的字段） */
+		void ShowTimingTree(const CPUTimeScopeNode& root);
+		void ShowTimingTree(const GPUTimeScopeNode& root);
 		/* 几何统计卡：本帧的提交次数与几何吞吐（Draw Call / 三角形 / 顶点 / 实例）。
 		 * 数据源 = RenderStatistics，帧边界与 GPU 计时器一致 */
 		void ShowGeometryStatsCard();
 		/* 帧耗时曲线：三线（Frame / CPU / GPU）+ 悬停读值；需要至少两帧历史才画线 */
 		void ShowFrameTimeGraph(float height);
-		/* 录制工具栏：录制 / 停止、上一帧 / 下一帧、峰值 / 谷值、清空、导出 CSV ——
-		 * 一行等大图标按钮（录制视图常显；实时视图只在录制进行中显示，避免录制状态失联） */
-		void ShowGPUTimerToolbar();
-		/* GPU 录制的逐帧回放：帧间曲线 + 选帧滑条 + 概要行；
-		 * 有录制内容且不在录制中时显示，改动 m_ReplayFrame（-1 = 未选中） */
-		void ShowGPUTimerRecordingUI();
-		/* CPU 版工具栏 / 回放（对偶 GPU；本期不含导出，列 = 根总耗时）。
-		 * 工具栏首钮 = 追踪文本开关（图标钮，沿用录制选项语义） */
-		void ShowCPUTimerToolbar();
-		void ShowCPUTimerRecordingUI();
-		/* 追踪文本写盘会话与录制同起同停（首钮只记偏好 —— 未录制时不开写） */
+		/* 计时工具栏：暂停 / 继续、上一帧 / 下一帧、峰值 / 谷值、清空、导出 CSV、
+		 * 追踪文本 —— 一行等大图标按钮，只在录制视图出现（它管的是回放） */
+		void ShowTimingsToolbar();
+		void ShowChannelFilterPopup();
+		/* 共用时间轴：CPU / GPU 两条曲线按帧号对齐，一条滑条同时驱动两棵树 */
+		void ShowCaptureTimeline();
+		/* 追踪文本写盘会话：开关打开且采集未暂停时在写 */
 		void SyncCPUTraceTextSession();
-		/* CPU 卡的三种图表视图（同一份结果树数据源；树表 = 整行可选中 + 搜索过滤）；
-		 * Treemap 的 show_duration = 条目标签附耗时行（弹窗用；卡片保持名字-only） */
-		void ShowCPUTreeView(const ResultCPUTimerNode& root);
-		void ShowCPUTreemapView(const ResultCPUTimerNode& root, float width, float height, bool show_duration);
-		void ShowCPUFlameView(const ResultCPUTimerNode& root, float width, float height);
-		/* 图表放大窗口（「在窗口中打开」弹出）：独立顶层窗口，数据源与视图与卡共享 */
-		void ShowCPUChartWindow();
+		/* 当前回放帧号：未选中（0）或选中的帧已被环形窗口覆盖时，取最新一帧 */
+		[[nodiscard]] uint32_t ResolveCaptureFrameId() const;
+		/* 当前这棵树属于哪一帧（弹窗行的帧号浮标）：录制 = 选中的帧，冻结 = 抓取时刻，
+		 * 实时 = 该源最新结果帧（GPU 结果晚两帧，不能用引擎当前帧号） */
+		[[nodiscard]] uint32_t CurrentDisplayFrameId(TimingSource source) const;
+		/* 显示根（卡与弹窗共用）：录制视图 = 选中录制帧（无效时返回空）；冻结 = 快照；
+		 * 其余 = 实时树 */
+		[[nodiscard]] const CPUTimeScopeNode* ResolveCpuDisplayRoot() const;
+		[[nodiscard]] const GPUTimeScopeNode* ResolveGpuDisplayRoot() const;
+		/* 图表弹窗（「在窗口中打开」弹出）：独立顶层窗口，跟着打开它的那个源 */
+		void ShowTimingChartWindow();
 		/* 弹窗最大化 / 还原切换（行尾按钮）：最大化贴满主视口工作区，还原回浮动矩形 */
-		void ToggleCPUChartWindowMaximized();
-		/* 抓取当前帧切换（CPU 卡行 / 弹窗行共用）：冻结拍快照 + 记帧号；再点解冻 */
-		void ToggleCPUCaptureFrame();
-		/* 图表的显示根（卡与放大窗口共用）：录制视图 = 选中录制帧；其余 = 实时树 */
-		[[nodiscard]] const ResultCPUTimerNode* ResolveDisplayRoot() const;
+		void ToggleChartWindowMaximized();
+		/* 抓取当前帧切换（卡 / 弹窗共用）：冻结拍快照 + 记帧号；再点解冻 */
 
-		/* 回放选中的录制帧（-1 = 未选中，落到实时树） */
-		int m_ReplayFrame{ -1 };
+		/* 回放选中的帧号（0 = 未选中，跟随最新）；CPU / GPU 两棵树共用同一条时间轴 */
+		uint32_t m_ReplayFrameId{ 0 };
+		/* 计时卡看哪棵树（默认 CPU）；只有一设计时开着时自动跟随 */
+		TimingSource m_TimingSource{ TimingSource::CPU };
+		/* CPU / GPU 源页签的选中块位置（0 = CPU、1 = GPU） */
+		float m_SourceSlide{ 0.0f };
 
-		/* 计时树里选中的行（节点 id；-1 = 未选中）—— 选中 / 悬停都高亮整行 */
-		int m_SelectedNode{ -1 };
-
-		/* GPU Timings 卡的观测方式：false = 实时树 / true = 录制视图（录制 + 逐帧回放） */
+		/* 计时卡的观测方式：false = 实时树 / true = 录制视图（滚动窗口回放） */
 		bool m_RecordView{ false };
 		/* 滑动页签的选中块位置（0 = 实时页签、1 = 录制页签）：指数趋近产生滑动动画 */
 		float m_TabSlide{ 0.0f };
-		/* 上一帧是否在录制中（用于"录制刚结束 → 停在最后一帧"） */
-		bool m_WasRecording{ false };
 
-		/* CPU Timings 卡状态（与 GPU 卡各自独立） */
-		int m_CpuReplayFrame{ -1 };
-		int m_CpuSelectedNode{ -1 };
-		bool m_CpuRecordView{ false };
-		float m_CpuTabSlide{ 0.0f };
-		bool m_CpuWasRecording{ false };
-		/* 计时树搜索（CPU / GPU 卡各一）：输入缓冲 + 小写化过滤词（空 = 不过滤）；
-		 * 命中计数在树表绘制时结算（见 GetCPUTimingSearchMatchCount） */
-		char m_CpuTimingSearch[128] = {};
-		std::string m_CpuTimingSearchFilter{};
-		uint32_t m_CpuTimingSearchMatchCount{ 0 };
-		char m_GpuTimingSearch[128] = {};
-		std::string m_GpuTimingSearchFilter{};
-		uint32_t m_GpuTimingSearchMatchCount{ 0 };
+		/* 两个源的树表 / 图表状态：选中行、搜索、视图页、下钻、折叠、缩放 */
+		TimingViewState m_CpuView{};
+		TimingViewState m_GpuView{};
+
 		/* 追踪文本（HELIOS_PROFILE）：录制期同步写盘的偏好 + 会话归属（谁开谁关 ——
 		 * 只收尾本面板开的会话，别动外部手动开的） */
 		bool m_CpuTraceTextEnabled{ false };
 		bool m_CpuTraceTextSessionOwned{ false };
 
-		/* CPU 卡的图表视图 + 选中块滑动位置（0..2，指数趋近） + Treemap 下钻路径
-		 * （label 链；换帧 / 换数据源后解析失败段自动截断） + 放大窗口开关 */
-		CpuChartView m_CpuChartView{ CpuChartView::Tree };
-		float m_CpuChartSlide{ 0.0f };
-		/* 放大窗口的图表视图：与卡片独立（两处各自滑动）；下钻 / 折叠 / 缩放等状态仍共享 */
-		CpuChartView m_CpuChartViewWindow{ CpuChartView::Tree };
-		float m_CpuChartSlideWindow{ 0.0f };
-		std::vector<std::string> m_CpuTreemapZoom{};
-		/* 火焰图折叠集合：节点绝对 label 链（显示根起 "a/b/c"）。树变化后失效项不匹配、
-		 * 自然失效（无需清理） */
-		std::unordered_set<std::string> m_CpuFlameCollapsed{};
-		/* 抓取当前帧（两个卡的实时视图里、搜索右侧的相机钮）：冻结 = 显示根改用当前帧快照，
+		/* 抓取当前帧（实时视图里、搜索右侧的相机钮）：冻结 = 显示根改用当前帧快照，
 		 * 不再跟随实时数据刷新，便于逐行细看；再点解冻。录制视图下按钮不出现。
-		 * 弹窗行也有同一个钮（共享同一冻结态）；暂停期间帧号显示 FrozenFrameId（抓取时刻
-		 * 的帧号，不再随实时跳动）。 */
+		 * 弹窗行也有同一个钮（共享同一冻结态）；帧号浮标显示抓取时刻的帧号。 */
 		bool m_CpuFrozen{ false };
-		ResultCPUTimerNode m_CpuFrozenRoot{};
+		CPUTimeScopeNode m_CpuFrozenRoot{};
 		uint32_t m_CpuFrozenFrameId{ 0 };
 		bool m_GpuFrozen{ false };
-		ResultGPUTimerNode m_GpuFrozenRoot{};
+		GPUTimeScopeNode m_GpuFrozenRoot{};
+		uint32_t m_GpuFrozenFrameId{ 0 };
 
-		/* 火焰图视图窗口：缩放（1..64）+ 归一化左缘；滚轮缩放（锚在光标）、拖拽平移、右键
-		 * 复位（FrameGraph 同一套手感）；缩放后右下角浮出缩略图（可拖 / 点跳）。
-		 * DraggedDistance 区分拖拽与单击（未过阈值松开 = 单击）；ScrollGrab = 按在缩略图上 */
-		float m_CpuFlameZoom{ 1.0f };
-		float m_CpuFlamePan{ 0.0f };
-		float m_CpuFlameDraggedDistance{ 0.0f };
-		bool m_CpuFlameScrollGrab{ false };
-		bool m_CpuChartWindowOpen{ false };
-		/* 弹窗最大化：true 时每帧把窗口压在主视口工作区（跟随编辑器窗口尺寸变化）；
-		 * 还原用最大化前记下的浮动矩形 —— 最大化期间窗口自身存的尺寸已被覆盖，须自留一份
-		 * （头文件不引 imgui.h，矩形用裸 float 存） */
-		bool m_CpuChartWindowMaximized{ false };
-		bool m_CpuChartWindowRestorePending{ false };
-		float m_CpuChartRestoreX{ 0.0f };
-		float m_CpuChartRestoreY{ 0.0f };
-		float m_CpuChartRestoreW{ 0.0f };
-		float m_CpuChartRestoreH{ 0.0f };
+		/* 图表弹窗：跟着打开它的源（标题随之变化）；最大化期间窗口自身存的尺寸每帧被覆盖，
+		 * 还原矩形得自己留一份（头文件不引 imgui.h，矩形用裸 float 存） */
+		bool m_ChartWindowOpen{ false };
+		TimingSource m_ChartWindowSource{ TimingSource::CPU };
+		bool m_ChartWindowMaximized{ false };
+		bool m_ChartWindowRestorePending{ false };
+		float m_ChartRestoreX{ 0.0f };
+		float m_ChartRestoreY{ 0.0f };
+		float m_ChartRestoreW{ 0.0f };
+		float m_ChartRestoreH{ 0.0f };
 	};
 }

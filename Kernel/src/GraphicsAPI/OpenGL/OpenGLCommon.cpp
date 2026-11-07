@@ -72,7 +72,7 @@ namespace Helios
 	/* 检查GLError信息 */
 	void CheckGLError(const char* file, const char* func_name, uint32_t line) noexcept
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		GLenum error = glGetError();
 		if (error != GL_NO_ERROR)
@@ -84,7 +84,7 @@ namespace Helios
 	/* 检查FrameBuffer状态 */
 	void CheckGLFrameBufferStatus(GLenum target, const char* func_name, uint32_t line) noexcept
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		GLenum status = glCheckFramebufferStatus(target);
 		if (status != GL_FRAMEBUFFER_COMPLETE)

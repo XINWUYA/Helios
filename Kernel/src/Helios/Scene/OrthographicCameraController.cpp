@@ -16,7 +16,7 @@ namespace Helios
 
 	void OrthographicCameraController::OnUpdate(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		if (Input::IsKeyPressed(Key::W)) // 上移
 		{
@@ -64,7 +64,7 @@ namespace Helios
 
 	void OrthographicCameraController::OnEvent(IEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		EventDispatcher dispatcher(event);
 		dispatcher.Dispatch<MouseScrolledEvent>(BIND_EVENT_FUNC(OrthographicCameraController::OnMouseScrolled));
@@ -73,7 +73,7 @@ namespace Helios
 
 	void OrthographicCameraController::OnResize(float width, float height)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		m_AspectRatio = width / height;
 		m_pCamera->SetAspectRatio(m_AspectRatio);
@@ -82,7 +82,7 @@ namespace Helios
 
 	bool OrthographicCameraController::OnMouseScrolled(MouseScrolledEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		m_ZoomLevel -= event->GetYOffset() * 0.25f;
 		m_ZoomLevel = std::max(m_ZoomLevel, 0.25f);
@@ -93,7 +93,7 @@ namespace Helios
 
 	bool OrthographicCameraController::OnWindowResized(WindowResizeEvent* event)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		OnResize(static_cast<float>(event->GetWidth()), static_cast<float>(event->GetHeight()));
 		return false;

@@ -47,11 +47,11 @@ int main(int argc, char** argv)
 		// See the profiler result in: edge://tracing/
 		// More suggested: https://ui.perfetto.dev/
 		// Just Drag the json file in.
-		PROFILER_BEGIN_SESSION("Startup", "TimeCostProfiler-Startup.json");
+		PROFILER_BEGIN_SESSION("Startup", "PerfettoWriter-Startup.json");
 		auto app = Helios::CreateApplication();
 		PROFILER_END_SESSION();
 
-		PROFILER_BEGIN_SESSION("Runtime", "TimeCostProfiler-Runtime.json");
+		PROFILER_BEGIN_SESSION("Runtime", "PerfettoWriter-Runtime.json");
 		app->Run();
 		PROFILER_END_SESSION();
 	}

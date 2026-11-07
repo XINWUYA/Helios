@@ -396,7 +396,7 @@ namespace Helios
     MetalShader::MetalShader(const std::string& filepath)
         : DeviceShader(filepath)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         m_DebugName = ExtractFilename(filepath);
 
@@ -454,7 +454,7 @@ namespace Helios
     MetalShader::MetalShader(std::string name, const std::string& vertex_src, const std::string& pixel_src)
         : DeviceShader(""), m_DebugName(std::move(name))
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         std::unordered_map<ShaderCompiler::ShaderStage, std::string> shader_sources{
             { ShaderCompiler::ShaderStage::Vertex, vertex_src },
@@ -493,7 +493,7 @@ namespace Helios
 
     bool MetalShader::ApplyPrepared(DeviceShader& prepared)
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         auto* fresh = dynamic_cast<MetalShader*>(&prepared);
         if (fresh == nullptr || !fresh->IsValid())
@@ -542,7 +542,7 @@ namespace Helios
 
     bool MetalShader::BuildDeviceObjects()
     {
-        PROFILE_FUNCTION();
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         if (!m_Loaded)
             return false;

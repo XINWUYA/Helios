@@ -57,7 +57,7 @@ namespace Helios
 	/* 创建一个实体 */
 	Entity Scene::CreateEntity(const std::string& name)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		Entity entity = { m_Registry.create(), shared_from_this() };
 
@@ -105,7 +105,7 @@ namespace Helios
 
 	void Scene::DestroyEntity(Entity& entity)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* 骨骼模型：先把它的关节实体一起清掉，别在场景里留孤儿 */
 		SkeletonModel::Clear(*this, static_cast<entt::entity>(entity));
@@ -364,7 +364,7 @@ namespace Helios
 
 	void Scene::ClearAllEntities()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* 实体即将销毁，动画会话与脚本实例都不再有宿主 */
 		m_AnimationRuntime.Clear();
@@ -385,7 +385,7 @@ namespace Helios
 	 * 重复登记无效果；生命周期由调用方保证（相机销毁前先摘除）。 */
 	void Scene::AddExternalCamera(Camera* camera)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		if (camera == nullptr)
 			return;
@@ -397,7 +397,7 @@ namespace Helios
 	/* 外部相机摘除：不在册时无效果 */
 	void Scene::RemoveExternalCamera(Camera* camera)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		m_ExternalCameras.erase(
 			std::remove(m_ExternalCameras.begin(), m_ExternalCameras.end(), camera),
@@ -516,7 +516,7 @@ namespace Helios
 
 	void Scene::OnUpdate(float delta_time)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* 动画先推进：属性轨道写组件，下面的变换推送才能当帧看到新姿势 */
 		m_AnimationRuntime.Tick(*this, delta_time);
@@ -543,14 +543,14 @@ namespace Helios
 		/* 先把本帧的世界变换全部算出来（局部矩阵按值缓存，没动过的实体只有一次查表），
 		 * 渲染侧读到的才是同一份快照。这一步不能省：只有 Transform 的节点也要入快照 */
 		{
-			PROFILE_SCOPE("Scene World Transforms");
+			PROFILE_CPU_SCOPE_CH(ProfileChannel::Scene, "Scene World Transforms");
 			for (const entt::entity entity : m_Registry.view<TransformComponent>())
 				FrameWorldTransform(entity);
 		}
 
 		/* 再按组件类型分开推送，不再对每个实体挨个 try_get 四种组件：
 		 * 模型最多，一个视图走完；光 / 相机 / 探针各自数量很少 */
-		PROFILE_SCOPE("Push Scene Transforms");
+		PROFILE_CPU_SCOPE_CH(ProfileChannel::Scene, "Push Scene Transforms");
 		m_MeshIndex.BeginSync();
 		m_SkyBoxEntities.clear();
 		for (auto [entity, model_component] : m_Registry.view<ModelComponent>().each())
@@ -881,7 +881,7 @@ namespace Helios
 
 	Entity Scene::GetPrimaryCameraEntity()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* difference of view and group: https://github.com/skypjack/entt/discussions/638 */
 		const auto entity_view = m_Registry.view<CameraComponent>();
@@ -918,7 +918,7 @@ namespace Helios
 
 	void Scene::Serializer(const std::string& path, bool write_bake_cache)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* 存的是作者数据：先停播并还原姿势，别把当前帧的采样值写进场景 */
 		m_AnimationRuntime.StopAll(*this);
@@ -978,7 +978,7 @@ namespace Helios
 
 	bool Scene::Deserializer(const std::string& path)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		std::filesystem::path scene_path;
 		if (!TryPathFromUtf8(path, scene_path))
@@ -1084,7 +1084,7 @@ namespace Helios
 
 	void Scene::SerializeEntity(tinyxml2::XMLElement* root_node, Entity& entity)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		tinyxml2::XMLElement* entity_root = root_node->InsertNewChildElement("Entity");
 

@@ -61,7 +61,7 @@ namespace Helios
 
 			TextureHandle BuildFog(RenderView& render_view, TextureHandle input)
 			{
-				PROFILE_FUNCTION();
+				PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 				const FogSettings* settings = render_view.GetPostProcessState().Get<FogSettings>();
 				if (settings == nullptr || !settings->Enabled)

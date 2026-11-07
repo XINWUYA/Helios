@@ -62,7 +62,7 @@ namespace Helios
 
 	void ImGuiLayer::OnAttached()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::UI);
 
 		IMGUI_CHECKVERSION();
 
@@ -107,7 +107,7 @@ namespace Helios
 
 	void ImGuiLayer::OnDetached()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::UI);
 
 		m_Renderer->Cleanup();
 		m_Renderer.reset();
@@ -198,7 +198,7 @@ namespace Helios
 
 	void ImGuiLayer::Begin()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::UI);
 
 		/* 帧边界：先把挂起的缩放重建做掉（跨屏移动窗口后），再开新帧。
 		 * 必须在这里而非 OnEvent 里做 —— 事件可能在帧中途到达。 */
@@ -212,7 +212,7 @@ namespace Helios
 
 	void ImGuiLayer::End()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::UI);
 
 		/* 作用域由后端 PushDebugGroup 一并驱动（组名即作用域名） */
 		Renderer::GetRenderAPI()->PushDebugGroup("ImGuiPass");
@@ -226,7 +226,7 @@ namespace Helios
 
 	void ImGuiLayer::RenderPlatformWindows()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::UI);
 
 		auto render_api = Renderer::GetRenderAPI();
 		if (!render_api)

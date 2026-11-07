@@ -1,8 +1,10 @@
 ﻿#pragma once
 #include <optional>
+#include <string>
 #include <vector>
 #include <glm/glm.hpp>
 #include "FrameGraphResources.h"
+#include "Helios/Profiler/Profiler.h"
 
 namespace Helios
 {
@@ -62,19 +64,21 @@ namespace Helios
 	public:
 		virtual ~IFrameGraphPass() = default;
 
-		/* 设置RenderPassNode */
-		void SetRenderPassNode(const SharedPtr<RenderPassNode>& node) { m_pRenderPassNode = node; }
+		/* 设置RenderPassNode，顺带把名字缓存下来：执行时拿它当计时组名，
+		 * 而这里拿不到 RenderPassNode 的完整定义 */
+		void SetRenderPassNode(const SharedPtr<RenderPassNode>& node);
 		/* 获取RenderPassNode */
 		[[nodiscard]] SharedPtr<RenderPassNode> GetRenderPassNode() const { return m_pRenderPassNode.lock(); }
 
-		/* 执行阶段 */
+		/* 执行阶段。组名取 Pass 名，整个执行体包在一个 GPU 计时作用域里，
+		 * 中途返回也不会漏掉闭合 */
 		virtual void Execute(const FrameGraphResources& resources) = 0;
-		virtual void BeforeExecute();
-		virtual void AfterExecute();
 
 	protected:
 		/* 对应的RenderPassNode */
 		WeakPtr<RenderPassNode> m_pRenderPassNode;
+		/* 节点名：建图时缓存，执行时当计时组名 */
+		std::string m_DebugName;
 	};
 
 	/* 带执行阶段的FrameGraphPass */
@@ -95,9 +99,8 @@ namespace Helios
 		/* 执行阶段 */
 		void Execute(const FrameGraphResources& resources) override
 		{
-			BeforeExecute();
+			PROFILE_GPU_SCOPE(m_DebugName);
 			m_ExecuteFunc(resources, m_Data);
-			AfterExecute();
 		}
 
 	protected:

@@ -8,7 +8,7 @@ namespace Helios
 {
 	OpenGLVertexArray::OpenGLVertexArray(const std::string& name)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 #ifdef __APPLE__
 		// macOS: Use traditional function (OpenGL 4.1 compatible)
@@ -24,7 +24,7 @@ namespace Helios
 
 	OpenGLVertexArray::~OpenGLVertexArray()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		ReleaseVariants();
 		glDeleteVertexArrays(1, &m_VertexArrayId);
@@ -32,7 +32,7 @@ namespace Helios
 
 	void OpenGLVertexArray::Bind() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glBindVertexArray(m_ActiveVertexArrayId != 0 ? m_ActiveVertexArrayId : m_VertexArrayId);
 	}
@@ -52,14 +52,14 @@ namespace Helios
 
 	void OpenGLVertexArray::Unbind() const
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		glBindVertexArray(0);
 	}
 
 	void OpenGLVertexArray::AddVertexBuffer(const SharedPtr<DeviceVertexBuffer>& vertex_buffer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		ASSERT(vertex_buffer && !vertex_buffer->GetLayout().GetElements().empty(), "Vertex buffer has no layout!");
 
@@ -73,7 +73,7 @@ namespace Helios
 
 	void OpenGLVertexArray::ConfigureAttributes(const ShaderReflectionData& reflection)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		if (m_VertexBuffers.empty())
 			return;
@@ -224,7 +224,7 @@ namespace Helios
 
 	void OpenGLVertexArray::SetIndexBuffer(const SharedPtr<IndexBuffer>& index_buffer)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		/* 每个签名 VAO 都要挂上索引缓冲 */
 		glBindVertexArray(m_VertexArrayId);

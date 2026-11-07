@@ -19,7 +19,7 @@ namespace Helios
 
 	void OpenGLQueryNode::Begin()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		CHECK_GL_ERROR;
 		glQueryCounter(m_TimestampQueries[0], GL_TIMESTAMP);
@@ -28,7 +28,7 @@ namespace Helios
 
 	void OpenGLQueryNode::End()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		CHECK_GL_ERROR;
 		glQueryCounter(m_TimestampQueries[1], GL_TIMESTAMP);
@@ -37,7 +37,7 @@ namespace Helios
 
 	bool OpenGLQueryNode::GetQueryResult()
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		CHECK_GL_ERROR;
 		uint64_t timestampAvailable[2] = {0};

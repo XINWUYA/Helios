@@ -334,7 +334,7 @@ namespace Helios::ImGuiExt
 
 	float BeginPropertyRow(const char* label, float label_width, bool frame_aligned)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 
@@ -544,7 +544,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个普通的文本UI */
 	void DrawCommonTextUI(const std::string& label, const std::string& value, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
@@ -558,7 +558,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个Color UI */
 	void DrawColorUI(const std::string& label, glm::vec4& color, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
@@ -571,7 +571,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个资源引用UI */
 	void DrawTextureUI(const std::string& label, SharedPtr<DeviceTexture>& texture, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		BeginPropertyRow(label.c_str(), label_width);
 
@@ -630,7 +630,7 @@ namespace Helios::ImGuiExt
 	void DrawDragIntUI(const char* label, int& value, float speed, float min_value, float max_value,
 		float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label, label_width);
 		const bool bounded = max_value > min_value;
@@ -648,7 +648,7 @@ namespace Helios::ImGuiExt
 	void DrawDragFloatUI(const std::string& label, float& value, float speed, float min_value,
 		float max_value, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 		const bool bounded = max_value > min_value;
@@ -702,7 +702,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个滑块：量程给全才画，手输同样按量程钳制 */
 	void DrawSliderIntUI(const char* label, int& value, int min_value, int max_value, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label, label_width);
 
@@ -716,7 +716,7 @@ namespace Helios::ImGuiExt
 	void DrawSliderFloatUI(const std::string& label, float& value, float min_value, float max_value,
 		float label_width, const char* format)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 
@@ -729,7 +729,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个可拖动的Float2 UI */
 	void DrawDragFloat2UI(const char* label, glm::vec2& value, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		DrawVectorRow(label, glm::value_ptr(value), 2, 0.0f, label_width, "%.3f", false);
 	}
@@ -737,7 +737,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个可拖动的Float3 UI */
 	void DrawDragFloat3UI(const char* label, glm::vec3& value, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		DrawVectorRow(label, glm::value_ptr(value), 3, 0.0f, label_width, "%.3f", false);
 	}
@@ -745,7 +745,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个可拖动的Float4 UI */
 	void DrawDragFloat4UI(const char* label, glm::vec4& value, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		DrawVectorRow(label, glm::value_ptr(value), 4, 0.0f, label_width, "%.3f", false);
 	}
@@ -754,7 +754,7 @@ namespace Helios::ImGuiExt
 	void DrawVec3ControlUI(const std::string& label, glm::vec3& values, float reset_value, float label_width,
 	                       bool uniform_scale)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 重置值由组件声明（如 Scale 复位成 1），点分量按钮即恢复；
 		 * uniform_scale 行额外给 Shift 等比（见 DrawVectorRow） */
@@ -764,7 +764,7 @@ namespace Helios::ImGuiExt
 	/* 绘制带选中的图像按钮UI */
 	void DrawCheckedImageButtonUI(const std::string& label, const SharedPtr<DeviceTexture>& texture, const ImVec2& size, bool checked, const std::function<void()>& button_func)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ASSERT(texture);
 
@@ -795,7 +795,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个Checkbox */
 	bool DrawCheckboxUI(const std::string& label, bool& value, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		BeginPropertyRow(label.c_str(), label_width);
 
@@ -808,7 +808,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个Combo */
 	void DrawComboUI(const std::string& label, const std::vector<std::string>& options, int& selected_idx, const std::function<void(int)>& callback, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ASSERT(!options.empty());
 
@@ -868,7 +868,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个层掩码 UI：值列是下拉按钮，弹出 32 层的复选（顶部全不选 / 全选） */
 	void DrawLayerMaskUI(const std::string& label, LayerMask& mask, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const float value_width = BeginPropertyRow(label.c_str(), label_width);
 		const std::string summary = DescribeLayerMask(mask);
@@ -904,7 +904,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个方向指示 */
 	bool DrawDirectionIndicator(const std::string& label, glm::vec3& direction, float label_width)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		BeginPropertyRow(label.c_str(), label_width);
 
@@ -921,7 +921,7 @@ namespace Helios::ImGuiExt
 	/* 绘制一个询问弹窗UI(todo: 还不能用，需要调试) */
 	bool DrawModalUI(const std::string& label, const std::string& content_text, bool& never_ask)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		/* 显示在窗口中间 */
 		const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
@@ -962,7 +962,7 @@ namespace Helios::ImGuiExt
 	bool DrawDotSliderFloat(const char* label, float& value, float v_min, float v_max,
 		const char* format, ImGuiSliderFlags flags)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		ImGuiWindow* window = ImGui::GetCurrentWindow();
 		if (window->SkipItems)
@@ -1075,7 +1075,7 @@ namespace Helios::ImGuiExt
 	/* 行内小标签：占位 + 自绘，回给调用方宽度（好从值列里扣掉这段） */
 	float DrawTagChip(const char* text, float height)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		const ImGuiStyle& style = ImGui::GetStyle();
 		if (height <= 0.0f)
@@ -1101,7 +1101,7 @@ namespace Helios::ImGuiExt
 
 	AssetRefRowResult DrawAssetRefRow(const AssetRefRowOptions& options)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION();
 
 		AssetRefRowResult result;
 
@@ -1176,4 +1176,12 @@ namespace Helios::ImGuiExt
 		return result;
 	}
 
+
+	/* 同行内绝对定位到「行首起 offset 处」：补上窗口缩进，与普通行首同基准 */
+	void SameLineAt(float offset_from_line_start)
+	{
+		ImGui::SameLine(0.0f, 0.0f);
+		const ImGuiWindow* window = ImGui::GetCurrentWindow();
+		ImGui::SetCursorPosX(window->DC.Indent.x + window->DC.ColumnsOffset.x + offset_from_line_start);
+	}
 }

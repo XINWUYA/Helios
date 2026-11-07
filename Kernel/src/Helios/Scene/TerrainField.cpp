@@ -274,7 +274,7 @@ namespace Helios
 
 	void TerrainField::Rebuild(const TerrainComponent& component, const glm::mat4& world)
 	{
-		PROFILE_FUNCTION();
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* 变换每帧都要跟上，但不参与高度图的重建判断：
 		 * 拖 gizmo 只更新矩阵，不再重新生成整张高度图 */
