@@ -20,10 +20,16 @@ namespace Helios
 		 * 未注入 = ImGui 内置默认字体与默认风格 —— 引擎不预设编辑器外观。 */
 		using StyleInstaller = std::function<void(ImGuiIO&, float content_scale)>;
 
-		ImGuiLayer();
-		~ImGuiLayer() override;
+		/* ini_name：布局文件名主干，落在 <项目>/.helios/<ini_name>.ini，空 = imgui.ini。
+		 * 同一项目下并行开多个应用才需要给名字，否则它们会抢同一份停靠数据。 */
+		struct Config
+		{
+			std::string ini_name;
+			StyleInstaller style;
+		};
 
-		void SetStyleInstaller(StyleInstaller installer) { m_StyleInstaller = std::move(installer); }
+		explicit ImGuiLayer(Config config = {});
+		~ImGuiLayer() override;
 
 		virtual void OnAttached() override;
 		virtual void OnDetached() override;
@@ -32,7 +38,7 @@ namespace Helios
 
 		/* 开始一帧内UI的收集 */
 		void Begin();
-		/* 完成UI构建，生成DrawData（供ImGuiPass在FrameGraph中渲染） */
+		/* 完成UI构建，生成DrawData并画到默认目标（ImGuiPass） */
 		void End();
 
 		void BlockEvents(bool block) { m_IsBlockEvents = block; }
@@ -56,7 +62,12 @@ namespace Helios
 		 * 而字体图集 / 样式只能在帧边界安全重建 —— 这里只记标记，下一帧 Begin() 之前执行。 */
 		void ApplyPendingContentScaleRebuild();
 
+		/* 布局文件绝对路径：<项目>/.helios/ 下，文件名由 Config::ini_name 决定 */
+		std::string BuildLayoutIniPath() const;
+
 		bool m_IsBlockEvents = false;
+		/* 布局文件名主干（见 Config::ini_name） */
+		std::string m_IniName;
 		/* imgui.ini 的绝对路径（SetLayoutSavingEnabled 切换时复用） */
 		std::string m_IniPath;
 		/* 界面外观安装器（见 StyleInstaller；空 = ImGui 内置默认） */

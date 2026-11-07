@@ -22,7 +22,7 @@
 namespace Helios
 {
 	MainEditorLayer::MainEditorLayer()
-		: ILayer("MainEditorLayer")
+		: ILayer("MainEditorLayer", 0) /* 最底层：资源浏览器、属性、日志这些常驻面板 */
 	{
 		PROFILE_CPU_FUNCTION();
 	}

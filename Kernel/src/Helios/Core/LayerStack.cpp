@@ -19,16 +19,26 @@ namespace Helios
 		m_LayerInsertIndex = 0;
 	}
 
+	/* 两种入栈只差插在哪个区：普通层占 [0, m_LayerInsertIndex)，覆盖层在其后。
+	 * 区内按优先级升序，数字大的更靠后（更上层）；同优先级保持调用先后。 */
 	void LayerStack::PushLayer(const SharedPtr<ILayer>& layer)
 	{
-		m_Layers.emplace(begin() + m_LayerInsertIndex, layer);
+		auto it = m_Layers.begin() + m_LayerInsertIndex;
+		while (it != m_Layers.begin() && (*(it - 1))->GetPriority() > layer->GetPriority())
+			--it;
+
+		m_Layers.emplace(it, layer);
 		m_LayerInsertIndex++;
 		layer->OnAttached();
 	}
 
 	void LayerStack::PushOverlay(const SharedPtr<ILayer>& layer)
 	{
-		m_Layers.emplace_back(layer);
+		auto it = m_Layers.end();
+		while (it != m_Layers.begin() + m_LayerInsertIndex && (*(it - 1))->GetPriority() > layer->GetPriority())
+			--it;
+
+		m_Layers.emplace(it, layer);
 		layer->OnAttached();
 	}
 

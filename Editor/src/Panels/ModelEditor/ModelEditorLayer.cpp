@@ -139,7 +139,7 @@ namespace Helios
 		}
 	}
 	ModelEditorLayer::ModelEditorLayer()
-		: ILayer("ModelEditorLayer")
+		: ILayer("ModelEditorLayer", 20) /* 最上层：模型编辑器打开时盖在场景之上 */
 	{
 		PROFILE_CPU_FUNCTION();
 	}

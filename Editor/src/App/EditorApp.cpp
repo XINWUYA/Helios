@@ -8,6 +8,7 @@
 #include "Helios/Common/PathUtils.h"
 #include "Common/ProjectConfig.h"
 #include "UI/EditorTheme.h"
+#include "Helios/ImGui/ImGuiLayer.h"
 
 namespace Helios
 {
@@ -37,8 +38,12 @@ namespace Helios
 	}
 
 	EditorApp::EditorApp(bool show_launcher)
-		: Application(kBaseTitle, 1920, 1080, true, &InstallEditorUiStyle)
+		: Application(kBaseTitle, 1920, 1080, true)
 	{
+		/* 编辑器带界面：字体与暗色主题由编辑器自己装（见 InstallEditorUiStyle），
+		 * 布局沿用 imgui.ini。 */
+		SetUILayer(CreateSharedPtr<ImGuiLayer>(ImGuiLayer::Config{ .style = &InstallEditorUiStyle }));
+
 		/* 日志窗口的捕获通道：在 Logger::Init()（main）之后、任何层绘出之前接上 */
 		AttachLogCapture();
 
@@ -80,8 +85,8 @@ namespace Helios
 		}
 
 		/* 布局跟项目走：先换 ini，编辑器层的窗口才会落进这个项目自己的停靠数据 */
-		if (m_pImGuiLayer != nullptr)
-			m_pImGuiLayer->RebindLayoutToProject();
+		if (m_pUILayer != nullptr)
+			m_pUILayer->RebindLayoutToProject();
 
 		const ProjectConfig config = LoadProjectConfig();
 		m_pWindow->SetWindowTitle(BuildWindowTitle(config.Name));
@@ -132,7 +137,8 @@ namespace Helios
 	void EditorApp::CreateEditorShell()
 	{
 		m_pMainLayer = CreateSharedPtr<MainEditorLayer>();
-		PushLayer(m_pMainLayer); /* 要先添加 */
+		/* 面板层的上下关系写在各自的优先级里（外壳 0 → 场景 10 → 模型 20），与建层先后无关 */
+		PushLayer(m_pMainLayer);
 	}
 
 	void EditorApp::CreateSceneEditor()

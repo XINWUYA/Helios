@@ -3,8 +3,9 @@
 
 namespace Helios
 {
-	ILayer::ILayer(const std::string& name)
+	ILayer::ILayer(const std::string& name, int priority)
 		: m_Name(name)
+		, m_Priority(priority)
 	{
 	}
 }

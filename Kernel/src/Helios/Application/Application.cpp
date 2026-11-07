@@ -12,8 +12,7 @@ namespace Helios
 {
 	Application* Application::s_pInstance = nullptr;
 
-	Application::Application(const std::string& window_title, uint32_t width, uint32_t height, bool start_maximized,
-		ImGuiLayer::StyleInstaller ui_style_installer, const std::string& config_name)
+	Application::Application(const std::string& window_title, uint32_t width, uint32_t height, bool start_maximized)
 	{
 		PROFILE_CPU_FUNCTION();
 
@@ -23,7 +22,6 @@ namespace Helios
 
 		/* 线程池先于一切子系统建好，同时收编主线程 */
 		Jobs::Init();
-		m_ConfigName = config_name;
 
 		m_pWindow = DeviceWindow::Create({ window_title, width, height, false, start_maximized });
 		m_pWindow->SetEventCallback(BIND_EVENT_FUNC(Application::OnEvent));
@@ -32,10 +30,6 @@ namespace Helios
 
 		/* 视口按物理像素建立（GetWidth/GetHeight 语义就是物理像素，与 RenderTarget 一致） */
 		Renderer::SetViewport(0, 0, m_pWindow->GetWidth(), m_pWindow->GetHeight());
-
-		m_pImGuiLayer = CreateSharedPtr<ImGuiLayer>();
-		m_pImGuiLayer->SetStyleInstaller(std::move(ui_style_installer));
-		PushOverlay(m_pImGuiLayer);
 	}
 
 	Application::~Application()
@@ -65,12 +59,6 @@ namespace Helios
 			const float time = static_cast<float>(glfwGetTime());
 			const float delta_time = time - m_LastFrameTime;
 			m_LastFrameTime = time;
-
-			/* 最小化期间冻结布局持久化：ImGui 会把宿主尺寸钳制后的 DockNode 比例写进 imgui.ini，一旦
-			 * 落盘、窗口还原后就回不到原样了。只冻结 ini、不跳过 DockSpace 提交 —— DockSpace inactive
-			 * 会让停靠窗口失去 parent 而脱坞。 */
-			if (m_pImGuiLayer)
-				m_pImGuiLayer->SetLayoutSavingEnabled(!m_IsMinimized);
 
 			if (!m_IsMinimized)
 			{
@@ -108,15 +96,19 @@ namespace Helios
 				{
 					PROFILE_CPU_SCOPE_CH(ProfileChannel::UI, "UI");
 
-					/* 后更新UI */
-					m_pImGuiLayer->Begin();
+					/* 没装 UI 层就整段跳过：层里的 OnImGuiRender 可以放心直接调 UI 接口，
+					 * 不用自己判空。 */
+					if (m_pUILayer)
 					{
-						PROFILE_CPU_SCOPE("Update ImGui Layers");
+						m_pUILayer->Begin();
+						{
+							PROFILE_CPU_SCOPE("Render UI Layers");
 
-						for (const auto& layer : m_LayerStack)
-							layer->OnImGuiRender();
+							for (const auto& layer : m_LayerStack)
+								layer->OnImGuiRender();
+						}
+						m_pUILayer->End();
 					}
-					m_pImGuiLayer->End();
 
 					/* 层已经画完：这时增删层不会打断上面的遍历 */
 					OnFrameEnd();
@@ -155,6 +147,16 @@ namespace Helios
 		m_LayerStack.PushOverlay(layer);
 	}
 
+	void Application::SetUILayer(const SharedPtr<ImGuiLayer>& layer)
+	{
+		PROFILE_CPU_FUNCTION();
+
+		ASSERT(m_pUILayer == nullptr, "UI layer already set!");
+		m_pUILayer = layer;
+
+		if (layer != nullptr)
+			PushOverlay(layer);
+	}
 
 	void Application::PopLayer(const SharedPtr<ILayer>& layer)
 	{

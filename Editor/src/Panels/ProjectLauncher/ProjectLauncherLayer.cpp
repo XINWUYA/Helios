@@ -75,7 +75,7 @@ namespace Helios
 	}
 
 	ProjectLauncherLayer::ProjectLauncherLayer()
-		: ILayer("ProjectLauncherLayer")
+		: ILayer("ProjectLauncherLayer", 100) /* 覆盖层最高：启动页盖住编辑器与 UI */
 	{
 		m_RecentProjects.Load();
 		RefreshEntries();

@@ -31,5 +31,3 @@
 
 #include "Helios/Application/Application.h"
 #include "Helios/Core/AssetManager.h"
-
-#include "Helios/ImGui/ImGuiLayer.h"

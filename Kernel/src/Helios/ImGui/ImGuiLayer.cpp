@@ -34,26 +34,25 @@ namespace Helios
 		return result.empty() ? std::string("App") : result;
 	}
 
-	/* 布局 ini：<项目>/.helios/imgui.ini，每个项目一份，换项目就换布局。
-	 * .helios 是点开头的本地状态目录，资源浏览器不列；并行开多个应用时按名字分文件。
-	 * 建目录失败退回项目根。 */
-	static std::string BuildLayoutIniPath()
+	ImGuiLayer::ImGuiLayer(Config config)
+		: ILayer("ImGuiLayer")
+		, m_IniName(std::move(config.ini_name))
+		, m_StyleInstaller(std::move(config.style))
 	{
-		const Application* app = Application::Instance();
-		const std::string config = app != nullptr ? app->GetConfigName() : std::string();
-		const std::filesystem::path file_name = config.empty()
-			? "imgui.ini" : (SanitizeFileName(config) + ".ini");
+	}
+
+	/* 布局 ini：<项目>/.helios/<ini_name>.ini，每个项目一份，换项目就换布局。
+	 * .helios 是点开头的本地状态目录，资源浏览器不列；建目录失败退回项目根。 */
+	std::string ImGuiLayer::BuildLayoutIniPath() const
+	{
+		const std::filesystem::path file_name = m_IniName.empty()
+			? "imgui.ini" : (SanitizeFileName(m_IniName) + ".ini");
 
 		const std::filesystem::path dir = g_ProjectPath / ".helios";
 
 		std::error_code error;
 		std::filesystem::create_directories(dir, error);
 		return (error ? g_ProjectPath / file_name : dir / file_name).string();
-	}
-
-	ImGuiLayer::ImGuiLayer()
-		: ILayer("ImGuiLayer")
-	{
 	}
 
 	ImGuiLayer::~ImGuiLayer()
@@ -151,6 +150,14 @@ namespace Helios
 				m_ContentScale = new_scale;
 				m_PendingContentScaleRebuild = true;
 			}
+		}
+
+		/* 最小化期间冻结布局持久化：ImGui 会把宿主尺寸钳制后的 DockNode 比例写进 ini，
+		 * 一旦落盘、窗口还原后就回不到原样。只冻结 ini，不影响 DockSpace 提交。 */
+		if (event->GetEventType() == EventType::WindowIconify)
+		{
+			const auto* iconify_event = static_cast<WindowIconifyEvent*>(event);
+			SetLayoutSavingEnabled(!iconify_event->IsIconified());
 		}
 
 		if (m_IsBlockEvents)

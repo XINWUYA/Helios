@@ -124,7 +124,7 @@ namespace Helios
 	}
 
 	SceneEditorLayer::SceneEditorLayer()
-		: ILayer("SceneEditorLayer")
+		: ILayer("SceneEditorLayer", 10) /* 外壳之上：场景视口和它自己的面板 */
 	{
 		PROFILE_CPU_FUNCTION();
 	}
