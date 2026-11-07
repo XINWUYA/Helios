@@ -247,6 +247,9 @@ namespace Helios
 		 * 抓取请求的置位 / 清零都在面板内部结算 */
 		m_FrameGraphPanel.OnImGuiRenderer(m_CameraEntries, Panel::VisibleFlag(Panel::kFrameGraph));
 
+		/* 变体清单：数据直接取资源缓存，窗口关着时面板自己跳过提交 */
+		m_ShaderVariantPanel.OnImGuiRender();
+
 		DrawScriptOrderWindow();
 
 		/* 主窗口，需要最后再画，以确保能够得到正确的窗口宽高 */

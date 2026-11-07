@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include "FrameGraphPanel.h"
 #include "RenderStatsPanel.h"
+#include "ShaderVariantPanel.h"
 #include "SceneHierarchy.h"
 #include "TimelinePanel.h"
 #include "Viewport/EditorBuiltinCamera.h"
@@ -273,5 +274,7 @@ namespace Helios
 		std::vector<FrameGraphPanel::CameraEntry> m_CameraEntries;
 		/* 渲染统计面板（每帧 CPU / GPU 耗时；绘制逻辑在面板自身） */
 		RenderStatsPanel m_RenderStatsPanel;
+		/* 着色器变体清单（源码声明的维度 + 已加载变体） */
+		ShaderVariantPanel m_ShaderVariantPanel;
 	};
 }

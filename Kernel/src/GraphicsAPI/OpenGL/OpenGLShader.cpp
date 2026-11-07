@@ -125,8 +125,8 @@ namespace Helios
 		return annotation;
 	}
 
-	OpenGLShader::OpenGLShader(const std::string& filepath)
-		: DeviceShader(filepath)
+	OpenGLShader::OpenGLShader(const std::string& filepath, const ShaderVariantDefines& defines)
+		: DeviceShader(filepath, defines)
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
@@ -136,10 +136,12 @@ namespace Helios
 
 		ShaderSourceInfo source_info;
 		m_OpenGLSourceCodes = ToGLStageSources(ShaderCompiler::LoadStageSources(filepath,
-			ShaderCompiler::ShaderTarget::OpenGL, {}, &source_info));
+			ShaderCompiler::ShaderTarget::OpenGL, defines, &source_info));
 		m_SourceHash = std::move(source_info.Hash);
 		m_RawHash = std::move(source_info.RawHash);
 		m_Dependencies = std::move(source_info.Dependencies);
+		/* 按声明规范化过的 define：热重载与变体对账都用这份，不是调用方传的稀疏表 */
+		m_VariantDefines = std::move(source_info.VariantDefines);
 
 		const auto compute_source = m_OpenGLSourceCodes.find(GL_COMPUTE_SHADER);
 		if (compute_source != m_OpenGLSourceCodes.end())
@@ -165,7 +167,7 @@ namespace Helios
 		CreateShaderProgram();
 	}
 
-	bool OpenGLShader::ApplyPrepared(DeviceShader& prepared)
+	bool OpenGLShader::ApplyPreparedImpl(DeviceShader& prepared)
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 

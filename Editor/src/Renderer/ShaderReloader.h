@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Helios/Common/Common.h"
+#include "Helios/Renderer/RenderCommon.h"
 
 namespace Helios
 {
@@ -34,7 +35,7 @@ namespace Helios
 		/* 排队与后台编译中的总个数 */
 		[[nodiscard]] size_t GetPendingCount() const
 		{
-			return m_Pending.size() + (m_Building.has_value() ? m_Building->Paths.size() : 0u);
+			return m_Pending.size() + (m_Building.has_value() ? m_Building->Targets.size() : 0u);
 		}
 
 	private:
@@ -50,15 +51,23 @@ namespace Helios
 			std::unordered_map<std::string, FileTime> Stamps{};
 		};
 
+		/* 待编译的一份：同一份源码可能挂着几个变体，各自带自己的 define 编 */
+		struct Target
+		{
+			std::string Path{};
+			ShaderVariantDefines Defines{};
+		};
+
 		struct Prepared
 		{
 			std::string Path{};
+			ShaderVariantDefines Defines{};
 			SharedPtr<DeviceShader> Shader{};
 		};
 
 		struct Build
 		{
-			std::vector<std::string> Paths{};
+			std::vector<Target> Targets{};
 			std::future<std::vector<Prepared>> Result{};
 			std::chrono::steady_clock::time_point StartTime{};
 		};
@@ -69,8 +78,10 @@ namespace Helios
 		void StartBuild(bool allow_async);
 		/* 后台那批编完了就整批换上；wait 为真时等它编完。返回是否已经没有在编的批次 */
 		bool FinishBuild(bool wait);
+		/* 按路径把活着的变体都收进来；找不到就不编 */
+		void CollectTargets(const std::vector<std::string>& paths, std::vector<Target>& out) const;
 		/* 逐个建好待换入的实例，可在后台线程跑 */
-		static std::vector<Prepared> BuildBatch(const std::vector<std::string>& paths);
+		static std::vector<Prepared> BuildBatch(const std::vector<Target>& targets);
 		/* 同一帧把整批换进活着的对象，返回真正换了内容的个数 */
 		size_t CommitBatch(std::vector<Prepared>& batch, double elapsed_ms);
 

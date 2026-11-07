@@ -46,23 +46,6 @@ namespace Helios
 		MaterialPropertySpec PropertySpec{};
 	};
 
-	/* Shader 变体的取值来源。维度写在着色器源码里（配置在 shader，引擎不认识具体名字）：
-	 *   uniform sampler2D u_NormalTexture; // @property @variant(USE_NORMAL)
-	 * 行尾标注绑到那一行的参数；写成 @variant(NAME, external) 的维度不绑参数。 */
-	enum class ShaderVariantSource : uint8_t
-	{
-		Param = 0, /* 值从材质参数派生：贴图看有没有值，数值看是否非零 */
-		External   /* 值由绘制端给：光源类型这类不在材质参数表里的维度 */
-	};
-
-	/* 一条变体维度声明 */
-	struct ShaderVariantSpec
-	{
-		std::string			Name{};      /* define 名，拼成 `#define NAME 值` */
-		std::string			ParamName{}; /* Param 来源时绑定的材质参数名 */
-		ShaderVariantSource	Source{ ShaderVariantSource::Param };
-	};
-
 	/* Shader反射数据：从Shader中`layout(binding = X) uniform sampler2D u_xxx; ` 反射出真实的绑定点  */
 	struct ShaderReflectionData
 	{
@@ -155,11 +138,21 @@ namespace Helios
 	class HELIOS_API DeviceShader
 	{
 	public:
-		DeviceShader(std::string path);
+		DeviceShader(std::string path, ShaderVariantDefines defines = {});
 		virtual ~DeviceShader() = default;
 
 		/* 路径 */
 		const std::string& GetPath() const { return m_Path; }
+
+		/* 编译时用的变体 define：已按源码声明补成全集（声明过没写的补 0，没声明的丢掉） */
+		[[nodiscard]] const ShaderVariantDefines& GetVariantDefines() const { return m_VariantDefines; }
+
+		/* 上次建这个实例花了多少毫秒（读文件加转换，不含驱动编译）；重载时更新 */
+		[[nodiscard]] double GetLoadTimeMs() const { return m_LoadTimeMs; }
+
+		/* 驱动侧编译（Metal 的 MTLLibrary、计算管线）累计耗时。首次绘制才发生，
+		 * 命中转换缓存时它是大头，和转换耗时分开看 */
+		[[nodiscard]] double GetDeviceBuildMs() const { return m_DeviceBuildMs; }
 
 		/* 绑定 */
 		virtual void Bind() = 0;
@@ -192,15 +185,18 @@ namespace Helios
 		bool Reload();
 
 		/* 按路径建一份待换入的实例，可在后台线程调。GPU 侧对象也一并建好，
-		 * 建不出来的实例 ApplyPrepared 会拒收；编译过程抛异常时返回空。 */
-		static SharedPtr<DeviceShader> PrepareReload(const std::string& filepath);
+		 * 建不出来的实例 ApplyPrepared 会拒收；编译过程抛异常时返回空。
+		 * defines 要与被换入的那个实例一致，不然换进去的就是另一个变体。 */
+		static SharedPtr<DeviceShader> PrepareReload(const std::string& filepath,
+			const ShaderVariantDefines& defines = {});
 
 		/* 换入前把 GPU 侧对象建好（Metal 的 library、计算管线），失败则标记无效 */
 		virtual bool BuildDeviceObjects() { return true; }
 
 		/* 把另一份同类型实例的编译产物换进来，只该在主线程调。
-		 * 成功后 prepared 接管旧状态，由调用方销毁；失败则本对象一个字节没动。 */
-		virtual bool ApplyPrepared(DeviceShader& prepared) { (void)prepared; return false; }
+		 * 成功后 prepared 接管旧状态，由调用方销毁；失败则本对象一个字节没动。
+		 * 换入成功连构建状态（变体定义、加载耗时）一起同步，热重载两条路径都走它。 */
+		bool ApplyPrepared(DeviceShader& prepared);
 
 		/* 加载时算好的源码哈希与依赖表（含被 include 的文件）。
 		 * 热重载靠它判断"内容真改了没"与"改的是不是它的依赖"。 */
@@ -244,10 +240,16 @@ namespace Helios
 		static std::vector<ShaderVariantSpec> ParseVariantSpecs(const std::string& source);
 
 		/* 创建Shader */
-		static SharedPtr<DeviceShader> Create(const std::string& filepath);
+		static SharedPtr<DeviceShader> Create(const std::string& filepath, const ShaderVariantDefines& defines = {});
 		static SharedPtr<DeviceShader> Create(const std::string& name, const std::string& vertex_src, const std::string& pixel_src);
 
 	protected:
+		/* 后端各自的换入实现；外部只经 ApplyPrepared */
+		virtual bool ApplyPreparedImpl(DeviceShader& prepared) { (void)prepared; return false; }
+
+		/* 驱动侧编译的耗时累加，后端在建 library / 管线时调 */
+		void AddDeviceBuildMs(double milliseconds) { m_DeviceBuildMs += milliseconds; }
+
 		void ReflectFromSPIRV(const std::vector<uint32_t>& spirv);
 		void ReflectFromGLSLSource(const std::string& source);
 		/* 从顶点阶段源码收集 layout(location = N) in 的属性声明 */
@@ -255,6 +257,12 @@ namespace Helios
 
 		/* 文件路径 */
 		std::string m_Path{};
+		/* 编译时用的变体 define：热重载要按同一份重编，不能退回不带变体的版本 */
+		ShaderVariantDefines m_VariantDefines{};
+		/* 建实例的耗时（毫秒），Create 里填 */
+		double m_LoadTimeMs{ 0.0 };
+		/* 驱动侧编译累计耗时（毫秒），后端建 library / 管线时累加 */
+		double m_DeviceBuildMs{ 0.0 };
 		/* Shader 反射数据（由各后端在编译/链接阶段填充） */
 		ShaderReflectionData m_Reflection{};
 		/* 展开 include 后各阶段源码的哈希（加载与重载时填） */

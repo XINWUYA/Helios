@@ -25,6 +25,8 @@ namespace Helios
 		/* 脚本执行顺序：全场景脚本挂载点的 Order 总表（从 Scripts 菜单打开，默认不占布局） */
 		inline constexpr const char* kScriptOrder    = "Script Order";
 		inline constexpr const char* kEditorCamera   = "Editor Camera";
+		/* 着色器变体：源码声明的维度、已加载的变体与各自加载耗时 */
+		inline constexpr const char* kShaderVariants = "Shader Variants";
 
 		/* 默认停靠的语义槽位，与 BuildDefaultLayout 里的 DockNode 划分一一对应 */
 		enum class DockSlot : uint8_t
@@ -71,6 +73,8 @@ namespace Helios
 				"Live read-only parameters of the scene editor camera" },
 			{ kScriptOrder,     DockSlot::Floating,     Menu::Scripts, "Script Order",   false,
 				"Global script execution order, sorted by Order" },
+			{ kShaderVariants,  DockSlot::Floating,     Menu::Window,  "Shader Variants", false,
+				"Declared variant dimensions and loaded variants per shader" },
 		};
 
 		/* 窗口开关的唯一存放处：PanelWindow、菜单和各层读写的都是这一份。

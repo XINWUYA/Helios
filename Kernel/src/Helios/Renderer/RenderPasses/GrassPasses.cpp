@@ -150,7 +150,9 @@ namespace Helios::GrassDraw
 			|| chunk_list == nullptr || !api->SupportsCompute())
 			return false;
 
-		static BuiltinAsset<DeviceShader> s_cull_shader("Shaders/Compute/GrassIndirectCull.glsl");
+		/* 同一份着色器的块表变体，见文件里的 @variant */
+		static BuiltinAsset<DeviceShader> s_cull_shader("Shaders/Compute/GrassIndirectCull.glsl",
+			ShaderVariantConfig{ ShaderVariantDefines{ { "GRASS_CULL_CHUNKED", 1 } } });
 		const SharedPtr<DeviceShader> shader = s_cull_shader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
@@ -183,7 +185,9 @@ namespace Helios::GrassDraw
 			|| chunk_bounds == nullptr || instance_count == 0 || !api->SupportsCompute())
 			return false;
 
-		static BuiltinAsset<DeviceShader> s_cull_full_shader("Shaders/Compute/GrassIndirectCullFull.glsl");
+		/* 同一份着色器的逐实例变体：不做块级预剔，自己测视锥 */
+		static BuiltinAsset<DeviceShader> s_cull_full_shader("Shaders/Compute/GrassIndirectCull.glsl",
+			ShaderVariantConfig{ ShaderVariantDefines{ { "GRASS_CULL_CHUNKED", 0 } } });
 		const SharedPtr<DeviceShader> shader = s_cull_full_shader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;

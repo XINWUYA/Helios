@@ -1,18 +1,25 @@
 #include "Pch.h"
 #include "ShaderCompiler.h"
 
+#include "Helios/Common/Assert.h"
 #include "Helios/Common/Utils.h"
+#include "Helios/Renderer/ShaderAnnotation.h"
 #include "Helios/Scene/SceneCommon.h"
 
 #include <xxhash.h>
 #include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <optional>
 #include <regex>
 #include <sstream>
 #include <thread>
+#include <unordered_set>
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
 #include <SPIRV/GlslangToSpv.h>
@@ -684,6 +691,222 @@ namespace Helios
             return mutex;
         }
 
+        /* 同一份着色器的同一个维度只报一次 —— 热重载一遍遍重编，不能跟着刷屏 */
+        bool FirstReport(const std::string& filepath, const std::string& name)
+        {
+            static std::mutex mutex;
+            static std::unordered_set<std::string> reported;
+
+            std::lock_guard lock(mutex);
+            return reported.insert(filepath + "#" + name).second;
+        }
+
+        /* 未声明维度在 Debug 下断点，编辑器里拼错名字会当场停下。自检要故意构造这种请求
+         * 验证丢弃规则，跑回归时用 HELIOS_VARIANT_STRICT=0 关掉。 */
+        bool VariantStrictEnabled()
+        {
+            static const bool enabled = []
+            {
+                const char* value = std::getenv("HELIOS_VARIANT_STRICT");
+                return value == nullptr || std::strcmp(value, "0") != 0;
+            }();
+            return enabled;
+        }
+
+        /* 请求了源码没声明的变体维度：已经丢掉，这里报错。维度名写死在 pass 代码里，
+         * 拼错就是 bug，不该静默。 */
+        void ReportUnknownVariantDefines(const std::string& filepath, const std::vector<std::string>& names)
+        {
+            const std::string filename = std::filesystem::path(filepath).filename().string();
+            for (const std::string& name : names)
+            {
+                if (!FirstReport(filepath, name))
+                    continue;
+
+                CORE_LOG_ERROR("[Shader] {} requests undeclared variant dimension '{}'", filename, name);
+#ifdef HELIOS_DEBUG
+                /* 热重载时"先删 shader 声明、后改 pass 调用"会先命中这里，两处要一起改 */
+                if (VariantStrictEnabled())
+                    Break();
+#endif
+            }
+        }
+
+        /* 维度目前只有开关量：传 2 这类值没有意义，只会多编一份和 0 不一样的源码 */
+        void ReportVariantValueOutOfRange(const std::string& filepath, const ShaderVariantDefines& requested)
+        {
+            const std::string filename = std::filesystem::path(filepath).filename().string();
+            for (const auto& [name, value] : requested)
+            {
+                if ((value == 0 || value == 1) || !FirstReport(filepath, name + "#value"))
+                    continue;
+                CORE_LOG_WARN("[Shader] Variant '{}' of {} = {}, only 0 / 1 are supported", name, filename, value);
+            }
+        }
+
+        /* 材质参数驱动的维度只剩解析，没有求值：行尾写 @variant 会被当成 param 维度，
+         * 值永远是 0。提示一次，别让人以为已经接上了。 */
+        void ReportUnsupportedParamVariants(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
+        {
+            const std::string filename = std::filesystem::path(filepath).filename().string();
+            for (const ShaderVariantSpec& spec : specs)
+            {
+                if (spec.Source != ShaderVariantSource::Param || !FirstReport(filepath, spec.Name + "#param"))
+                    continue;
+                CORE_LOG_WARN("[Shader] Variant '{}' of {} is bound to a material parameter, "
+                    "which is not supported yet; value stays 0", spec.Name, filename);
+            }
+        }
+
+        /* 声明过的维度只能用 #if X 判断。补全默认值后 #define X 0 总会存在，
+         * #ifdef X 与 defined(X) 恒为真，扫到就提示改写法。 */
+        void ReportVariantConditionalMisuse(const std::string& filepath,
+            const std::unordered_map<ShaderCompiler::ShaderStage, std::string>& stage_sources,
+            const std::vector<ShaderVariantSpec>& specs)
+        {
+            const std::string filename = std::filesystem::path(filepath).filename().string();
+
+            /* 前缀匹配要卡词边界，别让 USE 命中 USE_NORMAL */
+            const auto contains_word = [](const std::string& source, const std::string& pattern)
+            {
+                size_t pos = source.find(pattern);
+                while (pos != std::string::npos)
+                {
+                    const size_t next = pos + pattern.size();
+                    if (next >= source.size())
+                        return true;
+                    const unsigned char ch = static_cast<unsigned char>(source[next]);
+                    if (!std::isalnum(ch) && ch != '_')
+                        return true;
+                    pos = source.find(pattern, pos + 1);
+                }
+                return false;
+            };
+
+            for (const ShaderVariantSpec& spec : specs)
+            {
+                const std::string ifdef_pattern = "#ifdef " + spec.Name;
+                const std::string ifndef_pattern = "#ifndef " + spec.Name;
+                const std::string defined_pattern = "defined(" + spec.Name + ")";
+
+                bool found = false;
+                for (const auto& entry : stage_sources)
+                {
+                    const std::string& source = entry.second;
+                    if (contains_word(source, ifdef_pattern) || contains_word(source, ifndef_pattern)
+                        || source.find(defined_pattern) != std::string::npos)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (found && FirstReport(filepath, spec.Name + "#ifdef"))
+                {
+                    CORE_LOG_WARN("[Shader] Variant '{}' of {} is tested with #ifdef/defined(), "
+                        "which is always true; use #if {} instead", spec.Name, filename, spec.Name);
+                }
+            }
+        }
+
+        /* 缓存目录的清理。产物按内容哈希命名，改一次源码就换一批文件名，所以不能按写入
+         * 时间删 —— 那些每次启动都在用的稳定着色器反而是最老的。规则是"多久没被读过"：
+         * 命中缓存时刷新修改时间（见 TryLoadCache），超过下面的天数才删。 */
+        void TrimCache(const std::filesystem::path& dir)
+        {
+            /* 30 天没用过就删。UE 本地 DDC 的 UnusedFileAge 默认 15 天，编辑器项目改得慢，放宽一倍 */
+            constexpr int64_t kUnusedDays = 30;
+            /* 容量兜底：天数没到但文件堆太多时，仍然按最久没用删到八成 */
+            constexpr uint64_t kMaxBytes = 256ull * 1024ull * 1024ull;
+            constexpr size_t kMaxFiles = 4000;
+            /* 扫描间隔：编译本身已经是几十毫秒级，扫目录也压到三十秒最多一次 */
+            constexpr int64_t kTrimIntervalMs = 30000;
+
+            static std::atomic<int64_t> last_trim_ms{ 0 };
+            const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now_ms - last_trim_ms.load(std::memory_order_relaxed) < kTrimIntervalMs)
+                return;
+            last_trim_ms.store(now_ms, std::memory_order_relaxed);
+
+            struct CacheEntry
+            {
+                std::filesystem::path Path;
+                uint64_t Size{ 0 };
+                std::filesystem::file_time_type Stamp{};
+            };
+
+            std::error_code error;
+            std::vector<CacheEntry> files;
+            uint64_t total_bytes = 0;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(dir, error))
+            {
+                if (error)
+                    break;
+                if (!entry.is_regular_file(error) || error)
+                {
+                    error.clear();
+                    continue;
+                }
+
+                CacheEntry item;
+                item.Path = entry.path();
+                item.Size = entry.file_size(error);
+                item.Stamp = entry.last_write_time(error);
+                error.clear();
+
+                total_bytes += item.Size;
+                files.push_back(std::move(item));
+            }
+
+            /* 超过天数没读过的先删掉 */
+            const auto unused_edge = std::filesystem::file_time_type::clock::now()
+                - std::chrono::hours(24 * kUnusedDays);
+            size_t removed_unused = 0;
+            for (const CacheEntry& item : files)
+            {
+                if (item.Stamp >= unused_edge)
+                    continue;
+
+                std::error_code remove_error;
+                if (!std::filesystem::remove(item.Path, remove_error))
+                    continue;
+
+                ++removed_unused;
+                total_bytes = (total_bytes > item.Size) ? total_bytes - item.Size : 0;
+            }
+
+            const size_t remaining = files.size() - removed_unused;
+            size_t removed_capacity = 0;
+            if (remaining > kMaxFiles || total_bytes > kMaxBytes)
+            {
+                std::sort(files.begin(), files.end(),
+                    [](const CacheEntry& a, const CacheEntry& b) { return a.Stamp < b.Stamp; });
+
+                /* 删到八成：留出余量，不然每次保存都会再触发一遍 */
+                const size_t target_files = kMaxFiles * 8 / 10;
+                const uint64_t target_bytes = kMaxBytes * 8 / 10;
+                for (const CacheEntry& item : files)
+                {
+                    if (remaining - removed_capacity <= target_files && total_bytes <= target_bytes)
+                        break;
+                    if (item.Stamp < unused_edge)
+                        continue; /* 上一轮删过的不重复处理 */
+
+                    std::error_code remove_error;
+                    if (!std::filesystem::remove(item.Path, remove_error))
+                        continue;
+
+                    ++removed_capacity;
+                    total_bytes = (total_bytes > item.Size) ? total_bytes - item.Size : 0;
+                }
+            }
+
+            const size_t removed = removed_unused + removed_capacity;
+            if (removed > 0)
+                CORE_LOG_INFO("[Shader] Cache trimmed: {} unused, {} over quota, {} files / {} MB left",
+                    removed_unused, removed_capacity, files.size() - removed, total_bytes / (1024 * 1024));        }
+
         /* `#include "x"` 或 `#include <x>` 的路径；不是 include 行返回 false。
          * 原来每行跑两次 regex_search，改手写前缀匹配（规则一致：只认空格、路径非空）。 */
         [[nodiscard]] bool ParseIncludeLine(const std::string& line, std::string& out_path)
@@ -1017,8 +1240,45 @@ namespace Helios
             return stage_sources;
 
         PreProcessShaderSrc(source, stage_sources);
-        InjectVariantDefines(stage_sources, defines);
+
+        /* 变体声明从展开后的源码里读（可能写在 include 里）。按固定阶段顺序收集，
+         * 同一维度在多个阶段声明时先到者定，结果不随容器遍历顺序变。 */
+        std::vector<ShaderVariantSpec> variant_specs;
+        for (const ShaderStage stage : { ShaderStage::Vertex, ShaderStage::Fragment, ShaderStage::Compute })
+        {
+            const auto stage_it = stage_sources.find(stage);
+            if (stage_it == stage_sources.end())
+                continue;
+
+            for (const ShaderVariantSpec& spec : ShaderAnnotation::ParseVariantSpecs(stage_it->second))
+            {
+                const bool exists = std::any_of(variant_specs.begin(), variant_specs.end(),
+                    [&spec](const ShaderVariantSpec& known) { return known.Name == spec.Name; });
+                if (!exists)
+                    variant_specs.push_back(spec);
+            }
+        }
+
+        /* 补成声明全集再注入：声明过没请求的补 0，请求了没声明的丢掉。
+         * 这样"全默认"的空表与显式写 0 是同一份源码，拼错的维度名也不会静默多编一份。 */
+        std::vector<std::string> unknown_defines;
+        const ShaderVariantDefines normalized =
+            ShaderAnnotation::NormalizeVariantDefines(variant_specs, defines, &unknown_defines);
+
+        /* 声明与取值的几处约定，都在这里一次报完 */
+        ReportUnknownVariantDefines(filepath, unknown_defines);
+        ReportVariantValueOutOfRange(filepath, defines);
+        ReportUnsupportedParamVariants(filepath, variant_specs);
+        ReportVariantConditionalMisuse(filepath, stage_sources, variant_specs);
+
+        InjectVariantDefines(stage_sources, normalized);
         PrepareStageSources(stage_sources, target, ExtractFilename(filepath));
+
+        if (info != nullptr)
+        {
+            info->VariantSpecs = std::move(variant_specs);
+            info->VariantDefines = normalized;
+        }
 
         if (info != nullptr && !stage_sources.empty())
         {
@@ -1145,6 +1405,11 @@ namespace Helios
         return ss.str();
     }
 
+    const char* ShaderCompiler::TranslatorVersion()
+    {
+        return kTranslatorVersion;
+    }
+
     std::string ShaderCompiler::HashDependencies(const std::vector<std::string>& dependencies)
     {
         std::vector<std::pair<std::string, std::string>> contents;
@@ -1185,6 +1450,11 @@ namespace Helios
 
     std::filesystem::path ShaderCompiler::GetCacheDirectory(ShaderTarget target)
     {
+        /* 自检用：产物写到临时目录，不往项目缓存里留夹具和测试着色器 */
+        if (const char* override_dir = std::getenv("HELIOS_SHADER_CACHE_DIR");
+            override_dir != nullptr && override_dir[0] != '\0')
+            return std::filesystem::path(override_dir) / TargetToString(target);
+
         return g_ProjectPath / "Cache/Shaders" / TargetToString(target);
     }
 
@@ -1201,6 +1471,14 @@ namespace Helios
         output.resize(size);
         in.read(output.data(), size);
         in.close();
+
+        /* 命中就是"这份产物还在用"：刷新修改时间，清理按它判多久没被读过。
+         * 一天最多写一次，避免每次启动给几百个文件各改一遍时间戳。 */
+        std::error_code error;
+        const auto now = std::filesystem::file_time_type::clock::now();
+        const auto stamp = std::filesystem::last_write_time(cache_path, error);
+        if (!error && now - stamp > std::chrono::hours(24))
+            std::filesystem::last_write_time(cache_path, now, error);
         return true;
     }
 
@@ -1232,6 +1510,8 @@ namespace Helios
         std::filesystem::rename(temp_path, cache_path, error);
         if (error)
             std::filesystem::remove(temp_path, error);
+
+        TrimCache(dir);
     }
 
     bool ShaderCompiler::CompileInternal(const std::string& source, ShaderStage stage, ShaderTarget target,

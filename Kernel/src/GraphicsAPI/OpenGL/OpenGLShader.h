@@ -7,7 +7,7 @@ namespace Helios
 	class OpenGLShader : public DeviceShader
 	{
 	public:
-		OpenGLShader(const std::string& filepath);
+		OpenGLShader(const std::string& filepath, const ShaderVariantDefines& defines = {});
 		OpenGLShader(std::string name, const std::string& vertex_src, const std::string& pixel_src);
 		~OpenGLShader() override;
 
@@ -35,7 +35,7 @@ namespace Helios
 		[[nodiscard]] uint32_t GetThreadGroupSize() const override { return m_ThreadGroupSize; }
 
 		/* 换入另一份实例的 program 与反射。GL 的调用要落在有上下文的线程，只该在主线程用 */
-		bool ApplyPrepared(DeviceShader& prepared) override;
+		bool ApplyPreparedImpl(DeviceShader& prepared) override;
 
 		/* 构造是否成功编出了 program（语法错误时为假） */
 		[[nodiscard]] bool IsValid() const { return m_ProgramID != 0 && !m_CompileFailed; }

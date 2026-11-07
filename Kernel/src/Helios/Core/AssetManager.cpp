@@ -14,10 +14,10 @@
 
 namespace Helios
 {
-	/* Shader: 从路径加载 */
-	SharedPtr<DeviceShader> AssetFactory<DeviceShader>::Create(const std::string& path)
+	/* Shader: 从路径加载，带上变体 define */
+	SharedPtr<DeviceShader> AssetFactory<DeviceShader>::Create(const std::string& path, const LoadConfig& config)
 	{
-		return DeviceShader::Create(path);
+		return DeviceShader::Create(path, config.Defines);
 	}
 
 	/* 纹理: 从路径加载（加载参数由贴图自身的 .texmeta 决定） */
@@ -85,7 +85,23 @@ namespace Helios
 			asset = AssetFactory<AssetType>::Create(path, effective);
 
 		if (asset != nullptr)
+		{
+			/* 资源可能把配置补全过（着色器变体按源码声明补成全集）：按实例实际生效的配置归键。
+			 * 同一语义换个写法（空表与显式写 0）会命中这里，直接复用已有实例。 */
+			if constexpr (requires { LoadConfig{ asset->GetVariantDefines() }; })
+			{
+				const LoadConfig actual{ asset->GetVariantDefines() };
+				const std::string actual_key = MakeKey(path, actual);
+				const auto existing = m_AssetMap.find(actual_key);
+				if (existing != m_AssetMap.end())
+					return existing->second.Asset;
+
+				m_AssetMap[actual_key] = { asset, actual, path, load_config };
+				return asset;
+			}
+
 			m_AssetMap[key] = { asset, effective, path, load_config };
+		}
 		return asset;
 	}
 
@@ -223,7 +239,7 @@ namespace Helios
 	}
 
 	/* 显式实例化资源缓存, 供外部链接使用 */
-	template class HELIOS_API AssetStore<DeviceShader, NoConfig>;
+	template class HELIOS_API AssetStore<DeviceShader, ShaderVariantConfig>;
 	template class HELIOS_API AssetStore<DeviceTexture, NoConfig>;
 	template class HELIOS_API AssetStore<Model, NoConfig>;
 	template class HELIOS_API AssetStore<Material, NoConfig>;

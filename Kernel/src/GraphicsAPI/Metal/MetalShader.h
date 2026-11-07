@@ -32,7 +32,7 @@ namespace Helios
     class MetalShader : public DeviceShader
     {
     public:
-        MetalShader(const std::string& filepath);
+        MetalShader(const std::string& filepath, const ShaderVariantDefines& defines = {});
         MetalShader(std::string name, const std::string& vertex_src, const std::string& pixel_src);
         ~MetalShader() override;
 
@@ -82,7 +82,7 @@ namespace Helios
         [[nodiscard]] uint32_t GetThreadGroupSize() const override { return m_ThreadGroupSize; }
 
         /* 换入另一份实例的编译产物：失败保持原样，成功后代价只有交换本身 */
-        bool ApplyPrepared(DeviceShader& prepared) override;
+        bool ApplyPreparedImpl(DeviceShader& prepared) override;
 
         /* 后台把 library 与计算管线建好，Metal 编不过 MSL 时在换入前就判失败 */
         bool BuildDeviceObjects() override;

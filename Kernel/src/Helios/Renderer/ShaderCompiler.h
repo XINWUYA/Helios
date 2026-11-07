@@ -19,6 +19,11 @@ namespace Helios
         std::string RawHash{};
         /* 递归展开到的全部文件（主文件排在最前，去重后的绝对路径） */
         std::vector<std::string> Dependencies{};
+        /* 源码里声明的变体维度（含 include，按阶段顺序合并，同名先到） */
+        std::vector<ShaderVariantSpec> VariantSpecs{};
+        /* 规范化后的变体 define：声明过的维度都有值，没声明的已经丢掉。
+         * 实例要按这份记，热重载才能用同一套 define 重编。 */
+        ShaderVariantDefines VariantDefines{};
     };
 
     /* 编辑器也要用它读依赖（属性面板列 include），所以跨模块导出 */
@@ -62,8 +67,9 @@ namespace Helios
             bool write_uniform_locations, std::string& error_msg);
 
         /* 后端统一从这里拿各阶段源码：读文件、展开 include、按 #type 拆阶段，再插变体 define、
-         * 自动分配槽位。defines 为空时与不带变体的行为完全一致。
-         * info 非空时输出内容哈希与依赖表（加载完成后不再重读文件）。
+         * 自动分配槽位。defines 会先按源码里的 @variant 声明补成全集 —— 声明过没请求的补 0，
+         * 请求了没声明的丢掉并告警，所以空表与显式写 0 是同一份源码。
+         * info 非空时输出内容哈希、依赖表与规范化后的 define（加载完成后不再重读文件）。
          * 读取或分配失败只打日志；读不到文件时返回空表。 */
         static std::unordered_map<ShaderStage, std::string> LoadStageSources(const std::string& filepath,
             ShaderTarget target, const ShaderVariantDefines& defines = {}, ShaderSourceInfo* info = nullptr);
@@ -82,6 +88,10 @@ namespace Helios
 
         /* 源码内容哈希（含翻译器版本），编译缓存按它命名 */
         static std::string ComputeHash(const std::string& source);
+
+        /* 翻译规则版本。转换产物按内容哈希命名，只有改了翻译规则的存量产物会失效，
+         * 管线缓存这类整份存档靠它判断要不要重建。 */
+        static const char* TranslatorVersion();
 
     private:
         /* 一次读取的上下文：依赖表、各文件原始字节、当前 include 链（查循环用） */

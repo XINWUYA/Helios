@@ -93,11 +93,13 @@ namespace Helios
 			paths.push_back(shader->GetPath());
 		}
 
-		if (paths.empty())
+		std::vector<Target> targets;
+		CollectTargets(paths, targets);
+		if (targets.empty())
 			return 0;
 
 		const auto start_time = std::chrono::steady_clock::now();
-		std::vector<Prepared> batch = BuildBatch(paths);
+		std::vector<Prepared> batch = BuildBatch(targets);
 		return CommitBatch(batch, ElapsedMs(start_time));
 	}
 
@@ -163,18 +165,25 @@ namespace Helios
 		for (const std::string& path : paths)
 			RecordStamps(m_Watches[path]);
 
+		/* 一条路径可能挂着几个变体，各自带自己的 define 编 */
+		std::vector<Target> targets;
+		CollectTargets(paths, targets);
+		if (targets.empty())
+			return;
+
 		if (!allow_async || Renderer::CurrentAPI() != RenderAPI::Metal)
 		{
 			const auto start_time = std::chrono::steady_clock::now();
-			std::vector<Prepared> batch = BuildBatch(paths);
+			std::vector<Prepared> batch = BuildBatch(targets);
 			CommitBatch(batch, ElapsedMs(start_time));
 			return;
 		}
 
 		Build build;
-		build.Paths = paths;
+		build.Targets = targets;
 		build.StartTime = std::chrono::steady_clock::now();
-		build.Result = std::async(std::launch::async, [paths]() { return BuildBatch(paths); });
+		build.Result = std::async(std::launch::async,
+			[targets]() { return BuildBatch(targets); });
 		m_Building = std::move(build);
 	}
 
@@ -195,23 +204,41 @@ namespace Helios
 		return true;
 	}
 
-	std::vector<ShaderReloader::Prepared> ShaderReloader::BuildBatch(const std::vector<std::string>& paths)
+	void ShaderReloader::CollectTargets(const std::vector<std::string>& paths, std::vector<Target>& out) const
+	{
+		out.clear();
+		if (paths.empty())
+			return;
+
+		/* 一份源码可能挂着几个变体：按路径把活着的实例都收进来，各自带自己的 define 重编 */
+		for (const SharedPtr<DeviceShader>& shader : AssetManager::Instance().GetAll<DeviceShader>())
+		{
+			if (!IsReloadable(shader))
+				continue;
+			if (std::find(paths.begin(), paths.end(), shader->GetPath()) == paths.end())
+				continue;
+			out.push_back({ shader->GetPath(), shader->GetVariantDefines() });
+		}
+	}
+
+	std::vector<ShaderReloader::Prepared> ShaderReloader::BuildBatch(const std::vector<Target>& targets)
 	{
 		std::vector<Prepared> batch;
-		batch.reserve(paths.size());
-		for (const std::string& path : paths)
-			batch.push_back({ path, DeviceShader::PrepareReload(path) });
+		batch.reserve(targets.size());
+		for (const Target& target : targets)
+			batch.push_back({ target.Path, target.Defines,
+				DeviceShader::PrepareReload(target.Path, target.Defines) });
 		return batch;
 	}
 
 	size_t ShaderReloader::CommitBatch(std::vector<Prepared>& batch, double elapsed_ms)
 	{
-		/* 编译期间着色器可能已被清出缓存，按路径找活着的那个 */
-		std::unordered_map<std::string, SharedPtr<DeviceShader>> live;
+		/* 编译期间着色器可能已被清出缓存，按路径找活着的那个；同一路径的几个变体靠 define 区分 */
+		std::unordered_map<std::string, std::vector<SharedPtr<DeviceShader>>> live;
 		for (const SharedPtr<DeviceShader>& shader : AssetManager::Instance().GetAll<DeviceShader>())
 		{
 			if (shader != nullptr && !shader->GetPath().empty())
-				live.emplace(shader->GetPath(), shader);
+				live[shader->GetPath()].push_back(shader);
 		}
 
 		size_t reloaded = 0;
@@ -229,15 +256,27 @@ namespace Helios
 			if (watch != m_Watches.end())
 				AdoptDependencies(watch->second, prepared.Shader->GetDependencies());
 
-			const auto target = live.find(prepared.Path);
-			if (target == live.end())
+			const auto candidates = live.find(prepared.Path);
+			if (candidates == live.end())
 				continue;
 
-			const uint32_t generation_before = target->second->GetGeneration();
-			if (!target->second->ApplyPrepared(*prepared.Shader))
+			SharedPtr<DeviceShader> target;
+			for (const SharedPtr<DeviceShader>& shader : candidates->second)
+			{
+				if (shader->GetVariantDefines() == prepared.Defines)
+				{
+					target = shader;
+					break;
+				}
+			}
+			if (target == nullptr)
 				continue;
 
-			if (target->second->GetGeneration() != generation_before)
+			const uint32_t generation_before = target->GetGeneration();
+			if (!target->ApplyPrepared(*prepared.Shader))
+				continue;
+
+			if (target->GetGeneration() != generation_before)
 			{
 				++reloaded;
 				CORE_LOG_INFO("[Shader] Reloaded {}", std::filesystem::path(prepared.Path).filename().string());
@@ -276,7 +315,10 @@ namespace Helios
 		if (std::find(m_Pending.begin(), m_Pending.end(), path) != m_Pending.end())
 			return true;
 
-		return m_Building.has_value()
-			&& std::find(m_Building->Paths.begin(), m_Building->Paths.end(), path) != m_Building->Paths.end();
+		if (!m_Building.has_value())
+			return false;
+
+		return std::any_of(m_Building->Targets.begin(), m_Building->Targets.end(),
+			[&path](const Target& target) { return target.Path == path; });
 	}
 }

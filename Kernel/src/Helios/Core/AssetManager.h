@@ -8,6 +8,7 @@
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/Common.h"
 #include "Helios/Common/Export.h"
+#include "Helios/Renderer/RenderCommon.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 
 namespace Helios
@@ -29,12 +30,12 @@ namespace Helios
 	template<typename AssetType>
 	struct AssetFactory;
 
-	/* Shader: 无加载配置 */
+	/* Shader: 加载配置就是变体 define 表，同一份源码的不同变体各存一份 */
 	template<>
 	struct AssetFactory<DeviceShader>
 	{
-		using LoadConfig = NoConfig;
-		static SharedPtr<DeviceShader> Create(const std::string& path);
+		using LoadConfig = ShaderVariantConfig;
+		static SharedPtr<DeviceShader> Create(const std::string& path, const LoadConfig& config);
 	};
 
 	/* 纹理: 无加载配置（加载参数只来自贴图自身的 .texmeta） */
@@ -138,7 +139,7 @@ namespace Helios
 	};
 
 	/* AssetStore显式实例化声明 */
-	extern template class AssetStore<DeviceShader, NoConfig>;
+	extern template class AssetStore<DeviceShader, ShaderVariantConfig>;
 	extern template class AssetStore<DeviceTexture, NoConfig>;
 	extern template class AssetStore<Model, NoConfig>;
 	extern template class AssetStore<Material, NoConfig>;
@@ -224,8 +225,15 @@ namespace Helios
 	template<typename AssetType>
 	class BuiltinAsset
 	{
+		using LoadConfig = typename AssetFactory<AssetType>::LoadConfig;
+
 	public:
 		explicit BuiltinAsset(const char* relative_path) : m_RelativePath(relative_path) {}
+
+		/* 带加载配置的句柄：只有配置不是 NoConfig 的资源用得上（着色器变体） */
+		BuiltinAsset(const char* relative_path, LoadConfig config)
+			requires (!std::is_same_v<LoadConfig, NoConfig>)
+			: m_RelativePath(relative_path), m_Config(std::move(config)) {}
 
 		SharedPtr<AssetType> Get()
 		{
@@ -233,8 +241,11 @@ namespace Helios
 			const uint32_t generation = GetProjectPathGeneration();
 			if (asset == nullptr || generation != m_Generation)
 			{
-				asset = AssetManager::Instance().GetOrLoad<AssetType>(
-					PathToUtf8(ResolveAssetPath(PathFromUtf8(m_RelativePath))));
+				const std::string path = PathToUtf8(ResolveAssetPath(PathFromUtf8(m_RelativePath)));
+				if constexpr (std::is_same_v<LoadConfig, NoConfig>)
+					asset = AssetManager::Instance().GetOrLoad<AssetType>(path);
+				else
+					asset = AssetManager::Instance().GetOrLoad<AssetType>(path, m_Config);
 				m_Asset = asset;
 				m_Generation = generation;
 			}
@@ -243,6 +254,7 @@ namespace Helios
 
 	private:
 		const char* m_RelativePath;
+		LoadConfig m_Config{};
 		WeakPtr<AssetType> m_Asset;
 		uint32_t m_Generation{ 0 };
 	};

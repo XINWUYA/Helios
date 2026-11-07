@@ -144,10 +144,6 @@ namespace Helios
 		 * shader，声明过的采样器必须每个都有绑定（Metal 校验会直接断言）。 */
 		[[nodiscard]] std::vector<MaterialParamInfo> CollectMissingTextureParamDefaults() const;
 
-		/* 收集 shader 声明的 Param 变体维度取值：贴图看材质里有没有设、数值看是否非零。
-		 * External 维度不在材质里取，由绘制端补。键有序，可直接拼缓存键。 */
-		[[nodiscard]] ShaderVariantDefines CollectVariantDefines() const;
-
 		/* 采样点缺省时补的默认贴图：法线图按名字认；乘法类（Albedo / Roughness / Ambient）
 		 * 用白，其余用黑。GBuffer 材质转换与材质参数补齐共用这一份判据。 */
 		static SharedPtr<DeviceTexture> DefaultTextureForSampler(const std::string& sampler_name);

@@ -3,20 +3,23 @@
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/ShaderCompiler.h"
 #include "Helios/Renderer/GlslDeclScan.h"
+#include "Helios/Renderer/ShaderAnnotation.h"
 #include "GraphicsAPI/OpenGL/OpenGLShader.h"
 #ifdef PLATFORM_MACOS
 #include "GraphicsAPI/Metal/MetalShader.h"
 #endif
 #include <regex>
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <spirv_cross.hpp>
 
 namespace Helios
 {
 	using namespace GlslScan;
-	DeviceShader::DeviceShader(std::string path)
-		: m_Path(std::move(path))
+	using namespace ShaderAnnotation;
+	DeviceShader::DeviceShader(std::string path, ShaderVariantDefines defines)
+		: m_Path(std::move(path)), m_VariantDefines(std::move(defines))
 	{
 	}
 
@@ -32,23 +35,36 @@ namespace Helios
 	}
 
 	/* 创建Shader */
-	SharedPtr<DeviceShader> DeviceShader::Create(const std::string& filepath)
+	SharedPtr<DeviceShader> DeviceShader::Create(const std::string& filepath, const ShaderVariantDefines& defines)
 	{
+		const auto start_time = std::chrono::steady_clock::now();
+
+		SharedPtr<DeviceShader> shader;
 		switch(Renderer::CurrentAPI())
 		{
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
 		case RenderAPI::OpenGL:
-			return CreateSharedPtr<OpenGLShader>(filepath);
+			shader = CreateSharedPtr<OpenGLShader>(filepath, defines);
+			break;
 #ifdef PLATFORM_MACOS
 		case RenderAPI::Metal:
-			return CreateSharedPtr<MetalShader>(filepath);
+			shader = CreateSharedPtr<MetalShader>(filepath, defines);
+			break;
 #endif
 		default: 
 			CORE_LOG_ERROR("Unknown RenderAPI is unsupported!");
 			return nullptr;
 		}
+
+		/* 加载耗时就记在这里：变体面板要按变体看编译花多久，后端不必各记一份 */
+		if (shader != nullptr)
+		{
+			shader->m_LoadTimeMs = std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - start_time).count();
+		}
+		return shader;
 	}
 
 	/* 创建Shader */
@@ -71,8 +87,20 @@ namespace Helios
 		}
 	}
 
-	/* 依赖文件的原始字节跟加载时一致：读一遍文件就够了，不用展开也不用编译 */
-	bool DeviceShader::ContentUnchanged() const
+	bool DeviceShader::ApplyPrepared(DeviceShader& prepared)
+	{
+		if (!ApplyPreparedImpl(prepared))
+			return false;
+
+		/* 源码可能增删了 @variant 声明：跟着换成这次编译实际用的全集，
+		 * 否则实例会一直按旧维度重编，面板显示的也对不上 */
+		m_VariantDefines = prepared.m_VariantDefines;
+		m_LoadTimeMs = prepared.m_LoadTimeMs;
+		m_DeviceBuildMs = prepared.m_DeviceBuildMs;
+		return true;
+	}
+
+	/* 依赖文件的原始字节跟加载时一致：读一遍文件就够了，不用展开也不用编译 */	bool DeviceShader::ContentUnchanged() const
 	{
 		if (m_RawHash.empty() || m_Dependencies.empty())
 			return false;
@@ -80,12 +108,13 @@ namespace Helios
 		return ShaderCompiler::HashDependencies(m_Dependencies) == m_RawHash;
 	}
 
-	SharedPtr<DeviceShader> DeviceShader::PrepareReload(const std::string& filepath)
+	SharedPtr<DeviceShader> DeviceShader::PrepareReload(const std::string& filepath,
+		const ShaderVariantDefines& defines)
 	{
 		/* 编辑中的源码什么都可能有（比如超长数字让 stoul 抛异常），异常不能漏到调用方 */
 		try
 		{
-			SharedPtr<DeviceShader> prepared = Create(filepath);
+			SharedPtr<DeviceShader> prepared = Create(filepath, defines);
 			if (prepared != nullptr)
 				prepared->BuildDeviceObjects();
 			return prepared;
@@ -119,7 +148,7 @@ namespace Helios
 		const auto start_time = std::chrono::steady_clock::now();
 		const uint32_t generation_before = m_Generation;
 
-		const SharedPtr<DeviceShader> prepared = PrepareReload(m_Path);
+		const SharedPtr<DeviceShader> prepared = PrepareReload(m_Path, m_VariantDefines);
 		if (prepared == nullptr || !ApplyPrepared(*prepared))
 			return false;
 
@@ -247,18 +276,6 @@ namespace Helios
 			}
 		}
 
-		/* 去掉首尾空白 */
-		std::string Trim(const std::string& text)
-		{
-			size_t begin = 0;
-			size_t end = text.size();
-			while (begin < end && std::isspace(static_cast<unsigned char>(text[begin])))
-				++begin;
-			while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1])))
-				--end;
-			return text.substr(begin, end - begin);
-		}
-
 		/* 注释里有没有这条指令：@range 不会命中 @range2（后面必须是括号 / 空白 / 结尾） */
 		bool HasDirective(const std::string& comment, const char* directive)
 		{
@@ -272,78 +289,6 @@ namespace Helios
 				pos = comment.find(directive, after);
 			}
 			return false;
-		}
-
-		/* 取 `@名字(...)` 括号里的文本；没这条指令、或后面没括号时返回空 */
-		std::string DirectiveArg(const std::string& comment, const char* directive)
-		{
-			size_t pos = comment.find(directive);
-			while (pos != std::string::npos)
-			{
-				const size_t after = pos + std::strlen(directive);
-				if (after >= comment.size())
-					return {};
-
-				/* 紧跟空白 = 光秃秃一条指令（如 @property），没有括号参数 */
-				if (std::isspace(static_cast<unsigned char>(comment[after])))
-					return {};
-
-				if (comment[after] == '(')
-				{
-					const size_t close = comment.find(')', after);
-					if (close == std::string::npos)
-						return {};
-					return Trim(comment.substr(after + 1, close - after - 1));
-				}
-
-				pos = comment.find(directive, after);
-			}
-			return {};
-		}
-
-		/* 按逗号拆参数（保留空项，交给调用方判长度） */
-		std::vector<std::string> SplitArgs(const std::string& text)
-		{
-			std::vector<std::string> args;
-			size_t begin = 0;
-			while (true)
-			{
-				const size_t comma = text.find(',', begin);
-				args.push_back(Trim(text.substr(begin,
-					comma == std::string::npos ? std::string::npos : comma - begin)));
-				if (comma == std::string::npos)
-					break;
-				begin = comma + 1;
-			}
-			return args;
-		}
-
-		/* 行内 uniform 声明的参数名：`uniform sampler2D u_X;` / `layout(...) uniform vec4 u_Y = ...;`。
-		 * uniform 块头（`uniform Xxx {`）没有分号，返回空。 */
-		std::string UniformNameInLine(const std::string& line)
-		{
-			const size_t uniform_pos = line.find("uniform");
-			if (uniform_pos == std::string::npos)
-				return {};
-
-			const size_t semicolon = line.find(';', uniform_pos);
-			if (semicolon == std::string::npos)
-				return {};
-
-			std::string decl = line.substr(uniform_pos + 7, semicolon - uniform_pos - 7);
-			if (const size_t assign = decl.find('='); assign != std::string::npos)
-				decl.erase(assign);
-			if (const size_t bracket = decl.find('['); bracket != std::string::npos)
-				decl.erase(bracket);
-
-			/* 类型之后最后一个标识符就是参数名 */
-			const size_t name_end = decl.find_last_not_of(" \t\r\n");
-			if (name_end == std::string::npos)
-				return {};
-			const size_t name_start = decl.find_last_of(" \t\r\n", name_end);
-			return (name_start == std::string::npos)
-				? decl.substr(0, name_end + 1)
-				: decl.substr(name_start + 1, name_end - name_start);
 		}
 
 		/* 把声明行尾注释解析成面板规范（认不出的指令就当普通注释，不影响参数本身） */
@@ -393,70 +338,13 @@ namespace Helios
 
 			return spec;
 		}
-
-		/* 第二项是不是 external（不区分大小写） */
-		bool IsExternalKeyword(const std::string& text)
-		{
-			static constexpr const char* kExternal = "external";
-			if (text.size() != std::strlen(kExternal))
-				return false;
-			for (size_t i = 0; i < text.size(); ++i)
-			{
-				if (std::tolower(static_cast<unsigned char>(text[i])) != kExternal[i])
-					return false;
-			}
-			return true;
-		}
 	}
 
 	/* 变体维度：逐行找 @variant(NAME) / @variant(NAME, external)。行尾标注绑到该行声明的参数，
 	 * 单独一行或写了 external 的就是外部维度 —— 值不在材质里取。 */
 	std::vector<ShaderVariantSpec> DeviceShader::ParseVariantSpecs(const std::string& source)
 	{
-		std::vector<ShaderVariantSpec> specs;
-		if (source.empty())
-			return specs;
-
-		const auto add = [&specs](ShaderVariantSpec spec)
-		{
-			for (const ShaderVariantSpec& existing : specs)
-			{
-				if (existing.Name == spec.Name)
-					return; /* 同名先到者定 */
-			}
-			specs.push_back(std::move(spec));
-		};
-
-		size_t line_begin = 0;
-		while (line_begin <= source.size())
-		{
-			const size_t line_end = source.find('\n', line_begin);
-			const std::string line = source.substr(line_begin,
-				line_end == std::string::npos ? std::string::npos : line_end - line_begin);
-
-			if (line.find("@variant") != std::string::npos)
-			{
-				const std::vector<std::string> args = SplitArgs(DirectiveArg(line, "@variant"));
-				if (!args.empty() && !args[0].empty())
-				{
-					ShaderVariantSpec spec;
-					spec.Name = args[0];
-					const bool external = args.size() > 1 && IsExternalKeyword(args[1]);
-					if (!external)
-						spec.ParamName = UniformNameInLine(line);
-					/* 绑不到参数的（单独一行写的）自然按外部维度处理 */
-					spec.Source = (external || spec.ParamName.empty())
-						? ShaderVariantSource::External
-						: ShaderVariantSource::Param;
-					add(std::move(spec));
-				}
-			}
-
-			if (line_end == std::string::npos)
-				break;
-			line_begin = line_end + 1;
-		}
-		return specs;
+		return ShaderAnnotation::ParseVariantSpecs(source);
 	}
 
 	void DeviceShader::ReflectFromSPIRV(const std::vector<uint32_t>& spirv)

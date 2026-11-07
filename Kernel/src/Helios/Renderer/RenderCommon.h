@@ -267,9 +267,47 @@ namespace Helios
 		Mat4,
 	};
 
+	/* Shader 变体的取值来源。维度写在着色器源码里（配置在 shader，引擎不认识具体名字）：
+	 *   uniform sampler2D u_NormalTexture; // @property @variant(USE_NORMAL)
+	 * 行尾标注绑到那一行的参数；写成 @variant(NAME, external) 的维度不绑参数。 */
+	enum class ShaderVariantSource : uint8_t
+	{
+		Param = 0, /* 绑定了材质参数，但求值还没接：加载时按 0 编并提示暂不支持 */
+		External   /* 值由绘制端逐笔给：光源类型这类不在材质参数表里的维度 */
+	};
+
+	/* 一条变体维度声明 */
+	struct ShaderVariantSpec
+	{
+		std::string			Name{};      /* define 名，拼成 `#define NAME 值` */
+		std::string			ParamName{}; /* Param 来源时绑定的材质参数名 */
+		ShaderVariantSource	Source{ ShaderVariantSource::Param };
+	};
+
 	/* Shader 变体键：维度名 -> 值。有序，拼缓存键与资产键时顺序稳定。
-	 * 维度本身声明在着色器源码的 @variant 标注里，引擎侧不认识具体名字。 */
+	 * 维度本身声明在着色器源码的 @variant 标注里，引擎侧不认识具体名字。
+	 * 编译前会按声明补成全集（声明过没写补 0，没声明的丢掉），所以"全默认"写空表即可；
+	 * 想命中同一个资源缓存实例，就把声明过的维度都显式写出来。 */
 	using ShaderVariantDefines = std::map<std::string, int>;
+
+	/* Shader 的加载配置：同一份源码按 defines 各存一份，空表就是不带的变体 */
+	struct ShaderVariantConfig
+	{
+		ShaderVariantDefines Defines{};
+
+		/* 资源缓存键用的指纹；Defines 有序，同一个组合每次算出来都一样 */
+		[[nodiscard]] uint64_t Fingerprint() const
+		{
+			uint64_t hash = 1469598103934665603ull;
+			for (const auto& [name, value] : Defines)
+			{
+				for (const char ch : name)
+					hash = (hash ^ static_cast<uint8_t>(ch)) * 1099511628211ull;
+				hash = (hash ^ static_cast<uint64_t>(value)) * 1099511628211ull;
+			}
+			return hash;
+		}
+	};
 
 	/* BlendEquation */
 	enum class BlendEquation : uint8_t

@@ -2,7 +2,11 @@
 
 #include "Pch.h"
 #include "MetalCommon.h"
+#include "Helios/Renderer/ShaderCompiler.h"
 #include "Helios/Scene/SceneCommon.h"
+
+#include <fstream>
+#include <iterator>
 
 namespace Helios
 {
@@ -51,6 +55,61 @@ namespace Helios
             std::filesystem::path PipelineArchivePath()
             {
                 return g_ProjectPath / "Cache/Shaders/PipelineArchive.binary";
+            }
+
+            /* 管线缓存档的容量上限。Metal 的 BinaryArchive 只有 add、没有删条目的接口，
+             * 旧源码版本堆出来的条目只能靠整份丢掉重建来回收。 */
+            constexpr uint64_t kPipelineArchiveMaxBytes = 96ull * 1024 * 1024;
+
+            /* BinaryArchive 是不透明二进制，塞不进自定义元数据，版本单独存一个旁路文件。
+             * 翻译规则变了，存量条目已经对不上新的 MSL 文本，整份重建。 */
+            std::filesystem::path PipelineArchiveVersionPath()
+            {
+                return PipelineArchivePath().parent_path() / "PipelineArchive.version";
+            }
+
+            void WritePipelineArchiveVersion()
+            {
+                const std::filesystem::path path = PipelineArchiveVersionPath();
+                std::error_code error_code;
+                if (path.has_parent_path())
+                    std::filesystem::create_directories(path.parent_path(), error_code);
+
+                std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                if (out)
+                    out << ShaderCompiler::TranslatorVersion();
+            }
+
+            /* 版本对不上、或者档案已经太大，就把档案和版本文件一起删掉，本次运行重新积累 */
+            void ResetPipelineArchiveIfNeeded()
+            {
+                const std::filesystem::path path = PipelineArchivePath();
+                std::error_code error_code;
+                if (!std::filesystem::exists(path, error_code))
+                    return;
+
+                std::string recorded;
+                {
+                    std::ifstream in(PipelineArchiveVersionPath(), std::ios::binary);
+                    if (in)
+                        recorded.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+                }
+
+                uint64_t size = 0;
+                const uint64_t measured = std::filesystem::file_size(path, error_code);
+                if (!error_code)
+                    size = measured;
+
+                const bool version_changed = recorded != ShaderCompiler::TranslatorVersion();
+                const bool oversized = size > kPipelineArchiveMaxBytes;
+                if (!version_changed && !oversized)
+                    return;
+
+                std::filesystem::remove(path, error_code);
+                std::filesystem::remove(PipelineArchiveVersionPath(), error_code);
+                CORE_LOG_INFO("MetalRuntime: pipeline archive reset ({}), {:.1f} MB dropped",
+                    version_changed ? "translator version changed" : "size limit",
+                    static_cast<double>(size) / (1024.0 * 1024.0));
             }
 
             /* 把未落盘的缓存条目写出；失败保留脏标记（下次窗口再试），
@@ -182,6 +241,9 @@ namespace Helios
             if (g_PipelineArchive != nullptr || g_PipelineArchiveUnavailable || g_Device == nullptr)
                 return g_PipelineArchive;
 
+            /* 旧档先过一遍版本与容量：不符就删掉，下面从空档重新积累 */
+            ResetPipelineArchiveIfNeeded();
+
             MTL::BinaryArchiveDescriptor* descriptor = MTL::BinaryArchiveDescriptor::alloc()->init();
             NS::Error* error = nullptr;
 
@@ -202,6 +264,11 @@ namespace Helios
             {
                 g_PipelineArchiveUnavailable = true;
                 CORE_LOG_WARN("MetalRuntime: pipeline archive unavailable, shader compilation cache disabled");
+            }
+            else
+            {
+                /* 加载成功就记下版本：之后没有新条目也能认出这份档属于当前转换规则 */
+                WritePipelineArchiveVersion();
             }
 
             /* 写盘节流从装载时刻起算：启动 / 开场景的编译高峰期内不做整档重写 */

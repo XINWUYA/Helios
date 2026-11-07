@@ -393,8 +393,8 @@ namespace Helios
         return h;
     }
 
-    MetalShader::MetalShader(const std::string& filepath)
-        : DeviceShader(filepath)
+    MetalShader::MetalShader(const std::string& filepath, const ShaderVariantDefines& defines)
+        : DeviceShader(filepath, defines)
     {
         PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
@@ -402,10 +402,12 @@ namespace Helios
 
         ShaderSourceInfo source_info;
         auto shader_sources = ShaderCompiler::LoadStageSources(filepath, ShaderCompiler::ShaderTarget::Metal,
-            {}, &source_info);
+            defines, &source_info);
         m_SourceHash = std::move(source_info.Hash);
         m_RawHash = std::move(source_info.RawHash);
         m_Dependencies = std::move(source_info.Dependencies);
+        /* 按声明规范化过的 define：热重载与变体对账都用这份，不是调用方传的稀疏表 */
+        m_VariantDefines = std::move(source_info.VariantDefines);
         if (shader_sources.empty())
         {
             CORE_LOG_ERROR("Failed to read shader file: {}", filepath);
@@ -491,7 +493,7 @@ namespace Helios
         CORE_LOG_INFO("Metal shader created: {}", m_DebugName);
     }
 
-    bool MetalShader::ApplyPrepared(DeviceShader& prepared)
+    bool MetalShader::ApplyPreparedImpl(DeviceShader& prepared)
     {
         PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
@@ -657,6 +659,8 @@ namespace Helios
         if (device == nullptr)
             return nullptr;
 
+        const auto start_time = std::chrono::steady_clock::now();
+
         if (m_ComputeLibrary == nullptr)
         {
             NS::Error* error = nullptr;
@@ -684,6 +688,9 @@ namespace Helios
         function->release();
         if (m_ComputePipeline == nullptr)
             CORE_LOG_ERROR("Failed to create compute pipeline state: {}", m_DebugName);
+        else
+            AddDeviceBuildMs(std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - start_time).count());
 
         return m_ComputePipeline;
     }
@@ -1438,6 +1445,8 @@ namespace Helios
         }
 
         NS::Error* error = nullptr;
+        const auto start_time = std::chrono::steady_clock::now();
+
         if (!m_VertexLibrary)
         {
             m_VertexLibrary = device->newLibrary(
@@ -1460,6 +1469,9 @@ namespace Helios
             }
         }
 
+        /* 库编译是变体真正的大头（命中转换缓存时尤其明显），单独记一笔给面板 */
+        AddDeviceBuildMs(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start_time).count());
         return true;
     }
 
