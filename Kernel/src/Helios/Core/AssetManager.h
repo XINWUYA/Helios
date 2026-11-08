@@ -90,6 +90,12 @@ namespace Helios
 		/* 获取或创建资源(指定加载配置); 无配置类型时此重载被约束禁用 */
 		SharedPtr<AssetType> GetOrLoad(const std::string& path, const LoadConfig& load_config) requires (!std::is_same_v<LoadConfig, NoConfig>);
 
+		/* 只查缓存不创建：命中返回已有实例，否则空。变体回退要"先看有没有、没编过再决定" */
+		SharedPtr<AssetType> Find(const std::string& path, const LoadConfig& load_config) const requires (!std::is_same_v<LoadConfig, NoConfig>);
+
+		/* 同一份源码已加载的全部变体，按配置指纹排序（变体评分与清单用） */
+		std::vector<SharedPtr<AssetType>> GetAllByPath(const std::string& path) const requires (!std::is_same_v<LoadConfig, NoConfig>);
+
 		/* 按路径重载（只对提供 Reload 的资源类型生效）。加载配置可能因资产设置变化，
 		 * 重载后按新的有效配置重新分键。返回是否至少重载成功一个。 */
 		bool ReloadByPath(const std::string& path);
@@ -195,6 +201,20 @@ namespace Helios
 		{
 			using LoadConfig = typename AssetFactory<AssetType>::LoadConfig;
 			return AssetStore<AssetType, LoadConfig>::Instance().GetAllAssets();
+		}
+
+		/* 只查缓存不创建，没命中返回空 */
+		template<typename AssetType, typename LoadConfig = typename AssetFactory<AssetType>::LoadConfig>
+		SharedPtr<AssetType> Find(const std::string& path, const LoadConfig& load_config)
+		{
+			return AssetStore<AssetType, LoadConfig>::Instance().Find(path, load_config);
+		}
+
+		/* 同一份源码已加载的全部变体 */
+		template<typename AssetType, typename LoadConfig = typename AssetFactory<AssetType>::LoadConfig>
+		std::vector<SharedPtr<AssetType>> GetAllByPath(const std::string& path)
+		{
+			return AssetStore<AssetType, LoadConfig>::Instance().GetAllByPath(path);
 		}
 
 		/* 某类资源已缓存的数量 */

@@ -1,5 +1,7 @@
 ﻿#include "Pch.h"
 #include "AssetManager.h"
+#include <algorithm>
+#include <unordered_set>
 #include "Helios/Profiler/Profiler.h"
 #include <Helios/VirtualDevice/DeviceShader.h>
 #include <Helios/Scene/Model.h>
@@ -94,9 +96,19 @@ namespace Helios
 				const std::string actual_key = MakeKey(path, actual);
 				const auto existing = m_AssetMap.find(actual_key);
 				if (existing != m_AssetMap.end())
+				{
+					/* 换了个写法请求到同一个变体：把这次请求键也指过去，
+					 * 否则下次同样写法又查不到、白建一遍 */
+					if (key != actual_key)
+						m_AssetMap[key] = existing->second;
 					return existing->second.Asset;
+				}
 
-				m_AssetMap[actual_key] = { asset, actual, path, load_config };
+				Entry entry{ asset, actual, path, load_config };
+				m_AssetMap[actual_key] = entry;
+				/* 请求键与补全键一起登记：只写了部分维度的请求下次直接命中 */
+				if (key != actual_key)
+					m_AssetMap[key] = std::move(entry);
 				return asset;
 			}
 
@@ -118,6 +130,47 @@ namespace Helios
 	{
 		std::lock_guard lock(m_Mutex);
 		return GetOrLoadInternal(path, load_config);
+	}
+
+	template<typename AssetType, typename LoadConfig>
+	SharedPtr<AssetType> AssetStore<AssetType, LoadConfig>::Find(const std::string& path, const LoadConfig& load_config) const requires (!std::is_same_v<LoadConfig, NoConfig>)
+	{
+		std::lock_guard lock(m_Mutex);
+
+		/* 与 GetOrLoad 同一套归一化：资源可能把配置补全过，键要按补齐后的算 */
+		LoadConfig effective = load_config;
+		if constexpr (requires { AssetFactory<AssetType>::ResolveConfig(path, load_config); })
+			effective = AssetFactory<AssetType>::ResolveConfig(path, load_config);
+
+		const auto iter = m_AssetMap.find(MakeKey(path, effective));
+		return iter == m_AssetMap.end() ? nullptr : iter->second.Asset;
+	}
+
+	template<typename AssetType, typename LoadConfig>
+	std::vector<SharedPtr<AssetType>> AssetStore<AssetType, LoadConfig>::GetAllByPath(const std::string& path) const requires (!std::is_same_v<LoadConfig, NoConfig>)
+	{
+		std::lock_guard lock(m_Mutex);
+
+		std::vector<const Entry*> entries;
+		std::unordered_set<const AssetType*> seen;
+		for (const auto& [key, entry] : m_AssetMap)
+		{
+			/* 同一份变体挂在两条键上，按实例去重 */
+			if (entry.Path == path && seen.insert(entry.Asset.get()).second)
+				entries.push_back(&entry);
+		}
+
+		/* 按配置指纹排序：评分同分时取先到的，结果不能随容器遍历顺序变 */
+		std::sort(entries.begin(), entries.end(), [](const Entry* a, const Entry* b)
+			{
+				return a->Config.Fingerprint() < b->Config.Fingerprint();
+			});
+
+		std::vector<SharedPtr<AssetType>> result;
+		result.reserve(entries.size());
+		for (const Entry* entry : entries)
+			result.push_back(entry->Asset);
+		return result;
 	}
 
 	template<typename AssetType, typename LoadConfig>
@@ -160,8 +213,14 @@ namespace Helios
 		std::lock_guard lock(m_Mutex);
 		std::vector<SharedPtr<AssetType>> assets;
 		assets.reserve(m_AssetMap.size());
+		/* 同一份资源可能挂在请求键与补全键两条上，按实例去重 */
+		std::unordered_set<const AssetType*> seen;
 		for (const auto& [key, entry] : m_AssetMap)
+		{
+			if (entry.Asset != nullptr && !seen.insert(entry.Asset.get()).second)
+				continue;
 			assets.push_back(entry.Asset);
+		}
 		return assets;
 	}
 
@@ -169,7 +228,10 @@ namespace Helios
 	size_t AssetStore<AssetType, LoadConfig>::GetCount() const
 	{
 		std::lock_guard lock(m_Mutex);
-		return m_AssetMap.size();
+		std::unordered_set<const AssetType*> seen;
+		for (const auto& [key, entry] : m_AssetMap)
+			seen.insert(entry.Asset.get());
+		return seen.size();
 	}
 
 	template<typename AssetType, typename LoadConfig>
