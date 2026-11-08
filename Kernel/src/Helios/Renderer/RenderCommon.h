@@ -282,6 +282,8 @@ namespace Helios
 		std::string			Name{};      /* define 名，拼成 `#define NAME 值` */
 		std::string			ParamName{}; /* Param 来源时绑定的材质参数名 */
 		ShaderVariantSource	Source{ ShaderVariantSource::Param };
+		ParamType			ParamKind{ ParamType::Texture }; /* Param 来源时的参数类型，解析期校验用 */
+		bool				ParamKindKnown{ false };         /* 认不出声明类型时为假 */
 	};
 
 	/* Shader 变体键：维度名 -> 值。有序，拼缓存键与资产键时顺序稳定。
@@ -290,23 +292,29 @@ namespace Helios
 	 * 想命中同一个资源缓存实例，就把声明过的维度都显式写出来。 */
 	using ShaderVariantDefines = std::map<std::string, int>;
 
+	/* 维度取值上限（含）：开关量用 0 / 1，材质模型这类多档维度用中间值。
+	 * 越界会钳到区间内，不许材质里存个离谱数字编出一堆用不上的变体 */
+	static constexpr int ShaderVariantMaxValue = 7;
+
+	/* 变体组合的指纹，资源缓存键用；Defines 有序，同一个组合每次算出来都一样 */
+	inline uint64_t ShaderVariantFingerprint(const ShaderVariantDefines& defines)
+	{
+		uint64_t hash = 1469598103934665603ull;
+		for (const auto& [name, value] : defines)
+		{
+			for (const char ch : name)
+				hash = (hash ^ static_cast<uint8_t>(ch)) * 1099511628211ull;
+			hash = (hash ^ static_cast<uint64_t>(value)) * 1099511628211ull;
+		}
+		return hash;
+	}
+
 	/* Shader 的加载配置：同一份源码按 defines 各存一份，空表就是不带的变体 */
 	struct ShaderVariantConfig
 	{
 		ShaderVariantDefines Defines{};
 
-		/* 资源缓存键用的指纹；Defines 有序，同一个组合每次算出来都一样 */
-		[[nodiscard]] uint64_t Fingerprint() const
-		{
-			uint64_t hash = 1469598103934665603ull;
-			for (const auto& [name, value] : Defines)
-			{
-				for (const char ch : name)
-					hash = (hash ^ static_cast<uint8_t>(ch)) * 1099511628211ull;
-				hash = (hash ^ static_cast<uint64_t>(value)) * 1099511628211ull;
-			}
-			return hash;
-		}
+		[[nodiscard]] uint64_t Fingerprint() const { return ShaderVariantFingerprint(Defines); }
 	};
 
 	/* BlendEquation */

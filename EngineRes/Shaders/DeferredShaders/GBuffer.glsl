@@ -27,7 +27,9 @@ struct SVextex2Frag
 	vec3 Normal;
 	vec4 BaseColor;
 	vec2 TexCoord;
+#if MTL_NORMAL || MTL_PARALLAX
 	vec3 Tangent;
+#endif
 	float ObjectId;
 	float ReceiveShadow;
 	/* 当前帧与上一帧的裁剪空间位置：片元里相除才算得出屏幕位移 */
@@ -57,10 +59,13 @@ void main()
 	vert2frag.ObjectId = a_InstanceParams.x;
 	vert2frag.ReceiveShadow = a_InstanceParams.y;
 
-	/* 法线矩阵：非等比缩放下法线 / 切线要按逆转置矩阵变换 */
+	/* 法线矩阵：非等比缩放下法线 / 切线要按逆转置矩阵变换。
+	 * 切线只有法线图 / 视差档才用得上，关掉就不算也不传 */
 	mat3 normalMat = transpose(inverse(mat3(local2world)));
 	vert2frag.Normal = normalize(normalMat * a_Normal);
+#if MTL_NORMAL || MTL_PARALLAX
 	vert2frag.Tangent = normalize(normalMat * a_Tangent);
+#endif
 }
 
 
@@ -88,7 +93,9 @@ struct SVextex2Frag
 	vec3 Normal;
 	vec4 BaseColor;
 	vec2 TexCoord;
+#if MTL_NORMAL || MTL_PARALLAX
 	vec3 Tangent;
+#endif
 	float ObjectId;
 	float ReceiveShadow;
 	vec4 CurClip;
@@ -101,8 +108,14 @@ void main()
 {
 	/* 材质采样走公共库（与前向材质着色器同一份，见 Builtin/MaterialLit.glsl） */
 	SMaterialInput mtl;
+	/* 变体关掉切线时传零向量，MaterialLit 只在 TBN 分支里读它 */
+#if MTL_NORMAL || MTL_PARALLAX
+	const vec3 world_tangent = vert2frag.Tangent;
+#else
+	const vec3 world_tangent = vec3(0.0f);
+#endif
 	CalculateLitMaterial(mtl, vert2frag.Position, vert2frag.TexCoord,
-		vert2frag.BaseColor, vert2frag.Normal, vert2frag.Tangent);
+		vert2frag.BaseColor, vert2frag.Normal, world_tangent);
 
 	GBufferTexture0 = vec4(mtl.Albedo, mtl.Roughness);
 	/* 法线按 n*0.5+0.5 编码：RGBA8 存不了负值（解码在 GBufferCommon.glsl） */

@@ -3,7 +3,7 @@
 
 /* 地形的调试重绘：Overdraw / Mipmap / Wireframe 档。
  * 地形不进可见网格列表，这三档要单独补一笔才看得到；Surface 类在延迟管线里读 G-Buffer，
- * 前向管线由 TerrainForward.glsl 自己出读数，都不走这里。 */
+ * 前向管线由 Terrain.glsl 的前向变体自己出读数，都不走这里。 */
 layout(location = 0) in vec2 a_Uv;
 layout(location = 5) in vec4 a_PatchInfo;
 layout(location = 6) in vec4 a_PatchLod;

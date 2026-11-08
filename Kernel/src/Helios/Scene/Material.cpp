@@ -7,7 +7,9 @@
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -42,7 +44,115 @@ namespace Helios
 		++m_LayoutRevision;
 		/* Shader更换，binding布局也随之改变，刷新Shader的反射结果 */
 		RefreshTextureBindings();
+		RefreshParamVariants();
 		m_ShaderGeneration = shader != nullptr ? shader->GetGeneration() : 0;
+	}
+
+	/* 从反射里筛出材质参数维度。上限与类型已经在解析时报过，这里只做分类 */
+	void Material::RefreshParamVariants() const
+	{
+		m_ParamVariants.clear();
+		/* 声明换了，之前推导出来的变体全都对不上号 */
+		m_DrawVariants.clear();
+		m_DrawShaderWatchedTextures.clear();
+		if (m_pShader == nullptr)
+			return;
+
+		for (const ShaderVariantSpec& spec : m_pShader->GetReflectionData().VariantSpecs)
+		{
+			if (spec.Source == ShaderVariantSource::Param && !spec.ParamName.empty())
+				m_ParamVariants.push_back({ spec.Name, spec.ParamName });
+		}
+		m_ParamVariantsGeneration = m_pShader->GetGeneration();
+	}
+
+	/* 画用它。没有参数维度又没要求外部维度时就是基础着色器，一次空表判断 */
+	const SharedPtr<DeviceShader>& Material::GetDrawShader(const ShaderVariantDefines& external) const
+	{
+		if (m_pShader == nullptr)
+			return m_pShader;
+
+		/* 热重载可能改了声明（加 / 删维度），换代后重新筛一遍 */
+		const uint32_t generation = m_pShader->GetGeneration();
+		if (generation != m_ParamVariantsGeneration)
+			RefreshParamVariants();
+
+		if (m_ParamVariants.empty() && external.empty())
+			return m_pShader;
+
+		/* 内嵌源码的着色器没有路径，取不到变体实例，直接用基础着色器 */
+		if (m_pShader->GetPath().empty())
+			return m_pShader;
+
+		/* 贴图加载完成不会改版本号，单独查一遍：没加载好的维度按 0 算，加载完要能自己换回来 */
+		bool textures_ready = true;
+		for (const DeviceTexture* texture : m_DrawShaderWatchedTextures)
+		{
+			if (texture != nullptr && !texture->IsLoaded())
+			{
+				textures_ready = false;
+				break;
+			}
+		}
+
+		DrawVariantEntry& entry = m_DrawVariants[ShaderVariantFingerprint(external)];
+		if (entry.Shader != nullptr && entry.Revision == m_Revision
+			&& entry.Generation == generation && entry.TexturesReady == textures_ready)
+			return entry.Shader;
+
+		/* 底用着色器当前绑的变体（pass 通过 SetShader 指定的外部值），再叠本次外部维度，
+		 * 最后是材质参数 —— 越靠后越贴近 "这次画的这个材质" */
+		ShaderVariantDefines defines = m_pShader->GetVariantDefines();
+		for (const auto& [name, value] : external)
+			defines[name] = value;
+
+		m_DrawShaderWatchedTextures.clear();
+		for (const ParamVariant& variant : m_ParamVariants)
+		{
+			int value = 0;
+			const auto iter = m_Parameters.find(ToID(variant.ParamName));
+			if (iter != m_Parameters.end())
+			{
+				const MaterialParamInfo& info = iter->second;
+				if (info.Type == ParamType::Texture)
+				{
+					const auto* texture =
+						std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(&info.Value);
+					if (texture != nullptr && texture->first != nullptr)
+					{
+						m_DrawShaderWatchedTextures.push_back(texture->first.get());
+						/* 占位图不算设了：满配默认材质与 GBuffer 转换补图都靠这条排除 */
+						const bool placeholder =
+							texture->first.get() == DefaultTextureForSampler(variant.ParamName).get();
+						value = (!placeholder && texture->first->IsLoaded()) ? 1 : 0;
+					}
+				}
+				else if (info.Type == ParamType::Int)
+				{
+					const int* number = std::any_cast<int>(&info.Value);
+					/* 多档维度（材质模型之类）直接取整数值，钳到合法区间 */
+					value = (number != nullptr)
+						? std::clamp(*number, 0, ShaderVariantMaxValue) : 0;
+				}
+				else if (info.Type == ParamType::Float)
+				{
+					const float* number = std::any_cast<float>(&info.Value);
+					value = (number != nullptr)
+						? std::clamp(static_cast<int>(std::lround(*number)), 0, ShaderVariantMaxValue) : 0;
+				}
+			}
+			defines[variant.Name] = value;
+		}
+
+		entry.Shader = AssetManager::Instance().GetOrLoad<DeviceShader>(m_pShader->GetPath(),
+			ShaderVariantConfig{ std::move(defines) });
+		if (entry.Shader == nullptr)
+			entry.Shader = m_pShader;
+
+		entry.Revision = m_Revision;
+		entry.Generation = generation;
+		entry.TexturesReady = textures_ready;
+		return entry.Shader;
 	}
 
 	/* 能力位跟 Shader 的版本号绑定：热重载换代后重算一次 */
@@ -211,6 +321,10 @@ namespace Helios
 	 * per-draw 参数（见 MakeTextureParam）正是靠这条在应用时解析出正确的 binding。 */
 	void Material::ApplyParam(const MaterialParamInfo& param_info)
 	{
+		const SharedPtr<DeviceShader>& shader = GetDrawShader();
+		if (shader == nullptr)
+			return;
+
 		if (param_info.Type == ParamType::Texture)
 		{
 			/* 反射不到绑定点时回退到槽位 0，绝不静默跳过绑定：
@@ -222,7 +336,7 @@ namespace Helios
 			if (slot == InvalidTextureSlot)
 				slot = 0u;
 			if (BindTextureParam(param_info, slot))
-				m_pShader->SetInt(param_info.Name, static_cast<int>(slot));
+				shader->SetInt(param_info.Name, static_cast<int>(slot));
 			return;
 		}
 
@@ -232,12 +346,12 @@ namespace Helios
 
 		switch (param_info.Type)
 		{
-		case ParamType::Int: m_pShader->SetInt(param_info.Name, *static_cast<const int*>(data)); break;
-		case ParamType::Float: m_pShader->SetFloat(param_info.Name, *static_cast<const float*>(data)); break;
-		case ParamType::Vec2: m_pShader->SetFloat2(param_info.Name, *static_cast<const glm::vec2*>(data)); break;
-		case ParamType::Vec3: m_pShader->SetFloat3(param_info.Name, *static_cast<const glm::vec3*>(data)); break;
-		case ParamType::Vec4: m_pShader->SetFloat4(param_info.Name, *static_cast<const glm::vec4*>(data)); break;
-		case ParamType::Mat4: m_pShader->SetMat4(param_info.Name, *static_cast<const glm::mat4*>(data)); break;
+		case ParamType::Int: shader->SetInt(param_info.Name, *static_cast<const int*>(data)); break;
+		case ParamType::Float: shader->SetFloat(param_info.Name, *static_cast<const float*>(data)); break;
+		case ParamType::Vec2: shader->SetFloat2(param_info.Name, *static_cast<const glm::vec2*>(data)); break;
+		case ParamType::Vec3: shader->SetFloat3(param_info.Name, *static_cast<const glm::vec3*>(data)); break;
+		case ParamType::Vec4: shader->SetFloat4(param_info.Name, *static_cast<const glm::vec4*>(data)); break;
+		case ParamType::Mat4: shader->SetMat4(param_info.Name, *static_cast<const glm::mat4*>(data)); break;
 		case ParamType::Texture: break;
 		}
 	}
@@ -246,7 +360,8 @@ namespace Helios
 	{
 		BoundParam bound;
 		bound.Info = &info;
-		bound.Handle = m_pShader->ResolveParamHandle(info.Name);
+		const SharedPtr<DeviceShader>& shader = GetDrawShader();
+		bound.Handle = shader != nullptr ? shader->ResolveParamHandle(info.Name) : -1;
 		if (info.Type == ParamType::Texture)
 		{
 			const auto* texture_info = TextureValue(info);
@@ -260,13 +375,17 @@ namespace Helios
 
 	void Material::ApplyBound(const BoundParam& bound)
 	{
+		const SharedPtr<DeviceShader>& shader = GetDrawShader();
+		if (shader == nullptr)
+			return;
+
 		const MaterialParamInfo& info = *bound.Info;
 		if (info.Type == ParamType::Texture)
 		{
 			if (BindTextureParam(info, bound.Slot) && bound.Handle >= 0)
 			{
 				const int slot = static_cast<int>(bound.Slot);
-				m_pShader->SetParam(bound.Handle, ParamType::Int, &slot);
+				shader->SetParam(bound.Handle, ParamType::Int, &slot);
 			}
 			return;
 		}
@@ -274,15 +393,17 @@ namespace Helios
 		if (bound.Handle < 0)
 			return;
 		if (const void* data = ParamValueData(info))
-			m_pShader->SetParam(bound.Handle, info.Type, data);
+			shader->SetParam(bound.Handle, info.Type, data);
 	}
 
 	void Material::RebuildBindTable()
 	{
 		BindCache& cache = m_BindCache;
 		cache.Revision = m_LayoutRevision;
-		cache.Shader = m_pShader.get();
-		cache.Generation = m_pShader->GetGeneration();
+
+		const SharedPtr<DeviceShader>& shader = GetDrawShader();
+		cache.Shader = shader.get();
+		cache.Generation = shader != nullptr ? shader->GetGeneration() : 0;
 
 		cache.Params.clear();
 		cache.Params.reserve(m_Parameters.size());
@@ -301,6 +422,10 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
+		const SharedPtr<DeviceShader>& draw_shader = GetDrawShader();
+		if (draw_shader == nullptr)
+			return;
+
 		/* Shader 重载换代后反射可能变了（加一个采样器，后面的槽位整体位移），
 		 * 这里比一次版本号，变了就重解析贴图绑定点。O(1)，不必遍历材质表 */
 		if (m_pShader->GetGeneration() != m_ShaderGeneration)
@@ -310,11 +435,11 @@ namespace Helios
 		}
 
 		/* 先绑定Shader：GL 第一次绑定才 link，句柄要在这之后解析 */
-		m_pShader->Bind();
+		draw_shader->Bind();
 
 		BindCache& cache = m_BindCache;
-		if (cache.Revision != m_LayoutRevision || cache.Shader != m_pShader.get()
-			|| cache.Generation != m_pShader->GetGeneration())
+		if (cache.Revision != m_LayoutRevision || cache.Shader != draw_shader.get()
+			|| cache.Generation != draw_shader->GetGeneration())
 			RebuildBindTable();
 
 		for (const BoundParam& bound : cache.Params)
@@ -362,7 +487,9 @@ namespace Helios
 	/* 解绑材质 */
 	void Material::Unbind()
 	{
-		m_pShader->Unbind();
+		const SharedPtr<DeviceShader>& shader = GetDrawShader();
+		if (shader != nullptr)
+			shader->Unbind();
 	}
 
 	/* 默认材质 */

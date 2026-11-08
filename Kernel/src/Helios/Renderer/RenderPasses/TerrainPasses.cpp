@@ -82,7 +82,7 @@ namespace Helios::TerrainDraw
 			Renderer::FillLightUniformBuffer(lights[std::min(primary, lights.size() - 1)], shadow_maps);
 		}
 
-		/* 前向材质：从组件的材质克隆一份换 shader。两个 shader 的参数名一致，
+		/* 前向材质：从组件的材质克隆一份换到前向变体。参数名与延迟同源，
 		 * 换完直接沿用；源材质参数版本变了才重建。源材质释放后地址可能被新材质复用，
 		 * 所以记一份弱引用核对身份，顺手清掉已经释放的 */
 		SharedPtr<Material> GetForwardMaterial(const SharedPtr<Material>& source)
@@ -103,8 +103,10 @@ namespace Helios::TerrainDraw
 				&& entry.Source.lock() == source)
 				return entry.Material;
 
-			const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-				ABSOLUTE_PATH("Shaders/MaterialShaders/TerrainForward.glsl"));
+			/* 同一份地形着色器的前向变体，见源码里的 @variant */
+			static BuiltinAsset<DeviceShader> s_forward_shader("Shaders/MaterialShaders/Terrain.glsl",
+				ShaderVariantConfig{ ShaderVariantDefines{ { "TERRAIN_FORWARD", 1 } } });
+			const auto shader = s_forward_shader.Get();
 			if (shader == nullptr)
 				return source;
 

@@ -93,6 +93,43 @@ namespace Helios
 				: decl.substr(name_start + 1, name_end - name_start);
 		}
 
+		/* 声明行里 uniform 的类型；认不出返回 false。只认材质参数能承载的几种 */
+		inline bool UniformTypeInLine(const std::string& line, ParamType& out)
+		{
+			const size_t uniform_pos = line.find("uniform");
+			if (uniform_pos == std::string::npos)
+				return false;
+
+			size_t pos = uniform_pos + 7;
+			while (pos < line.size() && std::isspace(static_cast<unsigned char>(line[pos])))
+				++pos;
+
+			const size_t begin = pos;
+			while (pos < line.size() && (std::isalnum(static_cast<unsigned char>(line[pos])) || line[pos] == '_'))
+				++pos;
+			if (pos == begin)
+				return false;
+
+			const std::string type = line.substr(begin, pos - begin);
+			if (type == "int" || type == "uint")
+				out = ParamType::Int;
+			else if (type == "float")
+				out = ParamType::Float;
+			else if (type == "vec2")
+				out = ParamType::Vec2;
+			else if (type == "vec3")
+				out = ParamType::Vec3;
+			else if (type == "vec4")
+				out = ParamType::Vec4;
+			else if (type == "mat4")
+				out = ParamType::Mat4;
+			else if (type.rfind("sampler", 0) == 0)
+				out = ParamType::Texture;
+			else
+				return false;
+			return true;
+		}
+
 		/* 第二项是不是 external（不区分大小写） */
 		inline bool IsExternalKeyword(const std::string& text)
 		{
@@ -141,7 +178,10 @@ namespace Helios
 						spec.Name = args[0];
 						const bool external = args.size() > 1 && IsExternalKeyword(args[1]);
 						if (!external)
+						{
 							spec.ParamName = UniformNameInLine(line);
+							spec.ParamKindKnown = UniformTypeInLine(line, spec.ParamKind);
+						}
 						/* 绑不到参数的（单独一行写的）自然按外部维度处理 */
 						spec.Source = (external || spec.ParamName.empty())
 							? ShaderVariantSource::External

@@ -440,10 +440,11 @@ namespace Helios
 			? *instance_layout : GetObjectInstanceLayout();
 
 		/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState */
+		const SharedPtr<DeviceShader>& draw_shader = material->GetDrawShader();
 		if (instance_buffer != nullptr)
-			material->GetShader()->BindVertexArray(mesh_primitive.VertexArray, layout);
+			draw_shader->BindVertexArray(mesh_primitive.VertexArray, layout);
 		else
-			material->GetShader()->BindVertexArray(mesh_primitive.VertexArray);
+			draw_shader->BindVertexArray(mesh_primitive.VertexArray);
 
 		/* 绑定全局UniformBuffer（View/Object/Light），Metal后端需要显式绑定到RenderEncoder */
 		s_RenderData.pViewUniformBuffer->Bind();
@@ -462,7 +463,7 @@ namespace Helios
 		 * 有覆盖参数的那一笔除外 —— 它改过 Shader 上的值，下一笔必须重写回去 */
 		const uint8_t fill_missing = per_draw != nullptr ? per_draw->FillMissing : MaterialFill::None;
 		const bool has_overrides = per_draw != nullptr && !per_draw->Overrides.empty();
-		const uint32_t shader_generation = material->GetShader()->GetGeneration();
+		const uint32_t shader_generation = draw_shader->GetGeneration();
 		const uint32_t state_serial = m_pRenderAPI->GetStateSerial();
 		static const Material* s_LastBoundMaterial = nullptr;
 		static uint32_t s_LastBoundRevision = 0;
@@ -502,7 +503,7 @@ namespace Helios
 			static WeakPtr<DeviceShader> s_last_shader;
 			static uint32_t s_last_generation = 0;
 			static int s_shadow_binding = -1;
-			const SharedPtr<DeviceShader>& shader = material->GetShader();
+			const SharedPtr<DeviceShader>& shader = material->GetDrawShader();
 			const bool same_shader = !s_last_shader.owner_before(shader) && !shader.owner_before(s_last_shader);
 			if (!same_shader || shader->GetGeneration() != s_last_generation)
 			{

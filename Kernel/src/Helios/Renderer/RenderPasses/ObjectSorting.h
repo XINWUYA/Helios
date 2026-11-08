@@ -66,7 +66,8 @@ namespace Helios::RenderSorting
 			key *= 0x100000001B3ULL;
 		};
 
-		mix(reinterpret_cast<uintptr_t>(material.GetShader().get()));
+		/* 按实际绘制的着色器分：同一材质变体排在一起，换管线次数最少 */
+		mix(reinterpret_cast<uintptr_t>(material.GetDrawShader().get()));
 		mix(reinterpret_cast<uintptr_t>(vertex_array));
 		mix(static_cast<uint64_t>(state.CullMode));
 		mix(static_cast<uint64_t>(state.FrontFaceType));

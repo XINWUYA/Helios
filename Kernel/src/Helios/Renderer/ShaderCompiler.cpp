@@ -732,29 +732,17 @@ namespace Helios
             }
         }
 
-        /* 维度目前只有开关量：传 2 这类值没有意义，只会多编一份和 0 不一样的源码 */
+        /* 取值只认 0..ShaderVariantMaxValue：开关量用 0 / 1，多档维度用中间值。
+         * 越界只会多编一份跟谁都不重的源码，报一次让人回来看 */
         void ReportVariantValueOutOfRange(const std::string& filepath, const ShaderVariantDefines& requested)
         {
             const std::string filename = std::filesystem::path(filepath).filename().string();
             for (const auto& [name, value] : requested)
             {
-                if ((value == 0 || value == 1) || !FirstReport(filepath, name + "#value"))
+                if ((value >= 0 && value <= ShaderVariantMaxValue) || !FirstReport(filepath, name + "#value"))
                     continue;
-                CORE_LOG_WARN("[Shader] Variant '{}' of {} = {}, only 0 / 1 are supported", name, filename, value);
-            }
-        }
-
-        /* 材质参数驱动的维度只剩解析，没有求值：行尾写 @variant 会被当成 param 维度，
-         * 值永远是 0。提示一次，别让人以为已经接上了。 */
-        void ReportUnsupportedParamVariants(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
-        {
-            const std::string filename = std::filesystem::path(filepath).filename().string();
-            for (const ShaderVariantSpec& spec : specs)
-            {
-                if (spec.Source != ShaderVariantSource::Param || !FirstReport(filepath, spec.Name + "#param"))
-                    continue;
-                CORE_LOG_WARN("[Shader] Variant '{}' of {} is bound to a material parameter, "
-                    "which is not supported yet; value stays 0", spec.Name, filename);
+                CORE_LOG_WARN("[Shader] Variant '{}' of {} = {}, only 0..{} are supported",
+                    name, filename, value, ShaderVariantMaxValue);
             }
         }
 
@@ -808,6 +796,45 @@ namespace Helios
                 }
             }
         }
+
+        /* 材质参数维度的几条约定：类型、数量、前缀。
+         * 加载时报一次，不阻断编译 —— 编辑器先能跑起来，改对了自然消失。
+         * 与 external 维度可以混用：值由 Material::GetDrawShader 合成，见那里的叠加顺序。 */
+        void ValidateParamVariants(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
+        {
+            const std::string filename = std::filesystem::path(filepath).filename().string();
+
+            size_t param_count = 0;
+            for (const ShaderVariantSpec& spec : specs)
+            {
+                if (spec.Source == ShaderVariantSource::External)
+                    continue;
+
+                ++param_count;
+
+                if (spec.Name.rfind("MTL_", 0) != 0 && FirstReport(filepath, spec.Name + "#prefix"))
+                {
+                    CORE_LOG_WARN("[Shader] Variant '{}' of {} is bound to a material parameter, "
+                        "name it with an MTL_ prefix", spec.Name, filename);
+                }
+
+                const bool supported = spec.ParamKindKnown
+                    && (spec.ParamKind == ParamType::Texture || spec.ParamKind == ParamType::Int
+                        || spec.ParamKind == ParamType::Float);
+                if (!supported && FirstReport(filepath, spec.Name + "#kind"))
+                {
+                    CORE_LOG_ERROR("[Shader] Variant '{}' of {} binds to a uniform type that cannot "
+                        "drive a variant, only texture / int / float are supported", spec.Name, filename);
+                }
+            }
+
+            if (param_count > 4 && FirstReport(filepath, "#limit"))
+            {
+                CORE_LOG_ERROR("[Shader] {} declares {} material variants, at most 4 are supported",
+                    filename, param_count);
+            }
+        }
+
 
         /* 缓存目录的清理。产物按内容哈希命名，改一次源码就换一批文件名，所以不能按写入
          * 时间删 —— 那些每次启动都在用的稳定着色器反而是最老的。规则是"多久没被读过"：
@@ -1268,7 +1295,7 @@ namespace Helios
         /* 声明与取值的几处约定，都在这里一次报完 */
         ReportUnknownVariantDefines(filepath, unknown_defines);
         ReportVariantValueOutOfRange(filepath, defines);
-        ReportUnsupportedParamVariants(filepath, variant_specs);
+        ValidateParamVariants(filepath, variant_specs);
         ReportVariantConditionalMisuse(filepath, stage_sources, variant_specs);
 
         InjectVariantDefines(stage_sources, normalized);

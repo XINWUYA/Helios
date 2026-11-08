@@ -96,6 +96,9 @@ namespace Helios::MaterialParamUI
 	/* 直接改材质的 Shader：资产编辑缓冲这类"就地写"的场合用 */
 	bool DrawMaterialShaderRow(Material& material);
 
+	/* 当前参数驱动的变体：只列非 0 维度，全默认显示 (default)；没有参数维度时不画 */
+	void DrawMaterialVariantRow(const Material& material);
+
 	/* 渲染队列行：小于 2500 走不透明批次，2500 起走透明批次（与引擎的判据同源）。
 	 * 返回 true = 有改动（新值写回传入的引用）。 */
 	bool DrawMaterialRenderQueueRow(int32_t& render_queue);

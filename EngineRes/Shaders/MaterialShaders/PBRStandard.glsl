@@ -15,7 +15,9 @@ struct SVextex2Frag
 	vec3 WorldNormal;
 	vec4 BaseColor;
 	vec2 TexCoord;
+#if MTL_NORMAL || MTL_PARALLAX
 	vec3 WorldTangent;
+#endif
 };
 
 out SVextex2Frag vert2frag;
@@ -30,10 +32,12 @@ void main()
 	vert2frag.BaseColor     = a_Color;
 	vert2frag.TexCoord      = a_TexCoord.xy;
 
-	/* 法线矩阵：处理非等比缩放 */
+	/* 法线矩阵：处理非等比缩放。切线只有法线图 / 视差档才用得上，关掉就不算也不传 */
 	mat3 normal_mat = transpose(inverse(mat3(u_Local2WorldMat)));
 	vert2frag.WorldNormal  = normalize(normal_mat * a_Normal);
+#if MTL_NORMAL || MTL_PARALLAX
 	vert2frag.WorldTangent = normalize(normal_mat * a_Tangent);
+#endif
 }
 
 
@@ -60,7 +64,9 @@ struct SVextex2Frag
 	vec3 WorldNormal;
 	vec4 BaseColor;
 	vec2 TexCoord;
+#if MTL_NORMAL || MTL_PARALLAX
 	vec3 WorldTangent;
+#endif
 };
 
 in SVextex2Frag vert2frag;
@@ -71,8 +77,14 @@ layout(location = 1) out float ObjectId;
 void main()
 {
 	SMaterialInput mtl;
+	/* 变体关掉切线时传零向量，MaterialLit 只在 TBN 分支里读它 */
+#if MTL_NORMAL || MTL_PARALLAX
+	const vec3 world_tangent = vert2frag.WorldTangent;
+#else
+	const vec3 world_tangent = vec3(0.0f);
+#endif
 	CalculateLitMaterial(mtl, vert2frag.WorldPosition, vert2frag.TexCoord,
-		vert2frag.BaseColor, vert2frag.WorldNormal, vert2frag.WorldTangent);
+		vert2frag.BaseColor, vert2frag.WorldNormal, world_tangent);
 
 	vec3 N = mtl.Normal;
 	vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);

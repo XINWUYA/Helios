@@ -380,6 +380,39 @@ namespace Helios::MaterialParamUI
 		return true;
 	}
 
+	void DrawMaterialVariantRow(const Material& material)
+	{
+		const SharedPtr<DeviceShader>& shader = material.GetShader();
+		if (shader == nullptr)
+			return;
+
+		bool has_param_variant = false;
+		for (const ShaderVariantSpec& spec : shader->GetReflectionData().VariantSpecs)
+		{
+			if (spec.Source == ShaderVariantSource::Param)
+			{
+				has_param_variant = true;
+				break;
+			}
+		}
+		if (!has_param_variant)
+			return;
+
+		std::string text;
+		for (const auto& [name, value] : material.GetDrawShader()->GetVariantDefines())
+		{
+			if (value == 0)
+				continue;
+			if (!text.empty())
+				text += "  ";
+			text += name;
+		}
+
+		ImGuiExt::BeginPropertyRow("Variant", EditorTheme::Token::PropertyLabelWidth, true);
+		ImGui::TextDisabled("%s", text.empty() ? "(default)" : text.c_str());
+		ImGuiExt::EndPropertyRow();
+	}
+
 	bool DrawMaterialRenderQueueRow(int32_t& render_queue)
 	{
 		const float value_width = ImGuiExt::BeginPropertyRow("Render Queue", EditorTheme::Token::PropertyLabelWidth, true);

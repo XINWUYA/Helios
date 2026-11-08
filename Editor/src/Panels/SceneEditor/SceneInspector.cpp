@@ -2149,6 +2149,7 @@ namespace Helios
 		/* Shader 行（与模型编辑器共用同一控件）：点开菜单换 Shader，选中后记脏 + 热更新 */
 		if (MaterialParamUI::DrawMaterialShaderRow(material))
 			on_edit();
+		MaterialParamUI::DrawMaterialVariantRow(material);
 		MaterialParamUI::DrawMaterialParams(material, [&]() { return &material; }, m_AssetRevealFunc,
 			[&](ParamType type, const std::string& name, const std::any& value)
 			{
