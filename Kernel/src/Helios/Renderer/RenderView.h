@@ -185,6 +185,11 @@ namespace Helios
 		/* 准备一帧的RenderView数据 */
 		void Prepare();
 
+		/* 视图级变体取值：换视图才变的维度（管线开关这类）。写进来的值会并进
+		 * 材质变体请求，逐绘制提交时按来源分发；换视图重建视图对象即可复位 */
+		void SetVariantDefine(const std::string& name, int value);
+		[[nodiscard]] const ShaderVariantDefines& GetVariantDefines() const { return m_VariantDefines; }
+
 		/* 执行渲染当前View */
 		void Execute();
 
@@ -238,6 +243,8 @@ namespace Helios
 		DebugViewMode m_DebugViewMode{ DebugViewMode::None };
 		/* 可见层掩码：与对象 LayerMask 相交为空的对象不渲染 */
 		LayerMask m_CullingMask{ Layers::All };
+		/* 视图级变体取值，逐绘制提交时并进变体请求 */
+		ShaderVariantDefines m_VariantDefines{};
 		/* 后处理设置快照（每视图一份；Scene 解析写入，缺省空 = 全部效果关闭） */
 		PostProcess::PostProcessState m_PostProcessState{};
 		/* 天空状态快照（每视图一份；Scene 解析写入） */

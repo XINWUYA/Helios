@@ -44,44 +44,122 @@ namespace Helios
 		++m_LayoutRevision;
 		/* Shader更换，binding布局也随之改变，刷新Shader的反射结果 */
 		RefreshTextureBindings();
-		RefreshParamVariants();
+		RefreshVariantCache();
 		m_ShaderGeneration = shader != nullptr ? shader->GetGeneration() : 0;
 	}
 
-	/* 从反射里筛出材质参数维度。上限与类型已经在解析时报过，这里只做分类 */
-	void Material::RefreshParamVariants() const
+	/* 声明换代后作废推导缓存 */
+	void Material::RefreshVariantCache() const
 	{
-		m_ParamVariants.clear();
 		/* 声明换了，之前推导出来的变体全都对不上号 */
 		m_DrawVariants.clear();
 		m_DrawShaderWatchedTextures.clear();
-		if (m_pShader == nullptr)
-			return;
-
-		for (const ShaderVariantSpec& spec : m_pShader->GetReflectionData().VariantSpecs)
-		{
-			if (spec.Source == ShaderVariantSource::Param && !spec.ParamName.empty())
-				m_ParamVariants.push_back({ spec.Name, spec.ParamName });
-		}
-		m_ParamVariantsGeneration = m_pShader->GetGeneration();
+		mVariantCacheGeneration = m_pShader != nullptr ? m_pShader->GetGeneration() : 0;
 	}
 
-	const SharedPtr<DeviceShader>& Material::GetDrawShader(const ShaderVariantDefines& external) const
+	/* 按声明的来源逐维度求值。param 维度顺带记下要看加载状态的贴图：
+	 * 贴图没加载完时这一维按 0 算，加载完要能自己换回来 */
+	ShaderVariantDefines Material::ResolveDrawDefines(const ShaderVariantContext& context) const
+	{
+		ShaderVariantDefines defines = m_pShader->GetVariantDefines();
+		const auto& specs = m_pShader->GetReflectionData().VariantSpecs;
+		if (specs.empty())
+			return defines;
+
+		const auto lookup = [](const ShaderVariantDefines* table, const std::string& name)
+		{
+			if (table == nullptr)
+				return 0;
+			const auto it = table->find(name);
+			return it == table->end() ? 0 : it->second;
+		};
+
+		m_DrawShaderWatchedTextures.clear();
+		for (const ShaderVariantSpec& spec : specs)
+		{
+			switch (spec.Source)
+			{
+			case ShaderVariantSource::Param:
+			{
+				int value = 0;
+				const auto iter = m_Parameters.find(ToID(spec.ParamName));
+				if (iter != m_Parameters.end())
+				{
+					const MaterialParamInfo& info = iter->second;
+					if (info.Type == ParamType::Texture)
+					{
+						const auto* texture =
+							std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(&info.Value);
+						if (texture != nullptr && texture->first != nullptr)
+						{
+							m_DrawShaderWatchedTextures.push_back(texture->first.get());
+							/* 占位图不算设了：满配默认材质与 GBuffer 转换补图都靠这条排除 */
+							const bool placeholder =
+								texture->first.get() == DefaultTextureForSampler(spec.ParamName).get();
+							value = (!placeholder && texture->first->IsLoaded()) ? 1 : 0;
+						}
+					}
+					else if (info.Type == ParamType::Int)
+					{
+						const int* number = std::any_cast<int>(&info.Value);
+						value = (number != nullptr)
+							? std::clamp(*number, 0, ShaderVariantMaxValue) : 0;
+					}
+					else if (info.Type == ParamType::Float)
+					{
+						const float* number = std::any_cast<float>(&info.Value);
+						value = (number != nullptr)
+							? std::clamp(static_cast<int>(std::lround(*number)), 0, ShaderVariantMaxValue) : 0;
+					}
+				}
+				defines[spec.Name] = value;
+				break;
+			}
+			case ShaderVariantSource::External:
+				defines[spec.Name] = lookup(context.External, spec.Name);
+				break;
+			case ShaderVariantSource::View:
+				defines[spec.Name] = lookup(context.View, spec.Name);
+				break;
+			case ShaderVariantSource::Global:
+				defines[spec.Name] = lookup(&ShaderVariantGlobals::All(), spec.Name);
+				break;
+			}
+		}
+		return defines;
+	}
+
+	ShaderVariantDefines Material::GetMaterialVariantDefines() const
+	{
+		if (m_pShader == nullptr)
+			return {};
+		return ResolveDrawDefines(ShaderVariantContext{});
+	}
+
+	const SharedPtr<DeviceShader>& Material::GetDrawShader(const ShaderVariantContext& context) const
 	{
 		if (m_pShader == nullptr)
 			return m_pShader;
 
 		/* 热重载可能改了声明，换代后重新筛一遍 */
 		const uint32_t generation = m_pShader->GetGeneration();
-		if (generation != m_ParamVariantsGeneration)
-			RefreshParamVariants();
+		if (generation != mVariantCacheGeneration)
+			RefreshVariantCache();
 
-		if (m_ParamVariants.empty() && external.empty())
+		const auto& specs = m_pShader->GetReflectionData().VariantSpecs;
+		const bool has_param = std::any_of(specs.begin(), specs.end(),
+			[](const ShaderVariantSpec& spec) { return spec.Source == ShaderVariantSource::Param; });
+		const bool has_external = context.External != nullptr && !context.External->empty();
+		const bool has_view = context.View != nullptr && !context.View->empty();
+		const bool has_global = !ShaderVariantGlobals::All().empty();
+		if (specs.empty() || (!has_param && !has_external && !has_view && !has_global))
 			return m_pShader;
 
 		/* 内嵌源码的着色器没有路径，取不到变体实例，直接用基础着色器 */
 		if (m_pShader->GetPath().empty())
 			return m_pShader;
+
+		const ShaderVariantDefines defines = ResolveDrawDefines(context);
 
 		/* 贴图加载完成不会改版本号，单独查一遍：没加载好的维度按 0 算，加载完要能自己换回来 */
 		bool textures_ready = true;
@@ -94,57 +172,38 @@ namespace Helios
 			}
 		}
 
-		DrawVariantEntry& entry = m_DrawVariants[ShaderVariantFingerprint(external)];
-		if (entry.Shader != nullptr && entry.Revision == m_Revision
+		DrawVariantEntry& entry = m_DrawVariants[ShaderVariantFingerprint(defines)];
+		if (entry.Shader != nullptr && !entry.Approximate && entry.Revision == m_Revision
 			&& entry.Generation == generation && entry.TexturesReady == textures_ready)
 			return entry.Shader;
 
-		ShaderVariantDefines defines = m_pShader->GetVariantDefines();
-		for (const auto& [name, value] : external)
-			defines[name] = value;
+		const std::string& path = m_pShader->GetPath();
+		const ShaderVariantConfig config{ defines };
 
-		m_DrawShaderWatchedTextures.clear();
-		for (const ParamVariant& variant : m_ParamVariants)
+		/* 精确变体已经在缓存里就直接用；没编过时按回退开关决定是取近似的还是现编 */
+		SharedPtr<DeviceShader> resolved = AssetManager::Instance().Find<DeviceShader>(path, config);
+		bool approximate = false;
+		if (resolved == nullptr && ShaderVariantGlobals::FallbackEnabled())
 		{
-			int value = 0;
-			const auto iter = m_Parameters.find(ToID(variant.ParamName));
-			if (iter != m_Parameters.end())
+			const ShaderVariantMatch match = FindBestVariant(
+				AssetManager::Instance().GetAllByPath<DeviceShader>(path), defines);
+			/* 阈值取四分之三：只差一个小维度时顶上，差得多宁可现编，免得画面错得看不出来 */
+			if (match.Valid() && match.Score * 4 >= match.FullScore * 3)
 			{
-				const MaterialParamInfo& info = iter->second;
-				if (info.Type == ParamType::Texture)
-				{
-					const auto* texture =
-						std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(&info.Value);
-					if (texture != nullptr && texture->first != nullptr)
-					{
-						m_DrawShaderWatchedTextures.push_back(texture->first.get());
-						/* 占位图不算设了：满配默认材质与 GBuffer 转换补图都靠这条排除 */
-						const bool placeholder =
-							texture->first.get() == DefaultTextureForSampler(variant.ParamName).get();
-						value = (!placeholder && texture->first->IsLoaded()) ? 1 : 0;
-					}
-				}
-				else if (info.Type == ParamType::Int)
-				{
-					const int* number = std::any_cast<int>(&info.Value);
-					value = (number != nullptr)
-						? std::clamp(*number, 0, ShaderVariantMaxValue) : 0;
-				}
-				else if (info.Type == ParamType::Float)
-				{
-					const float* number = std::any_cast<float>(&info.Value);
-					value = (number != nullptr)
-						? std::clamp(static_cast<int>(std::lround(*number)), 0, ShaderVariantMaxValue) : 0;
-				}
+				resolved = match.Shader;
+				approximate = true;
+				if (ShaderVariantGlobals::ReportFallback(path, match.Diff))
+					CORE_LOG_WARN("[Shader] {} 用近似变体顶替：{}", path.substr(path.find_last_of('/') + 1), match.Diff);
 			}
-			defines[variant.Name] = value;
 		}
 
-		entry.Shader = AssetManager::Instance().GetOrLoad<DeviceShader>(m_pShader->GetPath(),
-			ShaderVariantConfig{ std::move(defines) });
-		if (entry.Shader == nullptr)
-			entry.Shader = m_pShader;
+		if (resolved == nullptr)
+			resolved = AssetManager::Instance().GetOrLoad<DeviceShader>(path, config);
+		if (resolved == nullptr)
+			resolved = m_pShader;
 
+		entry.Shader = resolved;
+		entry.Approximate = approximate;
 		entry.Revision = m_Revision;
 		entry.Generation = generation;
 		entry.TexturesReady = textures_ready;

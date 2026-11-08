@@ -42,6 +42,11 @@ namespace Helios
 		/* 填充天空常量：日月方向、大气系数与曝光，天空类着色器只读它 */
 		static void SetSkyUniforms(const Sky::SkyState& state);
 
+		/* 视图级变体取值：换视图才变的维度走这张表，逐绘制提交时并进变体请求。
+		 * RenderView::Prepare 时写入，同一时刻只有一张视图在画 */
+		static void SetViewVariantDefines(const ShaderVariantDefines& defines);
+		[[nodiscard]] static const ShaderVariantDefines& GetViewVariantDefines();
+
 		/* per_draw：单次绘制的覆盖参数（IBL 这类"每次绘制不同"的绑定）。
 	 * 只写当前绑定的 Shader 与纹理、不落材质对象 —— 共享材质因此保持只读。 */
 	static void Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,

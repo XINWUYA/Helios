@@ -14,6 +14,7 @@
 #include <Helios/Scene/Light.h>
 #include <Helios/Scene/ReflectionProbe.h>
 #include <Helios/Scene/SkeletonModel.h>
+#include <Helios/Renderer/Renderer.h>
 #include <Helios/Renderer/RenderPasses/DeferredPasses.h>
 #include <Helios/Renderer/RenderPasses/GrassPasses.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
@@ -107,6 +108,11 @@ namespace Helios
 		
 	}
 
+	void RenderView::SetVariantDefine(const std::string& name, int value)
+	{
+		m_VariantDefines[name] = std::clamp(value, 0, ShaderVariantMaxValue);
+	}
+
 	/* 执行渲染当前View */
 	void RenderView::Execute()
 	{
@@ -121,7 +127,8 @@ namespace Helios
 
 		/* 收集当前RenderView可见的对象 */
 		PrepareVisibleObjects();
-
+		/* 本视图的变体取值交给渲染器：变体在 SubmitDraw 里按来源合成 */
+		Renderer::SetViewVariantDefines(m_VariantDefines);
 		/* 补上一帧的世界矩阵：运动矢量靠它区分"相机在动"和"物体自己在动" */
 		PreparePreviousTransforms();
 

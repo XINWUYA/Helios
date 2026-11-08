@@ -5,6 +5,7 @@
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Renderer.h"
+#include "ShaderVariantCatalog.h"
 #include "Helios/Profiler/RenderStatistics.h"
 #include "RenderView.h"
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
@@ -153,6 +154,8 @@ namespace Helios
 	};
 
 	static RenderData s_RenderData;
+	/* 视图级变体取值：同一时刻只有一张视图在画，渲染期间存一份拷贝，视图销毁也不会悬空 */
+	static ShaderVariantDefines s_ViewVariantDefines;
 
 	SharedPtr<RenderAPI> Renderer::m_pRenderAPI = nullptr;
 	SharedPtr<DeviceTexture> Renderer::m_pCurrentShadowMap{};
@@ -205,6 +208,9 @@ namespace Helios
 		/* 逐帧递增，与 CPU 采集的帧号同步：面板按帧号对齐 CPU / GPU 两条录制 */
 		s_RenderData.ViewUniformData.FrameCounter++;
 		Profiler::Instance().BeginGPUFrame(s_RenderData.ViewUniformData.FrameCounter);
+
+		/* 预热队列按帧预算补编，避免一次性编译把一帧拖死 */
+		ShaderVariantCatalog::Instance().Tick();
 	}
 
 	void Renderer::Release()
@@ -319,6 +325,16 @@ namespace Helios
 		s_RenderData.ViewUniformData.PrevVelocityViewProjectionMatrix = projection * view;
 		s_RenderData.ViewUniformData.ViewPos = view_pos;
 		s_RenderData.pViewUniformBuffer->SetData(&s_RenderData.ViewUniformData, sizeof(ViewUniformData));
+	}
+
+	void Renderer::SetViewVariantDefines(const ShaderVariantDefines& defines)
+	{
+		s_ViewVariantDefines = defines;
+	}
+
+	const ShaderVariantDefines& Renderer::GetViewVariantDefines()
+	{
+		return s_ViewVariantDefines;
 	}
 
 	SharedPtr<DeviceTexture> Renderer::ExchangeCurrentShadowMap(SharedPtr<DeviceTexture> shadow_map)
@@ -440,11 +456,11 @@ namespace Helios
 			? *instance_layout : GetObjectInstanceLayout();
 
 		/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState。
-		 * 绝大多数绘制不带外部变体，走材质的默认推导，不用每次算指纹 */
-		const SharedPtr<DeviceShader>& draw_shader =
-			(per_draw != nullptr && !per_draw->VariantDefines.empty())
-			? material->GetDrawShader(per_draw->VariantDefines)
-			: material->GetDrawShader();
+		 * 变体按这一笔的来源合成：外部维度来自 per_draw，视图维度来自当前视图表 */
+		ShaderVariantContext variant_context;
+		variant_context.External = per_draw != nullptr ? &per_draw->VariantDefines : nullptr;
+		variant_context.View = &s_ViewVariantDefines;
+		const SharedPtr<DeviceShader>& draw_shader = material->GetDrawShader(variant_context);
 		if (instance_buffer != nullptr)
 			draw_shader->BindVertexArray(mesh_primitive.VertexArray, layout);
 		else

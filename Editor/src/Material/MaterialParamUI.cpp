@@ -380,36 +380,53 @@ namespace Helios::MaterialParamUI
 		return true;
 	}
 
+	/* 当前启用的变体维度：声明了哪些维度、各自当前取值、值从哪儿来。
+	 * 外部维度由绘制端逐笔决定，材质侧按 0 显示并标注 */
 	void DrawMaterialVariantRow(const Material& material)
 	{
 		const SharedPtr<DeviceShader>& shader = material.GetShader();
 		if (shader == nullptr)
 			return;
 
-		bool has_param_variant = false;
-		for (const ShaderVariantSpec& spec : shader->GetReflectionData().VariantSpecs)
+		const auto& specs = shader->GetReflectionData().VariantSpecs;
+		if (specs.empty())
+			return;
+
+		const ShaderVariantDefines defines = material.GetMaterialVariantDefines();
+
+		std::string text;
+		for (const ShaderVariantSpec& spec : specs)
 		{
-			if (spec.Source == ShaderVariantSource::Param)
+			if (!text.empty())
+				text += "   ";
+
+			const auto it = defines.find(spec.Name);
+			text += spec.Name;
+			text += '=';
+			text += std::to_string(it == defines.end() ? 0 : it->second);
+
+			switch (spec.Source)
 			{
-				has_param_variant = true;
+			case ShaderVariantSource::Param:
+				break;
+			case ShaderVariantSource::External:
+				text += " (per draw)";
+				break;
+			case ShaderVariantSource::View:
+				text += " (view)";
+				break;
+			case ShaderVariantSource::Global:
+				text += " (global)";
 				break;
 			}
 		}
-		if (!has_param_variant)
-			return;
 
-		std::string text;
-		for (const auto& [name, value] : material.GetDrawShader()->GetVariantDefines())
-		{
-			if (value == 0)
-				continue;
-			if (!text.empty())
-				text += "  ";
-			text += name;
-		}
-
-		ImGuiExt::BeginPropertyRow("Variant", EditorTheme::Token::PropertyLabelWidth, true);
-		ImGui::TextDisabled("%s", text.empty() ? "(default)" : text.c_str());
+		ImGuiExt::BeginPropertyRow("Variants", EditorTheme::Token::PropertyLabelWidth, true);
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped("%s", text.c_str());
+		ImGui::PopStyleColor();
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Keyword values this material drives. Dimensions marked per draw are chosen by the pass.");
 		ImGuiExt::EndPropertyRow();
 	}
 

@@ -5,6 +5,7 @@
 #include <optional>
 #include <vector>
 #include "Helios/Renderer/RenderCommon.h"
+#include "Helios/Renderer/ShaderVariants.h"
 
 namespace tinyxml2 { class XMLElement; }
 
@@ -74,11 +75,23 @@ namespace Helios
 
 		/* 实际绘制用的着色器：着色器声明了材质参数维度时按参数推导，没有就返回基础着色器。
 		 * 画用它，判断身份（是否天空盒、能不能进 G-Buffer）仍用 GetShader()。 */
-		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader() const { return GetDrawShader({}); }
+		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader() const { return GetDrawShader(ShaderVariantContext{}); }
 
 		/* 推导结果上再叠外部维度（pass 逐笔决定的那种，如调试档位）。叠加顺序：
-		 * 着色器当前绑的变体作底，外部值覆盖它，材质参数最后覆盖。结果按外部 define 分桶缓存。 */
-		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader(const ShaderVariantDefines& external) const;
+		 * 着色器当前绑的变体作底，外部值覆盖它，材质参数最后覆盖。结果按完整 define 指纹分桶缓存。 */
+		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader(const ShaderVariantDefines& external) const
+		{
+			ShaderVariantContext context;
+			context.External = &external;
+			return GetDrawShader(context);
+		}
+
+		/* 逐来源合成这一笔的变体取值：参数从材质推导，外部 / 视图 / 全局各查各的表。
+		 * 回退开着时精确变体缺失会取最接近的已加载变体，否则现编。 */
+		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader(const ShaderVariantContext& context) const;
+
+		/* 材质级变体取值（外部 / 视图维度按 0 算），面板显示当前启用的维度用 */
+		[[nodiscard]] ShaderVariantDefines GetMaterialVariantDefines() const;
 		/* 是否天空盒材质：以 SkyBox.glsl 为着色器的材质（天空盒的几何约定：
 		 * 顶点着色器把网格铺满全屏、深度取远平面）。这类材质不进延迟管线 G-Buffer、
 		 * 不参与阴影投射，由天空背景通道专绘。 */
@@ -223,13 +236,8 @@ namespace Helios
 		BoundParam BindParam(const MaterialParamInfo& info, const SharedPtr<DeviceShader>& shader) const;
 		void ApplyBound(const BoundParam& bound, const SharedPtr<DeviceShader>& shader);
 
-		/* 着色器声明的材质参数维度（SetShader 时筛出来，热重载换代后重筛） */
-		struct ParamVariant
-		{
-			std::string Name;      /* define 名 */
-			std::string ParamName; /* 绑定的材质参数 */
-		};
-		void RefreshParamVariants() const;
+		/* 声明换代后作废推导缓存（热重载改了 @variant 也能跟上） */
+		void RefreshVariantCache() const;
 
 		struct DrawVariantEntry
 		{
@@ -237,11 +245,15 @@ namespace Helios
 			uint32_t Revision{ UINT32_MAX };
 			uint32_t Generation{ 0 };
 			bool TexturesReady{ false };
+			/* 评分回退挑出来的近似变体：不复用，每次重新尝试精确匹配 */
+			bool Approximate{ false };
 		};
 
-		mutable std::vector<ParamVariant> m_ParamVariants;
-		/* 上次筛声明表时的着色器代数：热重载改了声明也能跟上 */
-		mutable uint32_t m_ParamVariantsGeneration{ 0 };
+		/* 按声明的来源逐维度求值，param 维度顺带记下要看加载状态的贴图 */
+		ShaderVariantDefines ResolveDrawDefines(const ShaderVariantContext& context) const;
+
+		/* 上次作废缓存时的着色器代数 */
+		mutable uint32_t mVariantCacheGeneration{ 0 };
 		/* 推导结果，按外部 define 的指纹分桶。贴图加载完成不会改版本号，
 		 * 每桶另外记一份"上次求值时是否都加载好了" */
 		mutable std::map<uint64_t, DrawVariantEntry> m_DrawVariants;
