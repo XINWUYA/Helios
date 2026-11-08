@@ -102,9 +102,11 @@ namespace Helios
 						? RenderSorting::MakeTransparentRasterState(material->GetRasterState())
 						: material->GetRasterState();
 
-					/* IBL 是"每次绘制都不一样"的绑定（按对象选最近探针）—— 走 per-draw 覆盖、不写进材质对象；
+					/* per_draw 跨对象复用，先清掉上一笔的覆盖与变体。
+					 * IBL 是"每次绘制都不一样"的绑定（按对象选最近探针），走覆盖、不写进材质对象；
 					 * 只对支持 IBL 的 Shader 发；没有探针时靠覆盖里的中性兜底，保证四个采样槽始终有绑定。 */
 					per_draw.Overrides.clear();
+					per_draw.VariantDefines.clear();
 					per_draw.RasterStateOverride.reset();
 					if (transparent)
 						per_draw.RasterStateOverride = base_state;
@@ -132,8 +134,9 @@ namespace Helios
 						}
 					}
 
-					/* 调试读数走单独的着色器变体，正常着色不必带着那份代码 */
-					if (debug && material->SupportsDebugView())
+					/* 调试读数走单独的着色器变体，正常着色不必带着那份代码。
+					 * 天空不参与调试分流，它的着色器也没声明这个维度 */
+					if (debug && !material->IsSkyBox() && material->SupportsDebugView())
 					{
 						per_draw.VariantDefines["DEBUG_VIEW"] = 1;
 						per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView", static_cast<int>(debug_view));
