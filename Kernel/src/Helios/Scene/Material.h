@@ -46,6 +46,9 @@ namespace Helios
 		std::optional<RenderRasterState> RasterStateOverride{};
 		/* 先于 Overrides 应用的补齐项，取值见 MaterialFill */
 		uint8_t FillMissing{ MaterialFill::None };
+		/* 这一笔要用的着色器变体（外部维度，如调试档位）。会跟材质参数推导合成，
+		 * 见 Material::GetDrawShader；空表就是不作额外指定，走材质自己的推导。 */
+		ShaderVariantDefines VariantDefines{};
 	};
 
 	/*
@@ -227,7 +230,6 @@ namespace Helios
 		};
 		void RefreshParamVariants() const;
 
-		/* 一个外部变体组合推导出来的绘制着色器 */
 		struct DrawVariantEntry
 		{
 			SharedPtr<DeviceShader> Shader;

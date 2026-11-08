@@ -315,8 +315,11 @@ namespace Helios::TerrainDraw
 
 				/* 前向的读数由材质自己出；延迟的 Surface / Shadow 档读 G-Buffer，不用管 */
 				if (forward && debug_view != DebugViewMode::None)
+				{
+					per_draw.VariantDefines["DEBUG_VIEW"] = 1;
 					per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView",
 						static_cast<int>(debug_view));
+				}
 
 				SubmitBatch(final_material, frame, batch, per_draw);
 			}

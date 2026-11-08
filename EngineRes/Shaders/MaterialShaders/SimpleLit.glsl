@@ -1,6 +1,10 @@
 #type vertex
 #version 410 core
 
+/* 调试读数整段只在调试变体里编进来，正常着色不带那份代码。
+ * 变体值由渲染通道逐笔给（0 = 正常，1 = 出读数），具体档位仍走 u_DebugView */
+// @variant(DEBUG_VIEW, external)
+
 /* 顶点属性按引擎统一契约（location 0..4 = 位置 / 法线 / 颜色 / UV / 切线）：
  * 本 shader 只用到 0/1/3，注意 UV 在槽位 3（2 是颜色槽，读错会拿到顶点色当 UV 使） */
 layout(location = 0) in vec3 a_Position;
@@ -43,7 +47,9 @@ void main()
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
 #include "../ReflectionProbe/IBLCommon.glsl"
+#if DEBUG_VIEW
 #include "../DebugShaders/DebugForward.glsl"
+#endif
 
 struct SVextex2Frag
 {
@@ -90,7 +96,8 @@ void main()
 
 	ObjectId = float(u_ObjectId);
 
-	/* 调试视图：简化档只有 Albedo 与固定的粗糙度 / 金属度，环境输入按 1 算 */
+	/* 调试视图：走调试变体时才编进来。简化档只有 Albedo 与固定的粗糙度 / 金属度，环境输入按 1 算 */
+#if DEBUG_VIEW
 	if (u_DebugView != 0)
 	{
 		const SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, roughness, metallic);
@@ -98,6 +105,7 @@ void main()
 			attenuation, shadow);
 		return;
 	}
+#endif
 
 	/* 间接光：u_UseIBL = 1 时逐绘制绑定反射探针环境贴图，否则退回简单环境项；
 	 * 只在合成的那一笔（第 0 笔）里累加 —— 其余笔只叠直接光 */

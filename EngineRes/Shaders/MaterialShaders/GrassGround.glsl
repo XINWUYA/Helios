@@ -3,6 +3,7 @@
 
 /* 地面：普通贴图地面 + 按距离接管草色。
  * 顶点属性按引擎统一契约（location 0/1/3 = 位置 / 法线 / UV）。 */
+// @variant(DEBUG_VIEW, external)
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
 layout(location = 3) in vec3 a_TexCoord;
@@ -40,7 +41,9 @@ void main()
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
 #include "../ReflectionProbe/IBLCommon.glsl"
+#if DEBUG_VIEW
 #include "../DebugShaders/DebugForward.glsl"
+#endif
 
 struct SVextex2Frag
 {
@@ -101,6 +104,8 @@ void main()
 
 	ObjectId = float(u_ObjectId);
 
+	/* 调试读数：走调试变体时才编进来 */
+#if DEBUG_VIEW
 	if (u_DebugView != 0)
 	{
 		const SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, 0.85f, 0.0f);
@@ -108,6 +113,7 @@ void main()
 			attenuation, shadow);
 		return;
 	}
+#endif
 
 	vec3 color = ComposeDirectLight(L, V, N, 0.0f, 0.85f, albedo, attenuation, shadow);
 

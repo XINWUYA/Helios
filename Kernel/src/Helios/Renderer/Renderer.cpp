@@ -439,8 +439,12 @@ namespace Helios
 		const VertexBufferLayout& layout = (instance_layout != nullptr)
 			? *instance_layout : GetObjectInstanceLayout();
 
-		/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState */
-		const SharedPtr<DeviceShader>& draw_shader = material->GetDrawShader();
+		/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState。
+		 * 绝大多数绘制不带外部变体，走材质的默认推导，不用每次算指纹 */
+		const SharedPtr<DeviceShader>& draw_shader =
+			(per_draw != nullptr && !per_draw->VariantDefines.empty())
+			? material->GetDrawShader(per_draw->VariantDefines)
+			: material->GetDrawShader();
 		if (instance_buffer != nullptr)
 			draw_shader->BindVertexArray(mesh_primitive.VertexArray, layout);
 		else

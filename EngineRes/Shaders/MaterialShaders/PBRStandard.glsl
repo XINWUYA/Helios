@@ -1,6 +1,10 @@
 #type vertex
 #version 410 core
 
+/* 调试读数整段只在调试变体里编进来，正常着色不带那份代码。
+ * 变体值由渲染通道逐笔给（0 = 正常，1 = 出读数），具体档位仍走 u_DebugView */
+// @variant(DEBUG_VIEW, external)
+
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;
 layout(location = 2) in vec4 a_Color;
@@ -53,7 +57,9 @@ void main()
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
 #include "../ReflectionProbe/IBLCommon.glsl"
+#if DEBUG_VIEW
 #include "../DebugShaders/DebugForward.glsl"
+#endif
 
 /* 不透明度乘数：透明队列的材质靠它整体调淡；不透明队列不混合，改了看不见 */
 uniform float u_Opacity = 1.0f; // @group(Surface) @property
@@ -99,13 +105,15 @@ void main()
 
 	ObjectId = float(u_ObjectId);
 
-	/* 调试视图：前向场景 Pass 逐绘制下发档位，命中就直接输出读数 */
+	/* 调试视图：走调试变体时才编进来，命中就直接输出读数 */
+#if DEBUG_VIEW
 	if (u_DebugView != 0)
 	{
 		OutFragColor = DebugForwardOutput(mtl, DebugStandardLighting(mtl, N, V, L, attenuation, shadow),
 			attenuation, shadow);
 		return;
 	}
+#endif
 
 	/* 间接光：有 IBL 绑定时用反射探针环境贴图，否则退回平面环境项；
 	 * 环境项 + 自发光只在合成的那一笔里累加（其余笔只叠直接光） */

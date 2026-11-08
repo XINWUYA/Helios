@@ -66,13 +66,12 @@ namespace Helios
 		m_ParamVariantsGeneration = m_pShader->GetGeneration();
 	}
 
-	/* 画用它。没有参数维度又没要求外部维度时就是基础着色器，一次空表判断 */
 	const SharedPtr<DeviceShader>& Material::GetDrawShader(const ShaderVariantDefines& external) const
 	{
 		if (m_pShader == nullptr)
 			return m_pShader;
 
-		/* 热重载可能改了声明（加 / 删维度），换代后重新筛一遍 */
+		/* 热重载可能改了声明，换代后重新筛一遍 */
 		const uint32_t generation = m_pShader->GetGeneration();
 		if (generation != m_ParamVariantsGeneration)
 			RefreshParamVariants();
@@ -100,8 +99,6 @@ namespace Helios
 			&& entry.Generation == generation && entry.TexturesReady == textures_ready)
 			return entry.Shader;
 
-		/* 底用着色器当前绑的变体（pass 通过 SetShader 指定的外部值），再叠本次外部维度，
-		 * 最后是材质参数 —— 越靠后越贴近 "这次画的这个材质" */
 		ShaderVariantDefines defines = m_pShader->GetVariantDefines();
 		for (const auto& [name, value] : external)
 			defines[name] = value;
@@ -130,7 +127,6 @@ namespace Helios
 				else if (info.Type == ParamType::Int)
 				{
 					const int* number = std::any_cast<int>(&info.Value);
-					/* 多档维度（材质模型之类）直接取整数值，钳到合法区间 */
 					value = (number != nullptr)
 						? std::clamp(*number, 0, ShaderVariantMaxValue) : 0;
 				}
@@ -197,10 +193,12 @@ namespace Helios
 		/* G-Buffer 判据 = 声明了标准材质契约的主采样器：自定义着色器的裸 uniform 转不过去 */
 		m_SupportsGBuffer = m_pShader->GetUniformBinding("u_AlbedoTexture") >= 0;
 
-		/* 调试分流判据 = 声明了 u_DebugView；拿不到裸 uniform 声明时按光照契约近似 */
-		m_SupportsDebugView = !reflection.MaterialParams.empty()
-			? reflection.FindMaterialParam("u_DebugView") != nullptr
-			: m_SupportsDirectLighting;
+		/* 调试分流判据 = 声明了 DEBUG_VIEW 变体维度。正常变体里根本没有 u_DebugView
+		 * 这份声明，按它查会恒为假；老着色器仍按裸 uniform 兜底 */
+		m_SupportsDebugView = reflection.FindVariantSpec("DEBUG_VIEW") != nullptr
+			|| (!reflection.MaterialParams.empty()
+				? reflection.FindMaterialParam("u_DebugView") != nullptr
+				: m_SupportsDirectLighting);
 	}
 
 	bool Material::IsSkyBox() const

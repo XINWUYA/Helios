@@ -132,8 +132,12 @@ namespace Helios
 						}
 					}
 
+					/* 调试读数走单独的着色器变体，正常着色不必带着那份代码 */
 					if (debug && material->SupportsDebugView())
+					{
+						per_draw.VariantDefines["DEBUG_VIEW"] = 1;
 						per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView", static_cast<int>(debug_view));
+					}
 
 					const auto& mesh_primitive = mesh_object->MeshSegment->GetMeshPrimitive();
 
@@ -376,7 +380,10 @@ namespace Helios
 				[probe_manager, &render_view, debug_view](const GrassComponent& grass, DrawParams& per_draw)
 				{
 					if (debug_view != DebugViewMode::None && grass.GetMaterial()->SupportsDebugView())
+					{
+						per_draw.VariantDefines["DEBUG_VIEW"] = 1;
 						per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView", static_cast<int>(debug_view));
+					}
 
 					if (!grass.GetMaterial()->SupportsIBL())
 						return;

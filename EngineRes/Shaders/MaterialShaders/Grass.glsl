@@ -4,6 +4,8 @@
 /* 草叶模板：x ∈ [-1, 1] 是叶宽方向，y ∈ [0, 1] 从根到梢。
  * 实际形状、弯曲与风都由 Builtin/GrassBlade.glsl 里的展开函数算，
  * 顶点缓冲里只有这一根 4 段的直条。 */
+// @variant(DEBUG_VIEW, external)
+
 layout(location = 0) in vec3 a_Position;
 
 /* 实例数据：每株一条。前三列已带缩放（x = 叶宽方向、y = 叶高、z = 叶面朝向），
@@ -91,7 +93,9 @@ void main()
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
 #include "../ReflectionProbe/IBLCommon.glsl"
+#if DEBUG_VIEW
 #include "../DebugShaders/DebugForward.glsl"
+#endif
 
 struct SVextex2Frag
 {
@@ -167,7 +171,9 @@ void main()
 
 	ObjectId = -1.0f;
 
-	/* 调试视图：直接光取上面的环绕漫反射加透射（草不算镜面），环境项多乘一道根部自遮挡 */
+	/* 调试视图：直接光取上面的环绕漫反射加透射（草不算镜面），环境项多乘一道根部自遮挡。
+	 * 走调试变体时才编进来 */
+#if DEBUG_VIEW
 	if (u_DebugView != 0)
 	{
 		SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, u_Roughness, 0.0f);
@@ -183,6 +189,7 @@ void main()
 		OutFragColor = DebugForwardOutput(mtl, lit, attenuation, shadow);
 		return;
 	}
+#endif
 
 	vec3 ambient;
 	if (u_UseIBL != 0)

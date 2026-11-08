@@ -5,6 +5,7 @@
  * 高度在顶点着色器里采样高度图，顶点数据完全不落地。
  * 前向变体不写运动矢量，那一趟没有速度附件。 */
 // @variant(TERRAIN_FORWARD, external)
+// @variant(DEBUG_VIEW, external)
 
 layout(location = 0) in vec2 a_Uv;
 /* 实例数据：每 patch 一条 */
@@ -64,7 +65,9 @@ void main()
 #if TERRAIN_FORWARD
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
+#if DEBUG_VIEW
 #include "../DebugShaders/DebugForward.glsl"
+#endif
 #else
 #include "../Builtin/Velocity.glsl"
 #endif
@@ -133,7 +136,8 @@ void main()
 
 	ObjectId = float(u_TerrainObjectId);
 
-	/* 调试分流：读数取自本笔实际着色用的量，与正常着色同源 */
+	/* 调试分流：读数取自本笔实际着色用的量，与正常着色同源。走调试变体时才编进来 */
+#if DEBUG_VIEW
 	if (u_DebugView != 0)
 	{
 		SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, surface.Roughness, 0.0f);
@@ -145,6 +149,7 @@ void main()
 		OutFragColor = DebugForwardOutput(mtl, lit, attenuation, shadow);
 		return;
 	}
+#endif
 
 	OutFragColor = vec4(direct + ambient, 1.0f);
 #else
