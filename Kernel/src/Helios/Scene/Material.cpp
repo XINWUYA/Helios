@@ -317,9 +317,9 @@ namespace Helios
 	/* 应用单个参数（per-draw 覆盖走这里，按名字写）。
 	 * Texture 的绑定点：值里带着的 slot 无效时按 Shader 反射重新解析 ——
 	 * per-draw 参数（见 MakeTextureParam）正是靠这条在应用时解析出正确的 binding。 */
-	void Material::ApplyParam(const MaterialParamInfo& param_info)
+	void Material::ApplyParam(const MaterialParamInfo& param_info, const SharedPtr<DeviceShader>& draw_shader)
 	{
-		const SharedPtr<DeviceShader>& shader = GetDrawShader();
+		const SharedPtr<DeviceShader>& shader = draw_shader != nullptr ? draw_shader : GetDrawShader();
 		if (shader == nullptr)
 			return;
 
@@ -354,11 +354,11 @@ namespace Helios
 		}
 	}
 
-	Material::BoundParam Material::BindParam(const MaterialParamInfo& info) const
+	Material::BoundParam Material::BindParam(const MaterialParamInfo& info,
+		const SharedPtr<DeviceShader>& shader) const
 	{
 		BoundParam bound;
 		bound.Info = &info;
-		const SharedPtr<DeviceShader>& shader = GetDrawShader();
 		bound.Handle = shader != nullptr ? shader->ResolveParamHandle(info.Name) : -1;
 		if (info.Type == ParamType::Texture)
 		{
@@ -371,9 +371,8 @@ namespace Helios
 		return bound;
 	}
 
-	void Material::ApplyBound(const BoundParam& bound)
+	void Material::ApplyBound(const BoundParam& bound, const SharedPtr<DeviceShader>& shader)
 	{
-		const SharedPtr<DeviceShader>& shader = GetDrawShader();
 		if (shader == nullptr)
 			return;
 
@@ -394,19 +393,18 @@ namespace Helios
 			shader->SetParam(bound.Handle, info.Type, data);
 	}
 
-	void Material::RebuildBindTable()
+	void Material::RebuildBindTable(const SharedPtr<DeviceShader>& shader)
 	{
 		BindCache& cache = m_BindCache;
 		cache.Revision = m_LayoutRevision;
 
-		const SharedPtr<DeviceShader>& shader = GetDrawShader();
 		cache.Shader = shader.get();
 		cache.Generation = shader != nullptr ? shader->GetGeneration() : 0;
 
 		cache.Params.clear();
 		cache.Params.reserve(m_Parameters.size());
 		for (const auto& [id, info] : m_Parameters)
-			cache.Params.push_back(BindParam(info));
+			cache.Params.push_back(BindParam(info, shader));
 
 		cache.FillsBuilt = MaterialFill::None;
 		cache.ValueFills.clear();
@@ -415,12 +413,12 @@ namespace Helios
 		cache.BoundTextureFills.clear();
 	}
 
-	/* 绑定材质中的各参数 */
-	void Material::Bind(uint8_t fill_missing)
+	/* 绑定材质中的各参数：写到这一笔实际要画的着色器上（变体的参数槽与基础不同） */
+	void Material::Bind(uint8_t fill_missing, const SharedPtr<DeviceShader>& shader_override)
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
-		const SharedPtr<DeviceShader>& draw_shader = GetDrawShader();
+		const SharedPtr<DeviceShader>& draw_shader = shader_override != nullptr ? shader_override : GetDrawShader();
 		if (draw_shader == nullptr)
 			return;
 
@@ -438,14 +436,14 @@ namespace Helios
 		BindCache& cache = m_BindCache;
 		if (cache.Revision != m_LayoutRevision || cache.Shader != draw_shader.get()
 			|| cache.Generation != draw_shader->GetGeneration())
-			RebuildBindTable();
+			RebuildBindTable(draw_shader);
 
 		for (const BoundParam& bound : cache.Params)
-			ApplyBound(bound);
+			ApplyBound(bound, draw_shader);
 
 		/* 补齐项第一次用到时才收集，之后跟着绑定表一起作废 */
-		const auto apply_fills = [this, &cache](uint8_t kind, std::vector<MaterialParamInfo>& fills,
-			std::vector<BoundParam>& bound_fills)
+		const auto apply_fills = [this, &cache, &draw_shader](uint8_t kind,
+			std::vector<MaterialParamInfo>& fills, std::vector<BoundParam>& bound_fills)
 		{
 			if ((cache.FillsBuilt & kind) == 0)
 			{
@@ -454,11 +452,11 @@ namespace Helios
 				bound_fills.clear();
 				bound_fills.reserve(fills.size());
 				for (const MaterialParamInfo& fill : fills)
-					bound_fills.push_back(BindParam(fill));
+					bound_fills.push_back(BindParam(fill, draw_shader));
 				cache.FillsBuilt |= kind;
 			}
 			for (const BoundParam& bound : bound_fills)
-				ApplyBound(bound);
+				ApplyBound(bound, draw_shader);
 		};
 		if ((fill_missing & MaterialFill::Textures) != 0)
 			apply_fills(MaterialFill::Textures, cache.TextureFills, cache.BoundTextureFills);

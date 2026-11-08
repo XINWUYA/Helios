@@ -484,7 +484,7 @@ namespace Helios
 			&& s_LastBoundFill == fill_missing;
 		if (!bind_ready)
 		{
-			material->Bind(fill_missing);
+			material->Bind(fill_missing, draw_shader);
 			s_LastBoundMaterial = material.get();
 			s_LastBoundRevision = material->GetRevision();
 			s_LastBoundGeneration = shader_generation;
@@ -497,7 +497,7 @@ namespace Helios
 		if (per_draw != nullptr)
 		{
 			for (const auto& param : per_draw->Overrides)
-				material->ApplyParam(param);
+				material->ApplyParam(param, draw_shader);
 		}
 
 		/* 按 Shader 声明绑定当前 Pass 的阴影纹理。绘制按 shader 分组，记住上一个的查表结果就够了 */
@@ -507,13 +507,12 @@ namespace Helios
 			static WeakPtr<DeviceShader> s_last_shader;
 			static uint32_t s_last_generation = 0;
 			static int s_shadow_binding = -1;
-			const SharedPtr<DeviceShader>& shader = material->GetDrawShader();
-			const bool same_shader = !s_last_shader.owner_before(shader) && !shader.owner_before(s_last_shader);
-			if (!same_shader || shader->GetGeneration() != s_last_generation)
+			const bool same_shader = !s_last_shader.owner_before(draw_shader) && !draw_shader.owner_before(s_last_shader);
+			if (!same_shader || draw_shader->GetGeneration() != s_last_generation)
 			{
-				s_last_shader = shader;
-				s_last_generation = shader->GetGeneration();
-				s_shadow_binding = shader->GetUniformBinding("u_ShadowMap");
+				s_last_shader = draw_shader;
+				s_last_generation = draw_shader->GetGeneration();
+				s_shadow_binding = draw_shader->GetUniformBinding("u_ShadowMap");
 			}
 			if (s_shadow_binding >= 0)
 				m_pCurrentShadowMap->Bind(static_cast<uint32_t>(s_shadow_binding));

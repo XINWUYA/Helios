@@ -113,14 +113,15 @@ namespace Helios
 		[[nodiscard]] const RenderRasterState& GetRasterState() const { return m_RasterState; }
 		RenderRasterState& GetRasterState() { return m_RasterState; }
 
-		/* 绑定材质中的各参数；fill_missing 见 MaterialFill */
-		void Bind(uint8_t fill_missing = MaterialFill::None);
+		/* 绑定材质中的各参数；fill_missing 见 MaterialFill。
+		 * draw_shader 是这一笔实际要画的着色器（可能是变体），空指针表示按材质默认推导 */
+		void Bind(uint8_t fill_missing = MaterialFill::None, const SharedPtr<DeviceShader>& draw_shader = nullptr);
 		/* 解绑材质 */
 		void Unbind();
 
 		/* 应用单个参数到当前绑定的 Shader（Bind 与 per-draw 覆盖共用）。
 		 * Texture 参数的绑定点：值里带着的 slot 无效时按 Shader 反射重新解析。 */
-		void ApplyParam(const MaterialParamInfo& param_info);
+		void ApplyParam(const MaterialParamInfo& param_info, const SharedPtr<DeviceShader>& draw_shader = nullptr);
 
 		/* 构造一个 per-draw 用的纹理参数：绑定点留待应用时按 Shader 反射解析 */
 		static MaterialParamInfo MakeTextureParam(const std::string& name, const SharedPtr<DeviceTexture>& texture);
@@ -218,9 +219,9 @@ namespace Helios
 		};
 
 		void StoreParam(MaterialParamInfo info);
-		void RebuildBindTable();
-		BoundParam BindParam(const MaterialParamInfo& info) const;
-		void ApplyBound(const BoundParam& bound);
+		void RebuildBindTable(const SharedPtr<DeviceShader>& shader);
+		BoundParam BindParam(const MaterialParamInfo& info, const SharedPtr<DeviceShader>& shader) const;
+		void ApplyBound(const BoundParam& bound, const SharedPtr<DeviceShader>& shader);
 
 		/* 着色器声明的材质参数维度（SetShader 时筛出来，热重载换代后重筛） */
 		struct ParamVariant
