@@ -37,13 +37,8 @@ void main()
 
 #include "../Builtin/Math.glsl"
 #include "../Builtin/Uniforms.glsl"
-#include "../Builtin/ShadowUtils.glsl"
-#include "../Builtin/DirectLight.glsl"
-#include "../Builtin/LightCompose.glsl"
-#include "../ReflectionProbe/IBLCommon.glsl"
-#if DEBUG_VIEW
-#include "../DebugShaders/DebugForward.glsl"
-#endif
+#include "../Builtin/MaterialInput.glsl"
+#include "../Builtin/ForwardShade.glsl"
 
 struct SVextex2Frag
 {
@@ -93,40 +88,11 @@ void main()
 	const float noise = 0.92f + 0.16f * fract(sin(dot(floor(world_xz * 0.5f), vec2(12.9898f, 78.233f))) * 43758.5453f);
 	albedo = mix(albedo, u_GrassColor * noise, takeover);
 
-	const vec3 N = normalize(vert2frag.WorldNormal);
-	const vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);
-
-	vec3 L;
-	float attenuation;
-	float shadow;
-	EvaluateDirectLight(u_ShadowMap, vert2frag.WorldPosition, N, L, attenuation, shadow);
-	shadow *= u_ReceiveShadow;
+	/* 地面用固定的粗糙度 / 金属度，没有切线也没有环境贴图 */
+	SMaterialInput mtl = MakeMaterialInput(albedo, normalize(vert2frag.WorldNormal), 0.85f, 0.0f);
 
 	ObjectId = float(u_ObjectId);
 
-	/* 调试读数：走调试变体时才编进来 */
-#if DEBUG_VIEW
-	if (u_DebugView != 0)
-	{
-		const SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, 0.85f, 0.0f);
-		OutFragColor = DebugForwardOutput(mtl, DebugStandardLighting(mtl, N, V, L, attenuation, shadow),
-			attenuation, shadow);
-		return;
-	}
-#endif
-
-	vec3 color = ComposeDirectLight(L, V, N, 0.0f, 0.85f, albedo, attenuation, shadow);
-
-	/* 环境项只在合成的那一笔累加，多光源时其余笔只叠直接光 */
-	if (u_ComposeAmbientEmission > 0)
-	{
-		vec3 ambient;
-		if (u_UseIBL != 0)
-			ambient = max(vec3(0.0f), EvaluateIBL(N, V, 0.85f, 0.0f, albedo));
-		else
-			ambient = ComposeFallbackAmbient(vec3(1.0f), albedo, 1.0f);
-		color += ambient * AmbientShadowVisibility(N, L, shadow);
-	}
-
-	OutFragColor = vec4(color, 1.0f);
+	const SForwardShade shade = ShadeForwardSurface(mtl, vert2frag.WorldPosition);
+	OutFragColor = shade.DebugReadout ? shade.Color : vec4(shade.Color.rgb, 1.0f);
 }

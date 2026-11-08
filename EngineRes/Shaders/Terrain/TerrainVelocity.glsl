@@ -7,7 +7,7 @@ layout(location = 0) in vec2 a_Uv;
 layout(location = 5) in vec4 a_PatchInfo;
 layout(location = 6) in vec4 a_PatchLod;
 
-#include "../MaterialShaders/TerrainCommon.glsl"
+#include "TerrainCommon.glsl"
 
 out vec4 v_CurClip;
 out vec4 v_PrevClip;
@@ -27,14 +27,4 @@ void main()
 #type fragment
 #version 410 core
 
-#include "../Builtin/Velocity.glsl"
-
-in vec4 v_CurClip;
-in vec4 v_PrevClip;
-
-layout(location = 0) out vec2 OutVelocity;
-
-void main()
-{
-	OutVelocity = ComputeVelocityFromClip(v_CurClip, v_PrevClip);
-}
+#include "../Builtin/VelocityOutput.glsl"

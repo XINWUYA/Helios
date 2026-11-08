@@ -50,16 +50,9 @@ void main()
 
 #include "../Builtin/Math.glsl"
 #include "../Builtin/Uniforms.glsl"
-#include "../Builtin/BRDF.glsl"
 #include "../Builtin/MaterialInput.glsl"
 #include "../Builtin/MaterialLit.glsl"
-#include "../Builtin/ShadowUtils.glsl"
-#include "../Builtin/DirectLight.glsl"
-#include "../Builtin/LightCompose.glsl"
-#include "../ReflectionProbe/IBLCommon.glsl"
-#if DEBUG_VIEW
-#include "../DebugShaders/DebugForward.glsl"
-#endif
+#include "../Builtin/ForwardShade.glsl"
 
 /* 不透明度乘数：透明队列的材质靠它整体调淡；不透明队列不混合，改了看不见 */
 uniform float u_Opacity = 1.0f; // @group(Surface) @property
@@ -92,43 +85,10 @@ void main()
 	CalculateLitMaterial(mtl, vert2frag.WorldPosition, vert2frag.TexCoord,
 		vert2frag.BaseColor, vert2frag.WorldNormal, world_tangent);
 
-	vec3 N = mtl.Normal;
-	vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);
-
-	/* 直接光：按本笔光源的类型（方向光 / 点光 / 聚光）求光向、衰减与阴影 */
-	vec3 L;
-	float attenuation;
-	float shadow;
-	EvaluateDirectLight(u_ShadowMap, vert2frag.WorldPosition, N, L, attenuation, shadow);
-	/* 模型关闭「接受阴影」时阴影因子归零 */
-	shadow *= u_ReceiveShadow;
-
 	ObjectId = float(u_ObjectId);
 
-	/* 调试视图：走调试变体时才编进来，命中就直接输出读数 */
-#if DEBUG_VIEW
-	if (u_DebugView != 0)
-	{
-		OutFragColor = DebugForwardOutput(mtl, DebugStandardLighting(mtl, N, V, L, attenuation, shadow),
-			attenuation, shadow);
-		return;
-	}
-#endif
-
-	/* 间接光：有 IBL 绑定时用反射探针环境贴图，否则退回平面环境项；
-	 * 环境项 + 自发光只在合成的那一笔里累加（其余笔只叠直接光） */
-	vec3 color = ComposeDirectLight(L, V, N, mtl.Metallic, mtl.Roughness, mtl.Albedo,
-		attenuation, shadow);
-	if (u_ComposeAmbientEmission > 0)
-	{
-		vec3 ambient;
-		if (u_UseIBL != 0)
-			ambient = max(vec3(0.0f), EvaluateIBL(N, V, mtl.Roughness, mtl.Metallic, mtl.Albedo));
-		else
-			ambient = max(vec3(0.0f), ComposeFallbackAmbient(mtl.Ambient, mtl.Albedo, mtl.AO));
-
-		color += ambient * AmbientShadowVisibility(N, L, shadow) + mtl.Emission;
-	}
-
-	OutFragColor = vec4(color, mtl.Opacity * u_Opacity);
+	const SForwardShade shade = ShadeForwardSurface(mtl, vert2frag.WorldPosition);
+	OutFragColor = shade.DebugReadout
+		? shade.Color
+		: vec4(shade.Color.rgb, mtl.Opacity * u_Opacity);
 }

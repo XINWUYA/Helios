@@ -16,7 +16,7 @@ void main()
 #type fragment
 #version 410 core
 
-#include "../MaterialShaders/TerrainMaterial.glsl"
+#include "TerrainMaterial.glsl"
 
 in vec2 v_Uv;
 

@@ -3,7 +3,7 @@
 
 /* 草的调试重绘：Surface / Mipmap / Overdraw / Wireframe 档。
  * 草不进 G-Buffer、也不在可见网格列表里，调试 Pass 要单独补这一笔才看得到。 */
-#include "DebugGrassVertex.glsl"
+#include "../Grass/GrassBladeVertex.glsl"
 
 
 #type fragment
@@ -59,7 +59,7 @@ void main()
 
 	/* 草的颜色是程序化算出来的，没有贴图也就没有 mip 层级可看，Mipmap 档按底色画；
 	 * AO 读的是着色时用的根部自遮挡系数 */
-	SMaterialInput mtl = MakeDebugMaterialInput(albedo, vert2frag.WorldNormal, u_Roughness, 0.0f);
+	SMaterialInput mtl = MakeMaterialInput(albedo, vert2frag.WorldNormal, u_Roughness, 0.0f);
 	mtl.AO = ao;
 	const int mode = u_DebugMode == kDebugMipmap ? kDebugAlbedo : u_DebugMode;
 	OutFragColor = vec4(DebugSurfaceChannel(mode, mtl), 1.0f);

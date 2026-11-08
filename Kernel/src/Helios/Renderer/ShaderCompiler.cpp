@@ -732,7 +732,29 @@ namespace Helios
             }
         }
 
-        /* 取值只认 0..ShaderVariantMaxValue：开关量用 0 / 1，多档维度用中间值。
+        /* @variant 的第二个参数只认 external / view / global。拼错会静默退化成外部维度，
+         * 那条维度就永远没人给值，所以拼错就是 bug */
+        void ReportUnknownVariantSources(const std::string& filepath, const std::vector<std::string>& entries)
+        {
+            const std::string filename = std::filesystem::path(filepath).filename().string();
+            for (const std::string& entry : entries)
+            {
+                if (!FirstReport(filepath, entry + "#source"))
+                    continue;
+
+                const size_t colon = entry.find(':');
+                const std::string dim = colon == std::string::npos ? entry : entry.substr(0, colon);
+                const std::string keyword = colon == std::string::npos ? std::string() : entry.substr(colon + 1);
+                CORE_LOG_ERROR("[Shader] {} declares variant '{}' with unknown source '{}', "
+                    "only external / view / global are supported", filename, dim, keyword);
+#ifdef HELIOS_DEBUG
+                if (VariantStrictEnabled())
+                    Break();
+#endif
+            }
+        }
+
+        /* 维度取值只认 0..ShaderVariantMaxValue：开关量用 0 / 1，多档维度用中间值。
          * 越界只会多编一份跟谁都不重的源码，报一次让人回来看 */
         void ReportVariantValueOutOfRange(const std::string& filepath, const ShaderVariantDefines& requested)
         {
@@ -797,9 +819,8 @@ namespace Helios
             }
         }
 
-        /* 材质参数维度的几条约定：类型、数量、前缀。
-         * 加载时报一次，不阻断编译 —— 编辑器先能跑起来，改对了自然消失。
-         * 与 external 维度可以混用：值由 Material::GetDrawShader 合成，见那里的叠加顺序。 */
+        /* 材质参数维度的约定：类型、数量、前缀。加载时报一次，不阻断编译；
+         * 与 external / view / global 混用时，值由 Material::GetDrawShader 合成 */
         void ValidateParamVariants(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
         {
             const std::string filename = std::filesystem::path(filepath).filename().string();
@@ -807,7 +828,7 @@ namespace Helios
             size_t param_count = 0;
             for (const ShaderVariantSpec& spec : specs)
             {
-                if (spec.Source == ShaderVariantSource::External)
+                if (spec.Source != ShaderVariantSource::Param)
                     continue;
 
                 ++param_count;
@@ -1277,13 +1298,15 @@ namespace Helios
             if (stage_it == stage_sources.end())
                 continue;
 
-            for (const ShaderVariantSpec& spec : ShaderAnnotation::ParseVariantSpecs(stage_it->second))
+            std::vector<std::string> unknown_sources;
+            for (const ShaderVariantSpec& spec : ShaderAnnotation::ParseVariantSpecs(stage_it->second, &unknown_sources))
             {
                 const bool exists = std::any_of(variant_specs.begin(), variant_specs.end(),
                     [&spec](const ShaderVariantSpec& known) { return known.Name == spec.Name; });
                 if (!exists)
                     variant_specs.push_back(spec);
             }
+            ReportUnknownVariantSources(filepath, unknown_sources);
         }
 
         /* 补成声明全集再注入：声明过没请求的补 0，请求了没声明的丢掉。

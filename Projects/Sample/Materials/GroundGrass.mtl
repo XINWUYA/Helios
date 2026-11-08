@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<Material ShaderPath="Shaders/MaterialShaders/GrassGround.glsl">
+<Material ShaderPath="Shaders/Grass/GrassGround.glsl">
   <Parameters>
     <ParamInfo Type="5" Name="u_GroundTiling" Value="60.000000 60.000000 0.000000 0.000000" />
     <ParamInfo Type="0" Name="u_GroundTexture" Value="Textures/Grass.png"/>

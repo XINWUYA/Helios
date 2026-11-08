@@ -74,7 +74,7 @@ void main()
 		SGBufferData gbuffer;
 		CalculateGBuffer(gbuffer, vert2frag.TexCoord);
 
-		SMaterialInput mtl = MakeDebugMaterialInput(gbuffer.Albedo, gbuffer.WorldNormal,
+		SMaterialInput mtl = MakeMaterialInput(gbuffer.Albedo, gbuffer.WorldNormal,
 			gbuffer.Roughness, gbuffer.Metallic);
 		mtl.Specular = gbuffer.Specular;
 		mtl.AO = gbuffer.AO;

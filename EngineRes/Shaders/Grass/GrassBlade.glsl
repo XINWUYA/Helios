@@ -1,7 +1,7 @@
 #ifndef GRASS_BLADE_GLSL
 #define GRASS_BLADE_GLSL
 
-#include "Uniforms.glsl"
+#include "../Builtin/Uniforms.glsl"
 #include "GrassDensity.glsl"
 
 /* 草叶的形变数学：可见着色与阴影投影共用这一份，两边算出来的形状必须一模一样，

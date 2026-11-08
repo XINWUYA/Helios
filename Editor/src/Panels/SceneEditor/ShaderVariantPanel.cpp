@@ -83,9 +83,21 @@ namespace Helios
 					group.DeclaredDims += ", ";
 
 				group.DeclaredDims += spec.Name;
-				group.DeclaredDims += (spec.Source == ShaderVariantSource::External || spec.ParamName.empty())
-					? " (external)"
-					: " (" + spec.ParamName + ")";
+				switch (spec.Source)
+				{
+				case ShaderVariantSource::View:
+					group.DeclaredDims += " (view)";
+					break;
+				case ShaderVariantSource::Global:
+					group.DeclaredDims += " (global)";
+					break;
+				case ShaderVariantSource::External:
+					group.DeclaredDims += " (external)";
+					break;
+				case ShaderVariantSource::Param:
+					group.DeclaredDims += " (" + spec.ParamName + ")";
+					break;
+				}
 			}
 
 			for (const SharedPtr<DeviceShader>& shader : variants)

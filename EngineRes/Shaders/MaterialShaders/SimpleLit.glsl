@@ -42,14 +42,8 @@ void main()
 
 #include "../Builtin/Math.glsl"
 #include "../Builtin/Uniforms.glsl"
-#include "../Builtin/BRDF.glsl"
-#include "../Builtin/ShadowUtils.glsl"
-#include "../Builtin/DirectLight.glsl"
-#include "../Builtin/LightCompose.glsl"
-#include "../ReflectionProbe/IBLCommon.glsl"
-#if DEBUG_VIEW
-#include "../DebugShaders/DebugForward.glsl"
-#endif
+#include "../Builtin/MaterialInput.glsl"
+#include "../Builtin/ForwardShade.glsl"
 
 struct SVextex2Frag
 {
@@ -73,53 +67,19 @@ uniform float u_Opacity = 1.0f; // @property
 
 void main()
 {
-	/* 本 shader 无切线数据，直接用插值后的世界法线 */
-	vec3 N = normalize(vert2frag.WorldNormal);
-	vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);
-
 	/* Albedo 转到线性空间后再做光照（主贴图 UV 缩放与偏移在此生效） */
-	vec2 albedo_uv = vert2frag.TexCoord * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
+	const vec2 albedo_uv = vert2frag.TexCoord * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
 	const vec4 albedo_sample = texture(u_AlbedoTexture, albedo_uv);
-	vec3 albedo = SrgbToLinear(albedo_sample.rgb);
 
-	/* 简单光照模型：金属度 / 粗糙度用默认值 */
-	float metallic  = 0.0f;
-	float roughness = 0.8f;
-
-	/* 直接光：按本笔光源的类型（方向光 / 点光 / 聚光）求光向、衰减与阴影 */
-	vec3 L;
-	float attenuation;
-	float shadow;
-	EvaluateDirectLight(u_ShadowMap, vert2frag.WorldPosition, N, L, attenuation, shadow);
-	/* 模型关闭「接受阴影」时阴影因子归零 */
-	shadow *= u_ReceiveShadow;
+	/* 简单光照模型：金属度 / 粗糙度用默认值，没有切线也没有环境贴图 */
+	SMaterialInput mtl = MakeMaterialInput(SrgbToLinear(albedo_sample.rgb),
+		normalize(vert2frag.WorldNormal), 0.8f, 0.0f);
+	mtl.Opacity = albedo_sample.a;
 
 	ObjectId = float(u_ObjectId);
 
-	/* 调试视图：走调试变体时才编进来。简化档只有 Albedo 与固定的粗糙度 / 金属度，环境输入按 1 算 */
-#if DEBUG_VIEW
-	if (u_DebugView != 0)
-	{
-		const SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, roughness, metallic);
-		OutFragColor = DebugForwardOutput(mtl, DebugStandardLighting(mtl, N, V, L, attenuation, shadow),
-			attenuation, shadow);
-		return;
-	}
-#endif
-
-	/* 间接光：u_UseIBL = 1 时逐绘制绑定反射探针环境贴图，否则退回简单环境项；
-	 * 只在合成的那一笔（第 0 笔）里累加 —— 其余笔只叠直接光 */
-	vec3 color = ComposeDirectLight(L, V, N, metallic, roughness, albedo, attenuation, shadow);
-	if (u_ComposeAmbientEmission > 0)
-	{
-		vec3 ambient;
-		if (u_UseIBL != 0)
-			ambient = max(vec3(0.0f), EvaluateIBL(N, V, roughness, metallic, albedo));
-		else
-			ambient = ComposeFallbackAmbient(vec3(1.0f), albedo, 1.0f); /* 简化档：无 ambient 贴图 / AO */
-
-		color += ambient * AmbientShadowVisibility(N, L, shadow);
-	}
-
-	OutFragColor = vec4(color, albedo_sample.a * u_Opacity);
+	const SForwardShade shade = ShadeForwardSurface(mtl, vert2frag.WorldPosition);
+	OutFragColor = shade.DebugReadout
+		? shade.Color
+		: vec4(shade.Color.rgb, mtl.Opacity * u_Opacity);
 }

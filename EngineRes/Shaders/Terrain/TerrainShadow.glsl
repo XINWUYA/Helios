@@ -9,7 +9,7 @@ layout(location = 6) in vec4 a_PatchLod;
 
 uniform int u_CascadeIndex = 0;
 
-#include "../MaterialShaders/TerrainCommon.glsl"
+#include "TerrainCommon.glsl"
 
 void main()
 {

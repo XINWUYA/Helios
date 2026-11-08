@@ -30,7 +30,7 @@ namespace Helios
 		struct ShaderGroup
 		{
 			std::string Path;
-			std::string DeclaredDims; /* "A (external), B (u_NormalTexture)" */
+			std::string DeclaredDims; /* "A (external), B (view), C (u_NormalTexture)" */
 			std::vector<VariantRow> Variants;
 		};
 

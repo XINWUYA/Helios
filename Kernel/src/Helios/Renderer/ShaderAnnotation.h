@@ -130,23 +130,45 @@ namespace Helios
 			return true;
 		}
 
-		/* 第二项是不是 external（不区分大小写） */
-		inline bool IsExternalKeyword(const std::string& text)
+		inline bool KeywordEquals(const std::string& text, const char* keyword)
 		{
-			static constexpr const char* kExternal = "external";
-			if (text.size() != std::strlen(kExternal))
+			const size_t length = std::strlen(keyword);
+			if (text.size() != length)
 				return false;
-			for (size_t i = 0; i < text.size(); ++i)
+			for (size_t i = 0; i < length; ++i)
 			{
-				if (std::tolower(static_cast<unsigned char>(text[i])) != kExternal[i])
+				if (std::tolower(static_cast<unsigned char>(text[i])) != keyword[i])
 					return false;
 			}
 			return true;
 		}
 
-		/* 变体维度：逐行找 @variant(NAME) / @variant(NAME, external)。行尾标注绑到该行声明的参数，
-		 * 单独一行或写了 external 的就是外部维度 —— 值不在材质里取。同名先到者定。 */
-		inline std::vector<ShaderVariantSpec> ParseVariantSpecs(const std::string& source)
+		/* 把 @variant 的第二个参数转成取值来源，认不出返回 false */
+		inline bool VariantSourceFromKeyword(const std::string& text, ShaderVariantSource& source)
+		{
+			if (KeywordEquals(text, "external"))
+			{
+				source = ShaderVariantSource::External;
+				return true;
+			}
+			if (KeywordEquals(text, "view"))
+			{
+				source = ShaderVariantSource::View;
+				return true;
+			}
+			if (KeywordEquals(text, "global"))
+			{
+				source = ShaderVariantSource::Global;
+				return true;
+			}
+			return false;
+		}
+
+		/* 变体维度：逐行找 @variant(NAME) / @variant(NAME, 来源)。行尾标注绑到该行声明的参数，
+		 * 单独一行或写了来源关键字的就是不绑参数的那种。同名先到者定。
+		 * unknown_sources 非空时收集认不出的来源关键字（拼成 "维度名:关键字"），加载时报错用。 */
+		inline std::vector<ShaderVariantSpec> ParseVariantSpecs(const std::string& source,
+			std::vector<std::string>* unknown_sources = nullptr)
 		{
 			std::vector<ShaderVariantSpec> specs;
 			if (source.empty())
@@ -176,16 +198,26 @@ namespace Helios
 					{
 						ShaderVariantSpec spec;
 						spec.Name = args[0];
-						const bool external = args.size() > 1 && IsExternalKeyword(args[1]);
-						if (!external)
+
+						if (args.size() > 1)
+						{
+							/* 写了来源关键字就不再绑参数；拼错的按外部维度处理，由调用方报 */
+							if (!VariantSourceFromKeyword(args[1], spec.Source))
+							{
+								spec.Source = ShaderVariantSource::External;
+								if (unknown_sources != nullptr)
+									unknown_sources->push_back(args[0] + ":" + args[1]);
+							}
+						}
+						else
 						{
 							spec.ParamName = UniformNameInLine(line);
 							spec.ParamKindKnown = UniformTypeInLine(line, spec.ParamKind);
+							spec.Source = spec.ParamName.empty()
+								? ShaderVariantSource::External
+								: ShaderVariantSource::Param;
 						}
-						/* 绑不到参数的（单独一行写的）自然按外部维度处理 */
-						spec.Source = (external || spec.ParamName.empty())
-							? ShaderVariantSource::External
-							: ShaderVariantSource::Param;
+
 						add(std::move(spec));
 					}
 				}

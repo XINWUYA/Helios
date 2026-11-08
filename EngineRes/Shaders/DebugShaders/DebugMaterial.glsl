@@ -114,7 +114,7 @@ void main()
 	T = normalize(T - dot(T, N) * N);
 	const mat3 TBN = mat3(T, cross(T, N), N);
 
-	SMaterialInput mtl = MakeDebugMaterialInput(SrgbToLinear(main_sample.rgb) * vert2frag.BaseColor.rgb,
+	SMaterialInput mtl = MakeMaterialInput(SrgbToLinear(main_sample.rgb) * vert2frag.BaseColor.rgb,
 		normalize(TBN * (main_sample.xyz * 2.0f - 1.0f)), main_sample.r, main_sample.r);
 	mtl.Specular = main_sample.rgb;
 	mtl.Emission = main_sample.rgb;

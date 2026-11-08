@@ -2,7 +2,7 @@
 #version 410 core
 
 /* 草的调试重绘：Shadow 档。可见度要采阴影图，单独一份着色器 —— 其余档位不背这个采样器 */
-#include "DebugGrassVertex.glsl"
+#include "../Grass/GrassBladeVertex.glsl"
 
 
 #type fragment

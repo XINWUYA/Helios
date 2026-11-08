@@ -267,16 +267,16 @@ namespace Helios
 		Mat4,
 	};
 
-	/* Shader 变体的取值来源。维度写在着色器源码里（配置在 shader，引擎不认识具体名字）：
-	 *   uniform sampler2D u_NormalTexture; // @property @variant(USE_NORMAL)
-	 * 行尾标注绑到那一行的参数；写成 @variant(NAME, external) 的维度不绑参数。 */
+	/* Shader 变体的取值来源。维度写在着色器源码里：行尾 @variant(NAME) 绑该行参数，
+	 * 带来源的不绑参数，来源决定值从哪儿来。 */
 	enum class ShaderVariantSource : uint8_t
 	{
-		Param = 0, /* 绑定了材质参数，但求值还没接：加载时按 0 编并提示暂不支持 */
-		External   /* 值由绘制端逐笔给：光源类型这类不在材质参数表里的维度 */
+		Param = 0, /* 绑定了材质参数：值从材质参数推导，换材质才变 */
+		External,  /* 值由绘制端逐笔给：层级未定 */
+		View,      /* 值由渲染视图补：换视图才变 */
+		Global     /* 值由引擎配置补：换进程才变 */
 	};
 
-	/* 一条变体维度声明 */
 	struct ShaderVariantSpec
 	{
 		std::string			Name{};      /* define 名，拼成 `#define NAME 值` */
@@ -286,10 +286,8 @@ namespace Helios
 		bool				ParamKindKnown{ false };         /* 认不出声明类型时为假 */
 	};
 
-	/* Shader 变体键：维度名 -> 值。有序，拼缓存键与资产键时顺序稳定。
-	 * 维度本身声明在着色器源码的 @variant 标注里，引擎侧不认识具体名字。
-	 * 编译前会按声明补成全集（声明过没写补 0，没声明的丢掉），所以"全默认"写空表即可；
-	 * 想命中同一个资源缓存实例，就把声明过的维度都显式写出来。 */
+	/* Shader 变体键：维度名 -> 值，有序便于拼缓存键。编译前按声明补成全集，
+	 * 声明过没写补 0，没声明的丢掉 */
 	using ShaderVariantDefines = std::map<std::string, int>;
 
 	/* 维度取值上限（含）：开关量用 0 / 1，材质模型这类多档维度用中间值。

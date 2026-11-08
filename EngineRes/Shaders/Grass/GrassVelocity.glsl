@@ -13,7 +13,7 @@ layout(location = 8) in vec4 a_InstanceMatrix3;
 layout(location = 9) in vec4 a_InstanceParams;
 
 #include "../Builtin/Uniforms.glsl"
-#include "../Builtin/GrassBlade.glsl"
+#include "GrassBlade.glsl"
 
 /* 1 = 块底面（叶根下的草色垫层），0 = 叶片；与可见着色同名同值 */
 uniform int u_FlatPad = 0;              // @property
@@ -67,14 +67,4 @@ void main()
 #type fragment
 #version 410 core
 
-#include "../Builtin/Velocity.glsl"
-
-in vec4 v_CurClip;
-in vec4 v_PrevClip;
-
-layout(location = 0) out vec2 OutVelocity;
-
-void main()
-{
-	OutVelocity = ComputeVelocityFromClip(v_CurClip, v_PrevClip);
-}
+#include "../Builtin/VelocityOutput.glsl"

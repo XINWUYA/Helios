@@ -38,25 +38,6 @@ bool IsDebugIndirectMode(int mode)
 	return mode == kDebugIndirectDiffuse || mode == kDebugIndirectSpecular;
 }
 
-/* 没有贴图与环境项的着色器用它凑一份材质输入，环境输入按 1 算（与平面环境项回退同口径） */
-SMaterialInput MakeDebugMaterialInput(vec3 albedo, vec3 normal, float roughness, float metallic)
-{
-	SMaterialInput mtl;
-	mtl.Albedo = albedo;
-	mtl.Normal = normal;
-	mtl.Roughness = roughness;
-	mtl.Metallic = metallic;
-	mtl.Specular = vec3(0.0f);
-	mtl.Anisotropy = 0.0f;
-	mtl.Emission = vec3(0.0f);
-	mtl.Ambient = vec3(1.0f);
-	mtl.AO = 1.0f;
-	mtl.Opacity = 1.0f;
-	mtl.IOR = 0.0f;
-	mtl.ClearCoatThickness = 0.0f;
-	mtl.ClearCoatRoughness = 0.0f;
-	return mtl;
-}
 
 /* Surface 档的读数就是材质输入里对应的通道 */
 vec3 DebugSurfaceChannel(int mode, SMaterialInput mtl)

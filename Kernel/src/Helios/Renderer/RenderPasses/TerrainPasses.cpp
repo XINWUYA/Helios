@@ -104,7 +104,7 @@ namespace Helios::TerrainDraw
 				return entry.Material;
 
 			/* 同一份地形着色器的前向变体，见源码里的 @variant */
-			static BuiltinAsset<DeviceShader> s_forward_shader("Shaders/MaterialShaders/Terrain.glsl",
+			static BuiltinAsset<DeviceShader> s_forward_shader("Shaders/Terrain/Terrain.glsl",
 				ShaderVariantConfig{ ShaderVariantDefines{ { "TERRAIN_FORWARD", 1 } } });
 			const auto shader = s_forward_shader.Get();
 			if (shader == nullptr)

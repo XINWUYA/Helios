@@ -38,7 +38,7 @@ namespace Helios
 		static const SharedPtr<Material> s_Default = []()
 		{
 			const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-				ABSOLUTE_PATH("Shaders/MaterialShaders/Grass.glsl"));
+				ABSOLUTE_PATH("Shaders/Grass/Grass.glsl"));
 			return shader != nullptr ? Material::Create(shader) : nullptr;
 		}();
 		return s_Default;
@@ -59,7 +59,7 @@ namespace Helios
 		static const SharedPtr<Material> s_Default = []()
 		{
 			const auto shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-				ABSOLUTE_PATH("Shaders/MaterialShaders/Terrain.glsl"));
+				ABSOLUTE_PATH("Shaders/Terrain/Terrain.glsl"));
 			return shader != nullptr ? Material::Create(shader) : nullptr;
 		}();
 		return s_Default;

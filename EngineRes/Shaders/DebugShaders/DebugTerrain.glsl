@@ -8,7 +8,7 @@ layout(location = 0) in vec2 a_Uv;
 layout(location = 5) in vec4 a_PatchInfo;
 layout(location = 6) in vec4 a_PatchLod;
 
-#include "../MaterialShaders/TerrainCommon.glsl"
+#include "../Terrain/TerrainCommon.glsl"
 
 struct SVextex2Frag
 {
@@ -35,9 +35,9 @@ void main()
 #version 410 core
 
 #include "DebugViewCommon.glsl"
-#include "../MaterialShaders/TerrainCommon.glsl"
-#include "../MaterialShaders/TerrainMaterial.glsl"
-#include "../MaterialShaders/TerrainVTSample.glsl"
+#include "../Terrain/TerrainCommon.glsl"
+#include "../Terrain/TerrainMaterial.glsl"
+#include "../Terrain/TerrainVTSample.glsl"
 
 struct SVextex2Frag
 {
@@ -82,7 +82,7 @@ void main()
 	}
 
 	/* 地形颜色是程序化算的，没有贴图也就没有 mip 层级可看，Mipmap 档按底色画 */
-	SMaterialInput mtl = MakeDebugMaterialInput(surface.Albedo, surface.Normal, surface.Roughness, 0.0f);
+	SMaterialInput mtl = MakeMaterialInput(surface.Albedo, surface.Normal, surface.Roughness, 0.0f);
 	const int mode = u_DebugMode == kDebugMipmap ? kDebugAlbedo : u_DebugMode;
 	OutFragColor = vec4(DebugSurfaceChannel(mode, mtl), 1.0f);
 }

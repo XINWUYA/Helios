@@ -140,7 +140,7 @@ void main()
 #if DEBUG_VIEW
 	if (u_DebugView != 0)
 	{
-		SMaterialInput mtl = MakeDebugMaterialInput(albedo, N, surface.Roughness, 0.0f);
+		SMaterialInput mtl = MakeMaterialInput(albedo, N, surface.Roughness, 0.0f);
 		SDebugLighting lit;
 		lit.DirectDiffuse = direct;
 		lit.DirectSpecular = vec3(0.0f);

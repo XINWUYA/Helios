@@ -64,7 +64,7 @@ layout(std430, binding = 5) readonly buffer ChunkBounds
 #endif
 
 /* 抽稀曲线与可见着色、阴影着色共用一份，几边丢的是同一批株 */
-#include "../Builtin/GrassDensity.glsl"
+#include "GrassDensity.glsl"
 
 void main()
 {

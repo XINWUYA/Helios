@@ -24,7 +24,7 @@ uniform float u_GrassShadowFadeRadius = 34.0f;
 uniform int u_GrassShadowGpuCulled = 0;
 
 #include "../Builtin/Uniforms.glsl"
-#include "../Builtin/GrassBlade.glsl"
+#include "GrassBlade.glsl"
 
 /* 密度与阈值一起送给片元：丢叶子放在片元里做，不依赖各后端对裁剪体外顶点的处理 */
 out float v_GrassShadowDensity;

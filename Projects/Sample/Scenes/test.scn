@@ -250,7 +250,7 @@
         <Entity ID="69" Name="Grass">
             <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Grass Extent="12.500000 12.500000" Density="84" Height="0.60000002" Width="0.045000002" LodDistance="25" CullDistance="90" MinDensityScale="0.12" WindDirection="1.000000 0.350000" WindStrength="0.12" WindSpeed="1.6" WindSpatialScale="0.25" ReceiveShadow="true" CastShadow="true" BendRecover="6" Seed="7">
-                <MaterialOverride Instance="true" ShaderPath="Shaders/MaterialShaders/Grass.glsl" RenderQueue="2000">
+                <MaterialOverride Instance="true" ShaderPath="Shaders/Grass/Grass.glsl" RenderQueue="2000">
                     <Parameters>
                         <ParamInfo Type="4" Name="u_BaseColor" Value="0.210000 0.200000 0.050000"/>
                         <ParamInfo Type="4" Name="u_TipColor" Value="0.405660 0.254531 0.057405"/>

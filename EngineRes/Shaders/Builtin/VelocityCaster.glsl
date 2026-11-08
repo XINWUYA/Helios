@@ -27,14 +27,4 @@ void main()
 #type fragment
 #version 410 core
 
-#include "Velocity.glsl"
-
-in vec4 v_CurClip;
-in vec4 v_PrevClip;
-
-layout(location = 0) out vec2 OutVelocity;
-
-void main()
-{
-	OutVelocity = ComputeVelocityFromClip(v_CurClip, v_PrevClip);
-}
+#include "VelocityOutput.glsl"

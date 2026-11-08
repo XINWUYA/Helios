@@ -72,7 +72,7 @@ namespace Helios::GrassDraw
 			|| chunk_indices == nullptr || !api->SupportsCompute())
 			return false;
 
-		static BuiltinAsset<DeviceShader> s_placement_shader("Shaders/Compute/GrassPlacement.glsl");
+		static BuiltinAsset<DeviceShader> s_placement_shader("Shaders/Grass/GrassPlacement.glsl");
 		const SharedPtr<DeviceShader> shader = s_placement_shader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
@@ -104,7 +104,7 @@ namespace Helios::GrassDraw
 		if (api == nullptr || args == nullptr || chunk_list == nullptr || !api->SupportsCompute())
 			return false;
 
-		static BuiltinAsset<DeviceShader> s_args_reset_shader("Shaders/Compute/GrassIndirectReset.glsl");
+		static BuiltinAsset<DeviceShader> s_args_reset_shader("Shaders/Grass/GrassIndirectReset.glsl");
 		const SharedPtr<DeviceShader> shader = s_args_reset_shader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
@@ -125,7 +125,7 @@ namespace Helios::GrassDraw
 			|| args == nullptr || thread_count == 0 || !api->SupportsCompute())
 			return false;
 
-		static BuiltinAsset<DeviceShader> s_chunk_cull_shader("Shaders/Compute/GrassChunkCull.glsl");
+		static BuiltinAsset<DeviceShader> s_chunk_cull_shader("Shaders/Grass/GrassChunkCull.glsl");
 		const SharedPtr<DeviceShader> shader = s_chunk_cull_shader.Get();
 		if (shader == nullptr || !shader->IsCompute())
 			return false;
@@ -151,7 +151,7 @@ namespace Helios::GrassDraw
 			return false;
 
 		/* 同一份着色器的块表变体，见文件里的 @variant */
-		static BuiltinAsset<DeviceShader> s_cull_shader("Shaders/Compute/GrassIndirectCull.glsl",
+		static BuiltinAsset<DeviceShader> s_cull_shader("Shaders/Grass/GrassIndirectCull.glsl",
 			ShaderVariantConfig{ ShaderVariantDefines{ { "GRASS_CULL_CHUNKED", 1 } } });
 		const SharedPtr<DeviceShader> shader = s_cull_shader.Get();
 		if (shader == nullptr || !shader->IsCompute())
@@ -186,7 +186,7 @@ namespace Helios::GrassDraw
 			return false;
 
 		/* 同一份着色器的逐实例变体：不做块级预剔，自己测视锥 */
-		static BuiltinAsset<DeviceShader> s_cull_full_shader("Shaders/Compute/GrassIndirectCull.glsl",
+		static BuiltinAsset<DeviceShader> s_cull_full_shader("Shaders/Grass/GrassIndirectCull.glsl",
 			ShaderVariantConfig{ ShaderVariantDefines{ { "GRASS_CULL_CHUNKED", 0 } } });
 		const SharedPtr<DeviceShader> shader = s_cull_full_shader.Get();
 		if (shader == nullptr || !shader->IsCompute())
