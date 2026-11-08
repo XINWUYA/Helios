@@ -174,6 +174,43 @@ namespace Helios
 	}
 
 	template<typename AssetType, typename LoadConfig>
+	bool AssetStore<AssetType, LoadConfig>::Insert(const std::string& path, const LoadConfig& load_config,
+		const SharedPtr<AssetType>& asset) requires (!std::is_same_v<LoadConfig, NoConfig>)
+	{
+		if (asset == nullptr)
+			return false;
+
+		std::lock_guard lock(m_Mutex);
+
+		LoadConfig effective = load_config;
+		if constexpr (requires { AssetFactory<AssetType>::ResolveConfig(path, load_config); })
+			effective = AssetFactory<AssetType>::ResolveConfig(path, load_config);
+
+		const std::string key = MakeKey(path, effective);
+
+		if constexpr (requires { LoadConfig{ asset->GetVariantDefines() }; })
+		{
+			/* 按实例实际生效的配置归键：编译时会按声明补成全集 */
+			const LoadConfig actual{ asset->GetVariantDefines() };
+			const std::string actual_key = MakeKey(path, actual);
+			if (m_AssetMap.find(actual_key) != m_AssetMap.end())
+				return false;
+
+			Entry entry{ asset, actual, path, load_config };
+			m_AssetMap[actual_key] = entry;
+			if (key != actual_key)
+				m_AssetMap[key] = std::move(entry);
+			return true;
+		}
+
+		if (m_AssetMap.find(key) != m_AssetMap.end())
+			return false;
+
+		m_AssetMap[key] = { asset, effective, path, load_config };
+		return true;
+	}
+
+	template<typename AssetType, typename LoadConfig>
 	void AssetStore<AssetType, LoadConfig>::Refresh(const std::string& path, const SharedPtr<AssetType>& incoming)
 	{
 		if constexpr (requires { AssetFactory<AssetType>::Refresh(std::declval<const SharedPtr<AssetType>&>(), std::declval<const SharedPtr<AssetType>&>()); })

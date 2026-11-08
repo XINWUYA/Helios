@@ -8,6 +8,7 @@
 
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Core/Logger.h"
+#include "Helios/Renderer/ShaderVariantStreamer.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 
@@ -60,12 +61,6 @@ namespace Helios
 			}
 			return true;
 		}
-	}
-
-	ShaderVariantCatalog& ShaderVariantCatalog::Instance()
-	{
-		static ShaderVariantCatalog instance;
-		return instance;
 	}
 
 	std::vector<ShaderVariantItem> ShaderVariantCatalog::CollectLoaded()
@@ -135,29 +130,19 @@ namespace Helios
 
 	void ShaderVariantCatalog::Enqueue(const std::vector<ShaderVariantItem>& items)
 	{
+		/* 预热是加载期的批量活：当场编完比塞进后台更好——后台与主线程共用一把编译锁，
+		 * 批量任务堆在队列里会让随后每一次同步加载都排在它后面 */
 		for (const ShaderVariantItem& item : items)
 		{
 			if (item.Path.empty())
 				continue;
 
-			/* 已经编过的跳过：清单可能整份重放，重复排队只会白占帧预算 */
 			const std::string absolute = ABSOLUTE_PATH(item.Path);
-			if (AssetManager::Instance().Find<DeviceShader>(absolute, ShaderVariantConfig{ item.Defines }) != nullptr)
+			if (AssetManager::Instance().Find<DeviceShader>(absolute,
+				ShaderVariantConfig{ item.Defines }) != nullptr)
 				continue;
 
-			m_Pending.push_back(item);
-		}
-	}
-
-	void ShaderVariantCatalog::Tick()
-	{
-		for (uint32_t i = 0; i < m_FrameBudget && !m_Pending.empty(); ++i)
-		{
-			const ShaderVariantItem item = std::move(m_Pending.front());
-			m_Pending.pop_front();
-			AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH(item.Path),
-				ShaderVariantConfig{ item.Defines });
-			++m_Completed;
+			ShaderVariantStreamer::Instance().Preload(absolute, item.Defines);
 		}
 	}
 }

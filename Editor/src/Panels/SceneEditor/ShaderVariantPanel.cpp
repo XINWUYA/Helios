@@ -9,8 +9,7 @@
 #include "Panels/PanelWindow.h"
 #include "UI/PanelRegistry.h"
 #include "Helios/Core/AssetManager.h"
-#include "Helios/Renderer/ShaderVariantCatalog.h"
-#include "Helios/Renderer/ShaderVariants.h"
+#include "Helios/Renderer/ShaderVariantStreamer.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 
 namespace Helios
@@ -144,17 +143,11 @@ namespace Helios
 		ImGui::TextDisabled("%zu shaders, %zu variants, %zu with multiple variants",
 			groups.size(), total_variants, multi_variant);
 
-		/* 精确变体缺失时的两种处理：现编（默认）或用评分挑最接近的顶上 */
-		bool fallback = ShaderVariantGlobals::FallbackEnabled();
-		if (ImGui::Checkbox("Fall back to nearest variant", &fallback))
-			ShaderVariantGlobals::SetFallbackEnabled(fallback);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Missing variants use the closest loaded one instead of compiling a new one");
-
-		const size_t pending = ShaderVariantCatalog::Instance().Pending();
+		/* 变体在后台编，面板只报进度：卡顿看这里，命中率看变体数 */
+		const size_t pending = ShaderVariantStreamer::Instance().Pending();
 		if (pending > 0)
-			ImGui::TextDisabled("Prewarming: %zu pending, %u done", pending,
-				ShaderVariantCatalog::Instance().Completed());
+			ImGui::TextDisabled("Compiling: %zu queued, %u done", pending,
+				ShaderVariantStreamer::Instance().CompletedGeneration());
 
 		ImGui::Separator();
 

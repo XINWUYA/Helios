@@ -20,6 +20,7 @@
 #include <sstream>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 #include <glslang/Public/ResourceLimits.h>
 #include <glslang/Public/ShaderLang.h>
 #include <SPIRV/GlslangToSpv.h>
@@ -683,12 +684,23 @@ namespace Helios
          * 内容指纹也带上它，换代后热重载的"没变"判断不会被旧指纹挡住。 */
         constexpr const char* kTranslatorVersion = "helios-shader-translator-v6";
 
-        /* glslang 的全局状态没有初始化调用可依赖，编译一律串行：
-         * 首次加载在主线程、热重载在后台线程，两者可能撞上 */
-        std::mutex& CompileMutex()
+        /* 桶数跟并行编译数走：同时最多后台两个、主线程一个，乘核数留足余量。
+         * 固定小数字在 worker 池跑满时会频繁撞桶，退化成排队 */
+        size_t CompileMutexCount()
         {
-            static std::mutex mutex;
-            return mutex;
+            static const size_t count = std::max<size_t>(16,
+                static_cast<size_t>(std::thread::hardware_concurrency()) * 4);
+            return count;
+        }
+
+        /* 按产物路径分桶：同一份产物串行，不同源码并行。
+         * glslang 只有 InitializeProcess 需要单线程一次（见 CompileGLSLToSPIRV 的 call_once），
+         * 之后每个 TShader / TProgram 都是独立实例，SPIRV-Cross 的 Compiler 同理。
+         * 早先一刀切全局串行，会让后台编译把主线程的同步加载全堵住（实测同一套自检慢 26 倍） */
+        std::mutex& CompileMutexFor(const std::string& cache_path)
+        {
+            static std::vector<std::mutex> buckets(CompileMutexCount());
+            return buckets[std::hash<std::string>{}(cache_path) % buckets.size()];
         }
 
         /* 同一份着色器的同一个维度只报一次 —— 热重载一遍遍重编，不能跟着刷屏 */
@@ -1399,27 +1411,49 @@ namespace Helios
     bool ShaderCompiler::Compile(const std::string& source, ShaderStage stage, ShaderTarget target,
         std::string& output, std::string& error_msg, const std::string& name)
     {
-        const std::string hash = ComputeHash(source);
-        const std::filesystem::path cache_dir = GetCacheDirectory(target);
-        const std::string filename = (name.empty() ? "" : name + "_") + hash + "_" + ShaderStageToString(stage) + GetFileExtension(target);
-        const std::string cache_path = (cache_dir / filename).string();
+        CompileRequest request;
+        request.Source = source;
+        request.Stage = stage;
+        request.Target = target;
+        request.Name = name;
+
+        CompileResult result;
+        if (!Compile(request, result, error_msg))
+            return false;
+
+        output = std::move(result.Output);
+        return true;
+    }
+
+    bool ShaderCompiler::Compile(const CompileRequest& request, CompileResult& result, std::string& error_msg)
+    {
+        const std::string hash = ComputeHash(request.Source);
+        const std::filesystem::path cache_dir = GetCacheDirectory(request.Target);
+        const std::string filename = (request.Name.empty() ? "" : request.Name + "_") + hash + "_"
+            + ShaderStageToString(request.Stage) + GetFileExtension(request.Target);
+        result.CachePath = (cache_dir / filename).string();
 
         /* 命中缓存不用排队：缓存文件整份写完才改名落位，读到的不会是半截 */
-        if (TryLoadCache(cache_path, output))
+        if (TryLoadCache(result.CachePath, result.Output))
         {
-            CORE_LOG_INFO("ShaderCompiler cache hit: {}", cache_path);
+            CORE_LOG_INFO("ShaderCompiler cache hit: {}", result.CachePath);
+            result.FromCache = true;
             return true;
         }
 
-        /* 真编译串行（见 CompileMutex 的说明）；排队期间别人可能已经编好写进去了 */
-        std::lock_guard lock(CompileMutex());
-        if (TryLoadCache(cache_path, output))
+        /* 同一份产物串行、不同源码并行（见 CompileMutexFor 的说明）；排队期间别人可能已经编好写进去了 */
+        std::lock_guard lock(CompileMutexFor(result.CachePath));
+        if (TryLoadCache(result.CachePath, result.Output))
+        {
+            result.FromCache = true;
             return true;
+        }
 
-        if (!CompileInternal(source, stage, target, output, error_msg, name))
+        if (!CompileInternal(request.Source, request.Stage, request.Target, result.Output, error_msg,
+            request.Name))
             return false;
 
-        SaveCache(cache_path, output);
+        SaveCache(result.CachePath, result.Output);
         return true;
     }
 

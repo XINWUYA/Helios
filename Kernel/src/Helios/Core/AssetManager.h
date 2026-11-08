@@ -96,6 +96,11 @@ namespace Helios
 		/* 同一份源码已加载的全部变体，按配置指纹排序（变体评分与清单用） */
 		std::vector<SharedPtr<AssetType>> GetAllByPath(const std::string& path) const requires (!std::is_same_v<LoadConfig, NoConfig>);
 
+		/* 登记一份已经在别处建好的实例：变体在后台编完，主线程收进来。
+		 * 同定义的实例已存在时丢弃新的，返回是否真的登记上 */
+		bool Insert(const std::string& path, const LoadConfig& load_config,
+			const SharedPtr<AssetType>& asset) requires (!std::is_same_v<LoadConfig, NoConfig>);
+
 		/* 按路径重载（只对提供 Reload 的资源类型生效）。加载配置可能因资产设置变化，
 		 * 重载后按新的有效配置重新分键。返回是否至少重载成功一个。 */
 		bool ReloadByPath(const std::string& path);
@@ -215,6 +220,13 @@ namespace Helios
 		std::vector<SharedPtr<AssetType>> GetAllByPath(const std::string& path)
 		{
 			return AssetStore<AssetType, LoadConfig>::Instance().GetAllByPath(path);
+		}
+
+		/* 登记后台编好的实例 */
+		template<typename AssetType, typename LoadConfig = typename AssetFactory<AssetType>::LoadConfig>
+		bool Insert(const std::string& path, const LoadConfig& load_config, const SharedPtr<AssetType>& asset)
+		{
+			return AssetStore<AssetType, LoadConfig>::Instance().Insert(path, load_config, asset);
 		}
 
 		/* 某类资源已缓存的数量 */

@@ -27,16 +27,11 @@ namespace Helios
 		static void Clear();
 		[[nodiscard]] static const ShaderVariantDefines& All();
 
-		/* 精确变体缺失时是否用评分选近似变体顶上。真机 / 打包档打开，
-		 * 编辑器默认关：开发期宁可现编，也不让画面停在近似档上 */
-		static void SetFallbackEnabled(bool enabled);
-		[[nodiscard]] static bool FallbackEnabled();
 		/* 同一份源码的同一组差异只让上层报一次 */
 		static bool ReportFallback(const std::string& path, const std::string& diff);
 
 	private:
 		static ShaderVariantDefines s_Values;
-		static bool s_Fallback;
 	};
 
 	/* 变体匹配结果：候选中跟请求最接近的一份 */

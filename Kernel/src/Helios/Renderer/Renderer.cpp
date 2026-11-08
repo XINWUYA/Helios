@@ -5,7 +5,7 @@
 #include "Helios/VirtualDevice/DeviceBuffer.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Renderer.h"
-#include "ShaderVariantCatalog.h"
+#include "ShaderVariantStreamer.h"
 #include "Helios/Profiler/RenderStatistics.h"
 #include "RenderView.h"
 #include <Helios/VirtualDevice/DeviceFrameBuffer.h>
@@ -210,7 +210,7 @@ namespace Helios
 		Profiler::Instance().BeginGPUFrame(s_RenderData.ViewUniformData.FrameCounter);
 
 		/* 预热队列按帧预算补编，避免一次性编译把一帧拖死 */
-		ShaderVariantCatalog::Instance().Tick();
+		ShaderVariantStreamer::Instance().Tick();
 	}
 
 	void Renderer::Release()

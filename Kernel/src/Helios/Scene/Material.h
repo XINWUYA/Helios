@@ -245,8 +245,10 @@ namespace Helios
 			uint32_t Revision{ UINT32_MAX };
 			uint32_t Generation{ 0 };
 			bool TexturesReady{ false };
-			/* 评分回退挑出来的近似变体：不复用，每次重新尝试精确匹配 */
+			/* 近似变体：精确的还在后台编，编完要重新查一次 */
 			bool Approximate{ false };
+			/* 挑出这份近似结果时的完成代数：后台每编完一个变体加一 */
+			uint32_t CompletedGeneration{ 0 };
 		};
 
 		/* 按声明的来源逐维度求值，param 维度顺带记下要看加载状态的贴图 */

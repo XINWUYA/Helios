@@ -7,6 +7,7 @@
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
+#include "Helios/Renderer/ShaderVariantStreamer.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -47,6 +48,9 @@ namespace Helios
 		RefreshVariantCache();
 		m_ShaderGeneration = shader != nullptr ? shader->GetGeneration() : 0;
 	}
+
+	/* 贴图维度的组合由清单统一预热（见 ShaderVariantCatalog）。这里不自动枚举：
+	 * 后台编译与主线程的同步加载共用一把编译锁，排太多组合反而把主线程拖慢 */
 
 	/* 声明换代后作废推导缓存 */
 	void Material::RefreshVariantCache() const
@@ -172,38 +176,58 @@ namespace Helios
 			}
 		}
 
+		const std::string& path = m_pShader->GetPath();
+		const uint32_t completed = ShaderVariantStreamer::Instance().CompletedGeneration();
+
 		DrawVariantEntry& entry = m_DrawVariants[ShaderVariantFingerprint(defines)];
-		if (entry.Shader != nullptr && !entry.Approximate && entry.Revision == m_Revision
-			&& entry.Generation == generation && entry.TexturesReady == textures_ready)
+		const bool entry_ready = entry.Shader != nullptr && entry.Revision == m_Revision
+			&& entry.Generation == generation && entry.TexturesReady == textures_ready;
+
+		/* 精确结果一直有效；近似结果等后台编完新一代再重新查 */
+		if (entry_ready && (!entry.Approximate || entry.CompletedGeneration == completed))
 			return entry.Shader;
 
-		const std::string& path = m_pShader->GetPath();
-		const ShaderVariantConfig config{ defines };
+		const auto adopt = [&](const SharedPtr<DeviceShader>& shader) -> const SharedPtr<DeviceShader>&
+		{
+			entry.Shader = shader;
+			entry.Approximate = false;
+			entry.CompletedGeneration = completed;
+			entry.Revision = m_Revision;
+			entry.Generation = generation;
+			entry.TexturesReady = textures_ready;
+			return entry.Shader;
+		};
 
-		/* 精确变体已经在缓存里就直接用；没编过时按回退开关决定是取近似的还是现编 */
-		SharedPtr<DeviceShader> resolved = AssetManager::Instance().Find<DeviceShader>(path, config);
-		bool approximate = false;
-		if (resolved == nullptr && ShaderVariantGlobals::FallbackEnabled())
+		if (SharedPtr<DeviceShader> exact = AssetManager::Instance().Find<DeviceShader>(path,
+			ShaderVariantConfig{ defines }))
+			return adopt(exact);
+
+		/* 没编过：异步档排后台，同步档当场编完，两种情况都再查一次 */
+		ShaderVariantStreamer::Instance().Request(path, defines);
+		if (SharedPtr<DeviceShader> exact = AssetManager::Instance().Find<DeviceShader>(path,
+			ShaderVariantConfig{ defines }))
+			return adopt(exact);
+
+		/* 还没编好：这一帧拿最接近的已编变体顶着，编完自动换过去 */
+		if (!(entry_ready && entry.Approximate))
 		{
 			const ShaderVariantMatch match = FindBestVariant(
 				AssetManager::Instance().GetAllByPath<DeviceShader>(path), defines);
-			/* 阈值取四分之三：只差一个小维度时顶上，差得多宁可现编，免得画面错得看不出来 */
+			/* 阈值取四分之三：只差一个小维度就顶上，差得多就退回基础着色器 */
 			if (match.Valid() && match.Score * 4 >= match.FullScore * 3)
 			{
-				resolved = match.Shader;
-				approximate = true;
+				entry.Shader = match.Shader;
 				if (ShaderVariantGlobals::ReportFallback(path, match.Diff))
 					CORE_LOG_WARN("[Shader] {} 用近似变体顶替：{}", path.substr(path.find_last_of('/') + 1), match.Diff);
 			}
+			else
+			{
+				entry.Shader = m_pShader;
+			}
+			entry.Approximate = true;
 		}
 
-		if (resolved == nullptr)
-			resolved = AssetManager::Instance().GetOrLoad<DeviceShader>(path, config);
-		if (resolved == nullptr)
-			resolved = m_pShader;
-
-		entry.Shader = resolved;
-		entry.Approximate = approximate;
+		entry.CompletedGeneration = completed;
 		entry.Revision = m_Revision;
 		entry.Generation = generation;
 		entry.TexturesReady = textures_ready;

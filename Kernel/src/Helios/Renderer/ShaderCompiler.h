@@ -86,6 +86,30 @@ namespace Helios
         static bool Compile(const std::string& source, ShaderStage stage, ShaderTarget target,
             std::string& output, std::string& error_msg, const std::string& name = "");
 
+        /* 一次编译的完整输入。只有这些数据决定产物，将来交给编译进程时整份发过去，
+         * 调用方不用跟着改 */
+        struct CompileRequest
+        {
+            /* 展开 include、注入变体、分配槽位之后的源码 */
+            std::string Source{};
+            ShaderStage Stage{ ShaderStage::Vertex };
+            ShaderTarget Target{ ShaderTarget::Metal };
+            /* 只影响缓存文件名与产物注释，不参与编译 */
+            std::string Name{};
+        };
+
+        /* 编译产物。Vulkan 目标下 Output 是 SPIR-V 二进制 */
+        struct CompileResult
+        {
+            std::string Output{};
+            /* 落盘位置：命中缓存时也有值，便于调用方核对 */
+            std::string CachePath{};
+            bool FromCache{ false };
+        };
+
+        /* 结构体形态的编译入口：进程内与将来的编译进程共用这一份契约 */
+        static bool Compile(const CompileRequest& request, CompileResult& result, std::string& error_msg);
+
         /* 源码内容哈希（含翻译器版本），编译缓存按它命名 */
         static std::string ComputeHash(const std::string& source);
 

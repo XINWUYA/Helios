@@ -9,7 +9,6 @@
 namespace Helios
 {
 	ShaderVariantDefines ShaderVariantGlobals::s_Values;
-	bool ShaderVariantGlobals::s_Fallback = false;
 
 	void ShaderVariantGlobals::Set(const std::string& name, int value)
 	{
@@ -24,16 +23,6 @@ namespace Helios
 	const ShaderVariantDefines& ShaderVariantGlobals::All()
 	{
 		return s_Values;
-	}
-
-	void ShaderVariantGlobals::SetFallbackEnabled(bool enabled)
-	{
-		s_Fallback = enabled;
-	}
-
-	bool ShaderVariantGlobals::FallbackEnabled()
-	{
-		return s_Fallback;
 	}
 
 	bool ShaderVariantGlobals::ReportFallback(const std::string& path, const std::string& diff)

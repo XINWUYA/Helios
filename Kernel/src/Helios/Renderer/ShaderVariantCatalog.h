@@ -1,5 +1,4 @@
 #pragma once
-#include <deque>
 #include <string>
 #include <vector>
 #include "Helios/Common/Common.h"
@@ -15,15 +14,13 @@ namespace Helios
 	};
 
 	/*
-	 * 变体清单与预热。
-	 * 清单回答"这套内容到底用到哪些组合"，可从资源缓存现收，也能落成文本；
-	 * 预热按清单逐帧补编，避免真机首次进场景卡在编译上。
+	 * 变体清单。
+	 * 回答"这套内容到底用到哪些组合"：可从资源缓存现收，也能落成文本再读回来。
+	 * 预热交给 ShaderVariantStreamer 的异步队列，不在这里攒批次。
 	 */
 	class ShaderVariantCatalog
 	{
 	public:
-		static ShaderVariantCatalog& Instance();
-
 		/* 从资源缓存收当前已加载的全部组合（按路径与 define 排序，帧间稳定） */
 		[[nodiscard]] static std::vector<ShaderVariantItem> CollectLoaded();
 
@@ -31,23 +28,7 @@ namespace Helios
 		static bool Save(const std::string& filepath, const std::vector<ShaderVariantItem>& items);
 		[[nodiscard]] static std::vector<ShaderVariantItem> Load(const std::string& filepath);
 
-		/* 排进预热队列：已有的组合直接跳过，只补没编过的 */
-		void Enqueue(const std::vector<ShaderVariantItem>& items);
-		/* 每帧最多编几个：一个变体几十到几百毫秒，默认一个 */
-		void SetFrameBudget(uint32_t count) { m_FrameBudget = count; }
-
-		/* 推一轮预热，Renderer::Update 每帧调一次 */
-		void Tick();
-
-		[[nodiscard]] size_t Pending() const { return m_Pending.size(); }
-		[[nodiscard]] uint32_t Completed() const { return m_Completed; }
-		[[nodiscard]] bool Empty() const { return m_Pending.empty(); }
-
-	private:
-		ShaderVariantCatalog() = default;
-
-		std::deque<ShaderVariantItem> m_Pending;
-		uint32_t m_FrameBudget{ 1 };
-		uint32_t m_Completed{ 0 };
+		/* 按清单预热：编过的跳过，其余交给异步编译，不会卡住当前帧 */
+		static void Enqueue(const std::vector<ShaderVariantItem>& items);
 	};
 }
