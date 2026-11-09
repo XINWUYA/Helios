@@ -81,54 +81,45 @@ namespace Helios
 		m_DrawShaderWatchedTextures.clear();
 		for (const ShaderVariantSpec& spec : specs)
 		{
-			switch (spec.Source)
+			/* 材质维度从参数推导，其余查 context 里对应的表 */
+			if (spec.Source != ShaderVariantSource::Material)
 			{
-			case ShaderVariantSource::Material:
+				defines[spec.Name] = lookup(context.TableFor(spec.Source), spec.Name);
+				continue;
+			}
+
+			int value = 0;
+			const auto iter = m_Parameters.find(ToID(spec.ParamName));
+			if (iter != m_Parameters.end())
 			{
-				int value = 0;
-				const auto iter = m_Parameters.find(ToID(spec.ParamName));
-				if (iter != m_Parameters.end())
+				const MaterialParamInfo& info = iter->second;
+				if (info.Type == ParamType::Texture)
 				{
-					const MaterialParamInfo& info = iter->second;
-					if (info.Type == ParamType::Texture)
+					const auto* texture =
+						std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(&info.Value);
+					if (texture != nullptr && texture->first != nullptr)
 					{
-						const auto* texture =
-							std::any_cast<std::pair<SharedPtr<DeviceTexture>, uint32_t>>(&info.Value);
-						if (texture != nullptr && texture->first != nullptr)
-						{
-							m_DrawShaderWatchedTextures.push_back(texture->first.get());
-							/* 占位图不算设了：满配默认材质与 GBuffer 转换补图都靠这条排除 */
-							const bool placeholder =
-								texture->first.get() == DefaultTextureForSampler(spec.ParamName).get();
-							value = (!placeholder && texture->first->IsLoaded()) ? 1 : 0;
-						}
-					}
-					else if (info.Type == ParamType::Int)
-					{
-						const int* number = std::any_cast<int>(&info.Value);
-						value = (number != nullptr)
-							? std::clamp(*number, 0, ShaderVariantMaxValue) : 0;
-					}
-					else if (info.Type == ParamType::Float)
-					{
-						const float* number = std::any_cast<float>(&info.Value);
-						value = (number != nullptr)
-							? std::clamp(static_cast<int>(std::lround(*number)), 0, ShaderVariantMaxValue) : 0;
+						m_DrawShaderWatchedTextures.push_back(texture->first.get());
+						/* 占位图不算设了：满配默认材质与 GBuffer 转换补图都靠这条排除 */
+						const bool placeholder =
+							texture->first.get() == DefaultTextureForSampler(spec.ParamName).get();
+						value = (!placeholder && texture->first->IsLoaded()) ? 1 : 0;
 					}
 				}
-				defines[spec.Name] = value;
-				break;
+				else if (info.Type == ParamType::Int)
+				{
+					const int* number = std::any_cast<int>(&info.Value);
+					value = (number != nullptr)
+						? std::clamp(*number, 0, ShaderVariantMaxValue) : 0;
+				}
+				else if (info.Type == ParamType::Float)
+				{
+					const float* number = std::any_cast<float>(&info.Value);
+					value = (number != nullptr)
+						? std::clamp(static_cast<int>(std::lround(*number)), 0, ShaderVariantMaxValue) : 0;
+				}
 			}
-			case ShaderVariantSource::Draw:
-				defines[spec.Name] = lookup(context.Draw, spec.Name);
-				break;
-			case ShaderVariantSource::View:
-				defines[spec.Name] = lookup(context.View, spec.Name);
-				break;
-			case ShaderVariantSource::Global:
-				defines[spec.Name] = lookup(&ShaderVariantGlobals::All(), spec.Name);
-				break;
-			}
+			defines[spec.Name] = value;
 		}
 		return defines;
 	}
@@ -150,20 +141,15 @@ namespace Helios
 		if (generation != mVariantCacheGeneration)
 			RefreshVariantCache();
 
-		const auto& specs = m_pShader->GetReflectionData().VariantSpecs;
-		const bool has_material = std::any_of(specs.begin(), specs.end(),
-			[](const ShaderVariantSpec& spec) { return spec.Source == ShaderVariantSource::Material; });
-		const bool has_draw = context.Draw != nullptr && !context.Draw->empty();
-		const bool has_view = context.View != nullptr && !context.View->empty();
-		const bool has_global = !ShaderVariantGlobals::All().empty();
-		if (specs.empty() || (!has_material && !has_draw && !has_view && !has_global))
-			return m_pShader;
-
 		/* 内嵌源码的着色器没有路径，取不到变体实例，直接用基础着色器 */
 		if (m_pShader->GetPath().empty())
 			return m_pShader;
 
 		const ShaderVariantDefines defines = ResolveDrawDefines(context);
+
+		/* 没偏离基础变体：不用查缓存，也不该多编一份 */
+		if (defines == m_pShader->GetVariantDefines())
+			return m_pShader;
 
 		/* 贴图加载完成不会改版本号，单独查一遍：没加载好的维度按 0 算，加载完要能自己换回来 */
 		bool textures_ready = true;

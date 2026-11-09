@@ -17,6 +17,9 @@ namespace Helios
 	{
 		const ShaderVariantDefines* Draw{ nullptr };
 		const ShaderVariantDefines* View{ nullptr };
+
+		/* 该来源取值用的表；材质维度不走表，这一笔没给的来源也是空 */
+		[[nodiscard]] const ShaderVariantDefines* TableFor(ShaderVariantSource source) const;
 	};
 
 	/* 变体组合的文本形式：A=1,B=0；空表写成 "-"。清单与报错共用一种写法 */

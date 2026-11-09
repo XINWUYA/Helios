@@ -23,6 +23,22 @@ namespace Helios
 		return text;
 	}
 
+	const ShaderVariantDefines* ShaderVariantContext::TableFor(ShaderVariantSource source) const
+	{
+		switch (source)
+		{
+		case ShaderVariantSource::Draw:
+			return Draw;
+		case ShaderVariantSource::View:
+			return View;
+		case ShaderVariantSource::Global:
+			return &ShaderVariantGlobals::All();
+		case ShaderVariantSource::Material:
+			break;
+		}
+		return nullptr;
+	}
+
 	ShaderVariantDefines ShaderVariantGlobals::s_Values;
 
 	void ShaderVariantGlobals::Set(const std::string& name, int value)
