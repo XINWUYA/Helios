@@ -271,18 +271,18 @@ namespace Helios
 	 * 带来源的不绑参数，来源决定值从哪儿来。 */
 	enum class ShaderVariantSource : uint8_t
 	{
-		Param = 0, /* 绑定了材质参数：值从材质参数推导，换材质才变 */
-		External,  /* 值由绘制端逐笔给：层级未定 */
-		View,      /* 值由渲染视图补：换视图才变 */
-		Global     /* 值由引擎配置补：换进程才变 */
+		Material = 0, /* 材质级：值从材质参数推导，换材质才变 */
+		Draw,         /* 绘制级：值由绘制端逐笔给，存在 DrawParams::VariantDefines */
+		View,         /* 视图级：值由渲染视图给，换视图才变 */
+		Global        /* 进程级：值由引擎配置给，换进程才变 */
 	};
 
 	struct ShaderVariantSpec
 	{
 		std::string			Name{};      /* define 名，拼成 `#define NAME 值` */
-		std::string			ParamName{}; /* Param 来源时绑定的材质参数名 */
-		ShaderVariantSource	Source{ ShaderVariantSource::Param };
-		ParamType			ParamKind{ ParamType::Texture }; /* Param 来源时的参数类型，解析期校验用 */
+		std::string			ParamName{}; /* Material 来源时绑定的材质参数名 */
+		ShaderVariantSource	Source{ ShaderVariantSource::Material };
+		ParamType			ParamKind{ ParamType::Texture }; /* Material 来源时的参数类型，解析期校验用 */
 		bool				ParamKindKnown{ false };         /* 认不出声明类型时为假 */
 	};
 

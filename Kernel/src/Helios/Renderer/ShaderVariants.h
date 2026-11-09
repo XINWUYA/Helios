@@ -10,12 +10,12 @@ namespace Helios
 
 	/*
 	 * 一笔绘制的变体取值来源。
-	 * External 由绘制端逐笔给（调试档位这类），View 由视图给（换视图才变）；
+	 * Draw 由绘制端逐笔给（调试档位这类），View 由视图给（换视图才变）；
 	 * Global 来源走 ShaderVariantGlobals，进程内配置一次。
 	 */
 	struct ShaderVariantContext
 	{
-		const ShaderVariantDefines* External{ nullptr };
+		const ShaderVariantDefines* Draw{ nullptr };
 		const ShaderVariantDefines* View{ nullptr };
 	};
 

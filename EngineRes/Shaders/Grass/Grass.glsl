@@ -4,7 +4,7 @@
 /* 草叶模板：x ∈ [-1, 1] 是叶宽方向，y ∈ [0, 1] 从根到梢。
  * 实际形状、弯曲与风都由 Builtin/GrassBlade.glsl 里的展开函数算，
  * 顶点缓冲里只有这一根 4 段的直条。 */
-// @variant(DEBUG_VIEW, external)
+// @variant(DEBUG_VIEW, draw)
 
 #include "GrassBladeVertex.glsl"
 

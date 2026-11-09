@@ -4,8 +4,8 @@
 /* 地形顶点：33×33 模板网格只带 UV，世界位置由 patch 信息推出来，
  * 高度在顶点着色器里采样高度图，顶点数据完全不落地。
  * 前向变体不写运动矢量，那一趟没有速度附件。 */
-// @variant(TERRAIN_FORWARD, external)
-// @variant(DEBUG_VIEW, external)
+// @variant(TERRAIN_FORWARD, draw)
+// @variant(DEBUG_VIEW, draw)
 
 layout(location = 0) in vec2 a_Uv;
 /* 实例数据：每 patch 一条 */

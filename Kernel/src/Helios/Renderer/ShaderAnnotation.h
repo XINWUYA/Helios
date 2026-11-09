@@ -146,9 +146,9 @@ namespace Helios
 		/* 把 @variant 的第二个参数转成取值来源，认不出返回 false */
 		inline bool VariantSourceFromKeyword(const std::string& text, ShaderVariantSource& source)
 		{
-			if (KeywordEquals(text, "external"))
+			if (KeywordEquals(text, "draw"))
 			{
-				source = ShaderVariantSource::External;
+				source = ShaderVariantSource::Draw;
 				return true;
 			}
 			if (KeywordEquals(text, "view"))
@@ -201,10 +201,10 @@ namespace Helios
 
 						if (args.size() > 1)
 						{
-							/* 写了来源关键字就不再绑参数；拼错的按外部维度处理，由调用方报 */
+							/* 写了来源关键字就不再绑参数；拼错的按绘制级处理，由调用方报 */
 							if (!VariantSourceFromKeyword(args[1], spec.Source))
 							{
-								spec.Source = ShaderVariantSource::External;
+								spec.Source = ShaderVariantSource::Draw;
 								if (unknown_sources != nullptr)
 									unknown_sources->push_back(args[0] + ":" + args[1]);
 							}
@@ -214,8 +214,8 @@ namespace Helios
 							spec.ParamName = UniformNameInLine(line);
 							spec.ParamKindKnown = UniformTypeInLine(line, spec.ParamKind);
 							spec.Source = spec.ParamName.empty()
-								? ShaderVariantSource::External
-								: ShaderVariantSource::Param;
+								? ShaderVariantSource::Draw
+								: ShaderVariantSource::Material;
 						}
 
 						add(std::move(spec));

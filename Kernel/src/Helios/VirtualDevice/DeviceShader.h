@@ -236,7 +236,7 @@ namespace Helios
 		[[nodiscard]] static uint32_t ParseThreadGroupSize(const std::string& glsl_source);
 
 		/* 解析源码里的 @variant 标注（纯文本，不依赖后端）：行尾标注绑到该行声明的参数，
-		 * 写成 external 的不绑参数；同名维度先到者定。 */
+		 * 写成 draw 的不绑参数；同名维度先到者定。 */
 		static std::vector<ShaderVariantSpec> ParseVariantSpecs(const std::string& source);
 
 		/* 创建Shader */

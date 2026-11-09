@@ -93,10 +93,10 @@ namespace Helios
 				case ShaderVariantSource::Global:
 					group.DeclaredDims += " (global)";
 					break;
-				case ShaderVariantSource::External:
-					group.DeclaredDims += " (external)";
+				case ShaderVariantSource::Draw:
+					group.DeclaredDims += " (draw)";
 					break;
-				case ShaderVariantSource::Param:
+				case ShaderVariantSource::Material:
 					group.DeclaredDims += " (" + spec.ParamName + ")";
 					break;
 				}

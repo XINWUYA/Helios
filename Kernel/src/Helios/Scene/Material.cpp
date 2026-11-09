@@ -61,7 +61,7 @@ namespace Helios
 		mVariantCacheGeneration = m_pShader != nullptr ? m_pShader->GetGeneration() : 0;
 	}
 
-	/* 按声明的来源逐维度求值。param 维度顺带记下要看加载状态的贴图：
+	/* 按声明的来源逐维度求值。材质维度顺带记下要看加载状态的贴图：
 	 * 贴图没加载完时这一维按 0 算，加载完要能自己换回来 */
 	ShaderVariantDefines Material::ResolveDrawDefines(const ShaderVariantContext& context) const
 	{
@@ -83,7 +83,7 @@ namespace Helios
 		{
 			switch (spec.Source)
 			{
-			case ShaderVariantSource::Param:
+			case ShaderVariantSource::Material:
 			{
 				int value = 0;
 				const auto iter = m_Parameters.find(ToID(spec.ParamName));
@@ -119,8 +119,8 @@ namespace Helios
 				defines[spec.Name] = value;
 				break;
 			}
-			case ShaderVariantSource::External:
-				defines[spec.Name] = lookup(context.External, spec.Name);
+			case ShaderVariantSource::Draw:
+				defines[spec.Name] = lookup(context.Draw, spec.Name);
 				break;
 			case ShaderVariantSource::View:
 				defines[spec.Name] = lookup(context.View, spec.Name);
@@ -151,12 +151,12 @@ namespace Helios
 			RefreshVariantCache();
 
 		const auto& specs = m_pShader->GetReflectionData().VariantSpecs;
-		const bool has_param = std::any_of(specs.begin(), specs.end(),
-			[](const ShaderVariantSpec& spec) { return spec.Source == ShaderVariantSource::Param; });
-		const bool has_external = context.External != nullptr && !context.External->empty();
+		const bool has_material = std::any_of(specs.begin(), specs.end(),
+			[](const ShaderVariantSpec& spec) { return spec.Source == ShaderVariantSource::Material; });
+		const bool has_draw = context.Draw != nullptr && !context.Draw->empty();
 		const bool has_view = context.View != nullptr && !context.View->empty();
 		const bool has_global = !ShaderVariantGlobals::All().empty();
-		if (specs.empty() || (!has_param && !has_external && !has_view && !has_global))
+		if (specs.empty() || (!has_material && !has_draw && !has_view && !has_global))
 			return m_pShader;
 
 		/* 内嵌源码的着色器没有路径，取不到变体实例，直接用基础着色器 */

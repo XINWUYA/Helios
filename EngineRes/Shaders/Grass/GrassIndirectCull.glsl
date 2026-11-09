@@ -10,7 +10,7 @@
 
 /* 0 = 逐实例测视锥，1 = 只扫块级剔除留下的可见块表。默认值由引擎按声明补 0，
  * 这里不再写 #ifndef 兜底；判断只用 #if。 */
-// @variant(GRASS_CULL_CHUNKED, external)
+// @variant(GRASS_CULL_CHUNKED, draw)
 
 layout(local_size_x = 64) in;
 

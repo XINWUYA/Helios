@@ -744,7 +744,7 @@ namespace Helios
             }
         }
 
-        /* @variant 的第二个参数只认 external / view / global。拼错会静默退化成外部维度，
+        /* @variant 的第二个参数只认 draw / view / global。拼错会静默退化成绘制级，
          * 那条维度就永远没人给值，所以拼错就是 bug */
         void ReportUnknownVariantSources(const std::string& filepath, const std::vector<std::string>& entries)
         {
@@ -758,7 +758,7 @@ namespace Helios
                 const std::string dim = colon == std::string::npos ? entry : entry.substr(0, colon);
                 const std::string keyword = colon == std::string::npos ? std::string() : entry.substr(colon + 1);
                 CORE_LOG_ERROR("[Shader] {} declares variant '{}' with unknown source '{}', "
-                    "only external / view / global are supported", filename, dim, keyword);
+                    "only draw / view / global are supported", filename, dim, keyword);
 #ifdef HELIOS_DEBUG
                 if (VariantStrictEnabled())
                     Break();
@@ -831,8 +831,6 @@ namespace Helios
             }
         }
 
-        /* 材质参数维度的约定：类型、数量、前缀。加载时报一次，不阻断编译；
-         * 与 external / view / global 混用时，值由 Material::GetDrawShader 合成 */
         /* 维度多了组合数指数膨胀：五个维度就是 32 份，别在着色器里堆开关 */
         void ValidateVariantDimCount(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
         {
@@ -845,18 +843,19 @@ namespace Helios
                 filename, specs.size(), uint64_t{ 1 } << std::min<size_t>(specs.size(), 20));
         }
 
-        /* param 维度只支持贴图 / int / float，名字要带 MTL_ 前缀 */
-        void ValidateParamVariants(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
+        /* 材质维度的约定：只支持贴图 / int / float，名字带 MTL_ 前缀。加载时报一次，
+         * 不阻断编译；与 draw / view / global 混用时，值由 Material::GetDrawShader 合成 */
+        void ValidateMaterialVariants(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
         {
             const std::string filename = std::filesystem::path(filepath).filename().string();
 
-            size_t param_count = 0;
+            size_t material_count = 0;
             for (const ShaderVariantSpec& spec : specs)
             {
-                if (spec.Source != ShaderVariantSource::Param)
+                if (spec.Source != ShaderVariantSource::Material)
                     continue;
 
-                ++param_count;
+                ++material_count;
 
                 if (spec.Name.rfind("MTL_", 0) != 0 && FirstReport(filepath, spec.Name + "#prefix"))
                 {
@@ -874,10 +873,10 @@ namespace Helios
                 }
             }
 
-            if (param_count > 4 && FirstReport(filepath, "#limit"))
+            if (material_count > 4 && FirstReport(filepath, "#limit"))
             {
                 CORE_LOG_ERROR("[Shader] {} declares {} material variants, at most 4 are supported",
-                    filename, param_count);
+                    filename, material_count);
             }
         }
 
@@ -1344,7 +1343,7 @@ namespace Helios
         ReportUnknownVariantDefines(filepath, unknown_defines);
         ReportVariantValueOutOfRange(filepath, defines);
         ValidateVariantDimCount(filepath, variant_specs);
-        ValidateParamVariants(filepath, variant_specs);
+        ValidateMaterialVariants(filepath, variant_specs);
         ReportVariantConditionalMisuse(filepath, stage_sources, variant_specs);
 
         InjectVariantDefines(stage_sources, normalized);

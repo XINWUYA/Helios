@@ -456,9 +456,9 @@ namespace Helios
 			? *instance_layout : GetObjectInstanceLayout();
 
 		/* 绑定材质和顶点数据：Metal等后端需要在Bind前拿到VertexArray的VertexDescriptor来创建PipelineState。
-		 * 变体按这一笔的来源合成：外部维度来自 per_draw，视图维度来自当前视图表 */
+		 * 变体按这一笔的来源合成：绘制级维度来自 per_draw，视图维度来自当前视图表 */
 		ShaderVariantContext variant_context;
-		variant_context.External = per_draw != nullptr ? &per_draw->VariantDefines : nullptr;
+		variant_context.Draw = per_draw != nullptr ? &per_draw->VariantDefines : nullptr;
 		variant_context.View = &s_ViewVariantDefines;
 		const SharedPtr<DeviceShader>& draw_shader = material->GetDrawShader(variant_context);
 		if (instance_buffer != nullptr)

@@ -31,7 +31,7 @@ namespace Helios
 		struct ShaderGroup
 		{
 			std::string Path;
-			std::string DeclaredDims; /* "A (external), B (view), C (u_NormalTexture)" */
+			std::string DeclaredDims; /* "A (draw), B (view), C (u_NormalTexture)" */
 			/* 组内全部变体的耗时之和，用来找最贵的那份着色器 */
 			double TotalMs{ 0.0 };
 			std::vector<VariantRow> Variants;

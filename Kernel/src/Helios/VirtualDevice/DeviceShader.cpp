@@ -340,8 +340,8 @@ namespace Helios
 		}
 	}
 
-	/* 变体维度：逐行找 @variant(NAME) / @variant(NAME, external)。行尾标注绑到该行声明的参数，
-	 * 单独一行或写了 external 的就是外部维度 —— 值不在材质里取。 */
+	/* 变体维度：逐行找 @variant(NAME) / @variant(NAME, draw)。行尾标注绑到该行声明的参数，
+	 * 单独一行或写了 draw 的就是绘制级维度 —— 值不在材质里取。 */
 	std::vector<ShaderVariantSpec> DeviceShader::ParseVariantSpecs(const std::string& source)
 	{
 		return ShaderAnnotation::ParseVariantSpecs(source);

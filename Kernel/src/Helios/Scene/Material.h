@@ -47,7 +47,7 @@ namespace Helios
 		std::optional<RenderRasterState> RasterStateOverride{};
 		/* 先于 Overrides 应用的补齐项，取值见 MaterialFill */
 		uint8_t FillMissing{ MaterialFill::None };
-		/* 这一笔要用的着色器变体（外部维度，如调试档位）。会跟材质参数推导合成，
+		/* 这一笔要用的着色器变体（绘制级维度，如调试档位）。会跟材质参数推导合成，
 		 * 见 Material::GetDrawShader；空表就是不作额外指定，走材质自己的推导。 */
 		ShaderVariantDefines VariantDefines{};
 	};
@@ -77,20 +77,20 @@ namespace Helios
 		 * 画用它，判断身份（是否天空盒、能不能进 G-Buffer）仍用 GetShader()。 */
 		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader() const { return GetDrawShader(ShaderVariantContext{}); }
 
-		/* 推导结果上再叠外部维度（pass 逐笔决定的那种，如调试档位）。叠加顺序：
-		 * 着色器当前绑的变体作底，外部值覆盖它，材质参数最后覆盖。结果按完整 define 指纹分桶缓存。 */
-		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader(const ShaderVariantDefines& external) const
+		/* 推导结果上再叠绘制级维度（pass 逐笔决定的那种，如调试档位）。叠加顺序：
+		 * 着色器当前绑的变体作底，绘制值覆盖它，材质参数最后覆盖。结果按完整 define 指纹分桶缓存。 */
+		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader(const ShaderVariantDefines& draw) const
 		{
 			ShaderVariantContext context;
-			context.External = &external;
+			context.Draw = &draw;
 			return GetDrawShader(context);
 		}
 
-		/* 逐来源合成这一笔的变体取值：参数从材质推导，外部 / 视图 / 全局各查各的表。
+		/* 逐来源合成这一笔的变体取值：材质维度从参数推导，绘制 / 视图 / 全局各查各的表。
 		 * 回退开着时精确变体缺失会取最接近的已加载变体，否则现编。 */
 		[[nodiscard]] const SharedPtr<DeviceShader>& GetDrawShader(const ShaderVariantContext& context) const;
 
-		/* 材质级变体取值（外部 / 视图维度按 0 算），面板显示当前启用的维度用 */
+		/* 材质级变体取值（绘制 / 视图维度按 0 算），面板显示当前启用的维度用 */
 		[[nodiscard]] ShaderVariantDefines GetMaterialVariantDefines() const;
 		/* 是否天空盒材质：以 SkyBox.glsl 为着色器的材质（天空盒的几何约定：
 		 * 顶点着色器把网格铺满全屏、深度取远平面）。这类材质不进延迟管线 G-Buffer、
@@ -256,7 +256,7 @@ namespace Helios
 
 		/* 上次作废缓存时的着色器代数 */
 		mutable uint32_t mVariantCacheGeneration{ 0 };
-		/* 推导结果，按外部 define 的指纹分桶。贴图加载完成不会改版本号，
+		/* 推导结果，按绘制级 define 的指纹分桶。贴图加载完成不会改版本号，
 		 * 每桶另外记一份"上次求值时是否都加载好了" */
 		mutable std::map<uint64_t, DrawVariantEntry> m_DrawVariants;
 		mutable std::vector<const DeviceTexture*> m_DrawShaderWatchedTextures;

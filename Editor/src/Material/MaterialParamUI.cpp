@@ -381,7 +381,7 @@ namespace Helios::MaterialParamUI
 	}
 
 	/* 当前启用的变体维度：声明了哪些维度、各自当前取值、值从哪儿来。
-	 * 外部维度由绘制端逐笔决定，材质侧按 0 显示并标注 */
+	 * 绘制级维度由绘制端逐笔决定，材质侧按 0 显示并标注 */
 	void DrawMaterialVariantRow(const Material& material)
 	{
 		const SharedPtr<DeviceShader>& shader = material.GetShader();
@@ -407,10 +407,10 @@ namespace Helios::MaterialParamUI
 
 			switch (spec.Source)
 			{
-			case ShaderVariantSource::Param:
+			case ShaderVariantSource::Material:
 				break;
-			case ShaderVariantSource::External:
-				text += " (per draw)";
+			case ShaderVariantSource::Draw:
+				text += " (draw)";
 				break;
 			case ShaderVariantSource::View:
 				text += " (view)";
@@ -426,7 +426,7 @@ namespace Helios::MaterialParamUI
 		ImGui::TextWrapped("%s", text.c_str());
 		ImGui::PopStyleColor();
 		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Keyword values this material drives. Dimensions marked per draw are chosen by the pass.");
+			ImGui::SetTooltip("Keyword values this material drives. Dimensions tagged (draw) are chosen by the pass.");
 		ImGuiExt::EndPropertyRow();
 	}
 

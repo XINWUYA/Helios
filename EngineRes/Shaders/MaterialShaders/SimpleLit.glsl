@@ -3,7 +3,7 @@
 
 /* 调试读数整段只在调试变体里编进来，正常着色不带那份代码。
  * 变体值由渲染通道逐笔给（0 = 正常，1 = 出读数），具体档位仍走 u_DebugView */
-// @variant(DEBUG_VIEW, external)
+// @variant(DEBUG_VIEW, draw)
 
 /* 顶点属性按引擎统一契约（location 0..4 = 位置 / 法线 / 颜色 / UV / 切线）：
  * 本 shader 只用到 0/1/3，注意 UV 在槽位 3（2 是颜色槽，读错会拿到顶点色当 UV 使） */
