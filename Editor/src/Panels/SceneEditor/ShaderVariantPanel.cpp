@@ -2,6 +2,7 @@
 #include "ShaderVariantPanel.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <map>
 
 #include <imgui.h>
@@ -112,8 +113,10 @@ namespace Helios
 				row.Hash = hash.size() > 8 ? hash.substr(0, 8) : hash;
 				row.ConvertMs = shader->GetLoadTimeMs();
 				row.DeviceBuildMs = shader->GetDeviceBuildMs();
+				row.TotalMs = row.ConvertMs + row.DeviceBuildMs;
 				row.Generation = shader->GetGeneration();
 				row.IsCompute = shader->IsCompute();
+				group.TotalMs += row.TotalMs;
 				group.Variants.push_back(std::move(row));
 			}
 
@@ -143,6 +146,11 @@ namespace Helios
 		ImGui::TextDisabled("%zu shaders, %zu variants, %zu with multiple variants",
 			groups.size(), total_variants, multi_variant);
 
+		ImGui::SameLine();
+		ImGui::Checkbox("Sort by time", &m_SortByTime);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Put the most expensive shaders and variants on top");
+
 		/* 变体在后台编，面板只报进度：卡顿看这里，命中率看变体数 */
 		const size_t pending = ShaderVariantStreamer::Instance().Pending();
 		if (pending > 0)
@@ -157,12 +165,30 @@ namespace Helios
 			return;
 		}
 
+		/* 排序只影响展示顺序，Collect 出来的数据仍按路径稳定 */
+		if (m_SortByTime)
+		{
+			std::sort(groups.begin(), groups.end(), [](const ShaderGroup& a, const ShaderGroup& b)
+				{
+					return a.TotalMs > b.TotalMs;
+				});
+
+			for (ShaderGroup& group : groups)
+			{
+				std::sort(group.Variants.begin(), group.Variants.end(),
+					[](const VariantRow& a, const VariantRow& b) { return a.TotalMs > b.TotalMs; });
+			}
+		}
+
 		for (const ShaderGroup& group : groups)
 		{
-			/* 节点标题：文件名 + 变体数；声明维度单独一行，太长时不挤标题 */
-			const std::string label = ShortPath(group.Path) + "  (" + std::to_string(group.Variants.size()) + ")";
+			/* 节点标题：文件名 + 变体数 + 总耗时，长尾一眼能看见 */
+			char label[256];
+			std::snprintf(label, sizeof(label), "%s  (%zu)  %.1f ms",
+				ShortPath(group.Path).c_str(), group.Variants.size(), group.TotalMs);
+
 			const bool open = ImGui::TreeNodeEx(group.Path.c_str(),
-				ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen, "%s", label.c_str());
+				ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen, "%s", label);
 
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("%s\n%s", group.Path.c_str(),

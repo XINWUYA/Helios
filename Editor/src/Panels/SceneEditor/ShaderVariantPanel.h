@@ -22,6 +22,7 @@ namespace Helios
 			std::string Hash;      /* 内容哈希前 8 位 */
 			double ConvertMs{ 0.0 };  /* 读文件加 GLSL 转目标语言；命中磁盘缓存时接近 0 */
 			double DeviceBuildMs{ 0.0 }; /* 驱动侧编译（MTLLibrary / 计算管线），首次绘制才发生 */
+			double TotalMs{ 0.0 };    /* 上面两项之和，排序用 */
 			uint32_t Generation{ 1 };
 			bool IsCompute{ false };
 		};
@@ -31,6 +32,8 @@ namespace Helios
 		{
 			std::string Path;
 			std::string DeclaredDims; /* "A (external), B (view), C (u_NormalTexture)" */
+			/* 组内全部变体的耗时之和，用来找最贵的那份着色器 */
+			double TotalMs{ 0.0 };
 			std::vector<VariantRow> Variants;
 		};
 
@@ -40,5 +43,8 @@ namespace Helios
 	private:
 		/* 从资源缓存收集并按路径分组（排好序，帧间顺序稳定） */
 		static void Collect(std::vector<ShaderGroup>& groups);
+
+		/* 按耗时从大到小排，方便先看最贵的；默认还是按路径 */
+		bool m_SortByTime{ false };
 	};
 }
