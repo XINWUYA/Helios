@@ -71,6 +71,10 @@ namespace Helios::EditorTheme
         /* 警告提示：介于正文与错误之间的"需要注意"语义（日志窗口的 WARN 级标色） */
         inline const ImVec4 Warning   = ImVec4(0.851f, 0.702f, 0.420f, 1.00f); /* #D9B36B */
 
+        /* 运行态标识：Play 中的视口描边与工具栏状态色。色相刻意避开 Warning（琥珀）、
+         * Danger（红）与各主题的 Accent，且不随主题切换 —— 它说的是"正在运行" */
+        inline const ImVec4 Playing   = ImVec4(0.302f, 0.827f, 0.478f, 1.00f); /* #4DD37A */
+
         /* 强调色一族：运行时可变（工具栏切换主题），所以定义收口在 EditorTheme.cpp ——
          * Windows 上 Kernel.dll 与 Editor.exe 各有一份头文件里的 inline 变量，改一处另一处看不到。
          * 只用于选中 / 激活 / 焦点 / 拖拽，不作为装饰色铺满界面 */

@@ -5,6 +5,7 @@
 #include "FrameGraphPanel.h"
 #include "RenderStatsPanel.h"
 #include "ShaderVariantPanel.h"
+#include "PlaySession.h"
 #include "SceneHierarchy.h"
 #include "TimelinePanel.h"
 #include "Viewport/EditorBuiltinCamera.h"
@@ -47,13 +48,16 @@ namespace Helios
 		/* 编辑历史 */
 		bool Undo();
 		bool Redo();
-		/* 往同一条历史里塞一条命令（资源浏览器的新建 / 重命名 / 删除走这里，
-		 * 于是工具栏与菜单的撤销 / 重做对文件操作同样有效） */
-		void ExecuteCommand(UniquePtr<ICommand> command) { m_CommandStack.Execute(std::move(command)); }
-		[[nodiscard]] bool CanUndo() const { return m_CommandStack.CanUndo(); }
-		[[nodiscard]] bool CanRedo() const { return m_CommandStack.CanRedo(); }
-		[[nodiscard]] const char* GetUndoLabel() const { return m_CommandStack.GetUndoLabel(); }
-		[[nodiscard]] const char* GetRedoLabel() const { return m_CommandStack.GetRedoLabel(); }
+		/* 当前该用哪条历史：运行期用运行世界的独立栈（Stop 时连同记录一起丢），
+		 * 编辑态用编辑栈。Gizmo、属性面板、时间轴都走它 */
+		CommandStack& ActiveCommandStack() { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack : m_CommandStack; }
+		/* 资产命令入口（资源浏览器的新建 / 重命名 / 删除）：资产不属于场景内容，
+		 * 一律进编辑栈 —— 进运行期栈会在 Stop 时连撤销记录一起丢 */
+		void ExecuteAssetCommand(UniquePtr<ICommand> command) { m_CommandStack.Execute(std::move(command)); }
+		[[nodiscard]] bool CanUndo() const { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.CanUndo() : m_CommandStack.CanUndo(); }
+		[[nodiscard]] bool CanRedo() const { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.CanRedo() : m_CommandStack.CanRedo(); }
+		[[nodiscard]] const char* GetUndoLabel() const { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.GetUndoLabel() : m_CommandStack.GetUndoLabel(); }
+		[[nodiscard]] const char* GetRedoLabel() const { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.GetRedoLabel() : m_CommandStack.GetRedoLabel(); }
 
 		/* 场景有没有未保存的改动（层级面板根节点据此显示脏标记）。
 		 * 主判据是编辑历史的位置与上次保存时是否一致 —— 撤销回保存点即视为干净；
@@ -68,7 +72,15 @@ namespace Helios
 		 * （与原 ImGuizmo::IsUsing / IsOver 同义） */
 		[[nodiscard]] bool IsGizmoDragging() const { return m_GizmoDrag.Active; }
 		[[nodiscard]] bool IsGizmoHovered() const { return m_GizmoHoveredHandle >= 0; }
-		void SetPlayMode(PlayMode mode);
+		/* 进 / 出 Play、暂停与恢复：状态唯一真值在 PlaySession */
+		void SetPlayState(PlayState state);
+		[[nodiscard]] PlayState GetPlayState() const { return m_PlaySession.GetState(); }
+		/* 暂停中单步一帧（固定 1/60 秒） */
+		void StepFrame() { m_PlaySession.RequestStep(); }
+		/* Game 页签是否拿着焦点：主壳层据此让出无修饰键快捷键 */
+		[[nodiscard]] bool IsGameViewFocused() const { return m_GameViewportFocused; }
+		/* 运行区的一次性提示（保存运行中的编辑世界时给），到点自动消失 */
+		[[nodiscard]] const char* GetPlayHint() const { return m_PlayHintSeconds > 0.0f ? m_PlayHintText.c_str() : nullptr; }
 		/* 热重载脚本：运行中的实例按字段迁移到新库，不需要退出 Runtime */
 		void ReloadScripts(const std::function<bool()>& swap_module);
 
@@ -151,8 +163,16 @@ namespace Helios
 		bool OnMouseButtonPressed(class MouseButtonPressedEvent* event);
 		/* 响应鼠标滚轮（缩放 / 飞行速度） */
 		bool OnMouseScrolled(class MouseScrolledEvent* event);
-		/* 切换运行模式 */
-		void OnPlayModeChanged();
+		/* 进 Play：克隆运行世界、搬地形高度、切世界与命令栈 */
+		void EnterPlay();
+		/* 退出 Play：停脚本、丢运行世界、切回编辑世界并按句柄恢复选中 */
+		void ExitPlay();
+		/* 把「当前世界」换成 world：编辑器相机登记、层级面板、选中一起迁过去 */
+		void SwitchWorld(const SharedPtr<Scene>& world, entt::entity selection);
+		/* 推进当前世界：编辑态跑编辑世界与笔刷，运行态跑运行世界（暂停只渲染） */
+		void AdvanceWorld(float delta_time);
+		/* 每帧写输入闸：编辑态全窗口放行，运行态由 Game 面板的焦点与区域决定 */
+		void UpdateGameInput();
 		/* 响应拖拽文件到主窗口（资源浏览器内部拖拽） */
 		void OnDragItemToScene(const std::filesystem::path& path);
 		/* 响应系统文件拖入（Finder 把文件拖到窗口上）：落点在场景视口内才算「拖进场景」 */
@@ -165,6 +185,10 @@ namespace Helios
 
 		/* 显示主场景视口 */
 		void ShowSceneViewportUI();
+		/* 显示游戏画面（运行世界主相机的渲染结果） */
+		void ShowGameViewportUI();
+		/* 运行态标识：视口描一圈状态色（Game 与 Scene 两个视口共用） */
+		void DrawPlayBorder(const ImVec2& min, const ImVec2& max) const;
 		/* 脚本执行顺序总表：全场景挂载点按 Order 排，行内可改 */
 		void DrawScriptOrderWindow();
 		/* 顺序表的草稿落到组件上：按实体一条命令，可撤销 */
@@ -205,7 +229,8 @@ namespace Helios
 		/* 编辑器相机 */
 		UniquePtr<EditorCamera> m_pEditorCamera{ nullptr };
 
-		/* 主场景 */
+		/* 当前世界：编辑态是编辑世界，运行态是克隆出来的运行世界（见 PlaySession）。
+		 * 保存、脏标记、地形导出一律走 PlaySession::GetEditScene()，不能直接读它 */
 		SharedPtr<Scene> m_pMainScene;
 		/* 当前场景路径（只经 SetActiveScenePath 改） */
 		std::string m_ActiveScenePath{};
@@ -223,6 +248,10 @@ namespace Helios
 		SceneHierarchy m_SceneHierarchy;
 		/* 编辑历史：所有改动经命令栈落地 */
 		CommandStack m_CommandStack;
+		/* 运行期历史：与编辑栈分开，Stop 时随运行世界一起丢 */
+		CommandStack m_RuntimeCommandStack;
+		/* 运行会话：编辑世界与运行世界都在这里 */
+		PlaySession m_PlaySession;
 		/* 地形笔刷：一笔进行中的目标实体（松开鼠标时把这一笔入历史） */
 		Entity m_SculptTerrain{};
 		bool m_SculptActive{ false };
@@ -248,6 +277,20 @@ namespace Helios
 		Entity m_HoveredEntity;
 		/* 视口范围: x: width_min; y: height_min; z: width_max; w: height_max */
 		ViewportRegion m_ViewportRegion{};
+		/* 游戏画面范围（Game 面板的内容区）：运行态主相机的视口按它定，鼠标也按它换算 */
+		ViewportRegion m_GameViewportRegion{};
+		/* Game 面板可画 / 被悬停 / 拿着键盘焦点：焦点隔帧喂给输入闸 */
+		bool m_GameViewportDrawable{ false };
+		bool m_GameViewportHovered{ false };
+		bool m_GameViewportFocused{ false };
+		/* Scene 页签上一帧是否可画：不可画（被 Game 挡住 / 关掉）时关掉编辑器相机的渲染 */
+		bool m_SceneViewportDrawable{ true };
+		/* 进 / 出 Play 时把页签切到前台（下一帧 UI 提交后生效） */
+		bool m_FocusGameRequested{ false };
+		bool m_FocusSceneRequested{ false };
+		/* 运行区一次性提示的文本与剩余秒数 */
+		std::string m_PlayHintText{};
+		float m_PlayHintSeconds{ 0.0f };
 		/* 视口窗口被激活 */
 		bool m_IsViewportFocused{ false };
 		/* 鼠标停留在视口上 */
@@ -258,10 +301,6 @@ namespace Helios
 		/* 视图指示器手势：按下沿命中的轴盘序号（-1 = 未命中）；累计位移用于区分点击 / 拖拽 */
 		int32_t m_ViewGizmoPressedDisc{ -1 };
 		float m_ViewGizmoDraggedDistance{ 0.0f };
-		/* 默认为编辑模式 */
-		PlayMode m_PlayMode{ PlayMode::Edit };
-		/* 进 Runtime 前的场景快照：退出时按它还原，空路径 = 没有快照 */
-		std::filesystem::path m_RuntimeSnapshotPath;
 		/* 渲染图可视化页：依赖图 + 各 Pass 的中间渲染结果（抓取开关由面板自持） */
 		FrameGraphPanel m_FrameGraphPanel;
 		/* 时间轴面板 */

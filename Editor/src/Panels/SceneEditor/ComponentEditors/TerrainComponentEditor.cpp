@@ -244,9 +244,12 @@ namespace Helios
 				settings.Brush = static_cast<TerrainSculpt::Mode>(brush);
 			ImGui::SameLine(0.0f, gap);
 			const bool ready = component.m_Field != nullptr && !component.m_Field->IsEmpty();
-			ImGui::BeginDisabled(!entity || !ready || TerrainSculpt::GetExportRequest().Status == TerrainSculpt::ExportStatus::Pending);
+			ImGui::BeginDisabled(!entity || !ready || TerrainSculpt::ExportLocked()
+				|| TerrainSculpt::GetExportRequest().Status == TerrainSculpt::ExportStatus::Pending);
 			if (Icons::IconButton(Icons::Id::Export, ImVec2(height, height), false,
-				"Export heights to the bound asset or create a new .terrain"))
+				TerrainSculpt::ExportLocked()
+					? "Export is disabled while playing"
+					: "Export heights to the bound asset or create a new .terrain"))
 				TerrainSculpt::RequestExport(entity);
 			ImGui::EndDisabled();
 			ImGui::BeginDisabled(settings.Brush == TerrainSculpt::Mode::None);
@@ -320,6 +323,14 @@ namespace Helios
 
 	void SceneInspector::DrawTerrainRebuildPrompt(const ComponentDesc& desc, Entity& entity, TerrainComponent& component)
 	{
+		/* 运行期间不弹：导出被禁用，「导出并应用」无从谈起，待处理的改动直接丢掉 */
+		if (TerrainSculpt::ExportLocked())
+		{
+			m_TerrainPanel.PendingField = nullptr;
+			m_TerrainPanel.ExportSerial = 0;
+			return;
+		}
+
 		if (m_TerrainPanel.PendingField == nullptr)
 			return;
 		const auto& request = TerrainSculpt::GetExportRequest();

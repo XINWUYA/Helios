@@ -25,11 +25,13 @@ namespace Helios
 		return ImGui::IsKeyDown(ImGui::GetKeyIndex(key));
 	}
 
-	/* 执行模式 */
-	enum class PlayMode : uint8_t
+	/* 执行状态：唯一真值在 PlaySession（见 Panels/SceneEditor/PlaySession）。
+	 * 运行态当前世界是克隆出来的运行世界，编辑世界被冻结；退出直接丢弃运行世界 */
+	enum class PlayState : uint8_t
 	{
-		Edit = 0,	/* 编辑模式 */
-		Runtime		/* 运行模式 */
+		Edit = 0,	/* 编辑：当前世界就是编辑世界 */
+		Playing,	/* 运行：脚本与时间按帧推进 */
+		Paused		/* 运行中暂停：模拟停、渲染照常 */
 	};
 
 	/* 渲染尺寸的安全像素区间（ClampRenderSize 使用）。

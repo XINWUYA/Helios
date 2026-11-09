@@ -62,11 +62,19 @@ namespace Helios::TerrainSculpt
 		return s_Request;
 	}
 
+	/* 运行期导出锁：运行世界的地形改动退出 Play 就丢，导出会真写资产文件，一律禁用。
+	 * 面板据此禁用按钮，OnUpdate 收到漏网的请求也要按失败收尾 */
+	inline bool& ExportLocked()
+	{
+		static bool s_Locked = false;
+		return s_Locked;
+	}
+
 	/* 请求绑到实体，换选中不会把高度写进另一块地形。 */
 	inline uint64_t RequestExport(Entity target, bool bind_asset = true)
 	{
 		ExportRequest& request = GetExportRequest();
-		if (!target || request.Status == ExportStatus::Pending)
+		if (!target || request.Status == ExportStatus::Pending || ExportLocked())
 			return 0;
 		request.Target = target;
 		++request.Serial;

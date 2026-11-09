@@ -123,9 +123,14 @@ namespace Helios
 		if (event->GetRepeatCount() > 0)
 			return false;
 
-		const bool is_ctrl_pressed = Input::IsKeyPressed(Key::LeftControl) || Input::IsKeyPressed(Key::RightControl);
-		const bool is_shift_pressed = Input::IsKeyPressed(Key::LeftShift) || Input::IsKeyPressed(Key::RightShift);
-		const bool is_button_right_pressed = Input::IsMouseButtonPressed(Mouse::ButtonRight);
+		/* 编辑器快捷键读原始输入：游戏画面拿到焦点时输入闸对脚本关，对编辑器不关 */
+		const bool is_ctrl_pressed = Input::IsKeyPressedRaw(Key::LeftControl) || Input::IsKeyPressedRaw(Key::RightControl);
+		const bool is_shift_pressed = Input::IsKeyPressedRaw(Key::LeftShift) || Input::IsKeyPressedRaw(Key::RightShift);
+		const bool is_button_right_pressed = Input::IsMouseButtonPressedRaw(Mouse::ButtonRight);
+
+		/* Game 页签拿着焦点时让出无修饰键快捷键：Q / W / E / R 会和脚本的 WASD 抢键。
+		 * 带 Ctrl 的组合键保留，保存与撤销照样能用 */
+		const bool yield_to_game = !is_ctrl_pressed && m_Context.IsGameViewFocused();
 
 		switch (event->GetKeyCode())
 		{
@@ -160,19 +165,19 @@ namespace Helios
 				m_Context.Redo();
 			break;
 		case Key::Q: /* Q/W/E/R：切换 Gizmo 操作 */
-			if (!m_Context.IsGizmoDragging() && !is_button_right_pressed)
+			if (!yield_to_game && !m_Context.IsGizmoDragging() && !is_button_right_pressed)
 				m_Context.SetGizmoType(-1);
 			break;
 		case Key::W:
-			if (!m_Context.IsGizmoDragging() && !is_button_right_pressed)
+			if (!yield_to_game && !m_Context.IsGizmoDragging() && !is_button_right_pressed)
 				m_Context.SetGizmoType(0);
 			break;
 		case Key::E:
-			if (!m_Context.IsGizmoDragging() && !is_button_right_pressed)
+			if (!yield_to_game && !m_Context.IsGizmoDragging() && !is_button_right_pressed)
 				m_Context.SetGizmoType(1);
 			break;
 		case Key::R:
-			if (!m_Context.IsGizmoDragging() && !is_button_right_pressed)
+			if (!yield_to_game && !m_Context.IsGizmoDragging() && !is_button_right_pressed)
 				m_Context.SetGizmoType(2);
 			break;
 		default:
@@ -977,12 +982,45 @@ namespace Helios
 			const float centered_x = ImGui::GetWindowWidth() * 0.5f - kButtonSize * 0.5f;
 			ImGui::SameLine(std::max(centered_x, previous_right + kGroupGap));
 
-			const bool running = (m_Context.GetPlayMode() == PlayMode::Runtime);
-			if (Icons::IconButton(running ? Icons::Id::Stop : Icons::Id::Play, button_size, running,
-				running ? "Stop" : "Play"))
+			const PlayState play_state = m_Context.GetPlayState();
+			const bool playing = (play_state != PlayState::Edit);
+			const bool paused = (play_state == PlayState::Paused);
+
+			/* 状态点：运行态常驻标识色，编辑态中性灰 —— 不染整个界面，只这一处 */
 			{
-				m_Context.SetPlayMode(running ? PlayMode::Edit : PlayMode::Runtime);
+				const float radius = Scaled(4.0f);
+				const ImVec2 origin = ImGui::GetCursorScreenPos();
+				ImGui::Dummy(ImVec2(radius * 2.0f, button_size.y));
+				ImGui::GetWindowDrawList()->AddCircleFilled(
+					ImVec2(origin.x + radius, origin.y + button_size.y * 0.5f), radius,
+					ImGui::GetColorU32(playing ? EditorTheme::Token::Playing : EditorTheme::Token::Neutral7));
+				ImGui::SameLine();
 			}
+
+			if (playing)
+			{
+				if (Icons::IconButton(paused ? Icons::Id::Play : Icons::Id::Pause, button_size, paused,
+					paused ? "Resume" : "Pause"))
+					m_Context.SetPlayState(paused ? PlayState::Playing : PlayState::Paused);
+
+				ImGui::SameLine();
+				ImGui::BeginDisabled(!paused);
+				if (Icons::IconButton(Icons::Id::NextFrame, button_size, false, "Step one frame (1/60 s)"))
+					m_Context.StepFrame();
+				ImGui::EndDisabled();
+
+				ImGui::SameLine();
+				if (Icons::IconButton(Icons::Id::Stop, button_size, true, "Stop"))
+					m_Context.SetPlayState(PlayState::Edit);
+
+				if (const char* hint = m_Context.GetPlayHint())
+				{
+					ImGui::SameLine();
+					ImGui::TextDisabled("%s", hint);
+				}
+			}
+			else if (Icons::IconButton(Icons::Id::Play, button_size, false, "Play"))
+				m_Context.SetPlayState(PlayState::Playing);
 
 			const float utility_group_width = kButtonSize * 3.0f + ImGui::GetStyle().ItemSpacing.x * 2.0f;
 			const float utility_group_x = ImGui::GetContentRegionMax().x - utility_group_width;

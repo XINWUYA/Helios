@@ -63,10 +63,10 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION();
 
-		const bool is_alt_pressed = Input::IsKeyPressed(Key::LeftAlt) || Input::IsKeyPressed(Key::RightAlt);
-		const bool is_lmb_pressed = Input::IsMouseButtonPressed(Mouse::ButtonLeft);
-		const bool is_mmb_pressed = Input::IsMouseButtonPressed(Mouse::ButtonMiddle);
-		const bool is_rmb_pressed = Input::IsMouseButtonPressed(Mouse::ButtonRight);
+		const bool is_alt_pressed = Input::IsKeyPressedRaw(Key::LeftAlt) || Input::IsKeyPressedRaw(Key::RightAlt);
+		const bool is_lmb_pressed = Input::IsMouseButtonPressedRaw(Mouse::ButtonLeft);
+		const bool is_mmb_pressed = Input::IsMouseButtonPressedRaw(Mouse::ButtonMiddle);
+		const bool is_rmb_pressed = Input::IsMouseButtonPressedRaw(Mouse::ButtonRight);
 
 		/* 手势保持条件：其按键仍按住（Orbit / ZoomDrag 还要求 Alt —— 飞行中按下 Alt 会顺势切换为推拉；
 		 * 聚焦模式的轨道不配 Alt，左键按住即保持） */
@@ -120,7 +120,7 @@ namespace Helios
 		}
 
 		/* 鼠标增量逐帧维护（闲置时也更新）：起手帧的增量只是正常的单帧位移，不会跳视角 */
-		const glm::vec2 mouse_pos = Input::GetMousePos();
+		const glm::vec2 mouse_pos = Input::GetMousePosRaw();
 		const glm::vec2 mouse_delta = (mouse_pos - m_LastMousePosition) * kMouseSensitivity;
 		m_LastMousePosition = mouse_pos;
 
@@ -165,18 +165,18 @@ namespace Helios
 		}
 
 		glm::vec3 move_direction(0.0f);
-		if (Input::IsKeyPressed(Key::W))
+		if (Input::IsKeyPressedRaw(Key::W))
 			move_direction += m_ForwardDirection;
-		if (Input::IsKeyPressed(Key::S))
+		if (Input::IsKeyPressedRaw(Key::S))
 			move_direction -= m_ForwardDirection;
-		if (Input::IsKeyPressed(Key::D))
+		if (Input::IsKeyPressedRaw(Key::D))
 			move_direction += m_RightDirection;
-		if (Input::IsKeyPressed(Key::A))
+		if (Input::IsKeyPressedRaw(Key::A))
 			move_direction -= m_RightDirection;
 		/* 竖直用世界轴：俯仰朝下时 Q/E 不会变成前冲 */
-		if (Input::IsKeyPressed(Key::E))
+		if (Input::IsKeyPressedRaw(Key::E))
 			move_direction += glm::vec3(0.0f, 1.0f, 0.0f);
-		if (Input::IsKeyPressed(Key::Q))
+		if (Input::IsKeyPressedRaw(Key::Q))
 			move_direction -= glm::vec3(0.0f, 1.0f, 0.0f);
 
 		if (glm::dot(move_direction, move_direction) > 0.0f)

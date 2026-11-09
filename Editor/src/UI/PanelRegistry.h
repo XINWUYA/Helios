@@ -12,6 +12,8 @@ namespace Helios
 		inline constexpr const char* kSceneHierarchy  = "Scene Hierarchy";
 		inline constexpr const char* kProperties      = "Properties";
 		inline constexpr const char* kScene           = "Scene";
+		/* 游戏画面：运行世界主相机的渲染结果，默认与 Scene 成页签 */
+		inline constexpr const char* kGame            = "Game";
 		inline constexpr const char* kModel           = "Model";
 		inline constexpr const char* kStatInfo        = "Stat Info";
 		/* 资源浏览器：目录树 + 目录内容合成一个面板（原先 File List / Resource Browser 是两个页签） */
@@ -63,6 +65,8 @@ namespace Helios
 			{ kSceneHierarchy,  DockSlot::LeftTop,      Menu::None,    nullptr,          true },
 			{ kResourceBrowser, DockSlot::LeftBottom,   Menu::None,    nullptr,          true },
 			{ kScene,           DockSlot::Center,       Menu::Window,  "Scene Viewport", true },
+			{ kGame,            DockSlot::Center,       Menu::Window,  "Game",           true,
+				"Game view: the primary camera of the running world" },
 			{ kModel,           DockSlot::Center,       Menu::Window,  "Model Viewport", false },
 			{ kFrameGraph,      DockSlot::Center,       Menu::Window,  "Frame Graph",    true },
 			{ kProperties,      DockSlot::RightTop,     Menu::None,    nullptr,          true },

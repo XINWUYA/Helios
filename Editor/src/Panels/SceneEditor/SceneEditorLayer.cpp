@@ -139,6 +139,7 @@ namespace Helios
 		m_pMainScene = CreateSharedPtr<Scene>();
 		/* 编辑器相机登记为外部相机：初始场景也要挂上（此后随 SetActiveScene 迁移） */
 		m_pMainScene->AddExternalCamera(m_pEditorCamera.get());
+		m_PlaySession.SetEditScene(m_pMainScene);
 		m_SceneHierarchy.SetOwnerScene(m_pMainScene);
 		/* 层级树的展开状态跟着项目走：<项目>/.helios/hierarchy.cfg，按场景分段 */
 		m_SceneHierarchy.SetTreeStatePath(PathToUtf8(g_ProjectPath / ".helios" / "hierarchy.cfg"));
@@ -184,6 +185,9 @@ namespace Helios
 	void SceneEditorLayer::OnDetached()
 	{
 		PROFILE_CPU_FUNCTION();
+
+		/* 关编辑器前先退出运行态：运行世界持有脚本实例，不能留到场景析构 */
+		SetPlayState(PlayState::Edit);
 
 		/* 关编辑器前把当前场景的视角落盘，下次打开还是这一眼 */
 		CaptureViewState();
@@ -231,7 +235,8 @@ namespace Helios
 		m_SceneHierarchy.OnImGuiRender();
 
 		/* 时间轴：读当前选中实体（或其最近的 Animator 祖先）的片段；
-		 * 放在属性面板之后 —— 录制要看到这一帧的属性改动 */
+		 * 放在属性面板之后 —— 录制要看到这一帧的属性改动。
+		 * 关键帧改的是片段资产，与资源操作同理，一律进编辑栈 */
 		m_TimelinePanel.OnImGuiRender(m_pMainScene.get(), m_SceneHierarchy.GetSelectedEntity(),
 			&m_CommandStack, Panel::VisibleFlag(Panel::kTimeline));
 
@@ -252,11 +257,28 @@ namespace Helios
 
 		DrawScriptOrderWindow();
 
+		/* 游戏画面：运行世界主相机的渲染结果（运行态才画内容） */
+		ShowGameViewportUI();
+
 		/* 主窗口，需要最后再画，以确保能够得到正确的窗口宽高 */
 		ShowSceneViewportUI();
 
-		/* 录制放在视口之后：gizmo 在同一帧里改的变换也能被抓到 */
-		m_TimelinePanel.TickRecording(m_pMainScene.get(), m_SceneHierarchy.GetSelectedEntity());
+		/* 进 / 出 Play 切页签：面板都提交过之后再切才有效 */
+		if (m_FocusGameRequested)
+		{
+			m_FocusGameRequested = false;
+			ImGui::SetWindowFocus(Panel::kGame);
+		}
+		if (m_FocusSceneRequested)
+		{
+			m_FocusSceneRequested = false;
+			ImGui::SetWindowFocus(Panel::kScene);
+		}
+
+		/* 录制放在视口之后：gizmo 在同一帧里改的变换也能被抓到。
+		 * 运行期不录：录进去的关键帧属于运行世界，Stop 后就是废数据 */
+		if (!m_PlaySession.IsPlaying())
+			m_TimelinePanel.TickRecording(m_pMainScene.get(), m_SceneHierarchy.GetSelectedEntity());
 	}
 
 	void SceneEditorLayer::OnEvent(IEvent* event)
@@ -294,7 +316,7 @@ namespace Helios
 
 	/* 场景相机的画面尺寸 = 窗口画布（物理像素），与运行时一致。引擎样例由宿主设置（见
 	 * Samples::SetViewportRegion）；不设置就恒为 0×0（ScenePass 空跑）。逐帧写，窗口缩放 / 换场景
-	 * 都会自动跟上。 */
+	 * 都会自动跟上。运行期主相机的区域归 Game 面板（按面板尺寸写），这里跳过 */
 	void SceneEditorLayer::UpdateSceneCameraViewports()
 	{
 		PROFILE_CPU_FUNCTION();
@@ -308,10 +330,16 @@ namespace Helios
 		if (width == 0 || height == 0)
 			return; /* 最小化等异常尺寸：区域要求 > 0（SetViewportRegion 有断言） */
 
+		const Entity primary_camera = m_PlaySession.IsPlaying()
+			? m_pMainScene->GetPrimaryCameraEntity() : Entity{};
+
 		entt::registry& registry = m_pMainScene->GetRegistry();
 		const auto camera_view = registry.view<CameraComponent>();
 		for (auto entity : camera_view)
 		{
+			if (primary_camera && entity == static_cast<entt::entity>(primary_camera))
+				continue;
+
 			const auto& camera_component = camera_view.get<CameraComponent>(entity);
 			if (camera_component.m_Camera != nullptr)
 			{
@@ -328,8 +356,10 @@ namespace Helios
 		if (!m_pMainScene)
 			return;
 
-		/* 运行模式照常渲染，统计面板能看到游戏相机的真实开销 */
-		const bool runtime = (m_PlayMode == PlayMode::Runtime);
+		/* 运行态只画面板正看着的那台主相机（Game 页签），其余相机等面板点名再画；
+		 * 编辑态保持原样：场景相机只在 Frame Graph / 属性预览看它时才渲染 */
+		const bool playing = m_PlaySession.IsPlaying();
+		const Entity primary_camera = playing ? m_pMainScene->GetPrimaryCameraEntity() : Entity{};
 		const FrameGraph* viewed_graph = m_FrameGraphPanel.GetViewedGraph();
 		const Camera* preview_camera = m_SceneHierarchy.GetInspector().GetPreviewCamera();
 
@@ -344,9 +374,16 @@ namespace Helios
 			RenderView* render_view = camera_component.m_Camera->GetRenderView();
 			const bool viewed = render_view->GetFrameGraph().get() == viewed_graph
 				|| camera_component.m_Camera.get() == preview_camera;
-			render_view->SetEnableRender(runtime || viewed);
+			const bool game_view = playing && m_GameViewportDrawable
+				&& entity == static_cast<entt::entity>(primary_camera);
+			render_view->SetEnableRender(game_view || viewed);
 			render_view->SetOutputToTexture(true);
 		}
+
+		/* 编辑器相机：Scene 页签被挡住或关掉时不渲染（运行期间通常在看 Game 页签）。
+		 * 判据取上一帧 UI 的可画状态 —— 本帧的 UI 还没提交 */
+		const bool editor_viewed = m_pEditorCamera->GetRenderView()->GetFrameGraph().get() == viewed_graph;
+		m_pEditorCamera->GetRenderView()->SetEnableRender(m_SceneViewportDrawable || editor_viewed);
 	}
 
 	/* 收集本帧可视化可选的相机：编辑器相机在前、场景相机（按实体名）随后。
@@ -389,9 +426,8 @@ namespace Helios
 		if (event->GetRepeatCount() > 0)
 			return false;
 
-		bool is_ctrl_pressed = Input::IsKeyPressed(Key::LeftControl) || Input::IsKeyPressed(Key::RightControl);
-		bool is_shift_pressed = Input::IsKeyPressed(Key::LeftShift) || Input::IsKeyPressed(Key::RightShift);
-		bool is_button_right_pressed = Input::IsMouseButtonPressed(Mouse::ButtonRight);
+		bool is_ctrl_pressed = Input::IsKeyPressedRaw(Key::LeftControl) || Input::IsKeyPressedRaw(Key::RightControl);
+		bool is_shift_pressed = Input::IsKeyPressedRaw(Key::LeftShift) || Input::IsKeyPressedRaw(Key::RightShift);
 
 		switch (event->GetKeyCode())
 		{
@@ -429,8 +465,8 @@ namespace Helios
 			if (is_ctrl_pressed)
 				Redo();
 			return true;
-		case Key::F: /* F：视角聚焦到选中实体（指针需在视口上） */
-			if (m_PlayMode == PlayMode::Edit && m_IsViewportHovered)
+		case Key::F: /* F：视角聚焦到选中实体（指针需在视口上；运行期间同样可用） */
+			if (m_IsViewportHovered)
 				FocusSelectedEntity();
 			return true;
 		}
@@ -447,7 +483,7 @@ namespace Helios
 			/* 笔刷模式下、选中的是地形时左键是用来画的，不改选中；选中别的照常点选 */
 			const Entity selected = m_SceneHierarchy.GetSelectedEntity();
 			if (m_IsViewportHovered && selected && !IsGizmoHovered()
-				&& !Input::IsKeyPressed(Key::LeftAlt) && !ImGui::IsAnyItemHovered()
+				&& !Input::IsKeyPressedRaw(Key::LeftAlt) && !ImGui::IsAnyItemHovered()
 				&& ((TerrainSculpt::GetSettings().Brush != TerrainSculpt::Mode::None
 					&& selected.HasComponent<TerrainComponent>())
 					|| (GrassPaint::GetSettings().Brush != GrassPaint::Mode::None
@@ -456,7 +492,7 @@ namespace Helios
 
 			/* 这一击真落在场景视口上才拾取：指针不在视口上（如 Frame Graph 页签
 			 * 顶替视口时）、飞行 / Alt 轨道中、落在 Gizmo 或视图指示器上都不拾取 */
-			if (m_IsViewportHovered && !IsGizmoHovered() && !Input::IsKeyPressed(Key::LeftAlt)
+			if (m_IsViewportHovered && !IsGizmoHovered() && !Input::IsKeyPressedRaw(Key::LeftAlt)
 				&& !m_pEditorCamera->IsFlying() && !ImGui::IsAnyItemHovered())
 			{
 				CheckMouseSelectEntity();
@@ -467,12 +503,12 @@ namespace Helios
 	}
 
 	/* 滚轮：飞行中调移动速度，其余情况拉近拉远。只在指针位于视口上时接管，
-	 * 其余窗口的滚轮留给 ImGui 自己处理。 */
+	 * 其余窗口的滚轮留给 ImGui 自己处理。运行期间同样可用（等价 UE 的 Eject） */
 	bool SceneEditorLayer::OnMouseScrolled(MouseScrolledEvent* event)
 	{
 		PROFILE_CPU_FUNCTION();
 
-		if (m_PlayMode != PlayMode::Edit || !m_IsViewportHovered)
+		if (!m_IsViewportHovered)
 			return false;
 
 		const float wheel = event->GetYOffset();
@@ -615,8 +651,10 @@ namespace Helios
 		Entity entity = m_pMainScene->CreateEntity(name);
 		entity.AddComponent<ModelComponent>().m_Model = std::move(model);
 
-		/* 这条改动不走命令栈（没有对应的撤销），脏标记只能在这里显式补上 */
-		m_HasUnrecordedChange = true;
+		/* 这条改动不走命令栈（没有对应的撤销），脏标记只能在这里显式补上。
+		 * 运行期间改的是运行世界，Stop 后一起丢，不该把编辑世界标脏 */
+		if (!m_PlaySession.IsPlaying())
+			m_HasUnrecordedChange = true;
 
 		/* 新进场的模型顺手选中：属性面板里的模型信息与模型编辑器入口直接可见 */
 		m_SceneHierarchy.SetSelectedEntity(entity);
@@ -818,6 +856,9 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION();
 
+		/* 换场景一律先退出运行态：运行世界绑定的是旧场景，留着会让 Stop 把旧内容写进新场景 */
+		SetPlayState(PlayState::Edit);
+
 		/* 旧场景的视角先记下来，等新场景接好再一起落盘 */
 		FinishGrassPaint();
 		CaptureViewState();
@@ -831,6 +872,7 @@ namespace Helios
 		}
 
 		m_pMainScene = scene;
+		m_PlaySession.SetEditScene(m_pMainScene);
 		SetActiveScenePath(path);
 
 		/* 层级面板与 RenderView 都要指向新场景；编辑器相机登记为外部相机
@@ -914,14 +956,112 @@ namespace Helios
 		OpenScene(file_path);
 	}
 
-	void SceneEditorLayer::SetPlayMode(PlayMode mode)
+	void SceneEditorLayer::SetPlayState(PlayState state)
 	{
-		if (m_PlayMode == mode)
+		if (state == m_PlaySession.GetState())
 			return;
 
+		switch (state)
+		{
+		case PlayState::Edit:
+			ExitPlay();
+			break;
+		case PlayState::Paused:
+			m_PlaySession.SetPaused(true);
+			break;
+		case PlayState::Playing:
+			/* 从暂停恢复：只放开时间，不重建世界 */
+			if (m_PlaySession.IsPaused())
+				m_PlaySession.SetPaused(false);
+			else
+				EnterPlay();
+			break;
+		}
+	}
+
+	void SceneEditorLayer::EnterPlay()
+	{
+		PROFILE_CPU_FUNCTION();
+
+		if (m_pMainScene == nullptr)
+			return;
+
+		/* 笔画与拖拽先收尾：地形高度搬运要求笔画已结束，
+		 * Gizmo 拖拽的事务窗口也要在换栈之前关掉（否则编辑栈会一直开着合并窗口） */
+		FinishSculptStroke();
 		FinishGrassPaint();
-		m_PlayMode = mode;
-		OnPlayModeChanged();
+		EndGizmoDrag();
+		m_ScriptOrderDraft.clear();
+
+		const entt::entity selection = static_cast<entt::entity>(m_SceneHierarchy.GetSelectedEntity());
+		if (!m_PlaySession.Start(selection))
+			return;
+
+		/* 运行世界的地形改动退出就丢：导出入口整个关掉，别把运行态写进资产 */
+		TerrainSculpt::ExportLocked() = true;
+
+		SwitchWorld(m_PlaySession.GetActiveScene(), selection);
+
+		/* 有主相机才把页签切到 Game；没有就留在 Scene，只显示提示 */
+		if (m_pMainScene != nullptr && m_pMainScene->GetPrimaryCameraEntity())
+		{
+			Panel::SetVisible(Panel::kGame, true);
+			m_FocusGameRequested = true;
+		}
+	}
+
+	void SceneEditorLayer::ExitPlay()
+	{
+		PROFILE_CPU_FUNCTION();
+
+		if (!m_PlaySession.IsPlaying())
+			return;
+
+		/* 运行期历史与进行中的拖拽都属于运行世界，先收掉 */
+		EndGizmoDrag();
+		m_RuntimeCommandStack.Clear();
+		m_ScriptOrderDraft.clear();
+
+		/* 选中句柄在 Stop 里会被清掉，先取出来 */
+		const entt::entity selection = m_PlaySession.GetSelectionHandle();
+		m_PlaySession.Stop();
+		TerrainSculpt::ExportLocked() = false;
+
+		const SharedPtr<Scene>& edit_scene = m_PlaySession.GetEditScene();
+		if (edit_scene == nullptr)
+			return;
+
+		SwitchWorld(edit_scene, selection);
+		m_FocusSceneRequested = true;
+	}
+
+	/* 换世界：编辑器相机、层级面板、选中与命令栈一起迁过去。
+	 * 两份世界句柄一致，选中按句柄接回 */
+	void SceneEditorLayer::SwitchWorld(const SharedPtr<Scene>& world, entt::entity selection)
+	{
+		if (m_pMainScene != nullptr)
+			m_pMainScene->RemoveExternalCamera(m_pEditorCamera.get());
+
+		m_pMainScene = world;
+
+		if (m_pMainScene != nullptr)
+		{
+			m_SceneHierarchy.SetOwnerScene(m_pMainScene);
+			m_pEditorCamera->GetRenderView()->SetOwnerScene(m_pMainScene);
+			m_pMainScene->AddExternalCamera(m_pEditorCamera.get());
+		}
+
+		/* SetOwnerScene 会清选中、丢掉旧句柄：这里按句柄接回（实体已不在就留空） */
+		m_HoveredEntity = {};
+		EndGizmoDrag();
+
+		Entity restored;
+		if (m_pMainScene != nullptr && selection != entt::null && m_pMainScene->IsEntityValid(selection))
+			restored = Entity{ selection, m_pMainScene };
+		m_SceneHierarchy.SetSelectedEntity(restored);
+
+		/* 属性面板的组件改动要落到当前世界的栈上 */
+		m_SceneHierarchy.SetCommandStack(&ActiveCommandStack());
 	}
 
 	/* 脚本执行顺序总表：表格里改的是草稿，点 Apply 才写进组件（一条命令，可撤销） */
@@ -973,7 +1113,7 @@ namespace Helios
 			[](const Row& left, const Row& right) { return left.Current < right.Current; });
 
 		ImGui::TextDisabled("Scripts run in ascending Order; equal values keep the entity and slot order.");
-		if (m_PlayMode == PlayMode::Runtime)
+		if (m_PlaySession.IsPlaying())
 			ImGui::TextDisabled("Order cannot be edited while running.");
 
 		if (rows.empty())
@@ -982,7 +1122,7 @@ namespace Helios
 			return;
 		}
 
-		const bool editable = (m_PlayMode != PlayMode::Runtime);
+		const bool editable = !m_PlaySession.IsPlaying();
 		if (ImGui::BeginTable("##ScriptOrder", 3,
 			ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingFixedFit))
 		{
@@ -1075,14 +1215,15 @@ namespace Helios
 			if (!touched)
 				continue;
 
-			m_CommandStack.Execute(CreateUniquePtr<ScriptOrderCommand>(
+			ActiveCommandStack().Execute(CreateUniquePtr<ScriptOrderCommand>(
 				Entity{ handle, m_pMainScene }, std::move(before), std::move(after)));
 		}
 
 		m_ScriptOrderDraft.clear();
 	}
 
-	/* 热重载：场景交给自己，实例的存与回灌在 ScriptRuntime 里做 */
+	/* 热重载：场景交给自己，实例的存与回灌在 ScriptRuntime 里做。
+	 * 目标是当前世界 —— 运行期间就是运行世界，归属倒置后自然成立 */
 	void SceneEditorLayer::ReloadScripts(const std::function<bool()>& swap_module)
 	{
 		if (m_pMainScene == nullptr)
@@ -1095,51 +1236,15 @@ namespace Helios
 		m_pMainScene->GetScriptRuntime().Reload(*m_pMainScene, swap_module);
 	}
 
-	/* 进出 Runtime：脚本实例跟着建 / 销毁。Edit 模式下场景里只留类名和参数，不跑脚本。
-	 * 进出都配一次场景快照 —— 运行期间删实体、改材质都不该留在场景里。 */
-	void SceneEditorLayer::OnPlayModeChanged()
-	{
-		if (m_pMainScene == nullptr)
-			return;
-
-		/* 顺序表的草稿跨运行时没有意义：进出一律丢掉 */
-		m_ScriptOrderDraft.clear();
-
-		if (m_PlayMode == PlayMode::Runtime)
-		{
-			/* 快照不写探针烘焙缓存：那是会真落盘的副作用，运行前不该有 */
-			m_RuntimeSnapshotPath = std::filesystem::temp_directory_path() / "helios_runtime_snapshot.scn";
-			m_pMainScene->Serializer(PathToUtf8(m_RuntimeSnapshotPath), false);
-
-			m_pMainScene->GetScriptRuntime().Start(*m_pMainScene);
-			return;
-		}
-
-		m_pMainScene->GetScriptRuntime().Stop();
-
-		if (!m_RuntimeSnapshotPath.empty())
-		{
-			/* 加载是「替换」语义：实体全部重建，旧句柄一律作废 */
-			if (!m_pMainScene->Deserializer(PathToUtf8(m_RuntimeSnapshotPath)))
-				CORE_LOG_ERROR("Failed to restore the scene snapshot: {}", PathToUtf8(m_RuntimeSnapshotPath));
-
-			std::error_code error;
-			std::filesystem::remove(m_RuntimeSnapshotPath, error);
-			m_RuntimeSnapshotPath.clear();
-
-			/* 还原会重建实体：撤销历史与选中都指向旧句柄，一起清掉。
-			 * 干净点不动 —— 进运行前本来没保存的改动，还原后仍显示为未保存。 */
-			m_CommandStack.Clear();
-			m_HoveredEntity = {};
-			EndGizmoDrag();
-			m_SceneHierarchy.SetSelectedEntity(Entity{});
-		}
-	}
-
 	void SceneEditorLayer::SaveScene()
 	{
 		PROFILE_CPU_FUNCTION();
 		FinishGrassPaint();
+
+		/* 保存只认编辑世界：运行期间当前世界是运行世界，写它等于把脚本改过的状态落盘 */
+		Scene* edit_scene = m_PlaySession.GetEditScene().get();
+		if (edit_scene == nullptr)
+			return;
 
 		/* 若当前场景从未保存过，需要先确定一个保存路径 */
 		if (m_ActiveScenePath.empty())
@@ -1151,7 +1256,7 @@ namespace Helios
 
 		if (!SaveEditedTerrains())
 			return;
-		m_pMainScene->Serializer(m_ActiveScenePath);
+		edit_scene->Serializer(m_ActiveScenePath);
 
 		/* 场景内容与文件一致了：当前位置成为新的干净点 */
 		MarkSceneSaved();
@@ -1159,12 +1264,22 @@ namespace Helios
 		/* 顺手记下视角：保存是用户认账这个场景的时刻，此时落盘不会丢 */
 		CaptureViewState();
 		StoreViewStates();
+
+		if (m_PlaySession.IsPlaying())
+		{
+			m_PlayHintText = "Saved the editing scene; changes made while playing are discarded.";
+			m_PlayHintSeconds = 3.0f;
+		}
 	}
 
 	/* 保存场景到指定路径 */
 	void SceneEditorLayer::SaveSceneAs()
 	{
 		PROFILE_CPU_FUNCTION();
+
+		Scene* edit_scene = m_PlaySession.GetEditScene().get();
+		if (edit_scene == nullptr)
+			return;
 
 		const std::string file_path = FileDialog::SaveFile("scene(*.scn)\0*.scn\0");
 
@@ -1174,7 +1289,7 @@ namespace Helios
 
 		if (!SaveEditedTerrains())
 			return;
-		m_pMainScene->Serializer(file_path);
+		edit_scene->Serializer(file_path);
 
 		/* 保存成功后，当前场景路径切换为新路径 */
 		SetActiveScenePath(file_path);
@@ -1183,20 +1298,26 @@ namespace Helios
 		/* 视角换个名字记在新路径下，原路径那份留着 */
 		CaptureViewState();
 		StoreViewStates();
+
+		if (m_PlaySession.IsPlaying())
+		{
+			m_PlayHintText = "Saved the editing scene; changes made while playing are discarded.";
+			m_PlayHintSeconds = 3.0f;
+		}
 	}
 
 	bool SceneEditorLayer::Undo()
 	{
 		PROFILE_CPU_FUNCTION();
 		FinishGrassPaint();
-		return m_CommandStack.Undo();
+		return ActiveCommandStack().Undo();
 	}
 
 	bool SceneEditorLayer::Redo()
 	{
 		PROFILE_CPU_FUNCTION();
 		FinishGrassPaint();
-		return m_CommandStack.Redo();
+		return ActiveCommandStack().Redo();
 	}
 
 	void SceneEditorLayer::ShowSceneViewportUI()
@@ -1204,12 +1325,14 @@ namespace Helios
 		PROFILE_CPU_FUNCTION();
 
 		//m_ViewportRegion = { 268, 2188, 317, 1371 };
-		static ImGuiWindowFlags tab_bar_flags = ImGuiWindowFlags_NoFocusOnAppearing;
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 		/* 每帧都必须调用 Begin：窗口被关闭（点 X 或 View 菜单取消勾选）时它返回 false，
 		 * 只有继续调用才可能重新显示（关闭时不画内容即可）。 */
-		if (ImGui::Begin(Panel::kScene, &Panel::VisibleFlag(Panel::kScene)))
+		const bool drawable = ImGui::Begin(Panel::kScene, &Panel::VisibleFlag(Panel::kScene));
+		/* 上一帧的可画状态给渲染侧用：被 Game 页签挡住或关掉时不渲染编辑器相机 */
+		m_SceneViewportDrawable = drawable;
+		if (drawable)
 		{
 			/* 获取窗口范围 */
 			const auto viewport_region_min = ImGui::GetWindowContentRegionMin();
@@ -1234,6 +1357,7 @@ namespace Helios
 				/* ImTextureID 统一存放 DeviceTexture 指针：GetTextureID() 返回的硬件
 				 * 句柄在 Metal 上是 64 位指针被截断后的 32 位，不能当指针使用。 */
 				ImGui::Image((ImTextureID)output_rt.get(), viewport_panel_size, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+				DrawPlayBorder(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
 			}
 
 			/* 拖动资源到主窗口 */
@@ -1262,11 +1386,106 @@ namespace Helios
 		else
 		{
 			/* 视口窗口不可见：清掉交互标志，否则残留的 hover 会继续给相机授权、
-			 * 点击也会被误判成视口内选择。Gizmo 的帧状态一并清掉（本帧不再写）。 */
+			 * 点击也会被误判成视口内选择。Gizmo 的帧状态一并清掉（本帧不再写）。
+			 * 区域也归零：被 Game 页签挡住 / 关掉时不该再按旧尺寸拾取或渲染 */
 			m_IsViewportFocused = false;
 			m_IsViewportHovered = false;
+			m_ViewportRegion = {};
 			GetTransformGizmoState() = TransformGizmoState{};
 			m_GizmoHoveredHandle = -1;
+		}
+
+		ImGui::End();
+		ImGui::PopStyleVar();
+	}
+
+	/* 运行态标识：不染整个界面（面板大量自绘，改全局样式会污染主题），只给两个视口描边 */
+	void SceneEditorLayer::DrawPlayBorder(const ImVec2& min, const ImVec2& max) const
+	{
+		if (!m_PlaySession.IsPlaying())
+			return;
+
+		ImGui::GetWindowDrawList()->AddRect(min, max, ImGui::GetColorU32(EditorTheme::Token::Playing),
+			0.0f, ImDrawFlags_None, Scaled(2.0f));
+	}
+
+	/* 游戏画面：运行世界主相机的渲染结果。编辑态不画内容 —— 场景相机在编辑态本来就不渲染，
+	 * 硬撑一张过期图只会误导。没有主相机时只给提示，不回退到编辑器相机 */
+	void SceneEditorLayer::ShowGameViewportUI()
+	{
+		PROFILE_CPU_FUNCTION();
+
+		m_GameViewportDrawable = false;
+		m_GameViewportHovered = false;
+		m_GameViewportFocused = false;
+		m_GameViewportRegion = {};
+
+		if (!Panel::IsVisible(Panel::kGame))
+			return;
+
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+		const bool drawable = ImGui::Begin(Panel::kGame, &Panel::VisibleFlag(Panel::kGame));
+		if (drawable)
+		{
+			const auto region_min = ImGui::GetWindowContentRegionMin();
+			const auto region_max = ImGui::GetWindowContentRegionMax();
+			const auto offset = ImGui::GetWindowPos();
+			m_GameViewportRegion.MinX = static_cast<int32_t>(region_min.x + offset.x);
+			m_GameViewportRegion.MinY = static_cast<int32_t>(region_min.y + offset.y);
+			m_GameViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, region_max.x - region_min.x));
+			m_GameViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, region_max.y - region_min.y));
+
+			m_GameViewportDrawable = true;
+			m_GameViewportHovered = ImGui::IsWindowHovered();
+
+			/* 弹层（菜单 / 下拉 / 模态）打开时键盘归它，脚本不该继续收键 */
+			const bool popup_open = ImGui::IsPopupOpen(nullptr,
+				ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+			m_GameViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !popup_open;
+
+			const char* notice = nullptr;
+			Entity primary_camera;
+			if (!m_PlaySession.IsPlaying())
+				notice = "Enter Play to see the game view.";
+			else if (m_pMainScene == nullptr)
+				notice = "No scene.";
+			else
+			{
+				primary_camera = m_pMainScene->GetPrimaryCameraEntity();
+				if (!primary_camera)
+					notice = "No primary camera in this scene.";
+			}
+
+			if (notice != nullptr)
+			{
+				const ImVec2 available = ImGui::GetContentRegionAvail();
+				const ImVec2 text_size = ImGui::CalcTextSize(notice);
+				const ImVec2 cursor = ImGui::GetCursorPos();
+				ImGui::SetCursorPos(ImVec2(cursor.x + (available.x - text_size.x) * 0.5f,
+					cursor.y + (available.y - text_size.y) * 0.5f));
+				ImGui::TextDisabled("%s", notice);
+			}
+			else
+			{
+				RenderView* render_view = primary_camera.GetComponent<CameraComponent>().m_Camera->GetRenderView();
+
+				/* 视口区域归这个面板：按内容尺寸写主相机的区域（运行世界的其余相机不渲染） */
+				if (m_GameViewportRegion.Width > 0 && m_GameViewportRegion.Height > 0)
+				{
+					const auto rt_size = ClampRenderSize(
+						static_cast<float>(m_GameViewportRegion.Width),
+						static_cast<float>(m_GameViewportRegion.Height),
+						ImGuiToPhysicalScale());
+					render_view->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
+				}
+
+				if (auto output_rt = render_view->GetRenderTarget())
+				{
+					ImGui::Image((ImTextureID)output_rt.get(), ImGui::GetContentRegionAvail(),
+						ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+					DrawPlayBorder(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+				}
+			}
 		}
 
 		ImGui::End();
@@ -1363,7 +1582,7 @@ namespace Helios
 		if (!m_GizmoDrag.Active && m_GizmoHoveredHandle >= 0
 			&& ImGui::IsMouseClicked(ImGuiMouseButton_Left)
 			&& mouse_in_viewport && !ImGui::IsAnyItemHovered()
-			&& !Input::IsKeyPressed(Key::LeftAlt))
+			&& !Input::IsKeyPressedRaw(Key::LeftAlt))
 		{
 			if (TransformGizmo::BeginDrag(m_GizmoLayout, operation, m_GizmoHoveredHandle, mouse, m_GizmoDrag))
 			{
@@ -1373,7 +1592,7 @@ namespace Helios
 				just_started = true;
 
 				/* 按下时开启合并窗口：整段拖拽的逐帧改动合并为一条历史 */
-				m_CommandStack.BeginTransaction();
+				ActiveCommandStack().BeginTransaction();
 			}
 		}
 
@@ -1388,7 +1607,7 @@ namespace Helios
 				/* 拖拽期间逐帧从起点快照重算世界矩阵（不从当前值递推，长拖不会累积误差），
 				 * 再按父空间换算回本地并分解 —— 挂在父节点下的实体不会随父节点一起偏移。 */
 				TransformGizmo::Delta delta;
-				const bool snap = Input::IsKeyPressed(Key::LeftControl);
+				const bool snap = Input::IsKeyPressedRaw(Key::LeftControl);
 				const bool updated = TransformGizmo::UpdateDrag(m_GizmoLayout, m_GizmoDrag, mouse, snap, delta);
 
 				/* 角度弧画的是吸附后的角度（与落到实体上的旋转量一致） */
@@ -1431,7 +1650,7 @@ namespace Helios
 						next.m_Scale = scale;
 
 						/* 改动经命令栈落地（同一事务内的连续改动会并成一条） */
-						m_CommandStack.Execute(CreateUniquePtr<TransformCommand>(
+						ActiveCommandStack().Execute(CreateUniquePtr<TransformCommand>(
 							m_GizmoEntity, transform_component, next));
 					}
 				}
@@ -1553,7 +1772,7 @@ namespace Helios
 
 		m_GizmoDrag = TransformGizmo::Drag{};
 		m_GizmoEntity = {};
-		m_CommandStack.EndTransaction();
+		ActiveCommandStack().EndTransaction();
 	}
 
 	/* 右上角视图指示器：六个轴盘（X / Y / Z × ±）—— 点击切视角、拖拽轨道旋转。盘面样式和
@@ -1562,10 +1781,6 @@ namespace Helios
 	void SceneEditorLayer::ShowViewGizmoUI()
 	{
 		PROFILE_CPU_FUNCTION();
-
-		/* 运行模式下编辑器相机不响应输入，指示器一并停用 */
-		if (m_PlayMode != PlayMode::Edit)
-			return;
 
 		const float kBoxSize = Scaled(92.0f);	/* 指示器方框边长（设计像素 → 物理，见 Scaled） */
 		const float kBoxMargin = Scaled(6.0f);	/* 距视口上 / 右边缘 */
@@ -1690,11 +1905,11 @@ namespace Helios
 	{
 		const auto& settings = GrassPaint::GetSettings();
 		const Entity selected = m_SceneHierarchy.GetSelectedEntity();
-		const bool painting = m_PlayMode == PlayMode::Edit
+		const bool painting = !m_PlaySession.IsPlaying()
 			&& settings.Brush != GrassPaint::Mode::None && selected
 			&& selected.HasComponent<GrassComponent>() && m_IsViewportHovered
-			&& Input::IsMouseButtonPressed(Mouse::ButtonLeft) && !IsGizmoHovered()
-			&& !ImGui::IsAnyItemHovered() && !Input::IsKeyPressed(Key::LeftAlt);
+			&& Input::IsMouseButtonPressedRaw(Mouse::ButtonLeft) && !IsGizmoHovered()
+			&& !ImGui::IsAnyItemHovered() && !Input::IsKeyPressedRaw(Key::LeftAlt);
 		if (!painting)
 		{
 			FinishGrassPaint();
@@ -1760,7 +1975,7 @@ namespace Helios
 					before.push_back(m_GrassMaskBefore.empty() ? 255u : m_GrassMaskBefore[index]);
 					after.push_back(after_mask[index]);
 				}
-			m_CommandStack.Execute(CreateUniquePtr<GrassPaintCommand>(entity, lo, hi,
+			ActiveCommandStack().Execute(CreateUniquePtr<GrassPaintCommand>(entity, lo, hi,
 				std::move(before), std::move(after), m_GrassMaskBefore.empty()));
 		}
 		m_GrassMaskBefore.clear();
@@ -1768,7 +1983,7 @@ namespace Helios
 
 	void SceneEditorLayer::ShowGrassBrushUI()
 	{
-		if (m_PlayMode != PlayMode::Edit || !m_IsViewportHovered
+		if (m_PlaySession.IsPlaying() || !m_IsViewportHovered
 			|| GrassPaint::GetSettings().Brush == GrassPaint::Mode::None)
 			return;
 		const Entity selected = m_SceneHierarchy.GetSelectedEntity();
@@ -1837,11 +2052,12 @@ namespace Helios
 		PROFILE_CPU_FUNCTION();
 
 		const TerrainSculpt::Settings& settings = TerrainSculpt::GetSettings();
-		const bool painting = settings.Brush != TerrainSculpt::Mode::None
+		const bool painting = !m_PlaySession.IsPlaying()
+			&& settings.Brush != TerrainSculpt::Mode::None
 			&& m_IsViewportHovered
-			&& Input::IsMouseButtonPressed(Mouse::ButtonLeft)
+			&& Input::IsMouseButtonPressedRaw(Mouse::ButtonLeft)
 			&& !IsGizmoHovered() && !ImGui::IsAnyItemHovered()
-			&& !Input::IsKeyPressed(Key::LeftAlt)
+			&& !Input::IsKeyPressedRaw(Key::LeftAlt)
 			&& TerrainSculpt::GetExportRequest().Status != TerrainSculpt::ExportStatus::Pending;
 
 		if (!painting)
@@ -1912,7 +2128,7 @@ namespace Helios
 	/* 笔刷预览：在落笔处沿地表画一圈，半径与真正改高度的范围一致 */
 	void SceneEditorLayer::ShowTerrainBrushUI()
 	{
-		if (m_PlayMode != PlayMode::Edit || m_pEditorCamera == nullptr
+		if (m_PlaySession.IsPlaying() || m_pEditorCamera == nullptr
 			|| TerrainSculpt::GetSettings().Brush == TerrainSculpt::Mode::None || !m_IsViewportHovered
 			|| m_ViewportRegion.Width <= 0 || m_ViewportRegion.Height <= 0)
 			return;
@@ -1928,7 +2144,7 @@ namespace Helios
 		const ImVec2 viewport_min(m_ViewportRegion.MinX, m_ViewportRegion.MinY);
 		const ImVec2 viewport_size(static_cast<float>(m_ViewportRegion.Width), static_cast<float>(m_ViewportRegion.Height));
 
-		const bool paused = Input::IsKeyPressed(Key::LeftAlt) || IsGizmoHovered() || ImGui::IsAnyItemHovered()
+		const bool paused = Input::IsKeyPressedRaw(Key::LeftAlt) || IsGizmoHovered() || ImGui::IsAnyItemHovered()
 			|| TerrainSculpt::GetExportRequest().Status == TerrainSculpt::ExportStatus::Pending;
 		const auto state = paused ? TerrainBrushPreview::State::Paused : m_SculptActive
 			? TerrainBrushPreview::State::Painting : TerrainBrushPreview::State::Hover;
@@ -1960,7 +2176,7 @@ namespace Helios
 		if (!terrain.m_Field->EndBrushStroke(min, max, before, after))
 			return;
 
-		m_CommandStack.Execute(CreateUniquePtr<TerrainSculptCommand>(m_pMainScene, entity,
+		ActiveCommandStack().Execute(CreateUniquePtr<TerrainSculptCommand>(m_pMainScene, entity,
 			terrain.m_Field->GetResolution(), min, max, std::move(before), std::move(after)));
 	}
 
@@ -2058,12 +2274,18 @@ namespace Helios
 		return true;
 	}
 
+	/* 场景文件不存高度：保存场景前把编辑世界里笔刷改过的地形先写进资产。
+	 * 运行期间的改动属于运行世界，不写盘 */
 	bool SceneEditorLayer::SaveEditedTerrains()
 	{
-		for (auto [handle, terrain] : m_pMainScene->GetRegistry().view<TerrainComponent>().each())
+		const SharedPtr<Scene>& edit_scene = m_PlaySession.GetEditScene();
+		if (edit_scene == nullptr)
+			return false;
+
+		for (auto [handle, terrain] : edit_scene->GetRegistry().view<TerrainComponent>().each())
 		{
 			if (terrain.m_Field != nullptr && terrain.m_Field->HasUnsavedEdits()
-				&& !ExportTerrain(Entity{ handle, m_pMainScene }))
+				&& !ExportTerrain(Entity{ handle, edit_scene }))
 				return false;
 		}
 		return true;
@@ -2075,13 +2297,12 @@ namespace Helios
 		FocusEntity(m_SceneHierarchy.GetSelectedEntity());
 	}
 
-	/* 把轨道中心定位到实体，并按包围球取景（F 键与层级树双击共用） */
+	/* 把轨道中心定位到实体，并按包围球取景（F 键与层级树双击共用；运行期间同样可用） */
 	void SceneEditorLayer::FocusEntity(const Entity& entity)
 	{
 		PROFILE_CPU_FUNCTION();
 
-		if (m_PlayMode != PlayMode::Edit || !entity || m_pMainScene == nullptr
-			|| !entity.HasComponent<TransformComponent>())
+		if (!entity || m_pMainScene == nullptr || !entity.HasComponent<TransformComponent>())
 			return;
 
 		const glm::mat4 world_transform = m_pMainScene->GetWorldTransform(entity);
@@ -2120,42 +2341,36 @@ namespace Helios
 		/* 相机列表与面板 UI 同源：即使本帧不渲染（视口为 0）也刷新，面板不读过期条目 */
 		CollectCameraEntries();
 
+		/* 游戏输入闸：编辑态全窗口放行；运行态由 Game 面板上一帧的焦点与区域决定 */
+		UpdateGameInput();
+
+		/* 运行区的一次性提示（保存运行中的编辑世界时给） */
+		if (m_PlayHintSeconds > 0.0f)
+			m_PlayHintSeconds = std::max(0.0f, m_PlayHintSeconds - delta_time);
+
 		if (const Entity target = TerrainSculpt::ConsumeExportRequest())
 		{
 			const uint64_t serial = TerrainSculpt::GetExportRequest().Serial;
 			FinishSculptStroke();
-			TerrainSculpt::CompleteExport(serial, ExportTerrain(target, TerrainSculpt::GetExportRequest().BindAsset));
-		}
 
-		if (m_ViewportRegion.Width <= 0 || m_ViewportRegion.Height <= 0)
-			return;
+			/* 运行世界的地形导出直接丢弃：导出会真写资产文件，而运行世界的改动本来就要丢。
+			 * 必须以失败收尾，否则属性面板的待处理状态会一直挂着，退出 Play 后 Export 仍禁用 */
+			if (m_PlaySession.IsPlaying())
+			{
+				EDITOR_LOG_WARN("Terrain export is disabled while playing.");
+				TerrainSculpt::CompleteExport(serial, false);
+			}
+			else
+				TerrainSculpt::CompleteExport(serial, ExportTerrain(target, TerrainSculpt::GetExportRequest().BindAsset));
+		}
 
 		Renderer::SetClearColor(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
 		Renderer::Clear();
 
 		if (m_pMainScene)
 		{
-			switch (m_PlayMode)
-			{
-			case PlayMode::Edit:
-				/* 更新相机信息：指针悬停在视口上才授权起手导航（已起手的手势不受影响）；
-				 * Gizmo 拖拽中、指针落在视口内控件（视图指示器）上时都不让出输入 */
-				m_pEditorCamera->SetNavigationAllowed(
-					m_IsViewportHovered && !IsGizmoDragging() && !ImGui::IsAnyItemHovered());
-				m_pEditorCamera->OnUpdate(delta_time);
-
-				/* 笔刷在场景更新之前改高度，这一帧的草地贴地就能跟上 */
-				UpdateTerrainSculpt(delta_time);
-				UpdateGrassPaint(delta_time);
-
-				/* 更新场景中的实体 */
-				m_pMainScene->OnUpdate(delta_time);
-				break;
-			case PlayMode::Runtime:
-				/* 运行模式下编辑器相机不响应输入，但编辑器视口仍要由它呈现 */
-				m_pMainScene->OnUpdate(delta_time);
-				break;
-			}
+			/* 世界推进与场景视口尺寸无关：关掉 Scene 页签，游戏画面照样跑 */
+			AdvanceWorld(delta_time);
 
 			/* 相机这一帧的姿态定下来了，顺手看看要不要落盘 */
 			UpdateViewStateAutosave(delta_time);
@@ -2180,8 +2395,61 @@ namespace Helios
 				(selected_entity && m_pMainScene->IsEntityValid(selected_entity))
 					? static_cast<int32_t>(static_cast<uint32_t>(selected_entity)) : -1);
 
-			/* 执行本帧收集到的渲染视图：场景视口的内容在这里产生 */
+			/* 执行本帧收集到的渲染视图：场景视口与游戏画面的内容都在这里产生 */
 			m_pMainScene->Render();
 		}
+	}
+
+	/* 推进当前世界。运行期间编辑器相机照常导航（等价 UE 的 Eject）：Game 面板拿焦点时
+	 * 脚本读不到键盘，两边不会抢同一批按键 */
+	void SceneEditorLayer::AdvanceWorld(float delta_time)
+	{
+		const bool allowed = m_IsViewportHovered && !IsGizmoDragging() && !ImGui::IsAnyItemHovered();
+
+		if (!m_PlaySession.IsPlaying())
+		{
+			/* 指针悬停在视口上才授权起手导航（已起手的手势不受影响）；
+			 * Gizmo 拖拽中、指针落在视口内控件（视图指示器）上时都不让出输入 */
+			m_pEditorCamera->SetNavigationAllowed(allowed);
+			m_pEditorCamera->OnUpdate(delta_time);
+
+			/* 笔刷在场景更新之前改高度，这一帧的草地贴地就能跟上 */
+			UpdateTerrainSculpt(delta_time);
+			UpdateGrassPaint(delta_time);
+
+			m_pMainScene->OnUpdate(delta_time);
+			return;
+		}
+
+		m_pEditorCamera->SetNavigationAllowed(allowed);
+		m_pEditorCamera->OnUpdate(delta_time);
+
+		/* 暂停只停模拟，渲染照常；单步推进固定 1/60 秒 */
+		if (!m_PlaySession.IsPaused())
+			m_pMainScene->OnUpdate(delta_time);
+		else if (m_PlaySession.ConsumeStepRequest())
+			m_pMainScene->OnUpdate(PlaySession::kStepSeconds);
+	}
+
+	/* 输入闸：编辑态写 true + 全窗口；运行态写 Game 面板的焦点与区域。
+	 * 焦点来自上一帧 UI（OnUpdate 在 UI 之前），所以点进 Game 的那一次点击不会传给脚本 */
+	void SceneEditorLayer::UpdateGameInput()
+	{
+		if (!m_PlaySession.IsPlaying())
+		{
+			Input::SetGameInput(true, InputViewport{});
+			return;
+		}
+
+		InputViewport viewport{};
+		if (m_GameViewportDrawable)
+		{
+			viewport.Min = { static_cast<float>(m_GameViewportRegion.MinX),
+				static_cast<float>(m_GameViewportRegion.MinY) };
+			viewport.Size = { static_cast<float>(m_GameViewportRegion.Width),
+				static_cast<float>(m_GameViewportRegion.Height) };
+		}
+
+		Input::SetGameInput(m_GameViewportFocused, viewport);
 	}
 }

@@ -116,7 +116,7 @@ namespace Helios
 	void EditorContext::Execute(UniquePtr<ICommand> command)
 	{
 		if (auto* layer = GetSceneLayer())
-			layer->ExecuteCommand(std::move(command));
+			layer->ExecuteAssetCommand(std::move(command));
 	}
 
 	void EditorContext::SetGizmoType(int type)
@@ -139,11 +139,34 @@ namespace Helios
 		return layer != nullptr && layer->IsGizmoDragging();
 	}
 
-	void EditorContext::SetPlayMode(PlayMode mode)
+	PlayState EditorContext::GetPlayState()
 	{
-		m_PlayMode = mode;
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr ? layer->GetPlayState() : PlayState::Edit;
+	}
+
+	void EditorContext::SetPlayState(PlayState state)
+	{
 		if (auto* layer = GetSceneLayer())
-			layer->SetPlayMode(mode);
+			layer->SetPlayState(state);
+	}
+
+	void EditorContext::StepFrame()
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->StepFrame();
+	}
+
+	bool EditorContext::IsGameViewFocused()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr && layer->IsGameViewFocused();
+	}
+
+	const char* EditorContext::GetPlayHint()
+	{
+		const auto* layer = GetSceneLayer();
+		return layer != nullptr ? layer->GetPlayHint() : nullptr;
 	}
 
 	void EditorContext::ReloadScripts(const std::function<bool()>& swap_module)

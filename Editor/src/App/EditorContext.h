@@ -54,8 +54,15 @@ namespace Helios
 		/* Gizmo 拖拽进行中：主壳层据此屏蔽快捷键（拖拽期间不切工具、不撤销） */
 		[[nodiscard]] bool IsGizmoDragging();
 
-		[[nodiscard]] PlayMode GetPlayMode() const { return m_PlayMode; }
-		void SetPlayMode(PlayMode mode);
+		/* ---- 运行状态：唯一真值在场景面板的 PlaySession，这里只转发 ---- */
+		[[nodiscard]] PlayState GetPlayState();
+		void SetPlayState(PlayState state);
+		/* 暂停中单步一帧 */
+		void StepFrame();
+		/* Game 页签是否拿着焦点：主壳层据此让出无修饰键快捷键 */
+		[[nodiscard]] bool IsGameViewFocused();
+		/* 运行区的一次性提示，没有时为空 */
+		[[nodiscard]] const char* GetPlayHint();
 
 		/* 热重载脚本：运行中的实例按字段迁移到新库，不用退出 Runtime。
 		 * swap_module 由调用方给（编译并换库），面板不认识脚本模块。 */
@@ -90,6 +97,5 @@ namespace Helios
 
 		int      m_GizmoType{ -1 };
 		bool     m_GizmoLocalSpace{ true };
-		PlayMode m_PlayMode{ PlayMode::Edit };
 	};
 }

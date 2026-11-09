@@ -16,9 +16,29 @@ namespace Helios
 				? static_cast<GLFWwindow*>(application->GetWindow().GetNativeWindow())
 				: nullptr;
 		}
+
+		/* 闸的当前状态：默认开着、没有画面区域 —— 没人调 SetGameInput 时一切照旧 */
+		bool s_GameFocused = true;
+		InputViewport s_GameViewport{};
+
+		/* 闸是否放行：游戏画面有焦点，且应用窗口本身拿着系统焦点 */
+		bool GameInputOpen()
+		{
+			if (!s_GameFocused)
+				return false;
+
+			GLFWwindow* window = CurrentInputWindow();
+			return window != nullptr && glfwGetWindowAttrib(window, GLFW_FOCUSED) != 0;
+		}
 	}
 
-	bool Input::IsKeyPressed(const KeyCode key)
+	void Input::SetGameInput(bool focused, const InputViewport& viewport)
+	{
+		s_GameFocused = focused;
+		s_GameViewport = viewport;
+	}
+
+	bool Input::IsKeyPressedRaw(const KeyCode key)
 	{
 		GLFWwindow* window = CurrentInputWindow();
 		if (window == nullptr)
@@ -28,7 +48,7 @@ namespace Helios
 		return state == GLFW_PRESS || state == GLFW_REPEAT;
 	}
 
-	bool Input::IsMouseButtonPressed(const MouseCode btn)
+	bool Input::IsMouseButtonPressedRaw(const MouseCode btn)
 	{
 		GLFWwindow* window = CurrentInputWindow();
 		if (window == nullptr)
@@ -38,7 +58,7 @@ namespace Helios
 		return state == GLFW_PRESS;
 	}
 
-	glm::vec2 Input::GetMousePos()
+	glm::vec2 Input::GetMousePosRaw()
 	{
 		GLFWwindow* window = CurrentInputWindow();
 		if (window == nullptr)
@@ -50,6 +70,26 @@ namespace Helios
 		return glm::vec2(static_cast<float>(pos_x), static_cast<float>(pos_y));
 	}
 
+	bool Input::IsKeyPressed(const KeyCode key)
+	{
+		return GameInputOpen() && IsKeyPressedRaw(key);
+	}
+
+	bool Input::IsMouseButtonPressed(const MouseCode btn)
+	{
+		return GameInputOpen() && IsMouseButtonPressedRaw(btn);
+	}
+
+	glm::vec2 Input::GetMousePos()
+	{
+		if (!GameInputOpen())
+			return glm::vec2(0.0f);
+
+		const glm::vec2 position = GetMousePosRaw();
+		return (s_GameViewport.Size.x > 0.0f && s_GameViewport.Size.y > 0.0f)
+			? position - s_GameViewport.Min : position;
+	}
+
 	float Input::GetMouseX()
 	{
 		return GetMousePos().x;
@@ -58,5 +98,13 @@ namespace Helios
 	float Input::GetMouseY()
 	{
 		return GetMousePos().y;
+	}
+
+	glm::vec2 Input::GetMousePosNormalized()
+	{
+		if (!GameInputOpen() || s_GameViewport.Size.x <= 0.0f || s_GameViewport.Size.y <= 0.0f)
+			return glm::vec2(0.0f);
+
+		return (GetMousePosRaw() - s_GameViewport.Min) / s_GameViewport.Size;
 	}
 }
