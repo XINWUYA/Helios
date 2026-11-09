@@ -96,8 +96,15 @@ namespace Helios
 		entt::registry& GetRegistry() { return m_Registry; }
 		const entt::registry& GetRegistry() const { return m_Registry; }
 
-		/* 每帧更新：同步实体变换、收集本帧要渲染的视图（场景相机 + 已登记的外部相机） */
+		/* 每帧更新：同步实体变换、收集本帧要渲染的视图（场景相机 + 已登记的外部相机）。
+		 * 单帧步长在这里钳到 kMaxFrameDeltaSeconds，卡顿后不会一步跳过整段 */
 		void OnUpdate(float delta_time);
+
+		/* 按给定步长推进，不再钳制：调用方已按 kMaxFrameDeltaSeconds 处理过原始帧间隔
+		 * （运行期时间缩放、暂停单步都走这里） */
+		void Simulate(float delta_time);
+		/* 单帧步长上限（秒）：同时是 OnUpdate 的钳制值 */
+		static constexpr float kMaxFrameDeltaSeconds = 0.1f;
 
 		/* 外部相机登记 / 摘除。外部相机 = 不属于场景、但要渲染本场景的相机
 		 * （编辑器视口相机、工具预览相机等）。登记后每帧与场景相机一起收集渲染

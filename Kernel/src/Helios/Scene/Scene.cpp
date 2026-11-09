@@ -530,12 +530,14 @@ namespace Helios
 
 	void Scene::OnUpdate(float delta_time)
 	{
-		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
-
-		/* 单帧间隔钳到 0.1 秒：卡顿或断点之后不该让脚本与动画一步跳过整段。
+		/* 卡顿或断点之后，单帧间隔钳到上限：脚本与动画不该一步跳过整段。
 		 * 只影响场景推进，编辑器相机仍拿原始间隔 */
-		constexpr float kMaxFrameDelta = 0.1f;
-		delta_time = std::min(delta_time, kMaxFrameDelta);
+		Simulate(std::min(delta_time, kMaxFrameDeltaSeconds));
+	}
+
+	void Scene::Simulate(float delta_time)
+	{
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
 		/* 动画先推进：属性轨道写组件，下面的变换推送才能当帧看到新姿势 */
 		m_AnimationRuntime.Tick(*this, delta_time);
