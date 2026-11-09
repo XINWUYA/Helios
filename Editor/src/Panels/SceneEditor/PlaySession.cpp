@@ -35,6 +35,7 @@ namespace Helios
 		m_StepRequested = false;
 
 		TransferTerrainHeights(*m_pEditScene, *m_pRuntimeScene);
+		ShareBakedProbes(*m_pEditScene, *m_pRuntimeScene);
 		m_pRuntimeScene->GetScriptRuntime().Start(*m_pRuntimeScene);
 
 		m_State = PlayState::Playing;
@@ -80,6 +81,22 @@ namespace Helios
 		return true;
 	}
 
+	bool PlaySession::PauseOnScriptFault(std::string& out_message)
+	{
+		if (!IsPlaying() || m_pRuntimeScene == nullptr)
+			return false;
+
+		ScriptRuntime::Fault fault;
+		if (!m_pRuntimeScene->GetScriptRuntime().ConsumeFault(fault))
+			return false;
+
+		/* 出错的实例已经被停掉了，这里只负责把整场暂停 + 说清楚是谁出的错 */
+		SetPaused(true);
+
+		out_message = "Script error in '" + fault.ClassName + "': " + fault.Message + ". Play is paused.";
+		return true;
+	}
+
 	/* 高度存在 TerrainField 里，不进 .scn：克隆拿不到，按句柄单独搬一遍。
 	 * 搬运会把"有未保存改动"标记置真，运行世界的导出入口另有关闭兜住落盘 */
 	void PlaySession::TransferTerrainHeights(Scene& edit_scene, Scene& runtime_scene)
@@ -99,8 +116,29 @@ namespace Helios
 			if (target->m_Field == nullptr)
 				target->m_Field = CreateSharedPtr<TerrainField>();
 
-			if (!target->m_Field->RestoreHeightState(*target, terrain.m_Field->CaptureHeightState()))
+		if (!target->m_Field->RestoreHeightState(*target, terrain.m_Field->CaptureHeightState()))
 				EDITOR_LOG_WARN("Failed to carry terrain heights into play mode.");
+		}
+	}
+
+	/* 烘焙好的探针按句柄共享结果：运行世界是克隆出来的，不共享就得把整份 IBL 重烤一遍，
+	 * 场景里几个探针就是进 Play 时几秒的卡顿。接不上的（实时探针、配置不同）自己照常烘焙 */
+	void PlaySession::ShareBakedProbes(Scene& edit_scene, Scene& runtime_scene)
+	{
+		for (auto [handle, probe] : edit_scene.GetRegistry().view<ReflectionProbeComponent>().each())
+		{
+			const SharedPtr<ReflectionProbe>& source = probe.m_ReflectionProbe;
+			if (source == nullptr || !source->IsBaked())
+				continue;
+
+			if (!runtime_scene.IsEntityValid(handle))
+				continue;
+
+			ReflectionProbeComponent* target = runtime_scene.GetRegistry().try_get<ReflectionProbeComponent>(handle);
+			if (target == nullptr || target->m_ReflectionProbe == nullptr)
+				continue;
+
+			target->m_ReflectionProbe->AdoptBakeResultFrom(*source);
 		}
 	}
 }

@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <entt/entt.hpp>
+#include <string>
 #include "Common/EditorCommon.h"
 #include "Helios/Common/Common.h"
 
@@ -45,9 +46,15 @@ namespace Helios
 		void SetTimeScale(float scale);
 		[[nodiscard]] float GetTimeScale() const { return m_TimeScale; }
 
+		/* 运行世界踩到脚本异常就自动暂停，别让一次脚本错误带走编辑器。
+		 * 有异常时返回 true 并填 out_message（给工具栏提示用） */
+		bool PauseOnScriptFault(std::string& out_message);
+
 	private:
 		/* 地形高度不在场景文件里：按句柄从编辑世界搬到运行世界 */
 		static void TransferTerrainHeights(Scene& edit_scene, Scene& runtime_scene);
+		/* 烘焙好的探针结果按句柄共享：运行世界不必重烤同一份 IBL */
+		static void ShareBakedProbes(Scene& edit_scene, Scene& runtime_scene);
 
 		PlayState m_State{ PlayState::Edit };
 		SharedPtr<Scene> m_pEditScene;

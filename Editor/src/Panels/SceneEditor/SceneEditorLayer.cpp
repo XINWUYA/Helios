@@ -2520,12 +2520,22 @@ namespace Helios
 		{
 			if (m_PlaySession.ConsumeStepRequest())
 				m_pMainScene->Simulate(PlaySession::kStepSeconds);
-			return;
+		}
+		else
+		{
+			/* 原始帧间隔先钳制再乘缩放：缩放不放大「单帧最多推进多少」这条底线 */
+			const float clamped = std::min(delta_time, Scene::kMaxFrameDeltaSeconds);
+			m_pMainScene->Simulate(clamped * m_PlaySession.GetTimeScale());
 		}
 
-		/* 原始帧间隔先钳制再乘缩放：缩放不放大「单帧最多推进多少」这条底线 */
-		const float clamped = std::min(delta_time, Scene::kMaxFrameDeltaSeconds);
-		m_pMainScene->Simulate(clamped * m_PlaySession.GetTimeScale());
+		/* 脚本抛异常：出错的实例已经被停掉，这里把整场暂停并留一条提示 */
+		std::string fault_message;
+		if (m_PlaySession.PauseOnScriptFault(fault_message))
+		{
+			m_PlayHintText = fault_message;
+			m_PlayHintSeconds = 6.0f;
+			EDITOR_LOG_ERROR("{}", fault_message);
+		}
 	}
 
 	/* 输入闸：编辑态写 true + 全窗口；运行态写 Game 面板的焦点与区域。
