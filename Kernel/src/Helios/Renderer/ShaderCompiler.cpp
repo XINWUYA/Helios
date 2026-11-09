@@ -833,6 +833,19 @@ namespace Helios
 
         /* 材质参数维度的约定：类型、数量、前缀。加载时报一次，不阻断编译；
          * 与 external / view / global 混用时，值由 Material::GetDrawShader 合成 */
+        /* 维度多了组合数指数膨胀：五个维度就是 32 份，别在着色器里堆开关 */
+        void ValidateVariantDimCount(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
+        {
+            constexpr size_t kMaxDims = 5;
+            if (specs.size() <= kMaxDims || !FirstReport(filepath, "#dims"))
+                return;
+
+            const std::string filename = std::filesystem::path(filepath).filename().string();
+            CORE_LOG_WARN("[Shader] {} declares {} variant dimensions, {} combinations; merge small ones",
+                filename, specs.size(), uint64_t{ 1 } << std::min<size_t>(specs.size(), 20));
+        }
+
+        /* param 维度只支持贴图 / int / float，名字要带 MTL_ 前缀 */
         void ValidateParamVariants(const std::string& filepath, const std::vector<ShaderVariantSpec>& specs)
         {
             const std::string filename = std::filesystem::path(filepath).filename().string();
@@ -1330,6 +1343,7 @@ namespace Helios
         /* 声明与取值的几处约定，都在这里一次报完 */
         ReportUnknownVariantDefines(filepath, unknown_defines);
         ReportVariantValueOutOfRange(filepath, defines);
+        ValidateVariantDimCount(filepath, variant_specs);
         ValidateParamVariants(filepath, variant_specs);
         ReportVariantConditionalMisuse(filepath, stage_sources, variant_specs);
 
