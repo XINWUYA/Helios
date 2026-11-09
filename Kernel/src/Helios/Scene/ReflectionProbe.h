@@ -121,6 +121,11 @@ namespace Helios
         /* Probe已经烘焙 */
         bool IsBaked() const { return m_BakeCompleted; }
 
+        /* 接一份别的探针烤好的结果：进 Play 克隆出来的世界不必重烤同一份 IBL。
+         * 只接受静态探针（实时探针每帧往自己那几张图上写，共享会改到源世界那份），
+         * 且烘焙配置与层掩码要一致。已经烘焙过、配置不符或源没烤完时返回 false。 */
+        bool AdoptBakeResultFrom(const ReflectionProbe& source);
+
         /* ---- 烘焙结果的磁盘缓存 ----
          * 一组 HDR 立方体贴图可以落盘复用（加载场景直接恢复、跳过烘焙）。写入时机 = 保存场景
          * （Scene::Serializer 登记请求）；编辑过程中的高频中间状态不持久化。 */

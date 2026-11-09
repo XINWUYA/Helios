@@ -109,6 +109,29 @@ namespace Helios
         m_RebakeRequested = true;
     }
 
+    bool ReflectionProbe::AdoptBakeResultFrom(const ReflectionProbe& source)
+    {
+        if (&source == this || m_BakeCompleted)
+            return false;
+
+        /* 实时探针每帧往自己的图上写，共享等于改源世界那份；配置不同则结果对不上 */
+        if (!source.m_BakeCompleted || source.NeedsRealtimeBake() || NeedsRealtimeBake())
+            return false;
+        if (!(m_BakeConfig == source.m_BakeConfig) || m_CullingMask != source.m_CullingMask)
+            return false;
+        if (source.m_BakeResult.EnvColorCubemap == nullptr || source.m_BakeResult.IrradianceMap == nullptr
+            || source.m_BakeResult.PrefilterMap == nullptr)
+            return false;
+
+        /* 贴图是设备资源、没有世界归属：两份世界指同一份即可，源世界在运行期间是冻结的 */
+        m_BakeResult = source.m_BakeResult;
+        m_BakeCompleted = true;
+        m_EnvComplete = true;
+        m_RebakeRequested = false;
+        ++m_BakeRevision;
+        return true;
+    }
+
     bool ReflectionProbe::TickBakeInterval()
     {
         /* 还没烘出第一版（含刚重烘焙）不节流：先把结果赶出来，别让间隔拖住首帧 */

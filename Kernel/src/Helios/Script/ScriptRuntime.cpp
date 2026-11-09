@@ -186,7 +186,20 @@ namespace Helios
 		slot.Instance = object;
 		m_Instances.push_back({ entity, slot_index, object, desc->Destroy });
 		++m_CreatedCount;
-		object->OnCreate();
+
+		/* OnCreate 里抛异常同样不能穿出去：记下来，这个实例不参与后续 tick */
+		try
+		{
+			object->OnCreate();
+		}
+		catch (const std::exception& error)
+		{
+			RecordFault(m_Instances.back(), error.what());
+		}
+		catch (...)
+		{
+			RecordFault(m_Instances.back(), "unknown exception");
+		}
 	}
 
 	/* 热重载：字段值按挂载点存下来，实例重建后按名字回灌。临时状态（计时器、缓存的引用）
@@ -274,7 +287,7 @@ namespace Helios
 
 		for (Instance& instance : m_Instances)
 		{
-			if (instance.Object == nullptr)
+			if (instance.Object == nullptr || instance.Broken)
 				continue;
 
 			/* OnUpdate 里可能把实体或挂载点删了：逐个校验，别让实例操作已经没了的对象 */
@@ -287,7 +300,20 @@ namespace Helios
 			if (component->m_Scripts[instance.Slot].Instance != instance.Object)
 				continue;
 
-			instance.Object->OnUpdate(delta_time);
+			/* 脚本自己抛的异常不能穿出场景推进：那会把编辑器整个带走。
+			 * 捕获后停掉这个实例，编辑器会在下一帧暂停运行并提示 */
+			try
+			{
+				instance.Object->OnUpdate(delta_time);
+			}
+			catch (const std::exception& error)
+			{
+				RecordFault(instance, error.what());
+			}
+			catch (...)
+			{
+				RecordFault(instance, "unknown exception");
+			}
 		}
 	}
 
@@ -314,6 +340,10 @@ namespace Helios
 
 		m_Instances.clear();
 		m_pScene = nullptr;
+
+		/* 上一次运行的异常不带到下一次 */
+		m_Fault = Fault{};
+		m_HasFault = false;
 	}
 
 	void ScriptRuntime::DestroyInstancesFor(entt::entity entity)
@@ -336,11 +366,56 @@ namespace Helios
 		if (instance.Object == nullptr)
 			return;
 
-		instance.Object->OnDestroy();
+		/* 收尾也不许抛：Stop 走在关编辑器 / 切场景的路径上，崩在这里会连带丢编辑内容 */
+		try
+		{
+			instance.Object->OnDestroy();
 
-		if (instance.Destroy != nullptr)
-			instance.Destroy(instance.Object);
+			if (instance.Destroy != nullptr)
+				instance.Destroy(instance.Object);
+		}
+		catch (const std::exception& error)
+		{
+			CORE_LOG_ERROR("Script threw while shutting down: {}.", error.what());
+		}
+		catch (...)
+		{
+			CORE_LOG_ERROR("Script threw while shutting down: unknown exception.");
+		}
 
 		instance.Object = nullptr;
+	}
+
+	/* 记异常：带上实体、槽位与类名，停掉这个实例，等编辑器取走 */
+	void ScriptRuntime::RecordFault(Instance& instance, const char* message)
+	{
+		m_Fault = Fault{};
+		m_Fault.Entity = instance.Entity;
+		m_Fault.Slot = instance.Slot;
+
+		if (m_pScene != nullptr && m_pScene->GetRegistry().valid(instance.Entity))
+		{
+			const ScriptComponent* component = m_pScene->GetRegistry().try_get<ScriptComponent>(instance.Entity);
+			if (component != nullptr && instance.Slot < component->m_Scripts.size())
+				m_Fault.ClassName = component->m_Scripts[instance.Slot].ClassName;
+		}
+
+		m_Fault.Message = (message != nullptr) ? message : std::string();
+		m_HasFault = true;
+		instance.Broken = true;
+
+		CORE_LOG_ERROR("Script '{}' threw: {}. The instance stays stopped until play mode restarts.",
+			m_Fault.ClassName, m_Fault.Message);
+	}
+
+	bool ScriptRuntime::ConsumeFault(Fault& out)
+	{
+		if (!m_HasFault)
+			return false;
+
+		out = std::move(m_Fault);
+		m_Fault = Fault{};
+		m_HasFault = false;
+		return true;
 	}
 }

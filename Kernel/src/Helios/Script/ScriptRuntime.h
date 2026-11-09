@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <entt/entt.hpp>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace Helios
@@ -16,12 +17,26 @@ namespace Helios
 	class HELIOS_API ScriptRuntime
 	{
 	public:
+		/* 一次脚本异常：哪个实体的哪个槽、哪个类、什么错误 */
+		struct Fault
+		{
+			entt::entity Entity{ entt::null };
+			size_t       Slot{ 0 };
+			std::string  ClassName;
+			std::string  Message;
+		};
+
 		/* 给每个挂载点建实例并调 OnCreate（类缺失的跳过） */
 		void Start(Scene& scene);
 		/* 逆序 OnDestroy 并销毁全部实例 */
 		void Stop();
 		/* 每帧驱动：实例列表在 Start / Stop 之间不变，实体中途失效的逐个跳过 */
 		void Tick(Scene& scene, float delta_time);
+
+		/* 取走上一次脚本异常（取走后清空）：编辑器据此暂停并提示。
+		 * 出错的实例会被停掉，本次运行内不再 tick —— 它的状态可能已经坏了，继续调只会连环抛 */
+		[[nodiscard]] bool ConsumeFault(Fault& out);
+		[[nodiscard]] bool HasFault() const { return m_HasFault; }
 
 		/* 热重载：存下实例的字段值 → 销毁实例 → 调 swap_module 换库 → 用新类重建 → 回灌。
 		 * 回调失败（编译不过）时表里还是旧类，照样重建，运行不中断。
@@ -49,10 +64,14 @@ namespace Helios
 			size_t       Slot{ 0 };
 			Script*      Object{ nullptr };
 			void       (*Destroy)(Script* script){ nullptr };
+			/* 出过异常：本次运行内不再 tick（OnDestroy 照常走） */
+			bool         Broken{ false };
 		};
 
 		void CreateInstance(Scene& scene, entt::entity entity, size_t slot_index, ScriptSlot& slot);
 		void DestroyInstance(Instance& instance);
+		/* 记下异常并停掉这个实例 */
+		void RecordFault(Instance& instance, const char* message);
 
 		std::vector<Instance> m_Instances;
 		/* Stop 时要回挂载点里摘掉实例指针（组件比运行时活得久） */
@@ -61,5 +80,9 @@ namespace Helios
 		float m_LastDeltaTime{ 0.0f };
 		float m_ElapsedTime{ 0.0f };
 		bool m_bRunning{ false };
+
+		/* 最近一次脚本异常，等编辑器取走 */
+		Fault m_Fault{};
+		bool m_HasFault{ false };
 	};
 }
