@@ -19,6 +19,9 @@ namespace Helios
 		const ShaderVariantDefines* View{ nullptr };
 	};
 
+	/* 变体组合的文本形式：A=1,B=0；空表写成 "-"。清单与报错共用一种写法 */
+	std::string ShaderVariantDefinesToString(const ShaderVariantDefines& defines);
+
 	/* 进程级变体取值：平台能力、质量档这类换进程才变的东西 */
 	class ShaderVariantGlobals
 	{

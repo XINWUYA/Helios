@@ -6,6 +6,8 @@
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Core/Logger.h"
 #include "Helios/Renderer/Renderer.h"
+#include "Helios/Renderer/ShaderVariants.h"
+#include "Helios/Scene/SceneCommon.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 
 namespace Helios
@@ -80,6 +82,17 @@ namespace Helios
 		if (m_Queued.count(key) != 0 || m_Failed.count(key) != 0)
 			return false;
 
+		/* 严格模式不现编：清单外或者产物没带上，都是打包漏了，报一次就够了 */
+		if (m_Strict)
+		{
+			if (m_Failed.insert(key).second)
+			{
+				CORE_LOG_ERROR("[Shader] {}：{} {}", m_Manifest.count(key) != 0
+					? "清单里有但没产物" : "不在清单里", path, ShaderVariantDefinesToString(defines));
+			}
+			return false;
+		}
+
 		/* 同步档：当场编完再返回，调用方紧接着再查一次就能拿到精确变体 */
 		if (!AsyncEnabled())
 			return Preload(path, defines);
@@ -98,6 +111,40 @@ namespace Helios
 			return true;
 
 		return Publish(item, BuildCpu(item));
+	}
+
+	void ShaderVariantStreamer::SetStrictManifest(const std::vector<ShaderVariantItem>& items)
+	{
+		m_Manifest.clear();
+		for (const ShaderVariantItem& item : items)
+		{
+			if (!item.Path.empty())
+				m_Manifest.insert(MakeKey(ABSOLUTE_PATH(item.Path), item.Defines));
+		}
+
+		m_Strict = true;
+		m_Failed.clear();
+		CORE_LOG_INFO("[Shader] 变体清单生效：{} 条，缺失只报错不编译", m_Manifest.size());
+	}
+
+	void ShaderVariantStreamer::ClearStrictManifest()
+	{
+		m_Manifest.clear();
+		m_Strict = false;
+		m_Failed.clear();
+	}
+
+	size_t ShaderVariantStreamer::LoadStrictManifest(const std::string& filepath)
+	{
+		const std::vector<ShaderVariantItem> items = ShaderVariantCatalog::Load(filepath);
+		if (items.empty())
+		{
+			CORE_LOG_WARN("[Shader] 变体清单为空或读不到：{}", filepath);
+			return 0;
+		}
+
+		SetStrictManifest(items);
+		return items.size();
 	}
 
 	void ShaderVariantStreamer::Tick()

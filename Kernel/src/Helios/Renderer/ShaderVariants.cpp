@@ -8,6 +8,21 @@
 
 namespace Helios
 {
+	std::string ShaderVariantDefinesToString(const ShaderVariantDefines& defines)
+	{
+		if (defines.empty())
+			return "-";
+
+		std::string text;
+		for (const auto& [name, value] : defines)
+		{
+			if (!text.empty())
+				text += ',';
+			text += name + "=" + std::to_string(value);
+		}
+		return text;
+	}
+
 	ShaderVariantDefines ShaderVariantGlobals::s_Values;
 
 	void ShaderVariantGlobals::Set(const std::string& name, int value)

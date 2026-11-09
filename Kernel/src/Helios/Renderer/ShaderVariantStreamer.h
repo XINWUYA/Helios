@@ -4,9 +4,11 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "Helios/Common/Common.h"
 #include "Helios/Renderer/RenderCommon.h"
+#include "Helios/Renderer/ShaderVariantCatalog.h"
 
 namespace Helios
 {
@@ -29,6 +31,13 @@ namespace Helios
 		/* 加载期批量预热：当场编完，不进队列。后台与主线程共用一把编译锁，
 		 * 批量任务堆在队列里会拖慢随后的同步加载 */
 		bool Preload(const std::string& path, const ShaderVariantDefines& defines);
+
+		/* 严格模式：只认清单里的组合，缺什么都不编，直接报错。Player 用 */
+		void SetStrictManifest(const std::vector<ShaderVariantItem>& items);
+		void ClearStrictManifest();
+		[[nodiscard]] bool IsStrict() const { return m_Strict; }
+		/* 读清单文件并进入严格模式，返回条目数；读不到就不改状态 */
+		size_t LoadStrictManifest(const std::string& filepath);
 
 		/* 主线程每帧：先收后台结果入库，再按预算起新任务 */
 		void Tick();
@@ -77,6 +86,9 @@ namespace Helios
 		std::deque<std::pair<Item, std::future<SharedPtr<DeviceShader>>>> m_InFlight;
 		/* 编译失败过一次的组合不再自动重排：源码有明显错误时免得每帧都试一遍 */
 		std::unordered_set<std::string> m_Failed;
+		/* 严格模式的白名单（MakeKey 形式），空集合在非严格模式下无意义 */
+		std::unordered_set<std::string> m_Manifest;
+		bool m_Strict{ false };
 
 		uint32_t m_FrameBudget{ 4 };
 		uint32_t m_Completed{ 0 };

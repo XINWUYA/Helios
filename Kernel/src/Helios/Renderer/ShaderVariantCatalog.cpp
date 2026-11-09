@@ -9,6 +9,7 @@
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Core/Logger.h"
 #include "Helios/Renderer/ShaderVariantStreamer.h"
+#include "Helios/Renderer/ShaderVariants.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 
@@ -22,21 +23,6 @@ namespace Helios
 			const std::string marker = "/EngineRes/";
 			const size_t at = path.find(marker);
 			return at == std::string::npos ? path : path.substr(at + marker.size());
-		}
-
-		std::string FormatDefines(const ShaderVariantDefines& defines)
-		{
-			if (defines.empty())
-				return "-";
-
-			std::string text;
-			for (const auto& [name, value] : defines)
-			{
-				if (!text.empty())
-					text += ',';
-				text += name + "=" + std::to_string(value);
-			}
-			return text;
 		}
 
 		bool ParseDefines(const std::string& text, ShaderVariantDefines& out)
@@ -94,7 +80,7 @@ namespace Helios
 
 		file << "# path|A=1,B=0\n";
 		for (const ShaderVariantItem& item : items)
-			file << item.Path << '|' << FormatDefines(item.Defines) << '\n';
+			file << item.Path << '|' << ShaderVariantDefinesToString(item.Defines) << '\n';
 		return file.good();
 	}
 
