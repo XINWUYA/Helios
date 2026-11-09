@@ -10,6 +10,7 @@
 namespace tinyxml2
 {
 	class XMLElement;
+	class XMLDocument;
 }
 
 namespace Helios
@@ -142,7 +143,19 @@ namespace Helios
 		void Serializer(const std::string& path, bool write_bake_cache = true);
 		bool Deserializer(const std::string& path);
 
+		/* 克隆一份独立的世界：内存里序列化再反序列化，实体句柄逐个保持原值。
+		 * 渲染对象（Model / Camera）按组件重建，两份世界不共享实例；探针烘焙缓存不跟着克隆。
+		 * 失败返回空。 */
+		SharedPtr<Scene> Clone();
+
 	private:
+		/* 序列化 / 反序列化到内存文档：存盘与克隆共用这两个入口。
+		 * bake_cache_path 为空表示不登记探针烘焙缓存写入。 */
+		void SerializeDocument(tinyxml2::XMLDocument& doc, const std::string* bake_cache_path);
+		bool DeserializeDocument(const tinyxml2::XMLDocument& doc, bool preserve_handles);
+		/* 建实体。preserve_handle 为真时优先用给定句柄（克隆用），槽位被占则退回新分配 */
+		Entity CreateEntityInternal(const std::string& name, entt::entity preserve_handle);
+
 		/* 对类型列表中的每个组件类型连接信号（由ConnectSignalsForComponents驱动展开） */
 		template<typename... Ts>
         void ConnectSignalsForComponents(std::tuple<Ts...>);

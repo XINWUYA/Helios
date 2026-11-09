@@ -57,9 +57,21 @@ namespace Helios
 	/* 创建一个实体 */
 	Entity Scene::CreateEntity(const std::string& name)
 	{
+		return CreateEntityInternal(name, entt::null);
+	}
+
+	/* preserve_handle 非空时优先用它：entt 在槽位空闲时原样返回该句柄，
+	 * 被占则新分配一个（克隆的源场景句柄必然唯一，占位只可能来自坏文件） */
+	Entity Scene::CreateEntityInternal(const std::string& name, entt::entity preserve_handle)
+	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
-		Entity entity = { m_Registry.create(), shared_from_this() };
+		entt::entity handle = m_Registry.create(preserve_handle);
+		if (preserve_handle != entt::null && handle != preserve_handle)
+			CORE_LOG_WARN("Entity handle {} is taken, falling back to {}.", entt::to_integral(preserve_handle),
+				entt::to_integral(handle));
+
+		Entity entity = { handle, shared_from_this() };
 
 		/* 默认添加名称组件和变换组件 */
 		entity.AddComponent<NameComponent>(name.empty() ? "New Entity" : name);
@@ -520,6 +532,11 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
+		/* 单帧间隔钳到 0.1 秒：卡顿或断点之后不该让脚本与动画一步跳过整段。
+		 * 只影响场景推进，编辑器相机仍拿原始间隔 */
+		constexpr float kMaxFrameDelta = 0.1f;
+		delta_time = std::min(delta_time, kMaxFrameDelta);
+
 		/* 动画先推进：属性轨道写组件，下面的变换推送才能当帧看到新姿势 */
 		m_AnimationRuntime.Tick(*this, delta_time);
 
@@ -922,9 +939,6 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
-		/* 存的是作者数据：先停播并还原姿势，别把当前帧的采样值写进场景 */
-		m_AnimationRuntime.StopAll(*this);
-
 		std::filesystem::path scene_path;
 		if (!TryPathFromUtf8(path, scene_path))
 		{
@@ -939,18 +953,31 @@ namespace Helios
 			return;
 		}
 
-		auto* doc = new tinyxml2::XMLDocument();
-		doc->InsertEndChild(doc->NewDeclaration());
-		tinyxml2::XMLElement* scene_root = doc->NewElement("Scene");
-		doc->InsertEndChild(scene_root);
+		tinyxml2::XMLDocument doc;
+		SerializeDocument(doc, write_bake_cache ? &path : nullptr);
+
+		if (doc.SaveFile(scene_file.get()) != tinyxml2::XML_SUCCESS)
+			CORE_LOG_ERROR("Failed to write scene file: {}.", path);
+	}
+
+	/* 存的是作者数据：先停播并还原姿势，别把当前帧的采样值写进场景（克隆也走这里） */
+	void Scene::SerializeDocument(tinyxml2::XMLDocument& doc, const std::string* bake_cache_path)
+	{
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
+
+		m_AnimationRuntime.StopAll(*this);
+
+		doc.InsertEndChild(doc.NewDeclaration());
+		tinyxml2::XMLElement* scene_root = doc.NewElement("Scene");
+		doc.InsertEndChild(scene_root);
 
 		tinyxml2::XMLElement* entities_root = scene_root->InsertNewChildElement("Entities");
 
 		/* 保存场景时才持久化烘焙结果：这里只登记请求（真正的写入等 GPU 执行完、由探针状态机在后续
 		 * 帧完成），但缓存路径要在序列化组件之前定下来（一并写进 .scn）；缓存按正在保存的场景文件
 		 * 位置分目录。 */
-		if (m_pReflectionProbeManager != nullptr && write_bake_cache)
-			m_pReflectionProbeManager->RequestBakeCacheWrites(path);
+		if (m_pReflectionProbeManager != nullptr && bake_cache_path != nullptr)
+			m_pReflectionProbeManager->RequestBakeCacheWrites(*bake_cache_path);
 
 		/* 按实体句柄升序输出：registry 的遍历顺序与创建顺序无关，
 		 * 直接遍历会让每次「加载 → 保存」把实体顺序整体翻转。 */
@@ -970,12 +997,6 @@ namespace Helios
 
 			SerializeEntity(entities_root, entity);
 		}
-
-		/* 保存到文本 */
-		if (doc->SaveFile(scene_file.get()) != tinyxml2::XML_SUCCESS)
-			CORE_LOG_ERROR("Failed to write scene file: {}.", path);
-
-		delete doc;
 	}
 
 	bool Scene::Deserializer(const std::string& path)
@@ -1003,11 +1024,32 @@ namespace Helios
 			return false;
 		}
 
-		tinyxml2::XMLElement* scene_root = doc.FirstChildElement("Scene");
-		tinyxml2::XMLElement* entities_root = (scene_root != nullptr) ? scene_root->FirstChildElement("Entities") : nullptr;
+		return DeserializeDocument(doc, false);
+	}
+
+	SharedPtr<Scene> Scene::Clone()
+	{
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
+
+		tinyxml2::XMLDocument doc;
+		SerializeDocument(doc, nullptr);
+
+		SharedPtr<Scene> clone = CreateSharedPtr<Scene>();
+		if (!clone->DeserializeDocument(doc, true))
+			return nullptr;
+		return clone;
+	}
+
+	bool Scene::DeserializeDocument(const tinyxml2::XMLDocument& doc, bool preserve_handles)
+	{
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
+
+		const tinyxml2::XMLElement* scene_root = doc.FirstChildElement("Scene");
+		const tinyxml2::XMLElement* entities_root = (scene_root != nullptr)
+			? scene_root->FirstChildElement("Entities") : nullptr;
 		if (entities_root == nullptr)
 		{
-			CORE_LOG_ERROR("Scene file has no <Scene>/<Entities>: {}.", path);
+			CORE_LOG_ERROR("Scene data has no <Scene>/<Entities>.");
 			return false;
 		}
 
@@ -1020,7 +1062,7 @@ namespace Helios
 		std::vector<std::pair<const tinyxml2::XMLElement*, Entity>> loaded_entities;
 		std::unordered_map<uint64_t, Entity> entities_by_file_id;
 
-		for (tinyxml2::XMLElement* entity_root = entities_root->FirstChildElement(); entity_root; entity_root = entity_root->NextSiblingElement("Entity"))
+		for (const tinyxml2::XMLElement* entity_root = entities_root->FirstChildElement(); entity_root; entity_root = entity_root->NextSiblingElement("Entity"))
 		{
 			const tinyxml2::XMLAttribute* id_attribute = entity_root->FindAttribute("ID");
 			if (id_attribute == nullptr)
@@ -1030,7 +1072,11 @@ namespace Helios
 			if (name == nullptr || *name == '\0')
 				continue;
 
-			Entity entity = CreateEntity(name);
+			/* 克隆要保住句柄，跨世界的选中 / 地形高度都按它对上；打开文件仍走紧凑分配 */
+			const entt::entity preserved = preserve_handles
+				? static_cast<entt::entity>(static_cast<uint32_t>(id_attribute->Unsigned64Value()))
+				: entt::null;
+			Entity entity = CreateEntityInternal(name, preserved);
 
 			/* Name / Transform 由 CreateEntity 带上，其余组件由注册表驱动 */
 			for (const ComponentDesc& desc : ComponentRegistry::Instance().All())
