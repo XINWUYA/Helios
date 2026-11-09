@@ -63,6 +63,17 @@ namespace Helios
 			slot.Properties = std::move(rebuilt);
 		}
 
+		/* 字段表里按名字找字段：面板参数与实例字段靠它对上 */
+		const ScriptFieldDesc* FindField(const ScriptClassDesc& desc, const std::string& name)
+		{
+			for (const ScriptFieldDesc& field : desc.Fields)
+			{
+				if (field.Name != nullptr && name == field.Name)
+					return &field;
+			}
+			return nullptr;
+		}
+
 		/* 拖进来的实体句柄 → 名字（面板只存名字，脚本用 FindEntity 解析回去） */
 		std::string ResolveEntityName(const Scene* scene, entt::entity handle)
 		{
@@ -294,7 +305,8 @@ namespace Helios
 					selected = static_cast<int>(i) + 1;
 			}
 
-			/* Runtime 下实例在手，换类会跟当前实例对不上，锁住 */
+			/* Runtime 下实例在手：换类会跟当前实例对不上，类与移除锁住；
+			 * 参数行照常可改，改的是实例的当前值（见下面的循环） */
 			const bool read_only = (slot.Instance != nullptr);
 			if (read_only)
 				ImGui::BeginDisabled();
@@ -351,10 +363,20 @@ namespace Helios
 			if (!PropertiesInSync(slot, *desc))
 				RebuildProperties(slot, *desc);
 
+			/* 实例在手时以实例为准：先把当前值刷进文本（脚本每帧可能在改），
+			 * 改动再写回实例 —— 运行中调参立即生效，Stop 后参数仍是最后看到的那份 */
 			for (ScriptProperty& property : slot.Properties)
 			{
-				if (DrawPropertyValue(property, read_only, scene))
+				const ScriptFieldDesc* field = FindField(*desc, property.Name);
+				if (slot.Instance != nullptr && field != nullptr)
+					property.Value = ReadScriptPropertyText(*slot.Instance, *field);
+
+				if (DrawPropertyValue(property, false, scene))
+				{
+					if (slot.Instance != nullptr && field != nullptr)
+						ApplyScriptPropertyText(*slot.Instance, *field, property.Value);
 					changed = true;
+				}
 			}
 
 			if (slot.Properties.empty())

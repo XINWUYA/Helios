@@ -187,6 +187,10 @@ namespace Helios
 		void ShowSceneViewportUI();
 		/* 显示游戏画面（运行世界主相机的渲染结果） */
 		void ShowGameViewportUI();
+		/* 游戏画面工具条：时间缩放与固定比例 */
+		void DrawGameToolbar(Entity& primary_camera);
+		/* 把运行世界选中实体的值搬回编辑世界（一条命令进编辑栈） */
+		void ApplyRuntimeSelectionToEditScene();
 		/* 运行态标识：视口描一圈状态色（Game 与 Scene 两个视口共用） */
 		void DrawPlayBorder(const ImVec2& min, const ImVec2& max) const;
 		/* 脚本执行顺序总表：全场景挂载点按 Order 排，行内可改 */

@@ -41,6 +41,10 @@ namespace Helios
 		/* 单步的固定步长（秒） */
 		static constexpr float kStepSeconds = 1.0f / 60.0f;
 
+		/* 时间缩放：只作用于运行世界，渲染不受影响。进出 Play 复位成 1 */
+		void SetTimeScale(float scale);
+		[[nodiscard]] float GetTimeScale() const { return m_TimeScale; }
+
 	private:
 		/* 地形高度不在场景文件里：按句柄从编辑世界搬到运行世界 */
 		static void TransferTerrainHeights(Scene& edit_scene, Scene& runtime_scene);
@@ -50,5 +54,6 @@ namespace Helios
 		SharedPtr<Scene> m_pRuntimeScene;
 		entt::entity m_SelectionHandle{ entt::null };
 		bool m_StepRequested{ false };
+		float m_TimeScale{ 1.0f };
 	};
 }

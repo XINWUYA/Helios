@@ -54,6 +54,8 @@ namespace Helios
 		m_State = PlayState::Edit;
 		m_SelectionHandle = entt::null;
 		m_StepRequested = false;
+		/* 时间缩放是运行期工具，不跨越会话 */
+		m_TimeScale = 1.0f;
 	}
 
 	void PlaySession::SetPaused(bool paused)
@@ -62,6 +64,11 @@ namespace Helios
 			m_State = PlayState::Paused;
 		else if (!paused && m_State == PlayState::Paused)
 			m_State = PlayState::Playing;
+	}
+
+	void PlaySession::SetTimeScale(float scale)
+	{
+		m_TimeScale = std::clamp(scale, 0.0f, 4.0f);
 	}
 
 	bool PlaySession::ConsumeStepRequest()

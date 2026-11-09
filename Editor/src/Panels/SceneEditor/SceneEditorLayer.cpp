@@ -14,6 +14,7 @@
 #include "UI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
 #include "Command/AssetFileOps.h"
+#include "Command/ApplyRuntimeStateCommand.h"
 #include "Command/TransformCommand.h"
 #include "Command/TerrainSculptCommand.h"
 #include "Panels/SceneEditor/TerrainSculpt.h"
@@ -1409,6 +1410,76 @@ namespace Helios
 			0.0f, ImDrawFlags_None, Scaled(2.0f));
 	}
 
+	/* 游戏画面工具条：时间缩放与固定比例。只作用于运行世界，编辑世界不受影响 */
+	void SceneEditorLayer::DrawGameToolbar(Entity& primary_camera)
+	{
+		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, Scaled(2.0f)));
+
+		float time_scale = m_PlaySession.GetTimeScale();
+		ImGui::SetNextItemWidth(Scaled(120.0f));
+		if (ImGui::DragFloat("Speed", &time_scale, 0.01f, 0.0f, 4.0f, "%.2fx"))
+			m_PlaySession.SetTimeScale(time_scale);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Simulation speed. Rendering stays at full rate.");
+
+		ImGui::SameLine(0.0f, Scaled(12.0f));
+		bool fixed_aspect = primary_camera.GetComponent<CameraComponent>().m_IsFixedAspectRatio;
+		if (ImGui::Checkbox("16:9", &fixed_aspect))
+			primary_camera.GetComponent<CameraComponent>().m_IsFixedAspectRatio = fixed_aspect;
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Letterbox the game view to 16:9");
+
+		if (m_PlaySession.IsPaused())
+		{
+			ImGui::SameLine(0.0f, Scaled(12.0f));
+			ImGui::TextColored(EditorTheme::Token::Playing, "Paused");
+		}
+
+		/* 运行中调好的值带回编辑世界：只作用于选中实体，一条命令可撤销 */
+		ImGui::SameLine(0.0f, Scaled(12.0f));
+		const bool has_selection = static_cast<bool>(m_SceneHierarchy.GetSelectedEntity());
+		ImGui::BeginDisabled(!has_selection);
+		if (ImGui::Button("Apply to Editor Scene"))
+			ApplyRuntimeSelectionToEditScene();
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip(has_selection
+				? "Copy this entity's values back to the editing scene (undoable)"
+				: "Select an entity in the running world first");
+
+		ImGui::PopStyleVar();
+		ImGui::Spacing();
+	}
+
+	/* 运行世界的改动退出就丢，这里给一条主动带回去的路：按句柄 + 名字对上编辑世界的同一个实体，
+	 * 逐字段写回去，一条命令进编辑栈。地形不参与（高度不在组件里，搬参数会丢未保存的雕刻） */
+	void SceneEditorLayer::ApplyRuntimeSelectionToEditScene()
+	{
+		if (!m_PlaySession.IsPlaying())
+			return;
+
+		const Entity runtime_entity = m_SceneHierarchy.GetSelectedEntity();
+		const SharedPtr<Scene>& edit_scene = m_PlaySession.GetEditScene();
+
+		Entity edit_entity;
+		if (edit_scene != nullptr && runtime_entity)
+			edit_entity = Entity{ static_cast<entt::entity>(runtime_entity), edit_scene };
+
+		std::string reason;
+		UniquePtr<ApplyRuntimeStateCommand> command =
+			ApplyRuntimeStateCommand::Create(runtime_entity, edit_entity, reason);
+		if (command == nullptr)
+		{
+			m_PlayHintText = reason.empty() ? "Nothing to apply." : reason;
+			m_PlayHintSeconds = 3.0f;
+			return;
+		}
+
+		m_PlayHintText = "Applied " + std::to_string(command->GetFieldCount()) + " values to the editing scene.";
+		m_PlayHintSeconds = 3.0f;
+		m_CommandStack.Execute(std::move(command));
+	}
+
 	/* 游戏画面：运行世界主相机的渲染结果。编辑态不画内容 —— 场景相机在编辑态本来就不渲染，
 	 * 硬撑一张过期图只会误导。没有主相机时只给提示，不回退到编辑器相机 */
 	void SceneEditorLayer::ShowGameViewportUI()
@@ -1427,15 +1498,6 @@ namespace Helios
 		const bool drawable = ImGui::Begin(Panel::kGame, &Panel::VisibleFlag(Panel::kGame));
 		if (drawable)
 		{
-			const auto region_min = ImGui::GetWindowContentRegionMin();
-			const auto region_max = ImGui::GetWindowContentRegionMax();
-			const auto offset = ImGui::GetWindowPos();
-			m_GameViewportRegion.MinX = static_cast<int32_t>(region_min.x + offset.x);
-			m_GameViewportRegion.MinY = static_cast<int32_t>(region_min.y + offset.y);
-			m_GameViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, region_max.x - region_min.x));
-			m_GameViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, region_max.y - region_min.y));
-
-			m_GameViewportDrawable = true;
 			m_GameViewportHovered = ImGui::IsWindowHovered();
 
 			/* 弹层（菜单 / 下拉 / 模态）打开时键盘归它，脚本不该继续收键 */
@@ -1454,6 +1516,8 @@ namespace Helios
 				primary_camera = m_pMainScene->GetPrimaryCameraEntity();
 				if (!primary_camera)
 					notice = "No primary camera in this scene.";
+				else if (primary_camera.GetComponent<CameraComponent>().m_Camera == nullptr)
+					notice = "The primary camera has no camera object.";
 			}
 
 			if (notice != nullptr)
@@ -1467,22 +1531,49 @@ namespace Helios
 			}
 			else
 			{
+				DrawGameToolbar(primary_camera);
+
+				/* 画面区域：默认铺满，勾了固定比例就按 16:9 居中、四周留黑。
+				 * 视口区域、鼠标换算、描边都以这块为准，不按整个面板 */
+				const ImVec2 content_min = ImGui::GetCursorScreenPos();
+				const ImVec2 content_size = ImGui::GetContentRegionAvail();
+				ImVec2 box_min = content_min;
+				ImVec2 box_size = content_size;
+				constexpr float kAspect = 16.0f / 9.0f;
+				const bool fixed_aspect = primary_camera.GetComponent<CameraComponent>().m_IsFixedAspectRatio;
+				if (fixed_aspect && box_size.x > 0.0f && box_size.y > 0.0f)
+				{
+					if (box_size.x / box_size.y > kAspect)
+					{
+						box_size.x = box_size.y * kAspect;
+						box_min.x += (content_size.x - box_size.x) * 0.5f;
+					}
+					else
+					{
+						box_size.y = box_size.x / kAspect;
+						box_min.y += (content_size.y - box_size.y) * 0.5f;
+					}
+				}
+
+				m_GameViewportRegion.MinX = static_cast<int32_t>(box_min.x);
+				m_GameViewportRegion.MinY = static_cast<int32_t>(box_min.y);
+				m_GameViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, box_size.x));
+				m_GameViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, box_size.y));
+				m_GameViewportDrawable = true;
+
 				RenderView* render_view = primary_camera.GetComponent<CameraComponent>().m_Camera->GetRenderView();
 
-				/* 视口区域归这个面板：按内容尺寸写主相机的区域（运行世界的其余相机不渲染） */
+				/* 视口区域归这个面板：按画面尺寸写主相机的区域（运行世界的其余相机不渲染） */
 				if (m_GameViewportRegion.Width > 0 && m_GameViewportRegion.Height > 0)
 				{
-					const auto rt_size = ClampRenderSize(
-						static_cast<float>(m_GameViewportRegion.Width),
-						static_cast<float>(m_GameViewportRegion.Height),
-						ImGuiToPhysicalScale());
+					const auto rt_size = ClampRenderSize(box_size.x, box_size.y, ImGuiToPhysicalScale());
 					render_view->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
 				}
 
+				ImGui::SetCursorScreenPos(box_min);
 				if (auto output_rt = render_view->GetRenderTarget())
 				{
-					ImGui::Image((ImTextureID)output_rt.get(), ImGui::GetContentRegionAvail(),
-						ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
+					ImGui::Image((ImTextureID)output_rt.get(), box_size, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
 					DrawPlayBorder(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
 				}
 			}
@@ -2424,11 +2515,17 @@ namespace Helios
 		m_pEditorCamera->SetNavigationAllowed(allowed);
 		m_pEditorCamera->OnUpdate(delta_time);
 
-		/* 暂停只停模拟，渲染照常；单步推进固定 1/60 秒 */
-		if (!m_PlaySession.IsPaused())
-			m_pMainScene->OnUpdate(delta_time);
-		else if (m_PlaySession.ConsumeStepRequest())
-			m_pMainScene->OnUpdate(PlaySession::kStepSeconds);
+		/* 暂停只停模拟，渲染照常；单步推进固定 1/60 秒，不受时间缩放影响 */
+		if (m_PlaySession.IsPaused())
+		{
+			if (m_PlaySession.ConsumeStepRequest())
+				m_pMainScene->Simulate(PlaySession::kStepSeconds);
+			return;
+		}
+
+		/* 原始帧间隔先钳制再乘缩放：缩放不放大「单帧最多推进多少」这条底线 */
+		const float clamped = std::min(delta_time, Scene::kMaxFrameDeltaSeconds);
+		m_pMainScene->Simulate(clamped * m_PlaySession.GetTimeScale());
 	}
 
 	/* 输入闸：编辑态写 true + 全窗口；运行态写 Game 面板的焦点与区域。
