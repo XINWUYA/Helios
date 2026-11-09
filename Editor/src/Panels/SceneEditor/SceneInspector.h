@@ -12,6 +12,7 @@
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Entity.h"
 #include "Helios/Scene/Material.h"
+#include "Helios/VirtualDevice/DeviceShader.h"
 
 namespace Helios
 {
@@ -124,6 +125,9 @@ namespace Helios
 		};
 		/* 详情卡里的一条 include 依赖：整行命中，能定位的那条点击跳到资源浏览器 */
 		void DrawShaderIncludeRow(const ShaderIncludeRow& include);
+		/* shader 卡里的属性清单：与材质面板同一套分组口径（未分组在前，其余按组内首个
+		 * 参数名的字典序），行是只读文本 */
+		void DrawShaderPropertyList();
 		/* .mtl 的材质编辑卡：每条目一张，同级平铺在详情卡之后（与 probe 图卡同一路数）——
 		 * Shader 可选可改、参数与光栅化状态可就地编辑；改动即时热更（同步缓存里的
 		 * 共享材质 → 场景窗口立刻可见），「Apply」（没有改动时禁用）只负责序列化回文件 */
@@ -205,6 +209,10 @@ namespace Helios
 		std::filesystem::file_time_type m_AssetDetailWriteTime{};
 		std::vector<std::pair<std::string, std::string>> m_AssetDetailRows;
 		std::vector<ShaderIncludeRow> m_AssetShaderIncludes;
+		/* shader 源码声明的变体维度（关键字）与 @property 属性：与 include 同一个缓存键，
+		 * 只解析展开后的源码一遍，不编译也不建实例 */
+		std::vector<ShaderVariantSpec> m_AssetShaderKeywords;
+		std::vector<ReflectedMaterialParam> m_AssetShaderProperties;
 		/* 贴图设置草稿：换贴图时重新取，Apply 才落盘 */
 		std::string m_TextureSettingsPath;
 		TextureSettings m_TextureSettingsEdit;

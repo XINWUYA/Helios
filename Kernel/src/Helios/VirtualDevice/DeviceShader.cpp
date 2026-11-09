@@ -407,18 +407,23 @@ namespace Helios
 
 	void DeviceShader::ReflectFromGLSLSource(const std::string& source)
 	{
+		ReflectSource(source, m_Reflection);
+	}
+
+	void DeviceShader::ReflectSource(const std::string& source, ShaderReflectionData& reflection)
+	{
 		if (source.empty())
 			return;
 
 		/* 源码在手、下面要逐行扫了：空表可能只是"确实没有裸 uniform"，不是反射失败 */
-		m_Reflection.MaterialParamsScanned = true;
+		reflection.MaterialParamsScanned = true;
 
 		/* 材质参数表按名去重（顶点 / 片元各调用一次）：先到者定类型，
 		 * 后到的默认值只在前者没有时补上，材质标记取或、面板规范取有内容的那份。 */
-		const auto add_material_param = [this](ParamType type, const std::string& name, std::any default_value,
-			bool property, const MaterialPropertySpec& spec)
+		const auto add_material_param = [&reflection](ParamType type, const std::string& name,
+			std::any default_value, bool property, const MaterialPropertySpec& spec)
 		{
-			for (ReflectedMaterialParam& declared : m_Reflection.MaterialParams)
+			for (ReflectedMaterialParam& declared : reflection.MaterialParams)
 			{
 				if (declared.Name != name)
 					continue;
@@ -430,7 +435,7 @@ namespace Helios
 					declared.PropertySpec = spec;
 				return;
 			}
-			m_Reflection.MaterialParams.push_back({ type, name, std::move(default_value), property, spec });
+			reflection.MaterialParams.push_back({ type, name, std::move(default_value), property, spec });
 		};
 
 		/* 单遍扫出全部 uniform 声明，再按「贴图 → 标量 → 块」的原顺序落地，
@@ -447,7 +452,7 @@ namespace Helios
 
 			uint32_t binding = 0;
 			if (decl.HasLayout && ParseOnlyBinding(decl.Qualifiers, binding))
-				m_Reflection.SamplerBindings[decl.Name] = binding;
+				reflection.SamplerBindings[decl.Name] = binding;
 
 			add_material_param(ParamType::Texture, decl.Name, std::any{},
 				HasDirective(decl.Comment, kPropertyMarker), ParsePropertySpec(decl.Comment));
@@ -491,14 +496,14 @@ namespace Helios
 
 			uint32_t binding = 0;
 			if (ParseAnyBinding(decl.Qualifiers, binding))
-				m_Reflection.UniformBlockBindings.insert(binding);
+				reflection.UniformBlockBindings.insert(binding);
 		}
 
 		/* 变体维度：顶点 / 片元各调一次，同名只留一份 */
 		for (const ShaderVariantSpec& spec : ParseVariantSpecs(source))
 		{
-			if (m_Reflection.FindVariantSpec(spec.Name) == nullptr)
-				m_Reflection.VariantSpecs.push_back(spec);
+			if (reflection.FindVariantSpec(spec.Name) == nullptr)
+				reflection.VariantSpecs.push_back(spec);
 		}
 	}
 

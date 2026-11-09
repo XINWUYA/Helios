@@ -243,6 +243,10 @@ namespace Helios
 		static SharedPtr<DeviceShader> Create(const std::string& filepath, const ShaderVariantDefines& defines = {});
 		static SharedPtr<DeviceShader> Create(const std::string& name, const std::string& vertex_src, const std::string& pixel_src);
 
+		/* 只按源码解析参数与变体声明（不编译、不需要实例）：编辑器选中着色器资产时看它声明了
+		 * 什么，与运行时反射走同一份实现。source 传展开 include 后的整份源码。 */
+		static void ReflectSource(const std::string& source, ShaderReflectionData& reflection);
+
 	protected:
 		/* 后端各自的换入实现；外部只经 ApplyPrepared */
 		virtual bool ApplyPreparedImpl(DeviceShader& prepared) { (void)prepared; return false; }

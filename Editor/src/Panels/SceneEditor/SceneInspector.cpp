@@ -32,6 +32,7 @@
 #include "Helios/Renderer/PostProcess/Effects/Fog.h"
 #include "Helios/Renderer/PostProcess/Effects/Taa.h"
 #include "Helios/Renderer/ShaderCompiler.h"
+#include "Helios/VirtualDevice/DeviceShader.h"
 #include <tinyxml2.h>
 #include <algorithm>
 #include <cstring>
@@ -538,6 +539,78 @@ namespace Helios
 			return "File";
 		}
 
+		/* 变体维度（关键字）的取值来源：材质维度带上绑定的参数名，其余只有来源 */
+		std::string DescribeShaderKeyword(const ShaderVariantSpec& spec)
+		{
+			std::string text = GetEnumName(spec.Source);
+			if (spec.Source == ShaderVariantSource::Material && !spec.ParamName.empty())
+				text += " (" + spec.ParamName + ")";
+			return text;
+		}
+
+		/* 反射默认值文本：贴图与矩阵没有可显示的默认值，返回空串 */
+		std::string DescribeParamDefault(ParamType type, const std::any& value)
+		{
+			if (!value.has_value())
+				return {};
+
+			char text[96];
+			switch (type)
+			{
+			case ParamType::Texture:
+				return {};
+			case ParamType::Int:
+				return std::to_string(std::any_cast<int>(value));
+			case ParamType::Float:
+				std::snprintf(text, sizeof(text), "%g", std::any_cast<float>(value));
+				return text;
+			case ParamType::Vec2:
+				{
+					const glm::vec2 number = std::any_cast<glm::vec2>(value);
+					std::snprintf(text, sizeof(text), "%g, %g", number.x, number.y);
+				}
+				return text;
+			case ParamType::Vec3:
+				{
+					const glm::vec3 number = std::any_cast<glm::vec3>(value);
+					std::snprintf(text, sizeof(text), "%g, %g, %g", number.x, number.y, number.z);
+				}
+				return text;
+			case ParamType::Vec4:
+				{
+					const glm::vec4 number = std::any_cast<glm::vec4>(value);
+					std::snprintf(text, sizeof(text), "%g, %g, %g, %g",
+						number.x, number.y, number.z, number.w);
+				}
+				return text;
+			case ParamType::Mat4:
+				return {};
+			}
+			return {};
+		}
+
+		/* 一条 @property 的说明：显示名（与参数名不同才带）+ 类型 + 源码默认值 + @range */
+		std::string DescribeShaderProperty(const ReflectedMaterialParam& param)
+		{
+			std::string text;
+			if (!param.PropertySpec.Label.empty() && param.PropertySpec.Label != param.Name)
+				text = param.PropertySpec.Label + ", ";
+			text += GetEnumName(param.Type);
+
+			const std::string default_text = DescribeParamDefault(param.Type, param.Default);
+			if (!default_text.empty())
+				text += " = " + default_text;
+
+			if (param.PropertySpec.HasRange)
+			{
+				char range[48];
+				std::snprintf(range, sizeof(range), " [%g, %g]",
+					param.PropertySpec.Min, param.PropertySpec.Max);
+				text += range;
+			}
+			return text;
+		}
+
 		/* 烘焙缓存里的一张图 -> 显示名（与探针卡的详情行同口径） */
 		const char* BakeImageKindName(ReflectionProbeBakeCache::ImageKind kind)
 		{
@@ -864,6 +937,32 @@ namespace Helios
 			DrawOpenInModelEditorButton(PathToUtf8(absolute_path));
 		}
 
+		/* shader 声明的变体关键字与材质属性（源码里的 @variant / @property）：选中就能看到
+		 * 这个着色器会出哪些变体、材质卡会列哪些参数 */
+		if (!entry.IsFolder && entry.Kind == AssetFileKind::Shader)
+		{
+			if (!m_AssetShaderKeywords.empty())
+			{
+				DrawCardSectionDivider();
+				ImGuiExt::DrawCommonTextUI("Keywords", std::to_string(m_AssetShaderKeywords.size()));
+
+				/* 关键字名字长短不一：标签列按最长的算一次，各行来源不错位 */
+				float label_width = EditorTheme::Token::PropertyLabelWidth;
+				for (const ShaderVariantSpec& keyword : m_AssetShaderKeywords)
+					label_width = ImMax(label_width, ImGui::CalcTextSize(keyword.Name.c_str()).x
+						+ ImGui::GetStyle().ItemInnerSpacing.x);
+				for (const ShaderVariantSpec& keyword : m_AssetShaderKeywords)
+					ImGuiExt::DrawCommonTextUI(keyword.Name, DescribeShaderKeyword(keyword), label_width);
+			}
+
+			if (!m_AssetShaderProperties.empty())
+			{
+				DrawCardSectionDivider();
+				ImGuiExt::DrawCommonTextUI("Properties", std::to_string(m_AssetShaderProperties.size()));
+				DrawShaderPropertyList();
+			}
+		}
+
 		/* shader 的 include 依赖：卡尾列出被引用的文件（项目里的那条点了就跳到资源浏览器） */
 		if (!entry.IsFolder && entry.Kind == AssetFileKind::Shader && !m_AssetShaderIncludes.empty())
 		{
@@ -984,6 +1083,51 @@ namespace Helios
 			m_AssetRevealFunc(include.Relative);
 	}
 
+	void SceneInspector::DrawShaderPropertyList()
+	{
+		PROFILE_CPU_FUNCTION();
+
+		/* 排序与分组跟材质面板同一口径（PropertyLayoutOf 按参数名排，组按组内首个参数名的
+		 * 字典序出现）：卡片里看到的顺序就是材质卡上的顺序 */
+		std::vector<const ReflectedMaterialParam*> params;
+		params.reserve(m_AssetShaderProperties.size());
+		for (const ReflectedMaterialParam& param : m_AssetShaderProperties)
+			params.push_back(&param);
+		std::sort(params.begin(), params.end(),
+			[](const ReflectedMaterialParam* lhs, const ReflectedMaterialParam* rhs)
+			{
+				return lhs->Name < rhs->Name;
+			});
+
+		std::vector<std::string> groups{ "" };
+		for (const ReflectedMaterialParam* param : params)
+		{
+			if (std::find(groups.begin(), groups.end(), param->PropertySpec.Group) == groups.end())
+				groups.push_back(param->PropertySpec.Group);
+		}
+
+		/* 参数名一行一条、长短不一：标签列按最长的那个一次算好，各行值不错位 */
+		float label_width = EditorTheme::Token::PropertyLabelWidth;
+		for (const ReflectedMaterialParam* param : params)
+			label_width = ImMax(label_width, ImGui::CalcTextSize(param->Name.c_str()).x
+				+ ImGui::GetStyle().ItemInnerSpacing.x);
+
+		for (const std::string& group : groups)
+		{
+			if (!group.empty() && !MaterialParamUI::BeginPropertyGroup(group.c_str(), group.c_str()))
+				continue;
+
+			ImGui::PushID(group.c_str());
+			for (const ReflectedMaterialParam* param : params)
+			{
+				if (param->PropertySpec.Group != group)
+					continue;
+				ImGuiExt::DrawCommonTextUI(param->Name, DescribeShaderProperty(*param), label_width);
+			}
+			ImGui::PopID();
+		}
+	}
+
 	void SceneInspector::DrawMultiAssetCard()
 	{
 		PROFILE_CPU_FUNCTION();
@@ -1042,6 +1186,8 @@ namespace Helios
 			m_AssetDetailPath.clear();
 			m_AssetDetailRows.clear();
 			m_AssetShaderIncludes.clear();
+			m_AssetShaderKeywords.clear();
+			m_AssetShaderProperties.clear();
 			m_AssetProbeCards.clear();
 			m_AssetTerrain = TerrainAssetPreview{};
 			m_AssetMaterial = nullptr;
@@ -1056,6 +1202,8 @@ namespace Helios
 		m_AssetDetailWriteTime = write_time;
 		m_AssetDetailRows.clear();
 		m_AssetShaderIncludes.clear();
+		m_AssetShaderKeywords.clear();
+		m_AssetShaderProperties.clear();
 		m_AssetProbeCards.clear();
 		m_AssetTerrain = TerrainAssetPreview{};
 		m_AssetMaterial = nullptr;
@@ -1272,9 +1420,10 @@ namespace Helios
 		}
 		else if (entry.Kind == AssetFileKind::Shader && IsGlslSource(absolute_path))
 		{
-			/* shader 依赖：只读源码展开一遍 include（不编译），主文件之外的都是被引用的文件 */
+			/* 展开 include 后的整份源码只读一遍：依赖、变体关键字与属性声明都从它来
+			 * （不编译也不建实例，选中即看得到） */
 			std::vector<std::string> dependencies;
-			ShaderCompiler::ReadFile(PathToUtf8(absolute_path), &dependencies);
+			const std::string source = ShaderCompiler::ReadFile(PathToUtf8(absolute_path), &dependencies);
 
 			for (size_t index = 1; index < dependencies.size(); ++index)
 			{
@@ -1283,6 +1432,17 @@ namespace Helios
 				const std::filesystem::path relative_path = PathFromUtf8(relative);
 				m_AssetShaderIncludes.push_back({ relative, !relative_path.is_absolute()
 					&& std::filesystem::exists(g_ProjectPath / relative_path) });
+			}
+
+			/* 解析口径与运行时反射同一份实现：只留 @property 的那几条（引擎逐绘制给的
+			 * 参数不进材质面板，这里也不列） */
+			ShaderReflectionData reflection;
+			DeviceShader::ReflectSource(source, reflection);
+			m_AssetShaderKeywords = reflection.VariantSpecs;
+			for (const ReflectedMaterialParam& param : reflection.MaterialParams)
+			{
+				if (param.Property)
+					m_AssetShaderProperties.push_back(param);
 			}
 		}
 	}
