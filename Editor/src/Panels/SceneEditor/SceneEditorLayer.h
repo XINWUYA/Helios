@@ -3,6 +3,7 @@
 #include <map>
 #include <unordered_map>
 #include "FrameGraphPanel.h"
+#include "GameViewPanel.h"
 #include "RenderStatsPanel.h"
 #include "ShaderVariantPanel.h"
 #include "PlaySession.h"
@@ -187,11 +188,23 @@ namespace Helios
 		void ShowSceneViewportUI();
 		/* 显示游戏画面（运行世界主相机的渲染结果） */
 		void ShowGameViewportUI();
-		/* 游戏画面工具条：时间缩放与固定比例 */
-		void DrawGameToolbar(Entity& primary_camera);
-		/* 把运行世界选中实体的值搬回编辑世界（一条命令进编辑栈） */
-		void ApplyRuntimeSelectionToEditScene();
-		/* 运行态标识：视口描一圈状态色（Game 与 Scene 两个视口共用） */
+		/* 全屏覆盖层：画面铺满编辑器窗口，Esc 退出 */
+		void ShowGameFullscreenUI();
+		/* 一帧的 Game 画面数据：面板状态、纹理与它对应的相机视图 */
+		struct GameViewFrame
+		{
+			GameViewPanel::State State;
+			ImTextureID Image{ nullptr };
+			RenderView* View{ nullptr };
+			Camera* Camera{ nullptr };
+		};
+		/* 填一份 Game 画面数据：没有画面时 State.Notice 非空 */
+		GameViewFrame BuildGameView();
+		/* 面板改的值落回去：时间缩放 / 比例 / 全屏，并把画面区域交给相机 */
+		void CommitGameViewState(const GameViewPanel::Result& result, GameViewFrame& frame);
+		/* 把面板算出的画面区域落给相机（视口区域 + 投影比例） */
+		void ApplyGameViewport(const GameViewPanel::Result& result, const GameViewFrame& frame);
+		/* 运行态标识：视口描一圈状态色（Scene 视口；Game 面板的画框在 GameViewPanel 里） */
 		void DrawPlayBorder(const ImVec2& min, const ImVec2& max) const;
 		/* 脚本执行顺序总表：全场景挂载点按 Order 排，行内可改 */
 		void DrawScriptOrderWindow();
@@ -319,5 +332,12 @@ namespace Helios
 		RenderStatsPanel m_RenderStatsPanel;
 		/* 着色器变体清单（源码声明的维度 + 已加载变体） */
 		ShaderVariantPanel m_ShaderVariantPanel;
+		/* Game 页签的版式（工具行 / 画面框 / 空态） */
+		GameViewPanel m_GameViewPanel;
+		/* Game 视图设置：比例只是窗口设置，不进场景也不写相机 */
+		bool m_GameAspectFixed{ false };
+		float m_GameAspectRatio{ 16.0f / 9.0f };
+		/* 全屏覆盖层是否开着 */
+		bool m_GameFullscreen{ false };
 	};
 }

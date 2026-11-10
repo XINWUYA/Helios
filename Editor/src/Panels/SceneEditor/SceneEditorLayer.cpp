@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "SceneEditorLayer.h"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -14,7 +15,6 @@
 #include "UI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
 #include "Command/AssetFileOps.h"
-#include "Command/ApplyRuntimeStateCommand.h"
 #include "Command/TransformCommand.h"
 #include "Command/TerrainSculptCommand.h"
 #include "Panels/SceneEditor/TerrainSculpt.h"
@@ -264,6 +264,9 @@ namespace Helios
 		/* 主窗口，需要最后再画，以确保能够得到正确的窗口宽高 */
 		ShowSceneViewportUI();
 
+		/* 全屏覆盖层最后画：要盖住上面所有面板 */
+		ShowGameFullscreenUI();
+
 		/* 进 / 出 Play 切页签：面板都提交过之后再切才有效 */
 		if (m_FocusGameRequested)
 		{
@@ -418,6 +421,13 @@ namespace Helios
 	bool SceneEditorLayer::OnKeyPressed(KeyPressedEvent* event)
 	{
 		PROFILE_CPU_FUNCTION();
+
+		/* 全屏覆盖层优先：Esc 不论键盘被谁拿走都先退全屏 */
+		if (m_GameFullscreen && event->GetKeyCode() == Key::Escape)
+		{
+			m_GameFullscreen = false;
+			return true;
+		}
 
 		/* ImGui 正收键盘（输入框激活等）时快捷键让位——否则改名框里按 Ctrl+Z 会连场景
 		 * 一起撤销；消费掉，兜底层（主编辑器）也不会再响应同一批快捷键 */
@@ -704,6 +714,7 @@ namespace Helios
 
 	/* 文件格式（<项目>/.helios/view.cfg）：
 	 *   LastScene=上次打开的场景
+	 *   GameAspectFixed=Game 视图是否固定比例 / GameAspect=比例
 	 *   [场景路径]
 	 *   Pivot=x y z / Angles=yaw pitch / Distance=d */
 	void SceneEditorLayer::LoadViewStates()
@@ -748,6 +759,21 @@ namespace Helios
 				continue;
 			}
 
+			/* Game 视图比例：窗口设置，跟场景无关 */
+			if (key == "GameAspect")
+			{
+				const float value = static_cast<float>(std::atof(raw.c_str()));
+				if (value > 0.0f)
+					m_GameAspectRatio = value;
+				continue;
+			}
+
+			if (key == "GameAspectFixed")
+			{
+				m_GameAspectFixed = (raw == "1");
+				continue;
+			}
+
 			if (scene.empty())
 				continue;
 
@@ -782,6 +808,10 @@ namespace Helios
 		/* 空着就不写这行：下次启动直接落到项目的启动场景 */
 		if (!m_LastScenePath.empty())
 			stream << "LastScene=" << m_LastScenePath << "\n";
+
+		/* Game 视图比例：窗口设置，不进场景文件 */
+		stream << "GameAspectFixed=" << (m_GameAspectFixed ? 1 : 0) << "\n";
+		stream << "GameAspect=" << m_GameAspectRatio << "\n";
 
 		for (const auto& [scene, state] : m_ViewStates)
 		{
@@ -838,7 +868,10 @@ namespace Helios
 		const SceneViewState live{ m_pEditorCamera->GetFocalPoint(), m_pEditorCamera->GetYaw(),
 			m_pEditorCamera->GetPitch(), m_pEditorCamera->GetDistance() };
 		const auto found = m_ViewStates.find(m_ActiveSceneKey);
-		if (found != m_ViewStates.end() && found->second == live)
+
+		/* Game 视图比例也在同一份文件里：它变了（m_ViewStatesDirty）同样要落盘 */
+		const bool view_moved = (found == m_ViewStates.end() || !(found->second == live));
+		if (!view_moved && !m_ViewStatesDirty)
 		{
 			m_ViewIdleSeconds = 0.0f;
 			return;
@@ -849,7 +882,8 @@ namespace Helios
 			return;
 
 		m_ViewIdleSeconds = 0.0f;
-		CaptureViewState();
+		if (view_moved)
+			CaptureViewState();
 		StoreViewStates();
 	}
 
@@ -1400,7 +1434,7 @@ namespace Helios
 		ImGui::PopStyleVar();
 	}
 
-	/* 运行态标识：不染整个界面（面板大量自绘，改全局样式会污染主题），只给两个视口描边 */
+	/* 运行态标识：不染整个界面（面板大量自绘，改全局样式会污染主题），只给场景视口描边 */
 	void SceneEditorLayer::DrawPlayBorder(const ImVec2& min, const ImVec2& max) const
 	{
 		if (!m_PlaySession.IsPlaying())
@@ -1410,74 +1444,104 @@ namespace Helios
 			0.0f, ImDrawFlags_None, Scaled(2.0f));
 	}
 
-	/* 游戏画面工具条：时间缩放与固定比例。只作用于运行世界，编辑世界不受影响 */
-	void SceneEditorLayer::DrawGameToolbar(Entity& primary_camera)
+	/* 填一份 Game 画面数据：运行态才有画面，没有主相机时只给空态文案 */
+	SceneEditorLayer::GameViewFrame SceneEditorLayer::BuildGameView()
 	{
-		ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, Scaled(2.0f)));
+		GameViewFrame frame;
+		GameViewPanel::State& state = frame.State;
 
-		float time_scale = m_PlaySession.GetTimeScale();
-		ImGui::SetNextItemWidth(Scaled(120.0f));
-		if (ImGui::DragFloat("Speed", &time_scale, 0.01f, 0.0f, 4.0f, "%.2fx"))
-			m_PlaySession.SetTimeScale(time_scale);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Simulation speed. Rendering stays at full rate.");
+		state.Playing = m_PlaySession.IsPlaying();
+		state.Paused = m_PlaySession.IsPaused();
+		state.Fullscreen = m_GameFullscreen;
+		state.TimeScale = m_PlaySession.GetTimeScale();
+		/* 比例只是窗口设置：不进场景，也不写相机 */
+		state.FixedAspect = m_GameAspectFixed;
+		state.AspectRatio = m_GameAspectRatio;
 
-		ImGui::SameLine(0.0f, Scaled(12.0f));
-		bool fixed_aspect = primary_camera.GetComponent<CameraComponent>().m_IsFixedAspectRatio;
-		if (ImGui::Checkbox("16:9", &fixed_aspect))
-			primary_camera.GetComponent<CameraComponent>().m_IsFixedAspectRatio = fixed_aspect;
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Letterbox the game view to 16:9");
-
-		if (m_PlaySession.IsPaused())
+		Entity primary_camera;
+		if (!state.Playing)
 		{
-			ImGui::SameLine(0.0f, Scaled(12.0f));
-			ImGui::TextColored(EditorTheme::Token::Playing, "Paused");
+			state.Notice = "Not running";
+			state.NoticeHint = "Press Play to see the game view.";
+			state.NoticeIcon = Icons::Id::Play;
+		}
+		else if (m_pMainScene == nullptr)
+		{
+			state.Notice = "No scene";
+			state.NoticeHint = "Open a scene to run it.";
+			state.NoticeIcon = Icons::Id::Scene;
+		}
+		else
+		{
+			primary_camera = m_pMainScene->GetPrimaryCameraEntity();
+			CameraComponent* camera = primary_camera ? &primary_camera.GetComponent<CameraComponent>() : nullptr;
+			if (camera == nullptr)
+			{
+				state.Notice = "No primary camera";
+				state.NoticeHint = "Mark a camera as primary to drive the game view.";
+				state.NoticeIcon = Icons::Id::Camera;
+			}
+			else if (camera->m_Camera == nullptr)
+			{
+				state.Notice = "Camera unavailable";
+				state.NoticeHint = "The primary camera has no camera object.";
+				state.NoticeIcon = Icons::Id::Camera;
+			}
+			else
+			{
+				frame.Camera = camera->m_Camera.get();
+				frame.View = frame.Camera->GetRenderView();
+				if (auto output_rt = frame.View->GetRenderTarget())
+					frame.Image = (ImTextureID)output_rt.get();
+			}
 		}
 
-		/* 运行中调好的值带回编辑世界：只作用于选中实体，一条命令可撤销 */
-		ImGui::SameLine(0.0f, Scaled(12.0f));
-		const bool has_selection = static_cast<bool>(m_SceneHierarchy.GetSelectedEntity());
-		ImGui::BeginDisabled(!has_selection);
-		if (ImGui::Button("Apply to Editor Scene"))
-			ApplyRuntimeSelectionToEditScene();
-		ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip(has_selection
-				? "Copy this entity's values back to the editing scene (undoable)"
-				: "Select an entity in the running world first");
-
-		ImGui::PopStyleVar();
-		ImGui::Spacing();
+		return frame;
 	}
 
-	/* 运行世界的改动退出就丢，这里给一条主动带回去的路：按句柄 + 名字对上编辑世界的同一个实体，
-	 * 逐字段写回去，一条命令进编辑栈。地形不参与（高度不在组件里，搬参数会丢未保存的雕刻） */
-	void SceneEditorLayer::ApplyRuntimeSelectionToEditScene()
+	/* 画面区域归 Game 面板：视口区域与投影比例都按它，画面才不会被拉扁 */
+	void SceneEditorLayer::ApplyGameViewport(const GameViewPanel::Result& result, const GameViewFrame& frame)
 	{
-		if (!m_PlaySession.IsPlaying())
+		if (frame.View == nullptr || !result.Drawable)
 			return;
 
-		const Entity runtime_entity = m_SceneHierarchy.GetSelectedEntity();
-		const SharedPtr<Scene>& edit_scene = m_PlaySession.GetEditScene();
+		if (result.Region.Width == 0 || result.Region.Height == 0)
+			return;
 
-		Entity edit_entity;
-		if (edit_scene != nullptr && runtime_entity)
-			edit_entity = Entity{ static_cast<entt::entity>(runtime_entity), edit_scene };
+		m_GameViewportRegion = result.Region;
+		m_GameViewportDrawable = true;
 
-		std::string reason;
-		UniquePtr<ApplyRuntimeStateCommand> command =
-			ApplyRuntimeStateCommand::Create(runtime_entity, edit_entity, reason);
-		if (command == nullptr)
+		const auto rt_size = ClampRenderSize(static_cast<float>(result.Region.Width),
+			static_cast<float>(result.Region.Height), ImGuiToPhysicalScale());
+		frame.View->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
+
+		if (frame.Camera == nullptr)
+			return;
+
+		const float aspect = static_cast<float>(result.Region.Width) / static_cast<float>(result.Region.Height);
+		if (std::abs(frame.Camera->GetAspectRatio() - aspect) > 1e-4f)
+			frame.Camera->SetAspectRatio(aspect);
+	}
+
+	/* 面板改的值落回去：时间缩放归 PlaySession，比例归窗口设置，全屏按钮翻转覆盖层 */
+	void SceneEditorLayer::CommitGameViewState(const GameViewPanel::Result& result, GameViewFrame& frame)
+	{
+		if (frame.State.TimeScale != m_PlaySession.GetTimeScale())
+			m_PlaySession.SetTimeScale(frame.State.TimeScale);
+
+		if (frame.State.FixedAspect != m_GameAspectFixed || frame.State.AspectRatio != m_GameAspectRatio)
 		{
-			m_PlayHintText = reason.empty() ? "Nothing to apply." : reason;
-			m_PlayHintSeconds = 3.0f;
-			return;
+			m_GameAspectFixed = frame.State.FixedAspect;
+			m_GameAspectRatio = frame.State.AspectRatio;
+			m_ViewStatesDirty = true;
 		}
 
-		m_PlayHintText = "Applied " + std::to_string(command->GetFieldCount()) + " values to the editing scene.";
-		m_PlayHintSeconds = 3.0f;
-		m_CommandStack.Execute(std::move(command));
+		if (result.ToggleFullscreen)
+			m_GameFullscreen = !m_GameFullscreen;
+
+		m_GameViewportHovered = result.Hovered;
+		m_GameViewportFocused = result.Focused;
+		ApplyGameViewport(result, frame);
 	}
 
 	/* 游戏画面：运行世界主相机的渲染结果。编辑态不画内容 —— 场景相机在编辑态本来就不渲染，
@@ -1495,92 +1559,63 @@ namespace Helios
 			return;
 
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		const bool drawable = ImGui::Begin(Panel::kGame, &Panel::VisibleFlag(Panel::kGame));
+		const bool drawable = ImGui::Begin(Panel::kGame, &Panel::VisibleFlag(Panel::kGame),
+			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 		if (drawable)
 		{
-			m_GameViewportHovered = ImGui::IsWindowHovered();
-
-			/* 弹层（菜单 / 下拉 / 模态）打开时键盘归它，脚本不该继续收键 */
-			const bool popup_open = ImGui::IsPopupOpen(nullptr,
-				ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-			m_GameViewportFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !popup_open;
-
-			const char* notice = nullptr;
-			Entity primary_camera;
-			if (!m_PlaySession.IsPlaying())
-				notice = "Enter Play to see the game view.";
-			else if (m_pMainScene == nullptr)
-				notice = "No scene.";
-			else
+			/* 全屏时这一层被盖住：不画内容，画面与输入都归全屏窗口 */
+			if (!m_GameFullscreen)
 			{
-				primary_camera = m_pMainScene->GetPrimaryCameraEntity();
-				if (!primary_camera)
-					notice = "No primary camera in this scene.";
-				else if (primary_camera.GetComponent<CameraComponent>().m_Camera == nullptr)
-					notice = "The primary camera has no camera object.";
-			}
-
-			if (notice != nullptr)
-			{
-				const ImVec2 available = ImGui::GetContentRegionAvail();
-				const ImVec2 text_size = ImGui::CalcTextSize(notice);
-				const ImVec2 cursor = ImGui::GetCursorPos();
-				ImGui::SetCursorPos(ImVec2(cursor.x + (available.x - text_size.x) * 0.5f,
-					cursor.y + (available.y - text_size.y) * 0.5f));
-				ImGui::TextDisabled("%s", notice);
-			}
-			else
-			{
-				DrawGameToolbar(primary_camera);
-
-				/* 画面区域：默认铺满，勾了固定比例就按 16:9 居中、四周留黑。
-				 * 视口区域、鼠标换算、描边都以这块为准，不按整个面板 */
-				const ImVec2 content_min = ImGui::GetCursorScreenPos();
-				const ImVec2 content_size = ImGui::GetContentRegionAvail();
-				ImVec2 box_min = content_min;
-				ImVec2 box_size = content_size;
-				constexpr float kAspect = 16.0f / 9.0f;
-				const bool fixed_aspect = primary_camera.GetComponent<CameraComponent>().m_IsFixedAspectRatio;
-				if (fixed_aspect && box_size.x > 0.0f && box_size.y > 0.0f)
-				{
-					if (box_size.x / box_size.y > kAspect)
-					{
-						box_size.x = box_size.y * kAspect;
-						box_min.x += (content_size.x - box_size.x) * 0.5f;
-					}
-					else
-					{
-						box_size.y = box_size.x / kAspect;
-						box_min.y += (content_size.y - box_size.y) * 0.5f;
-					}
-				}
-
-				m_GameViewportRegion.MinX = static_cast<int32_t>(box_min.x);
-				m_GameViewportRegion.MinY = static_cast<int32_t>(box_min.y);
-				m_GameViewportRegion.Width = static_cast<uint32_t>(std::max(0.0f, box_size.x));
-				m_GameViewportRegion.Height = static_cast<uint32_t>(std::max(0.0f, box_size.y));
-				m_GameViewportDrawable = true;
-
-				RenderView* render_view = primary_camera.GetComponent<CameraComponent>().m_Camera->GetRenderView();
-
-				/* 视口区域归这个面板：按画面尺寸写主相机的区域（运行世界的其余相机不渲染） */
-				if (m_GameViewportRegion.Width > 0 && m_GameViewportRegion.Height > 0)
-				{
-					const auto rt_size = ClampRenderSize(box_size.x, box_size.y, ImGuiToPhysicalScale());
-					render_view->SetViewportRegion({ 0, 0, rt_size.x, rt_size.y });
-				}
-
-				ImGui::SetCursorScreenPos(box_min);
-				if (auto output_rt = render_view->GetRenderTarget())
-				{
-					ImGui::Image((ImTextureID)output_rt.get(), box_size, ImVec2{ 0, 1 }, ImVec2{ 1, 0 });
-					DrawPlayBorder(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-				}
+				GameViewFrame frame = BuildGameView();
+				const GameViewPanel::Result result = m_GameViewPanel.Draw(frame.State, frame.Image);
+				CommitGameViewState(result, frame);
 			}
 		}
 
 		ImGui::End();
 		ImGui::PopStyleVar();
+	}
+
+	/* 全屏覆盖层：铺满主视口，Esc 或右上角按钮退出。停靠布局不动，退出即还原 */
+	void SceneEditorLayer::ShowGameFullscreenUI()
+	{
+		PROFILE_CPU_FUNCTION();
+
+		if (!m_GameFullscreen)
+			return;
+
+		/* 面板被关掉 / 已经 Stop：全屏没有可看的东西，直接退出 */
+		if (!Panel::IsVisible(Panel::kGame) || !m_PlaySession.IsPlaying())
+		{
+			m_GameFullscreen = false;
+			return;
+		}
+
+		const ImGuiViewport* viewport = ImGui::GetMainViewport();
+		ImGui::SetNextWindowPos(viewport->WorkPos);
+		ImGui::SetNextWindowSize(viewport->WorkSize);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+		ImGui::PushStyleColor(ImGuiCol_WindowBg, EditorTheme::Token::Neutral0);
+
+		const bool drawable = ImGui::Begin("##GameFullscreen", nullptr,
+			ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
+			| ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
+			| ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings);
+		if (drawable)
+		{
+			/* 进来就接管键盘：画面一出来脚本就该收到按键，不用先点一下 */
+			if (ImGui::IsWindowAppearing())
+				ImGui::SetWindowFocus();
+
+			GameViewFrame frame = BuildGameView();
+			const GameViewPanel::Result result = m_GameViewPanel.Draw(frame.State, frame.Image);
+			CommitGameViewState(result, frame);
+		}
+
+		ImGui::End();
+		ImGui::PopStyleColor();
+		ImGui::PopStyleVar(2);
 	}
 
 	void SceneEditorLayer::ShowStatisticInfoUI()
