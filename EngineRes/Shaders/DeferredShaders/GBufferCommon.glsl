@@ -2,6 +2,7 @@
 #define GBUFFER_COMMON_GLSL
 
 #include "ShadingModel.glsl"
+#include "../Builtin/Uniforms.glsl"
 
 /* 通道分组按访问模式排：基色与 AO 一起读、法线与接受阴影同属几何、
  * 三个 BRDF 标量挤一张。改布局要同步 GBuffer.glsl 与 Terrain.glsl 的写出。 */
@@ -18,7 +19,7 @@ struct SGBufferData
 	vec4 CustomData;      /* Texture3，语义按 ShadingModel 解释，取值处各自说明 */
 	vec3 Ambient;         /* Texture4.rgb */
 	float Anisotropy;     /* Texture4.a */
-	vec3 WorldPosition;   /* Texture5.rgb */
+	vec3 WorldPosition;   /* 由 u_GBufferDepth 反投影重建，不占 G-Buffer 通道 */
 };
 
 uniform sampler2D u_GBufferTexture0;
@@ -26,7 +27,18 @@ uniform sampler2D u_GBufferTexture1;
 uniform sampler2D u_GBufferTexture2;
 uniform sampler2D u_GBufferTexture3;
 uniform sampler2D u_GBufferTexture4;
-uniform sampler2D u_GBufferTexture5;
+/* 深度附件：世界位置改成从它反投影，G-Buffer 不再存位置 */
+uniform sampler2D u_GBufferDepth;
+
+/* 深度反投影：uv 与深度还原世界坐标。深度是窗口空间的 [0,1]，换回 NDC 要乘 2 减 1 */
+vec3 ReconstructWorldPosition(vec2 uv)
+{
+	const float depth = texture(u_GBufferDepth, uv).r;
+	/* 深度已经是 D3D 风格的 [0,1]，直接当 NDC z 用；uv 的 (0,0) 与 NDC 左下角一致 */
+	const vec4 ndc = vec4(uv * 2.0f - 1.0f, depth, 1.0f);
+	const vec4 world = u_InvViewProjectionMat * ndc;
+	return world.xyz / world.w;
+}
 
 void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 {
@@ -35,7 +47,6 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 	vec4 color2 = texture(u_GBufferTexture2, uv);
 	vec4 color3 = texture(u_GBufferTexture3, uv);
 	vec4 color4 = texture(u_GBufferTexture4, uv);
-	vec4 color5 = texture(u_GBufferTexture5, uv);
 
 	gbuffer.Albedo = color0.rgb;
 	gbuffer.AO = color0.a;
@@ -50,7 +61,8 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 	gbuffer.CustomData = color3;
 	gbuffer.Ambient = color4.rgb;
 	gbuffer.Anisotropy = color4.a;
-	gbuffer.WorldPosition = color5.rgb;
+	/* 反投影版：位置还在验证，阴影/环境光可能整体偏移；对不上就改回 color5.rgb */
+	gbuffer.WorldPosition = ReconstructWorldPosition(uv);
 }
 
 #endif // GBUFFER_COMMON_GLSL

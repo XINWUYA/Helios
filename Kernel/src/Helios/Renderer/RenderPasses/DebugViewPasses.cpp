@@ -341,7 +341,7 @@ namespace Helios
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture2;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture3;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture4;
-					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture5;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferDepth;
 				};
 
 				auto accumulate_pass = frame_graph->AddPass<AccumulatePassData>("DebugShadowAccumulatePass",
@@ -362,7 +362,7 @@ namespace Helios
 						data.GBufferTexture2 = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferTexture2");
 						data.GBufferTexture3 = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferTexture3");
 						data.GBufferTexture4 = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferTexture4");
-						data.GBufferTexture5 = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferTexture5");
+						data.GBufferDepth = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferDepth");
 
 						builder.BindOutputResource(data.Accumulate, FrameGraphTexture::Usage::ColorAttachment);
 						builder.BindInputResource(data.ShadowMap, FrameGraphTexture::Usage::Sampleable);
@@ -371,7 +371,7 @@ namespace Helios
 						builder.BindInputResource(data.GBufferTexture2, FrameGraphTexture::Usage::Sampleable);
 						builder.BindInputResource(data.GBufferTexture3, FrameGraphTexture::Usage::Sampleable);
 						builder.BindInputResource(data.GBufferTexture4, FrameGraphTexture::Usage::Sampleable);
-						builder.BindInputResource(data.GBufferTexture5, FrameGraphTexture::Usage::Sampleable);
+						builder.BindInputResource(data.GBufferDepth, FrameGraphTexture::Usage::Sampleable);
 
 						FrameGraphPassInfo::Descriptor pass_desc;
 						pass_desc.Attachments.ColorAttachments(0) = data.Accumulate;
@@ -401,7 +401,7 @@ namespace Helios
 							material->SetTexture("u_GBufferTexture2", resources.Get(data.GBufferTexture2).Texture);
 							material->SetTexture("u_GBufferTexture3", resources.Get(data.GBufferTexture3).Texture);
 							material->SetTexture("u_GBufferTexture4", resources.Get(data.GBufferTexture4).Texture);
-							material->SetTexture("u_GBufferTexture5", resources.Get(data.GBufferTexture5).Texture);
+							material->SetTexture("u_GBufferDepth", resources.Get(data.GBufferDepth).Texture);
 
 							/* 每盏灯（有没有阴影数据都算）画一笔，光源参数逐笔重填 */
 							for (const auto& light : render_view.GetValidLights())
@@ -510,7 +510,7 @@ namespace Helios
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture2;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture3;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture4;
-					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture5;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferDepth;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> OverdrawCount;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowAccumulate;
 				};
@@ -529,13 +529,13 @@ namespace Helios
 							data.GBufferTexture2 = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferTexture2");
 							data.GBufferTexture3 = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferTexture3");
 							data.GBufferTexture4 = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferTexture4");
-							data.GBufferTexture5 = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferTexture5");
+							data.GBufferDepth = blackboard.GetResourceHandle<FrameGraphTexture>("GBufferDepth");
 							builder.BindInputResource(data.GBufferTexture0, FrameGraphTexture::Usage::Sampleable);
 							builder.BindInputResource(data.GBufferTexture1, FrameGraphTexture::Usage::Sampleable);
 							builder.BindInputResource(data.GBufferTexture2, FrameGraphTexture::Usage::Sampleable);
 							builder.BindInputResource(data.GBufferTexture3, FrameGraphTexture::Usage::Sampleable);
 							builder.BindInputResource(data.GBufferTexture4, FrameGraphTexture::Usage::Sampleable);
-							builder.BindInputResource(data.GBufferTexture5, FrameGraphTexture::Usage::Sampleable);
+							builder.BindInputResource(data.GBufferDepth, FrameGraphTexture::Usage::Sampleable);
 						}
 
 						/* Overdraw 档读计数纹理、Shadow 档读累加纹理（不绑定会被资源生命周期提前释放） */
@@ -569,11 +569,11 @@ namespace Helios
 							material->SetParameters(ParamType::Int, "u_DebugMode", static_cast<int>(mode));
 							material->SetParameters(ParamType::Int, "u_PreserveBackground", preserve_background ? 1 : 0);
 							material->SetTexture("u_GBufferTexture0", data.GBufferTexture0 ? resources.Get(data.GBufferTexture0).Texture : black);
+							material->SetTexture("u_GBufferDepth", data.GBufferDepth ? resources.Get(data.GBufferDepth).Texture : black);
 							material->SetTexture("u_GBufferTexture1", data.GBufferTexture1 ? resources.Get(data.GBufferTexture1).Texture : black);
 							material->SetTexture("u_GBufferTexture2", data.GBufferTexture2 ? resources.Get(data.GBufferTexture2).Texture : black);
 							material->SetTexture("u_GBufferTexture3", data.GBufferTexture3 ? resources.Get(data.GBufferTexture3).Texture : black);
 							material->SetTexture("u_GBufferTexture4", data.GBufferTexture4 ? resources.Get(data.GBufferTexture4).Texture : black);
-							material->SetTexture("u_GBufferTexture5", data.GBufferTexture5 ? resources.Get(data.GBufferTexture5).Texture : black);
 							material->SetTexture("u_OverdrawTexture", data.OverdrawCount ? resources.Get(data.OverdrawCount).Texture : black);
 							material->SetTexture("u_ShadowAccumTexture", data.ShadowAccumulate ? resources.Get(data.ShadowAccumulate).Texture : black);
 

@@ -46,6 +46,8 @@ namespace Helios
 		glm::mat4 ViewMatrix{ 1 };
 		glm::mat4 ProjectionMatrix{ 1 };
 		glm::mat4 ViewProjectionMatrix{ 1 };
+		/* 深度反投影用：从 NDC 与深度还原世界坐标，省掉 G-Buffer 的世界位置附件 */
+		glm::mat4 InvViewProjectionMatrix{ 1 };
 		/* 运动矢量的基准：两帧都不带抖动，抖动位移不该被当成物体在动 */
 		glm::mat4 VelocityViewProjectionMatrix{ 1 };
 		glm::mat4 PrevVelocityViewProjectionMatrix{ 1 };
@@ -255,6 +257,7 @@ namespace Helios
 		s_RenderData.ViewUniformData.ViewMatrix = view->GetCullingCamera()->GetViewMatrix();
 		s_RenderData.ViewUniformData.ProjectionMatrix = view->GetRenderProjectionMatrix();
 		s_RenderData.ViewUniformData.ViewProjectionMatrix = view->GetRenderViewProjectionMatrix();
+		s_RenderData.ViewUniformData.InvViewProjectionMatrix = glm::inverse(view->GetRenderViewProjectionMatrix());
 		s_RenderData.ViewUniformData.VelocityViewProjectionMatrix = view->GetVelocityViewProjectionMatrix();
 		s_RenderData.ViewUniformData.PrevVelocityViewProjectionMatrix = view->GetPrevVelocityViewProjectionMatrix();
 		s_RenderData.ViewUniformData.ViewPos = view->GetCullingCamera()->GetPosition();
@@ -320,6 +323,7 @@ namespace Helios
 		s_RenderData.ViewUniformData.ViewMatrix = view;
 		s_RenderData.ViewUniformData.ProjectionMatrix = projection;
 		s_RenderData.ViewUniformData.ViewProjectionMatrix = projection * view;
+		s_RenderData.ViewUniformData.InvViewProjectionMatrix = glm::inverse(projection * view);
 		/* 这些调用方（探针烘焙）不做时域累积，前后两帧当成同一帧 */
 		s_RenderData.ViewUniformData.VelocityViewProjectionMatrix = projection * view;
 		s_RenderData.ViewUniformData.PrevVelocityViewProjectionMatrix = projection * view;

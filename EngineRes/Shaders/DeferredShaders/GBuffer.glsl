@@ -88,12 +88,9 @@ layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal(10:10:10); a:
 layout(location = 2) out vec4 GBufferTexture2; /* r: Roughness; g: Metallic; b: Specular; a: 着色模型 ID */
 layout(location = 3) out vec4 GBufferTexture3; /* CustomData：ID 0 是 Emission + IOR，ID 1 是透射色 + 强度 */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
-layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition */
+layout(location = 5) out vec2 Velocity;        /* 屏幕空间运动矢量（UV 单位） */
 #if HELIOS_EDITOR
 layout(location = 6) out float ObjectId;
-layout(location = 7) out vec2 Velocity;        /* 屏幕空间运动矢量（UV 单位） */
-#else
-layout(location = 6) out vec2 Velocity;
 #endif
 
 struct SVextex2Frag
@@ -134,8 +131,6 @@ void main()
 	/* 第三张是自定义数据，这里按模型 ID 0 填自发光与 IOR */
 	GBufferTexture3 = vec4(mtl.Emission, mtl.IOR);
 	GBufferTexture4 = vec4(mtl.Ambient, mtl.Anisotropy);
-	/* 接受阴影已经跟着法线那张走了，这里只留世界位置 */
-	GBufferTexture5 = vec4(vert2frag.Position, 0.0f);
 
 #if HELIOS_EDITOR
 	ObjectId = vert2frag.ObjectId;

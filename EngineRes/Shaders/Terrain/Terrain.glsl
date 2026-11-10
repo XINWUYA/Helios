@@ -84,12 +84,9 @@ layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal(10:10:10); a:
 layout(location = 2) out vec4 GBufferTexture2; /* r: Roughness; g: Metallic; b: Specular; a: 着色模型 ID */
 layout(location = 3) out vec4 GBufferTexture3; /* rgb: Emission; a: IOR */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
-layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition */
+layout(location = 5) out vec2 Velocity;
 #if HELIOS_EDITOR
 layout(location = 6) out float ObjectId;
-layout(location = 7) out vec2 Velocity;
-#else
-layout(location = 6) out vec2 Velocity;
 #endif
 #endif
 
@@ -175,7 +172,6 @@ void main()
 	GBufferTexture3 = vec4(0.0f);
 	/* 环境兜底色写白（三个通道都是 1）：前向的 MakeMaterialInput 默认就是 vec3(1)，a 是各向异性 */
 	GBufferTexture4 = vec4(1.0f, 1.0f, 1.0f, 0.0f);
-	GBufferTexture5 = vec4(vert2frag.WorldPosition, 0.0f);
 
 	/* 地形可以按像素拾取：写实体 id，跟模型走同一套 */
 #if HELIOS_EDITOR

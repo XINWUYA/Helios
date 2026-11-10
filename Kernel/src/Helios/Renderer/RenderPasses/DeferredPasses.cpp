@@ -152,8 +152,6 @@ namespace Helios
 				/* 世界位置通道用浮点格式：RGBA8 会把世界坐标钳制到 [0,1]（负值归零、
 				 * 大于 1 截平），光照阶段拿它做级联阴影变换时采样点全部落在错误位置 ——
 				 * 阴影与场景对不上（偏移、截断，甚至全域误判为受光/被遮）。 */
-				FrameGraphTexture::Descriptor world_pos_target_desc = color_target_desc;
-				world_pos_target_desc.TextureFormat = TextureFormat::RGBA32F;
 
 				FrameGraphTexture::Descriptor depth_target_desc;
 				depth_target_desc.Width = viewport_region.Width;
@@ -184,7 +182,6 @@ namespace Helios
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture2;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture3;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture4;
-					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture5;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> ObjectId;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> Depth;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> Velocity;
@@ -198,7 +195,6 @@ namespace Helios
 						data.GBufferTexture2 = builder.CreateTexture("GBufferTexture2", color_target_desc);
 						data.GBufferTexture3 = builder.CreateTexture("GBufferTexture3", color_target_desc);
 						data.GBufferTexture4 = builder.CreateTexture("GBufferTexture4", color_target_desc);
-						data.GBufferTexture5 = builder.CreateTexture("GBufferTexture5", world_pos_target_desc);
 						/* 拾取通道只有编辑器视口要：关掉时不建这张附件，省 4 字节/像素 */
 						if (object_id_enabled)
 							data.ObjectId = builder.CreateTexture("GBufferObjectId", object_id_desc);
@@ -210,7 +206,6 @@ namespace Helios
 						builder.BindOutputResource(data.GBufferTexture2, FrameGraphTexture::Usage::ColorAttachment);
 						builder.BindOutputResource(data.GBufferTexture3, FrameGraphTexture::Usage::ColorAttachment);
 						builder.BindOutputResource(data.GBufferTexture4, FrameGraphTexture::Usage::ColorAttachment);
-						builder.BindOutputResource(data.GBufferTexture5, FrameGraphTexture::Usage::ColorAttachment);
 						if (object_id_enabled)
 							builder.BindOutputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
 						/* 深度给时域抗锯齿采样：补一个 Sampleable，延迟本来就是单采样 */
@@ -223,19 +218,14 @@ namespace Helios
 						pass_desc.Attachments.ColorAttachments(2) = data.GBufferTexture2;
 						pass_desc.Attachments.ColorAttachments(3) = data.GBufferTexture3;
 						pass_desc.Attachments.ColorAttachments(4) = data.GBufferTexture4;
-						pass_desc.Attachments.ColorAttachments(5) = data.GBufferTexture5;
-						/* 附件编号必须连续：关掉拾取通道时速度图顶到 6 */
+						/* 速度在拾取通道前面；关掉拾取时它就是最后一个附件 */
+						pass_desc.Attachments.ColorAttachments(5) = data.Velocity;
 						if (object_id_enabled)
 						{
 							pass_desc.Attachments.ColorAttachments(6) = data.ObjectId;
-							pass_desc.Attachments.ColorAttachments(7) = data.Velocity;
-							pass_desc.ColorClearValues.resize(8);
+							pass_desc.ColorClearValues.resize(7);
 							/* 空像素读作 -1，拾取时按"没点到"处理 */
 							pass_desc.ColorClearValues[6] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
-						}
-						else
-						{
-							pass_desc.Attachments.ColorAttachments(6) = data.Velocity;
 						}
 						pass_desc.Attachments.DepthAttachment() = data.Depth;
 						pass_desc.ViewportRegion = viewport_region;
@@ -340,7 +330,6 @@ namespace Helios
 				frame_graph->GetBlackboard()["GBufferTexture2"] = gbuffer_pass->GetData().GBufferTexture2;
 				frame_graph->GetBlackboard()["GBufferTexture3"] = gbuffer_pass->GetData().GBufferTexture3;
 				frame_graph->GetBlackboard()["GBufferTexture4"] = gbuffer_pass->GetData().GBufferTexture4;
-				frame_graph->GetBlackboard()["GBufferTexture5"] = gbuffer_pass->GetData().GBufferTexture5;
 				if (object_id_enabled)
 					frame_graph->GetBlackboard()["GBufferObjectId"] = gbuffer_pass->GetData().ObjectId;
 				frame_graph->GetBlackboard()["GBufferDepth"] = gbuffer_pass->GetData().Depth;
@@ -373,7 +362,7 @@ namespace Helios
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture2;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture3;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture4;
-					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferTexture5;
+					FrameGraphResourceHandleTyped<FrameGraphTexture> GBufferDepth;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> ShadowMapHandle;
 					FrameGraphResourceHandleTyped<FrameGraphTexture> LightingResult;
 				};
@@ -386,7 +375,7 @@ namespace Helios
 						data.GBufferTexture2 = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferTexture2");
 						data.GBufferTexture3 = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferTexture3");
 						data.GBufferTexture4 = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferTexture4");
-						data.GBufferTexture5 = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferTexture5");
+						data.GBufferDepth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("GBufferDepth");
 						data.ShadowMapHandle = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ShadowMapHandle");
 
 						data.LightingResult = builder.CreateTexture("LightingResult", color_target_desc);
@@ -396,7 +385,7 @@ namespace Helios
 						builder.BindInputResource(data.GBufferTexture2, FrameGraphTexture::Usage::Sampleable);
 						builder.BindInputResource(data.GBufferTexture3, FrameGraphTexture::Usage::Sampleable);
 						builder.BindInputResource(data.GBufferTexture4, FrameGraphTexture::Usage::Sampleable);
-						builder.BindInputResource(data.GBufferTexture5, FrameGraphTexture::Usage::Sampleable);
+						builder.BindInputResource(data.GBufferDepth, FrameGraphTexture::Usage::Sampleable);
 						builder.BindInputResource(data.ShadowMapHandle, FrameGraphTexture::Usage::Sampleable);
 						builder.BindOutputResource(data.LightingResult, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
 
@@ -455,11 +444,11 @@ namespace Helios
 							static BuiltinAsset<DeviceShader> s_lighting_shader("Shaders/DeferredShaders/Lighting.glsl");
 							const auto material = Renderer::CreateFullScreenMaterial(s_lighting_shader.Get(), true);
 							material->SetTexture("u_GBufferTexture0", resources.Get(data.GBufferTexture0).Texture);
+						material->SetTexture("u_GBufferDepth", resources.Get(data.GBufferDepth).Texture);
 							material->SetTexture("u_GBufferTexture1", resources.Get(data.GBufferTexture1).Texture);
 							material->SetTexture("u_GBufferTexture2", resources.Get(data.GBufferTexture2).Texture);
 							material->SetTexture("u_GBufferTexture3", resources.Get(data.GBufferTexture3).Texture);
 							material->SetTexture("u_GBufferTexture4", resources.Get(data.GBufferTexture4).Texture);
-							material->SetTexture("u_GBufferTexture5", resources.Get(data.GBufferTexture5).Texture);
 							/* 调试视图：光照分量档位（Diffuse / Specular / 环境项 / Probe） */
 							material->SetParameters(ParamType::Int, "u_DebugView", debug_view_value);
 

@@ -14,6 +14,8 @@ layout(std140, binding = 0) uniform ViewUniformBuffer
 	mat4 u_ViewMat;
 	mat4 u_ProjectionMat;
 	mat4 u_ViewProjectionMat;
+	/* 深度反投影：与 u_ViewProjectionMat 互逆，用来还原世界坐标 */
+	mat4 u_InvViewProjectionMat;
 	/* 运动矢量专用：两帧都不带抖动。抖动是同一表面点换像素，
 	 * 算进位移里会让整屏每帧都在动，重投影反而更抖 */
 	mat4 u_VelocityViewProjectionMat;

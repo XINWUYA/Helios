@@ -108,12 +108,9 @@ layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal(10:10:10); a:
 layout(location = 2) out vec4 GBufferTexture2; /* r: Roughness; g: Metallic; b: Specular; a: 着色模型 ID */
 layout(location = 3) out vec4 GBufferTexture3; /* CustomData：透射色 + 强度 */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
-layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition */
+layout(location = 5) out vec2 Velocity;
 #if HELIOS_EDITOR
 layout(location = 6) out float ObjectId;
-layout(location = 7) out vec2 Velocity;
-#else
-layout(location = 6) out vec2 Velocity;
 #endif
 
 struct SVextex2Frag
@@ -171,7 +168,6 @@ void main()
 	GBufferTexture3 = vec4(u_TransmissionColor, u_Transmission * thinness);
 	/* 没有 IBL 时延迟用 Ambient 兜底：rgb 是环境色，与 Grass.glsl 的 vec3(1) 一致，a 是各向异性 */
 	GBufferTexture4 = vec4(1.0f, 1.0f, 1.0f, 0.0f);
-	GBufferTexture5 = vec4(vert2frag.WorldPosition, 0.0f);
 
 #if HELIOS_EDITOR
 	/* 编辑器视图才写拾取通道；草不可拾取，与空像素同口径 */
