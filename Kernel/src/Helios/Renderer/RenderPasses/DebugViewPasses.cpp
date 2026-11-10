@@ -115,6 +115,9 @@ namespace Helios
 				if (mode == DebugViewMode::Overdraw)
 				{
 					raster_state.SetAdditiveBlend();
+					/* 计数的是"被写过几次"，叶片之间不能互相遮挡 */
+					raster_state.EnableDepthTest = false;
+					raster_state.EnableDepthWrite = false;
 				}
 				else if (mode == DebugViewMode::Wireframe)
 				{
@@ -138,6 +141,9 @@ namespace Helios
 				if (mode == DebugViewMode::Overdraw)
 				{
 					raster_state.SetAdditiveBlend();
+					/* 计数的是"被写过几次"，几何之间不能互相遮挡 */
+					raster_state.EnableDepthTest = false;
+					raster_state.EnableDepthWrite = false;
 				}
 				else if (mode == DebugViewMode::Wireframe)
 				{
@@ -192,6 +198,9 @@ namespace Helios
 							auto material = CreateSharedPtr<Material>();
 							auto& raster_state = material->GetRasterState();
 							raster_state.SetAdditiveBlend();
+							/* 计数的是"被写过几次"，物体之间不能互相遮挡 */
+							raster_state.EnableDepthTest = false;
+							raster_state.EnableDepthWrite = false;
 							material->SetShader(shader);
 							material->SetParameters(ParamType::Int, "u_DebugMode", static_cast<int>(DebugViewMode::Overdraw));
 							material->SetTexture("u_MainTexture", DeviceTexture::White());
