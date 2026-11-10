@@ -134,11 +134,10 @@ namespace Helios
 						}
 					}
 
-					/* 调试读数走单独的着色器变体，正常着色不必带着那份代码。
-					 * 天空不参与调试分流，它的着色器也没声明这个维度 */
+					/* 调试读数走视图级的 DEBUG_VIEW 变体，正常着色不必带着那份代码。
+					 * 这里只把档位传下去；天空不参与调试分流，它的着色器也没声明这个维度 */
 					if (debug && !material->IsSkyBox() && material->SupportsDebugView())
 					{
-						per_draw.VariantDefines["DEBUG_VIEW"] = 1;
 						per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView", static_cast<int>(debug_view));
 					}
 
@@ -384,7 +383,6 @@ namespace Helios
 				{
 					if (debug_view != DebugViewMode::None && grass.GetMaterial()->SupportsDebugView())
 					{
-						per_draw.VariantDefines["DEBUG_VIEW"] = 1;
 						per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView", static_cast<int>(debug_view));
 					}
 

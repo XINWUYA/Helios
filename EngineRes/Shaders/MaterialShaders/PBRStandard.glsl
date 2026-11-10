@@ -2,8 +2,8 @@
 #version 410 core
 
 /* 调试读数整段只在调试变体里编进来，正常着色不带那份代码。
- * 变体值由渲染通道逐笔给（0 = 正常，1 = 出读数），具体档位仍走 u_DebugView */
-// @variant(DEBUG_VIEW, draw)
+ * 视图打开调试档位时置 1，具体档位仍走 u_DebugView */
+// @variant(DEBUG_VIEW, view)
 
 layout(location = 0) in vec3 a_Position;
 layout(location = 1) in vec3 a_Normal;

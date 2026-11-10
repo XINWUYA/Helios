@@ -297,10 +297,10 @@ namespace Helios::TerrainDraw
 				if (forward && view != nullptr)
 					BindForwardIBL(*view, *batch.Field, per_draw);
 
-				/* 前向的读数由材质自己出；延迟的 Surface / Shadow 档读 G-Buffer，不用管 */
+				/* 前向的读数由材质自己出（视图级 DEBUG_VIEW 变体已经打开）：
+				 * 这里只把档位传下去；延迟的 Surface / Shadow 档读 G-Buffer，不用管 */
 				if (forward && debug_view != DebugViewMode::None)
 				{
-					per_draw.VariantDefines["DEBUG_VIEW"] = 1;
 					per_draw.Overrides.emplace_back(ParamType::Int, "u_DebugView",
 						static_cast<int>(debug_view));
 				}
@@ -832,8 +832,7 @@ namespace Helios::TerrainDraw
 
 			DrawParams per_draw;
 			BuildDrawParams(*batch.Field, *batch.Component, batch.EntityId, per_draw);
-			/* 捕获画进颜色立方图，跟视图走哪条管线无关：走独立的捕获开关 */
-			per_draw.VariantDefines["TERRAIN_CAPTURE"] = 1;
+			/* 捕获视图固定前向，RENDER_PIPELINE 已经把它送进颜色那条 */
 			BindForwardIBL(view, *batch.Field, per_draw);
 
 			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), range.Buffer,

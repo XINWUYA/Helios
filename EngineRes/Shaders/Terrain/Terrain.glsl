@@ -2,10 +2,9 @@
 #version 410 core
 
 /* 地形顶点：33×33 模板网格只带 UV，世界位置由 patch 信息推出来，高度在顶点阶段采样高度图。
- * 写颜色有两条来路：RENDER_PIPELINE 是视图走前向，TERRAIN_CAPTURE 是探针捕获，两者都不成立才写运动矢量。 */
+ * 写颜色还是填 G-Buffer 只看视图管线：前向（含探针捕获）写颜色，延迟才写运动矢量。 */
 // @variant(RENDER_PIPELINE, view)
-// @variant(TERRAIN_CAPTURE, draw)
-// @variant(DEBUG_VIEW, draw)
+// @variant(DEBUG_VIEW, view)
 
 layout(location = 0) in vec2 a_Uv;
 /* 实例数据：每 patch 一条 */
@@ -20,7 +19,7 @@ struct SVextex2Frag
 	vec2 LocalXZ;
 	float Step;
 	float ReceiveShadow;
-#if !RENDER_PIPELINE && !TERRAIN_CAPTURE
+#if !RENDER_PIPELINE
 	vec4 CurClip;
 	vec4 PrevClip;
 #endif
@@ -39,7 +38,7 @@ void main()
 	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph, local_xz);
 
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
-#if !RENDER_PIPELINE && !TERRAIN_CAPTURE
+#if !RENDER_PIPELINE
 	vert2frag.CurClip = u_VelocityViewProjectionMat * vec4(world, 1.0f);
 	/* 地形是静态的：上一帧的同一个世界点用上一帧的视图投影，位移只来自相机 */
 	vert2frag.PrevClip = u_PrevVelocityViewProjectionMat * vec4(world, 1.0f);
@@ -62,7 +61,7 @@ void main()
 
 /* 两条管线要的东西不一样：前向自己算光照，延迟只填 G-Buffer。
  * 包在 #if 里是为了让各自的反射表干净，别带上一堆用不到的采样器 */
-#if RENDER_PIPELINE || TERRAIN_CAPTURE
+#if RENDER_PIPELINE
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
 #include "../ReflectionProbe/IBLCommon.glsl"
@@ -73,7 +72,7 @@ void main()
 #include "../Builtin/Velocity.glsl"
 #endif
 
-#if RENDER_PIPELINE || TERRAIN_CAPTURE
+#if RENDER_PIPELINE
 layout(location = 0) out vec4 OutFragColor;
 layout(location = 1) out float ObjectId;
 #else
@@ -93,7 +92,7 @@ struct SVextex2Frag
 	vec2 LocalXZ;
 	float Step;
 	float ReceiveShadow;
-#if !RENDER_PIPELINE && !TERRAIN_CAPTURE
+#if !RENDER_PIPELINE
 	vec4 CurClip;
 	vec4 PrevClip;
 #endif
@@ -119,7 +118,7 @@ void main()
 		surface.Roughness = cached_albedo.a;
 	}
 
-#if RENDER_PIPELINE || TERRAIN_CAPTURE
+#if RENDER_PIPELINE
 	const vec3 N = surface.Normal;
 	const vec3 albedo = surface.Albedo;
 	const vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);
