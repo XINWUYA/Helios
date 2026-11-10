@@ -83,10 +83,27 @@ namespace Helios
 				return;
 
 			/* 选中项在本视图里没有可见几何（相机 / 光源这类只有 gizmo 的节点）就整个跳过：
-			 * 实体 id 附件里不会有它的像素，画完也是全透明，白白跑一遍全屏采样。 */
+			 * 实体 id 附件里不会有它的像素，画完也是全透明，白白跑一遍全屏采样。
+			 * 草不在网格表里，但它写进了 G-Buffer，要按实体上有没有 GrassComponent 补一条 ——
+			 * 实体 id 是 index，version 对不上就不能用 valid()，得按 index 比 */
 			const auto& visible_objects = render_view.GetVisibleMeshObjects();
-			const bool has_visible_geometry = std::any_of(visible_objects.begin(), visible_objects.end(),
+			bool has_visible_geometry = std::any_of(visible_objects.begin(), visible_objects.end(),
 				[selection_id](const VisibleMeshObject& object) { return object.ObjectId == selection_id; });
+			if (!has_visible_geometry)
+			{
+				if (const auto scene = render_view.GetOwnerScene())
+				{
+					for (auto [entity, grass] : scene->GetRegistry().view<GrassComponent>().each())
+					{
+						(void)grass;
+						if (static_cast<int32_t>(static_cast<uint32_t>(entity)) == selection_id)
+						{
+							has_visible_geometry = true;
+							break;
+						}
+					}
+				}
+			}
 			if (!has_visible_geometry)
 				return;
 

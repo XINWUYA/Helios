@@ -49,8 +49,11 @@ namespace Helios
 
 		/* per_draw：单次绘制的覆盖参数（IBL 这类"每次绘制不同"的绑定）。
 	 * 只写当前绑定的 Shader 与纹理、不落材质对象 —— 共享材质因此保持只读。 */
+	/* object_id >= 0 时把它写进对象 UBO 的 u_ObjectId：草、地形这类每批只有一个实体的
+	 * 提交靠它拿到拾取通道的 id，模型走实例数据（一批里多个实体）不用这个 */
 	static void Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
-	                   const DrawParams* per_draw = nullptr, uint32_t index_count = 0);
+	                   const DrawParams* per_draw = nullptr, uint32_t index_count = 0,
+	                   int32_t object_id = -1);
 
 		static int CurrentAPI() { return RenderAPI::GetAPI(); }
 
@@ -89,13 +92,13 @@ namespace Helios
 			const SharedPtr<DeviceVertexBuffer>& instance_buffer,
 			const SharedPtr<class DeviceStorageBuffer>& args_buffer, const DrawParams* per_draw = nullptr,
 			const VertexBufferLayout* instance_layout = nullptr,
-			uint32_t args_offset = 0, uint32_t instance_offset = 0);
+			uint32_t args_offset = 0, uint32_t instance_offset = 0, int32_t object_id = -1);
 
 		/* 实例化提交：同材质同网格的一批对象合成一笔，实例数据从 first_instance 起连续 count 条 */
 		static void SubmitInstanced(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 			const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance, uint32_t instance_count,
 			const DrawParams* per_draw = nullptr, uint32_t index_count = 0,
-			const VertexBufferLayout* instance_layout = nullptr);
+			const VertexBufferLayout* instance_layout = nullptr, int32_t object_id = -1);
 
 	private:
 		/* 提交的公共实现：实例缓冲为空就是普通绘制 */
@@ -111,6 +114,9 @@ namespace Helios
 		static SharedPtr<Material> CreateFullScreenMaterial(const SharedPtr<DeviceShader>& shader, bool additive = false);
 
 		static void FillObjectUniformBuffer(const VisibleMeshObject& mesh_object);
+
+		/* 把实体 id 写进对象 UBO：只改 u_ObjectId，矩阵等字段保持原样 */
+		static void WriteObjectId(int32_t object_id);
 
 		/* 填充光照 UniformBuffer：light_vp_mats = 级联的光照视图投影矩阵数组，cascade_splits = 各级联
 		 * 的视图空间分割距离（远边界），cascade_depth_spans = 深度跨度（折算阴影偏移用，可空）。

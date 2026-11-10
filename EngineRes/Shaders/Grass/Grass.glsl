@@ -95,7 +95,7 @@ void main()
 	color += u_TransmissionColor * albedo * u_Transmission * back_light * LightFactor(attenuation, shadow)
 		* thinness;
 
-	ObjectId = -1.0f;
+	ObjectId = float(u_ObjectId);
 
 	/* 调试视图：直接光取上面的环绕漫反射加透射（草不算镜面），环境项多乘一道根部自遮挡。
 	 * 走调试变体时才编进来 */

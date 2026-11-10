@@ -147,6 +147,7 @@ namespace Helios
 	{
 		/* 全局UniformBuffers */
 		ViewUniformData ViewUniformData;
+		ObjectUniformData ObjectUniformData;
 		SharedPtr<DeviceUniformBuffer> pViewUniformBuffer;
 		SharedPtr<DeviceUniformBuffer> pObjectUniformBuffer;
 		SharedPtr<DeviceUniformBuffer> pLightUniformBuffer;
@@ -426,15 +427,18 @@ namespace Helios
 	}
 
 	void Renderer::Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
-	                      const DrawParams* per_draw, uint32_t index_count)
+	                      const DrawParams* per_draw, uint32_t index_count, int32_t object_id)
 	{
+		WriteObjectId(object_id);
 		SubmitDraw(material, mesh_primitive, nullptr, 0, per_draw, index_count);
 	}
 
 	void Renderer::SubmitInstanced(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 		const SharedPtr<DeviceVertexBuffer>& instance_buffer, uint32_t first_instance, uint32_t instance_count,
-		const DrawParams* per_draw, uint32_t index_count, const VertexBufferLayout* instance_layout)
+		const DrawParams* per_draw, uint32_t index_count, const VertexBufferLayout* instance_layout,
+		int32_t object_id)
 	{
+		WriteObjectId(object_id);
 		SubmitDraw(material, mesh_primitive, instance_buffer, first_instance, per_draw, index_count, instance_count,
 			nullptr, instance_layout);
 	}
@@ -442,8 +446,10 @@ namespace Helios
 	void Renderer::SubmitIndirect(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 		const SharedPtr<DeviceVertexBuffer>& instance_buffer,
 		const SharedPtr<DeviceStorageBuffer>& args_buffer, const DrawParams* per_draw,
-		const VertexBufferLayout* instance_layout, uint32_t args_offset, uint32_t instance_offset)
+		const VertexBufferLayout* instance_layout, uint32_t args_offset, uint32_t instance_offset,
+		int32_t object_id)
 	{
+		WriteObjectId(object_id);
 		SubmitDraw(material, mesh_primitive, instance_buffer, 0, per_draw, 0, 0, args_buffer,
 			instance_layout, args_offset, instance_offset);
 	}
@@ -629,6 +635,16 @@ namespace Helios
 			raster_state.SetAdditiveBlend();
 		material->SetShader(shader);
 		return material;
+	}
+
+	void Renderer::WriteObjectId(int32_t object_id)
+	{
+		if (object_id < 0)
+			return;
+
+		/* 只改 id：矩阵等字段保持上一次写入的值，草和地形不读它们 */
+		s_RenderData.ObjectUniformData.ObjectId = static_cast<uint32_t>(object_id);
+		s_RenderData.pObjectUniformBuffer->SetData(&s_RenderData.ObjectUniformData, sizeof(ObjectUniformData));
 	}
 
 	void Renderer::FillObjectUniformBuffer(const VisibleMeshObject& mesh_object)

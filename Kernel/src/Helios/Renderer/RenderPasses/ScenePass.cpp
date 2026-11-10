@@ -223,6 +223,9 @@ namespace Helios
 					if (instance_buffer == nullptr)
 						continue;
 
+					/* 拾取通道的实体 id：这一片的每次提交都带上，着色器从对象 UBO 读 */
+					const int32_t grass_object_id = static_cast<int32_t>(static_cast<uint32_t>(entity));
+
 					const SharedPtr<Material> material = get_material(grass);
 					if (material == nullptr)
 						continue;
@@ -258,7 +261,7 @@ namespace Helios
 						per_draw.Overrides[flat_pad_index].Value = 1;
 						Renderer::SubmitInstanced(material, GrassField::GetPadPrimitive(), pad_buffer,
 							0, static_cast<uint32_t>(chunks.size()), &per_draw, 0,
-							&Renderer::GetGrassInstanceLayout());
+							&Renderer::GetGrassInstanceLayout(), grass_object_id);
 						per_draw.Overrides[flat_pad_index].Value = 0;
 					}
 
@@ -278,7 +281,7 @@ namespace Helios
 								grass.m_Field->GetIndirectDrawBuffer(&render_view, kCameraSlot),
 								grass.m_Field->GetIndirectArgs(&render_view, kCameraSlot), &per_draw,
 								&Renderer::GetGrassInstanceLayout(), segment * args_stride,
-								segment * capacity * instance_stride);
+								segment * capacity * instance_stride, grass_object_id);
 							RenderStatistics::Instance().AddGrassDrawCall(pass);
 						}
 						continue;
@@ -301,7 +304,7 @@ namespace Helios
 								continue;
 
 							Renderer::SubmitInstanced(material, blade, instance_buffer, batch.First, batch.Count,
-								&per_draw, 0, &Renderer::GetGrassInstanceLayout());
+								&per_draw, 0, &Renderer::GetGrassInstanceLayout(), grass_object_id);
 							RenderStatistics::Instance().AddGrassDrawCall(pass);
 						}
 						continue;
@@ -327,7 +330,7 @@ namespace Helios
 						/* 距离抽稀逐株做（GrassBlade.glsl 的 GrassBladeFaded），这里整块提交：
 						 * 按块截断实例数会在块边界上留台阶 */
 						Renderer::SubmitInstanced(material, blade, instance_buffer, chunk.First, chunk.Count,
-							&per_draw, 0, &Renderer::GetGrassInstanceLayout());
+							&per_draw, 0, &Renderer::GetGrassInstanceLayout(), grass_object_id);
 						RenderStatistics::Instance().AddGrassDrawCall(pass);
 					}
 				}

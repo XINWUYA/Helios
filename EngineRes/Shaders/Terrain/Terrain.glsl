@@ -31,7 +31,6 @@ out SVextex2Frag vert2frag;
 
 uniform float u_TerrainReceiveShadow = 1.0f;
 /* 地块实体的 id：实例化绘制一次一块地形，按 per-draw 传 */
-uniform int u_TerrainObjectId = -1;
 
 void main()
 {
@@ -105,7 +104,6 @@ struct SVextex2Frag
 in SVextex2Frag vert2frag;
 
 /* 地块实体的 id（per-draw） */
-uniform int u_TerrainObjectId = -1;
 
 void main()
 {
@@ -144,7 +142,7 @@ void main()
 		: max(vec3(0.0f), ComposeFallbackAmbient(vec3(0.0f), albedo, 1.0f));
 	const vec3 color = direct + ambient * AmbientShadowVisibility(N, L, shadow);
 
-	ObjectId = float(u_TerrainObjectId);
+	ObjectId = float(u_ObjectId);
 
 	/* 调试分流：读数取自本笔实际着色用的量，与正常着色同源。走调试变体时才编进来 */
 #if DEBUG_VIEW
@@ -175,7 +173,7 @@ void main()
 
 	/* 地形可以按像素拾取：写实体 id，跟模型走同一套 */
 #if HELIOS_EDITOR
-	ObjectId = float(u_TerrainObjectId);
+	ObjectId = float(u_ObjectId);
 #endif
 	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);
 #endif

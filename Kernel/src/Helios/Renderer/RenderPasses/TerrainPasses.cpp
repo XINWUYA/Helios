@@ -150,7 +150,6 @@ namespace Helios::TerrainDraw
 			AddTerrainOverrides(field, per_draw);
 			per_draw.Overrides.emplace_back(ParamType::Float, "u_TerrainReceiveShadow",
 				component.m_ReceiveShadow ? 1.0f : 0.0f);
-			per_draw.Overrides.emplace_back(ParamType::Int, "u_TerrainObjectId", entity_id);
 			AddVirtualTextureParams(field, per_draw);
 		}
 
