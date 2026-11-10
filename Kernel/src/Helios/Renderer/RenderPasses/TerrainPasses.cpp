@@ -10,6 +10,7 @@
 #include <Helios/Scene/Camera.h>
 #include <Helios/Scene/Components.h>
 #include <Helios/Scene/Material.h>
+#include <Helios/Scene/ReflectionProbe.h>
 #include <Helios/Scene/Scene.h>
 #include <Helios/Scene/SceneCommon.h>
 #include <Helios/Scene/ShadowMap.h>
@@ -80,42 +81,6 @@ namespace Helios::TerrainDraw
 			const size_t primary = (shadow_maps != nullptr)
 				? shadow_maps->FindPrimaryShadowLightIndex(lights) : 0;
 			Renderer::FillLightUniformBuffer(lights[std::min(primary, lights.size() - 1)], shadow_maps);
-		}
-
-		/* 前向材质：从组件的材质克隆一份换到前向变体。参数名与延迟同源，
-		 * 换完直接沿用；源材质参数版本变了才重建。源材质释放后地址可能被新材质复用，
-		 * 所以记一份弱引用核对身份，顺手清掉已经释放的 */
-		SharedPtr<Material> GetForwardMaterial(const SharedPtr<Material>& source)
-		{
-			struct Entry
-			{
-				std::weak_ptr<Material> Source;
-				SharedPtr<Material> Material;
-				uint32_t Revision{ 0 };
-			};
-			static std::unordered_map<const Material*, Entry> s_Cache;
-
-			for (auto it = s_Cache.begin(); it != s_Cache.end();)
-				it = it->second.Source.expired() ? s_Cache.erase(it) : std::next(it);
-
-			Entry& entry = s_Cache[source.get()];
-			if (entry.Material != nullptr && entry.Revision == source->GetRevision()
-				&& entry.Source.lock() == source)
-				return entry.Material;
-
-			/* 同一份地形着色器的前向变体，见源码里的 @variant */
-			static BuiltinAsset<DeviceShader> s_forward_shader("Shaders/Terrain/Terrain.glsl",
-				ShaderVariantConfig{ ShaderVariantDefines{ { "TERRAIN_FORWARD", 1 } } });
-			const auto shader = s_forward_shader.Get();
-			if (shader == nullptr)
-				return source;
-
-			auto material = source->Clone();
-			material->SetShader(shader);
-			entry.Source = source;
-			entry.Material = material;
-			entry.Revision = source->GetRevision();
-			return material;
 		}
 
 		/* 高度图与覆盖范围：材质本身多块地形共用，逐地形的差异全走 per-draw 覆盖。
@@ -295,23 +260,42 @@ namespace Helios::TerrainDraw
 				&TerrainField::GetInstanceLayout());
 		}
 
-		void SubmitVisibleBatch(const FrameCache& frame, bool forward, DebugViewMode debug_view)
+		/* 前向要自己算光照，环境项跟延迟一样取最近探针的 IBL；延迟走 G-Buffer，
+		 * 探针由光照 Pass 逐像素选，这里不绑 */
+		void BindForwardIBL(const RenderView& view, const TerrainField& field, DrawParams& per_draw)
+		{
+			const SharedPtr<Scene> scene = view.GetOwnerScene();
+			if (scene == nullptr)
+				return;
+
+			const auto probe_manager = scene->GetReflectionProbeManager();
+			const auto chosen = (probe_manager != nullptr && probe_manager->HasProbe())
+				? probe_manager->GetClostedReflectionProbe(field.GetOrigin(), view.GetCullingMask())
+				: nullptr;
+			Material::MakeIBLParamOverrides(per_draw.Overrides,
+				chosen != nullptr ? chosen->GetIrradianceMap() : nullptr,
+				chosen != nullptr ? chosen->GetPrefilterMap() : nullptr,
+				probe_manager != nullptr ? probe_manager->GetBRDFLutMap() : nullptr);
+		}
+
+		void SubmitVisibleBatch(const FrameCache& frame, bool forward, DebugViewMode debug_view,
+			const RenderView* view = nullptr)
 		{
 			if (frame.Batches.empty())
 				return;
 
 			for (const TerrainBatch& batch : frame.Batches)
 			{
-				const SharedPtr<Material> source = batch.Component->GetMaterial();
-				if (source == nullptr)
-					continue;
-
-				const SharedPtr<Material> final_material = forward ? GetForwardMaterial(source) : source;
-				if (final_material == nullptr)
+				const SharedPtr<Material> material = batch.Component->GetMaterial();
+				if (material == nullptr)
 					continue;
 
 				DrawParams per_draw;
 				BuildDrawParams(*batch.Field, *batch.Component, batch.EntityId, per_draw);
+
+				/* 走前向还是延迟由视图级变体 RENDER_PIPELINE 决定，这里只补前向要的环境项 */
+				if (forward && view != nullptr)
+					BindForwardIBL(*view, *batch.Field, per_draw);
 
 				/* 前向的读数由材质自己出；延迟的 Surface / Shadow 档读 G-Buffer，不用管 */
 				if (forward && debug_view != DebugViewMode::None)
@@ -321,7 +305,7 @@ namespace Helios::TerrainDraw
 						static_cast<int>(debug_view));
 				}
 
-				SubmitBatch(final_material, frame, batch, per_draw);
+				SubmitBatch(material, frame, batch, per_draw);
 			}
 		}
 
@@ -709,7 +693,7 @@ namespace Helios::TerrainDraw
 			? debug_view : DebugView::GetForwardMaterialMode(view.GetDebugViewMode());
 
 		const FrameCache& frame = EnsureVisibleFrame(view, scene);
-		SubmitVisibleBatch(frame, true, mode);
+		SubmitVisibleBatch(frame, true, mode, &view);
 	}
 
 	void SubmitDebug(RenderView& view, Scene& scene, const SharedPtr<Material>& material)
@@ -842,16 +826,15 @@ namespace Helios::TerrainDraw
 
 		for (const TerrainBatch& batch : batches)
 		{
-			const SharedPtr<Material> source = batch.Component->GetMaterial();
-			if (source == nullptr)
-				continue;
-
-			const SharedPtr<Material> material = GetForwardMaterial(source);
+			const SharedPtr<Material> material = batch.Component->GetMaterial();
 			if (material == nullptr)
 				continue;
 
 			DrawParams per_draw;
 			BuildDrawParams(*batch.Field, *batch.Component, batch.EntityId, per_draw);
+			/* 捕获画进颜色立方图，跟视图走哪条管线无关：走独立的捕获开关 */
+			per_draw.VariantDefines["TERRAIN_CAPTURE"] = 1;
+			BindForwardIBL(view, *batch.Field, per_draw);
 
 			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), range.Buffer,
 				range.FirstInstance + batch.First, batch.Count, &per_draw, 0,

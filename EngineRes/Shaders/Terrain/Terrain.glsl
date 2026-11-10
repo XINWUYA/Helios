@@ -1,10 +1,10 @@
 #type vertex
 #version 410 core
 
-/* 地形顶点：33×33 模板网格只带 UV，世界位置由 patch 信息推出来，
- * 高度在顶点着色器里采样高度图，顶点数据完全不落地。
- * 前向变体不写运动矢量，那一趟没有速度附件。 */
-// @variant(TERRAIN_FORWARD, draw)
+/* 地形顶点：33×33 模板网格只带 UV，世界位置由 patch 信息推出来，高度在顶点阶段采样高度图。
+ * 写颜色有两条来路：RENDER_PIPELINE 是视图走前向，TERRAIN_CAPTURE 是探针捕获，两者都不成立才写运动矢量。 */
+// @variant(RENDER_PIPELINE, view)
+// @variant(TERRAIN_CAPTURE, draw)
 // @variant(DEBUG_VIEW, draw)
 
 layout(location = 0) in vec2 a_Uv;
@@ -20,7 +20,7 @@ struct SVextex2Frag
 	vec2 LocalXZ;
 	float Step;
 	float ReceiveShadow;
-#if !TERRAIN_FORWARD
+#if !RENDER_PIPELINE && !TERRAIN_CAPTURE
 	vec4 CurClip;
 	vec4 PrevClip;
 #endif
@@ -39,7 +39,7 @@ void main()
 	const vec3 world = TerrainVertexWorld(a_Uv, a_PatchInfo, a_PatchLod, morph, local_xz);
 
 	gl_Position = u_ViewProjectionMat * vec4(world, 1.0f);
-#if !TERRAIN_FORWARD
+#if !RENDER_PIPELINE && !TERRAIN_CAPTURE
 	vert2frag.CurClip = u_VelocityViewProjectionMat * vec4(world, 1.0f);
 	/* 地形是静态的：上一帧的同一个世界点用上一帧的视图投影，位移只来自相机 */
 	vert2frag.PrevClip = u_PrevVelocityViewProjectionMat * vec4(world, 1.0f);
@@ -62,9 +62,10 @@ void main()
 
 /* 两条管线要的东西不一样：前向自己算光照，延迟只填 G-Buffer。
  * 包在 #if 里是为了让各自的反射表干净，别带上一堆用不到的采样器 */
-#if TERRAIN_FORWARD
+#if RENDER_PIPELINE || TERRAIN_CAPTURE
 #include "../Builtin/DirectLight.glsl"
 #include "../Builtin/LightCompose.glsl"
+#include "../ReflectionProbe/IBLCommon.glsl"
 #if DEBUG_VIEW
 #include "../DebugShaders/DebugForward.glsl"
 #endif
@@ -72,7 +73,7 @@ void main()
 #include "../Builtin/Velocity.glsl"
 #endif
 
-#if TERRAIN_FORWARD
+#if RENDER_PIPELINE || TERRAIN_CAPTURE
 layout(location = 0) out vec4 OutFragColor;
 layout(location = 1) out float ObjectId;
 #else
@@ -92,7 +93,7 @@ struct SVextex2Frag
 	vec2 LocalXZ;
 	float Step;
 	float ReceiveShadow;
-#if !TERRAIN_FORWARD
+#if !RENDER_PIPELINE && !TERRAIN_CAPTURE
 	vec4 CurClip;
 	vec4 PrevClip;
 #endif
@@ -118,9 +119,10 @@ void main()
 		surface.Roughness = cached_albedo.a;
 	}
 
-#if TERRAIN_FORWARD
+#if RENDER_PIPELINE || TERRAIN_CAPTURE
 	const vec3 N = surface.Normal;
 	const vec3 albedo = surface.Albedo;
+	const vec3 V = normalize(u_ViewPos - vert2frag.WorldPosition);
 
 	/* 地形只吃主方向光一笔：前向的地形提交在逐光源循环之外，光照 UBO 已经填成主光。
 	 * 不声明 u_ComposeAmbientEmission，SupportsDirectLighting 判为 false，正好走单笔路径 */
@@ -130,9 +132,14 @@ void main()
 	EvaluateDirectLight(u_ShadowMap, vert2frag.WorldPosition, N, L, attenuation, shadow);
 	shadow *= vert2frag.ReceiveShadow;
 
-	const float ndl = max(dot(N, L), 0.0f);
-	const vec3 direct = albedo * ndl * INV_PI * LightFactor(attenuation, shadow);
-	const vec3 ambient = ComposeFallbackAmbient(vec3(1.0f), albedo, 1.0f) * 0.5f;
+	/* 与延迟的光照合成同一套公式（Lighting.glsl）：直接光走 BRDF，环境项优先取探针 IBL，
+	 * 没有探针才退回平面环境。两条管线的画面必须对得上，不然换个管线地形就变个颜色 */
+	const vec3 direct = ComposeDirectLight(L, V, N, 0.0f, surface.Roughness, albedo,
+		attenuation, shadow);
+	const vec3 ambient = (u_UseIBL != 0)
+		? max(vec3(0.0f), EvaluateIBL(N, V, surface.Roughness, 0.0f, albedo))
+		: max(vec3(0.0f), ComposeFallbackAmbient(vec3(0.0f), albedo, 1.0f));
+	const vec3 color = direct + ambient * AmbientShadowVisibility(N, L, shadow);
 
 	ObjectId = float(u_TerrainObjectId);
 
@@ -151,7 +158,7 @@ void main()
 	}
 #endif
 
-	OutFragColor = vec4(direct + ambient, 1.0f);
+	OutFragColor = vec4(color, 1.0f);
 #else
 	GBufferTexture0 = vec4(surface.Albedo, surface.Roughness);
 	/* 法线按 n * 0.5 + 0.5 编码，与 GBuffer.glsl 同一约定 */
