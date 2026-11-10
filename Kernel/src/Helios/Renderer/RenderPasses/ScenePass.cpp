@@ -583,8 +583,10 @@ namespace Helios
 									MakeVelocityRasterState(grass.GetMaterial()->GetRasterState());
 							});
 
-						/* 地形同样不在可见对象表里：静止几何的位移全部来自相机 */
-						TerrainDraw::SubmitVelocity(*render_view, *scene);
+						/* 地形同样不在可见对象表里：静止几何的位移全部来自相机。
+						 * 叠到 G-Buffer 已有的速度图上时跳过它 —— 那张图里地形已经写过了 */
+						if (owns_target)
+							TerrainDraw::SubmitVelocity(*render_view, *scene);
 					}
 					render_pass_info->Unbind();
 					Renderer::GetRenderAPI()->Flush();

@@ -76,7 +76,8 @@ void main()
 
 		SMaterialInput mtl = MakeMaterialInput(gbuffer.Albedo, gbuffer.WorldNormal,
 			gbuffer.Roughness, gbuffer.Metallic);
-		mtl.Specular = gbuffer.Specular;
+		/* G-Buffer 里高光只存一个标量，调试读数按灰度显示 */
+		mtl.Specular = vec3(gbuffer.Specular);
 		mtl.AO = gbuffer.AO;
 		mtl.Emission = gbuffer.Emission;
 		mtl.Ambient = gbuffer.Ambient;

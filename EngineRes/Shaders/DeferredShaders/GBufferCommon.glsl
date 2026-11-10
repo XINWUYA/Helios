@@ -1,21 +1,26 @@
 #ifndef GBUFFER_COMMON_GLSL
 #define GBUFFER_COMMON_GLSL
 
+/* 通道分组按访问模式排：基色与 AO 一起读、法线与接受阴影同属几何、
+ * 三个 BRDF 标量挤一张。改布局要同步 GBuffer.glsl 与 Terrain.glsl 的写出。 */
 struct SGBufferData
 {
-	vec3 Albedo;
-	float Roughness;
-	vec3 WorldNormal;
-	float Metallic;
-	vec3 Specular;
-	float AO;
-	vec3 Emission;
-	float IOR;
-	vec3 Ambient;
-	float Anisotropy;
-	vec3 WorldPosition;
-	/* 接受阴影（0/1）：来自 GBuffer.glsl 写入的 GBufferTexture5.a */
-	float ReceiveShadow;
+	vec3 Albedo;          /* Texture0.rgb */
+	float AO;             /* Texture0.a */
+	vec3 WorldNormal;     /* Texture1.rgb，n * 0.5 + 0.5 */
+	float ReceiveShadow;  /* Texture1.a，2 bit 只存 0/1 */
+	float Roughness;      /* Texture2.r */
+	float Metallic;       /* Texture2.g */
+	float Specular;       /* Texture2.b，标量，材质里三通道通常一样 */
+	float ShadingModel;   /* Texture2.a，0 = 标准 PBR，1 = 双面植被 */
+	vec4 CustomData;      /* Texture3，语义按 ShadingModel 解释 */
+	vec3 Emission;        /* CustomData.rgb（模型 ID 0） */
+	float IOR;            /* CustomData.a（模型 ID 0） */
+	vec3 TransmissionColor; /* CustomData.rgb（模型 ID 1） */
+	float Transmission;   /* CustomData.a（模型 ID 1） */
+	vec3 Ambient;         /* Texture4.rgb */
+	float Anisotropy;     /* Texture4.a */
+	vec3 WorldPosition;   /* Texture5.rgb */
 };
 
 uniform sampler2D u_GBufferTexture0;
@@ -35,18 +40,25 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 	vec4 color5 = texture(u_GBufferTexture5, uv);
 
 	gbuffer.Albedo = color0.rgb;
-	gbuffer.Roughness = color0.a;
-	/* 法线解码：GBuffer 以 n * 0.5 + 0.5 编码（RGBA8 无符号格式存不了负值） */
+	gbuffer.AO = color0.a;
+	/* 法线解码：10:10:10 是无符号格式，写进去的是 n * 0.5 + 0.5 */
 	gbuffer.WorldNormal = color1.rgb * 2.0f - 1.0f;
-	gbuffer.Metallic = color1.a;
-	gbuffer.Specular = color2.rgb;
-	gbuffer.AO = color2.a;
-	gbuffer.Emission = color3.rgb;
-	gbuffer.IOR = color3.a;
+	gbuffer.ReceiveShadow = color1.a;
+	gbuffer.Roughness = color2.r;
+	gbuffer.Metallic = color2.g;
+	gbuffer.Specular = color2.b;
+	gbuffer.ShadingModel = color2.a;
+	/* 第三张是自定义数据：0 = 标准 PBR（自发光 + IOR），1 = 双面植被（透射色 + 强度）。
+	 * 写入方按 ID 填不同语义，读取方在这里一次解释清楚 */
+	gbuffer.CustomData = color3;
+	const bool foliage = gbuffer.ShadingModel > 0.5f;
+	gbuffer.Emission = foliage ? vec3(0.0f) : color3.rgb;
+	gbuffer.IOR = foliage ? 0.0f : color3.a;
+	gbuffer.TransmissionColor = foliage ? color3.rgb : vec3(0.0f);
+	gbuffer.Transmission = foliage ? color3.a : 0.0f;
 	gbuffer.Ambient = color4.rgb;
 	gbuffer.Anisotropy = color4.a;
 	gbuffer.WorldPosition = color5.rgb;
-	gbuffer.ReceiveShadow = color5.a;
 }
 
 #endif // GBUFFER_COMMON_GLSL

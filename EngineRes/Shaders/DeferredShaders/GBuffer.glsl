@@ -78,14 +78,22 @@ void main()
 #include "../Builtin/MaterialLit.glsl"
 #include "../Builtin/Velocity.glsl"
 
-layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: Roughness */
-layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal; a: Metallic */
-layout(location = 2) out vec4 GBufferTexture2; /* rgb: Specular; a: AO */
-layout(location = 3) out vec4 GBufferTexture3; /* rgb: Emission; a: IOR */
+/* 拾取通道开关：只有编辑器视口要写实体 id。关掉时少一张附件，
+ * 速度图顶到 6，附件编号仍然连续 */
+// @variant(OBJECT_ID, draw)
+
+layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: AO */
+layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal(10:10:10); a: 接受阴影(2 bit) */
+layout(location = 2) out vec4 GBufferTexture2; /* r: Roughness; g: Metallic; b: Specular; a: 着色模型 ID */
+layout(location = 3) out vec4 GBufferTexture3; /* CustomData：ID 0 是 Emission + IOR，ID 1 是透射色 + 强度 */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
-layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition; a: 接受阴影(0/1) */
+layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition */
+#if OBJECT_ID
 layout(location = 6) out float ObjectId;
 layout(location = 7) out vec2 Velocity;        /* 屏幕空间运动矢量（UV 单位） */
+#else
+layout(location = 6) out vec2 Velocity;
+#endif
 
 struct SVextex2Frag
 {
@@ -117,15 +125,19 @@ void main()
 	CalculateLitMaterial(mtl, vert2frag.Position, vert2frag.TexCoord,
 		vert2frag.BaseColor, vert2frag.Normal, world_tangent);
 
-	GBufferTexture0 = vec4(mtl.Albedo, mtl.Roughness);
-	/* 法线按 n*0.5+0.5 编码：RGBA8 存不了负值（解码在 GBufferCommon.glsl） */
-	GBufferTexture1 = vec4(mtl.Normal * 0.5f + 0.5f, mtl.Metallic);
-	GBufferTexture2 = vec4(mtl.Specular, mtl.AO);
+	GBufferTexture0 = vec4(mtl.Albedo, mtl.AO);
+	/* 法线按 n*0.5+0.5 编码：10:10:10 存不了负值；alpha 那 2 位放接受阴影 */
+	GBufferTexture1 = vec4(mtl.Normal * 0.5f + 0.5f, vert2frag.ReceiveShadow);
+	/* 三个 BRDF 标量挤一张，alpha 留给着色模型 ID（草并入 G-Buffer 后用） */
+	GBufferTexture2 = vec4(mtl.Roughness, mtl.Metallic, mtl.Specular.r, 0.0f);
+	/* 第三张是自定义数据，这里按模型 ID 0 填自发光与 IOR */
 	GBufferTexture3 = vec4(mtl.Emission, mtl.IOR);
 	GBufferTexture4 = vec4(mtl.Ambient, mtl.Anisotropy);
-	/* a 通道 = 接受阴影标记：延迟光照阶段没有逐对象数据，只能随 G-Buffer 带过去 */
-	GBufferTexture5 = vec4(vert2frag.Position, vert2frag.ReceiveShadow);
+	/* 接受阴影已经跟着法线那张走了，这里只留世界位置 */
+	GBufferTexture5 = vec4(vert2frag.Position, 0.0f);
 
+#if OBJECT_ID
 	ObjectId = vert2frag.ObjectId;
+#endif
 	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);
 }

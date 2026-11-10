@@ -35,6 +35,8 @@ namespace Helios
 		/* 编辑器视口缺省走延迟管线（可在 View 菜单切前向 / 延迟） */
 		SetRenderPipeline(RenderPipeline::Deferred);
 		SetDebugName("EditorCamera");
+		/* 像素拾取与选中描边要读实体 id 附件，只有编辑器视口需要 */
+		GetRenderView()->SetObjectIdEnabled(true);
 
 		UpdateCameraDirections();
 
@@ -310,6 +312,10 @@ namespace Helios
 	int32_t EditorCamera::PickingEntityByPixelPos(uint32_t x, uint32_t y) const
 	{
 		int32_t entity_id = -1;
+
+		/* 没开拾取通道的视图不写这张附件，读了只会拿到脏值 */
+		if (!m_pRenderView->IsObjectIdEnabled())
+			return entity_id;
 
 		/* 拾取通道随管线不同：延迟 = GBufferPass 的第 6 张附件（ObjectId）；
 		 * 前向 = ScenePass 的第 1 张附件（颜色在 0）。两者清值都是 -1。 */

@@ -138,11 +138,16 @@ namespace Helios
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
+				const bool object_id_enabled = render_view.IsObjectIdEnabled();
 
 				FrameGraphTexture::Descriptor color_target_desc;
 				color_target_desc.Width = viewport_region.Width;
 				color_target_desc.Height = viewport_region.Height;
 				color_target_desc.TextureFormat = TextureFormat::RGBA8;
+
+				/* 法线用 10:10:10:2：比 RGBA8 每个通道多两位，剩下的 2 位放接受阴影 */
+				FrameGraphTexture::Descriptor normal_target_desc = color_target_desc;
+				normal_target_desc.TextureFormat = TextureFormat::R10G10B10A2;
 
 				/* 世界位置通道用浮点格式：RGBA8 会把世界坐标钳制到 [0,1]（负值归零、
 				 * 大于 1 截平），光照阶段拿它做级联阴影变换时采样点全部落在错误位置 ——
@@ -189,12 +194,14 @@ namespace Helios
 					[&, gbuffer_shader](FrameGraphBuilder& builder, GBufferPassData& data)
 					{
 						data.GBufferTexture0 = builder.CreateTexture("GBufferTexture0", color_target_desc);
-						data.GBufferTexture1 = builder.CreateTexture("GBufferTexture1", color_target_desc);
+						data.GBufferTexture1 = builder.CreateTexture("GBufferTexture1", normal_target_desc);
 						data.GBufferTexture2 = builder.CreateTexture("GBufferTexture2", color_target_desc);
 						data.GBufferTexture3 = builder.CreateTexture("GBufferTexture3", color_target_desc);
 						data.GBufferTexture4 = builder.CreateTexture("GBufferTexture4", color_target_desc);
 						data.GBufferTexture5 = builder.CreateTexture("GBufferTexture5", world_pos_target_desc);
-						data.ObjectId = builder.CreateTexture("GBufferObjectId", object_id_desc);
+						/* 拾取通道只有编辑器视口要：关掉时不建这张附件，省 4 字节/像素 */
+						if (object_id_enabled)
+							data.ObjectId = builder.CreateTexture("GBufferObjectId", object_id_desc);
 						data.Depth = builder.CreateTexture("GBufferDepth", depth_target_desc);
 						data.Velocity = builder.CreateTexture("GBufferVelocity", velocity_desc);
 
@@ -204,7 +211,8 @@ namespace Helios
 						builder.BindOutputResource(data.GBufferTexture3, FrameGraphTexture::Usage::ColorAttachment);
 						builder.BindOutputResource(data.GBufferTexture4, FrameGraphTexture::Usage::ColorAttachment);
 						builder.BindOutputResource(data.GBufferTexture5, FrameGraphTexture::Usage::ColorAttachment);
-						builder.BindOutputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
+						if (object_id_enabled)
+							builder.BindOutputResource(data.ObjectId, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
 						/* 深度给时域抗锯齿采样：补一个 Sampleable，延迟本来就是单采样 */
 						builder.BindOutputResource(data.Depth, FrameGraphTexture::Usage::DepthAttachment | FrameGraphTexture::Usage::Sampleable);
 						builder.BindOutputResource(data.Velocity, FrameGraphTexture::Usage::ColorAttachment | FrameGraphTexture::Usage::Sampleable);
@@ -216,18 +224,27 @@ namespace Helios
 						pass_desc.Attachments.ColorAttachments(3) = data.GBufferTexture3;
 						pass_desc.Attachments.ColorAttachments(4) = data.GBufferTexture4;
 						pass_desc.Attachments.ColorAttachments(5) = data.GBufferTexture5;
-						pass_desc.Attachments.ColorAttachments(6) = data.ObjectId;
-						pass_desc.Attachments.ColorAttachments(7) = data.Velocity;
+						/* 附件编号必须连续：关掉拾取通道时速度图顶到 6 */
+						if (object_id_enabled)
+						{
+							pass_desc.Attachments.ColorAttachments(6) = data.ObjectId;
+							pass_desc.Attachments.ColorAttachments(7) = data.Velocity;
+							pass_desc.ColorClearValues.resize(8);
+							/* 空像素读作 -1，拾取时按"没点到"处理 */
+							pass_desc.ColorClearValues[6] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
+						}
+						else
+						{
+							pass_desc.Attachments.ColorAttachments(6) = data.Velocity;
+						}
 						pass_desc.Attachments.DepthAttachment() = data.Depth;
-						pass_desc.ColorClearValues.resize(8);
-						pass_desc.ColorClearValues[6] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
 						pass_desc.ViewportRegion = viewport_region;
 						/* G-Buffer 不开多重采样：轮廓像素会把空采样（清零的法线 / 世界坐标）
 						 * 一起平均进来，光照拿到假数据，边缘冒白边。延迟的抗锯齿交给后处理。 */
 						pass_desc.Multisample = false;
 						builder.CreateRenderPass("GBufferPassRenderTarget", pass_desc);
 					},
-					[&render_view, gbuffer_shader](const FrameGraphResources& resources, const GBufferPassData& data)
+					[&render_view, gbuffer_shader, object_id_enabled](const FrameGraphResources& resources, const GBufferPassData& data)
 					{
 						const auto render_pass_info = resources.GetPassRenderTarget();
 						render_view.EmplacePassFrameBuffer("GBufferPass", render_pass_info);
@@ -240,6 +257,8 @@ namespace Helios
 							 * 不写会残留上一个对象的取值 */
 							DrawParams per_draw;
 							per_draw.FillMissing = MaterialFill::Values;
+							/* 拾取通道跟着视图开关走：关了就不请求那套输出 */
+							per_draw.VariantDefines["OBJECT_ID"] = object_id_enabled ? 1 : 0;
 
 							/* 组批：列表已经按材质 + 网格排过序，同材质同网格的连续对象合成一笔实例化绘制。
 							 * 物体的世界矩阵与 ObjectId 走实例数据，不再逐对象写 UBO */
@@ -321,7 +340,8 @@ namespace Helios
 				frame_graph->GetBlackboard()["GBufferTexture3"] = gbuffer_pass->GetData().GBufferTexture3;
 				frame_graph->GetBlackboard()["GBufferTexture4"] = gbuffer_pass->GetData().GBufferTexture4;
 				frame_graph->GetBlackboard()["GBufferTexture5"] = gbuffer_pass->GetData().GBufferTexture5;
-				frame_graph->GetBlackboard()["GBufferObjectId"] = gbuffer_pass->GetData().ObjectId;
+				if (object_id_enabled)
+					frame_graph->GetBlackboard()["GBufferObjectId"] = gbuffer_pass->GetData().ObjectId;
 				frame_graph->GetBlackboard()["GBufferDepth"] = gbuffer_pass->GetData().Depth;
 				frame_graph->GetBlackboard()["GBufferVelocity"] = gbuffer_pass->GetData().Velocity;
 				/* 两条管线统一从 "Velocity" 取速度图（前向在它自己的 Pass 里写这个键） */

@@ -5,6 +5,8 @@
  * 写颜色还是填 G-Buffer 只看视图管线：前向（含探针捕获）写颜色，延迟才写运动矢量。 */
 // @variant(RENDER_PIPELINE, view)
 // @variant(DEBUG_VIEW, view)
+/* 拾取通道开关：与 GBuffer.glsl 同一维度，关掉时速度图顶到 6 */
+// @variant(OBJECT_ID, draw)
 
 layout(location = 0) in vec2 a_Uv;
 /* 实例数据：每 patch 一条 */
@@ -76,14 +78,18 @@ void main()
 layout(location = 0) out vec4 OutFragColor;
 layout(location = 1) out float ObjectId;
 #else
-layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: Roughness */
-layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal; a: Metallic */
-layout(location = 2) out vec4 GBufferTexture2; /* rgb: Specular; a: AO */
+layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: AO */
+layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal(10:10:10); a: 接受阴影(2 bit) */
+layout(location = 2) out vec4 GBufferTexture2; /* r: Roughness; g: Metallic; b: Specular; a: 着色模型 ID */
 layout(location = 3) out vec4 GBufferTexture3; /* rgb: Emission; a: IOR */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
-layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition; a: 接受阴影 */
+layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition */
+#if OBJECT_ID
 layout(location = 6) out float ObjectId;
 layout(location = 7) out vec2 Velocity;
+#else
+layout(location = 6) out vec2 Velocity;
+#endif
 #endif
 
 struct SVextex2Frag
@@ -159,16 +165,19 @@ void main()
 
 	OutFragColor = vec4(color, 1.0f);
 #else
-	GBufferTexture0 = vec4(surface.Albedo, surface.Roughness);
+	GBufferTexture0 = vec4(surface.Albedo, 1.0f);
 	/* 法线按 n * 0.5 + 0.5 编码，与 GBuffer.glsl 同一约定 */
-	GBufferTexture1 = vec4(surface.Normal * 0.5f + 0.5f, 0.0f);
-	GBufferTexture2 = vec4(vec3(0.04f), 1.0f);
+	GBufferTexture1 = vec4(surface.Normal * 0.5f + 0.5f, vert2frag.ReceiveShadow);
+	/* 地形没有金属度与高光贴图，常数填满；alpha 的模型 ID 记 0 */
+	GBufferTexture2 = vec4(surface.Roughness, 0.0f, 0.04f, 0.0f);
 	GBufferTexture3 = vec4(0.0f);
 	GBufferTexture4 = vec4(0.0f);
-	GBufferTexture5 = vec4(vert2frag.WorldPosition, vert2frag.ReceiveShadow);
+	GBufferTexture5 = vec4(vert2frag.WorldPosition, 0.0f);
 
 	/* 地形可以按像素拾取：写实体 id，跟模型走同一套 */
+#if OBJECT_ID
 	ObjectId = float(u_TerrainObjectId);
+#endif
 	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);
 #endif
 }
