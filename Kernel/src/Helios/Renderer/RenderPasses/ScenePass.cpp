@@ -223,7 +223,7 @@ namespace Helios
 					if (instance_buffer == nullptr)
 						continue;
 
-					/* 拾取通道的实体 id：这一片的每次提交都带上，着色器从对象 UBO 读 */
+					/* 拾取通道的实体 id */
 					const int32_t grass_object_id = static_cast<int32_t>(static_cast<uint32_t>(entity));
 
 					const SharedPtr<Material> material = get_material(grass);

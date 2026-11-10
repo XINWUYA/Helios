@@ -170,7 +170,6 @@ void main()
 	GBufferTexture4 = vec4(1.0f, 1.0f, 1.0f, 0.0f);
 
 #if HELIOS_EDITOR
-	/* 编辑器视图才写拾取通道：点草选中的是草地实体 */
 	ObjectId = float(u_ObjectId);
 #endif
 	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);

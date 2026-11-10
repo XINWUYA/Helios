@@ -168,10 +168,9 @@ void main()
 	 * 填 0.04 会让高光档与 IBL 的菲涅尔跟前向对不上 */
 	GBufferTexture2 = vec4(surface.Roughness, 0.0f, 0.0f, SHADING_MODEL_STANDARD);
 	GBufferTexture3 = vec4(0.0f);
-	/* 环境兜底色写白（三个通道都是 1）：前向的 MakeMaterialInput 默认就是 vec3(1)，a 是各向异性 */
+	/* 环境兜底色写全 1：前向的 MakeMaterialInput 默认是 vec3(1)，a 是各向异性 */
 	GBufferTexture4 = vec4(1.0f, 1.0f, 1.0f, 0.0f);
 
-	/* 地形可以按像素拾取：写实体 id，跟模型走同一套 */
 #if HELIOS_EDITOR
 	ObjectId = float(u_ObjectId);
 #endif

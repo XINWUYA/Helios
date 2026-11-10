@@ -49,8 +49,7 @@ namespace Helios
 
 		/* per_draw：单次绘制的覆盖参数（IBL 这类"每次绘制不同"的绑定）。
 	 * 只写当前绑定的 Shader 与纹理、不落材质对象 —— 共享材质因此保持只读。 */
-	/* object_id >= 0 时把它写进对象 UBO 的 u_ObjectId：草、地形这类每批只有一个实体的
-	 * 提交靠它拿到拾取通道的 id，模型走实例数据（一批里多个实体）不用这个 */
+	/* object_id >= 0 时写进对象 UBO 供拾取通道用；模型一批多实体，走实例数据不带这个 */
 	static void Submit(const SharedPtr<Material>& material, const MeshPrimitive& mesh_primitive,
 	                   const DrawParams* per_draw = nullptr, uint32_t index_count = 0,
 	                   int32_t object_id = -1);

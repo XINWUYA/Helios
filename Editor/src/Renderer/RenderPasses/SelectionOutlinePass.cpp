@@ -73,6 +73,36 @@ namespace Helios
 			}
 		}
 
+		/* 实体在本视图里有没有可见几何：网格之外，草与地形也写进 G-Buffer。
+		 * 新增非网格几何时在这里补一条 */
+		bool HasVisibleGeometry(RenderView& render_view, int32_t selection_id)
+		{
+			const auto& visible_objects = render_view.GetVisibleMeshObjects();
+			if (std::any_of(visible_objects.begin(), visible_objects.end(),
+				[selection_id](const VisibleMeshObject& object) { return object.ObjectId == selection_id; }))
+				return true;
+
+			const auto scene = render_view.GetOwnerScene();
+			if (scene == nullptr)
+				return false;
+
+			/* 实体 id 存的是 index，version 对不上，不能用 valid()，只能按 index 比 */
+			const auto& registry = scene->GetRegistry();
+			const auto same = [selection_id](auto entity)
+			{
+				return static_cast<int32_t>(static_cast<uint32_t>(entity)) == selection_id;
+			};
+			for (auto entity : registry.view<GrassComponent>())
+			{
+				if (same(entity)) return true;
+			}
+			for (auto entity : registry.view<TerrainComponent>())
+			{
+				if (same(entity)) return true;
+			}
+			return false;
+		}
+
 		void AddPass(RenderView& render_view, int32_t selection_id,
 			FrameGraphResourceHandleTyped<FrameGraphTexture> output,
 			FrameGraphResourceHandleTyped<FrameGraphTexture> object_id)
@@ -82,29 +112,8 @@ namespace Helios
 			if (selection_id < 0 || !output || !object_id)
 				return;
 
-			/* 选中项在本视图里没有可见几何（相机 / 光源这类只有 gizmo 的节点）就整个跳过：
-			 * 实体 id 附件里不会有它的像素，画完也是全透明，白白跑一遍全屏采样。
-			 * 草不在网格表里，但它写进了 G-Buffer，要按实体上有没有 GrassComponent 补一条 ——
-			 * 实体 id 是 index，version 对不上就不能用 valid()，得按 index 比 */
-			const auto& visible_objects = render_view.GetVisibleMeshObjects();
-			bool has_visible_geometry = std::any_of(visible_objects.begin(), visible_objects.end(),
-				[selection_id](const VisibleMeshObject& object) { return object.ObjectId == selection_id; });
-			if (!has_visible_geometry)
-			{
-				if (const auto scene = render_view.GetOwnerScene())
-				{
-					for (auto [entity, grass] : scene->GetRegistry().view<GrassComponent>().each())
-					{
-						(void)grass;
-						if (static_cast<int32_t>(static_cast<uint32_t>(entity)) == selection_id)
-						{
-							has_visible_geometry = true;
-							break;
-						}
-					}
-				}
-			}
-			if (!has_visible_geometry)
+			/* 选中项没有可见几何（相机 / 光源这类只有 gizmo 的节点）就整个跳过 */
+			if (!HasVisibleGeometry(render_view, selection_id))
 				return;
 
 			auto& frame_graph = render_view.GetFrameGraph();

@@ -130,7 +130,7 @@ namespace Helios
 	{
 		namespace
 		{
-			/* GBuffer Pass：可见对象渲染进 MRT（6 张 G-Buffer 纹理 + ObjectId + 深度）。
+			/* G-Buffer Pass：可见对象渲染进 MRT（5 张 G-Buffer + 速度 + 可选的拾取通道 + 深度）。
 			 * 普通材质在提交前转换为 GBuffer.glsl 对应的临时材质。 */
 			void AddGBufferPass(RenderView& render_view)
 			{

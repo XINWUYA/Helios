@@ -247,7 +247,7 @@ namespace Helios::TerrainDraw
 			{
 				Renderer::SubmitIndirect(material, TerrainField::GetPatchPrimitive(),
 					batch.GpuInstances, batch.GpuArgs, &per_draw,
-					&TerrainField::GetInstanceLayout());
+					&TerrainField::GetInstanceLayout(), 0, 0, batch.EntityId);
 				return;
 			}
 
@@ -256,7 +256,7 @@ namespace Helios::TerrainDraw
 
 			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), frame.Range.Buffer,
 				frame.Range.FirstInstance + batch.First, batch.Count, &per_draw, 0,
-				&TerrainField::GetInstanceLayout());
+				&TerrainField::GetInstanceLayout(), batch.EntityId);
 		}
 
 		/* 前向要自己算光照，环境项跟延迟一样取最近探针的 IBL；延迟走 G-Buffer，
@@ -779,7 +779,7 @@ namespace Helios::TerrainDraw
 
 			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), range.Buffer,
 				range.FirstInstance + batch.First, batch.Count, &per_draw, 0,
-				&TerrainField::GetInstanceLayout());
+				&TerrainField::GetInstanceLayout(), batch.EntityId);
 		}
 	}
 
@@ -836,7 +836,7 @@ namespace Helios::TerrainDraw
 
 			Renderer::SubmitInstanced(material, TerrainField::GetPatchPrimitive(), range.Buffer,
 				range.FirstInstance + batch.First, batch.Count, &per_draw, 0,
-				&TerrainField::GetInstanceLayout());
+				&TerrainField::GetInstanceLayout(), batch.EntityId);
 		}
 	}
 }
