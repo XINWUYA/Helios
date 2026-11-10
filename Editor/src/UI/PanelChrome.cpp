@@ -611,7 +611,7 @@ namespace Helios::PanelChrome
 
 	Card BeginCard(const char* title, Icons::Id title_icon,
 	                      Icons::Id action_icon, const char* action_tooltip,
-	                      bool default_open, const char* drag_payload)
+	                      bool default_open, const char* drag_payload, bool force_open)
 	{
 		const ImGuiStyle& style = ImGui::GetStyle();
 		ImDrawList* draw_list = ImGui::GetWindowDrawList();
@@ -628,6 +628,8 @@ namespace Helios::PanelChrome
 		 * 这一层只包卡头，卡身内容的 ID 不受影响。 */
 		ImGui::PushID(title);
 		bool* open = ImGui::GetStateStorage()->GetBoolRef(ImGui::GetID("##CardOpen"), default_open);
+		if (force_open)
+			*open = true;
 		card.DropId = ImGui::GetID("##CardDrop");
 
 		draw_list->ChannelsSplit(2);

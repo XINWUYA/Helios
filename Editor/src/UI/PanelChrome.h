@@ -185,10 +185,12 @@ namespace Helios::PanelChrome
 	/* 开一张卡片：卡头（折叠箭头 + 可选图标 + 标题 + 右端动作）+ 卡身；动作按钮由卡片自己提交。
 	 * 折叠状态存在窗口级存储里、键 = 标题（连同调用方 ID 作用域）；同名卡要调用方自己 PushID 区分。
 	 * drag_payload 非空时卡头能拖走（内容就是这段字符串），点击折叠改成松手才判定，
-	 * 拖过一段距离的松手不算点击。 */
+	 * 拖过一段距离的松手不算点击。
+	 * force_open 为真时每帧强制展开（搜索命中期间用，折叠状态不能挡住结果）。 */
 	Card BeginCard(const char* title, Icons::Id title_icon = Icons::Id::None,
 	                      Icons::Id action_icon = Icons::Id::None, const char* action_tooltip = nullptr,
-	                      bool default_open = true, const char* drag_payload = nullptr);
+	                      bool default_open = true, const char* drag_payload = nullptr,
+	                      bool force_open = false);
 
 	/* 卡头徽章：标题右侧一枚小圆角标签（如 Instance），只做标识、不抢卡头的点击。
 	 * 必须在 BeginCard 之后、卡身之前调 —— 那时绘制通道还是卡头那一层。 */
