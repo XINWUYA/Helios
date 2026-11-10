@@ -65,6 +65,8 @@ namespace Helios
 	{
 	public:
 		RenderView(Camera* owner_camera);
+		/* 探针捕获专用：不绑相机，渲染内容由调用方逐面给（见 PrepareCapture） */
+		explicit RenderView(std::string debug_name);
 		~RenderView();
 
 		/* 获取裁剪相机 */
@@ -185,6 +187,10 @@ namespace Helios
 		/* 准备一帧的RenderView数据 */
 		void Prepare();
 
+		/* 探针捕获前的准备：不收集可见对象，只把场景 / 层 / 视口 / 管线与视图级变体备好。
+		 * 捕获固定走前向并关掉调试档位 —— 立方图里不该有读数 */
+		void PrepareCapture(const SharedPtr<Scene>& scene, LayerMask culling_mask, const ViewportRegion& region);
+
 		/* 视图级变体取值：换视图才变的维度（管线开关这类）。写进来的值会并进
 		 * 材质变体请求，逐绘制提交时按来源分发；换视图重建视图对象即可复位 */
 		void SetVariantDefine(const std::string& name, int value);
@@ -214,13 +220,16 @@ namespace Helios
 		[[nodiscard]] bool HasShadowCast() const { return m_IsHasShadowCast; }
 
 	private:
+		/* 两个构造函数共用的初始化：建 FrameGraph 与阴影管理器 */
+		void Init(const std::string& debug_name);
 		/* 视锥体剔除，仅保留对当前RenderView可见的对象 */
 		void PrepareVisibleObjects();
 		/* 按实体组装可绘制对象（材质解析 + 世界包围盒），索引查询出来的候选走这里 */
 		void BuildMeshObjects(const Scene& scene, const std::vector<entt::entity>& entities,
 			std::vector<VisibleMeshObject>& out) const;
-		/* 准备光源信息 */
-		void PrepareLights();
+		/* 准备光源信息。register_shadows = false 时只收光源列表，不注册阴影
+		 * （探针捕获用中性阴影图，不需要自己的一套级联） */
+		void PrepareLights(bool register_shadows = true);
 		/* 给可见对象补上一帧的世界矩阵（运动矢量用） */
 		void PreparePreviousTransforms();
 		/* 更新FrameGraph */

@@ -295,7 +295,7 @@ namespace Helios
     {
     public:
         ReflectionProbeManager() = default;
-        ~ReflectionProbeManager() = default;
+        ~ReflectionProbeManager();
         ReflectionProbeManager(const ReflectionProbeManager&) = delete;
         ReflectionProbeManager& operator=(const ReflectionProbeManager&) = delete;
 
@@ -343,6 +343,9 @@ namespace Helios
     private:
         /* 烘焙BRDF查找表 */
         void BakeBRDFLutMap();
+
+        /* 探针捕获专用视图：不绑相机，管线 / 变体 / 调试档位都跟相机视图隔开 */
+        SharedPtr<RenderView> m_pCaptureView{};
 
         /* 已注册的反射探针（由 ReflectionProbeComponent 注册，随组件销毁注销） */
         std::vector<SharedPtr<ReflectionProbe>> m_RegisteredProbes{};

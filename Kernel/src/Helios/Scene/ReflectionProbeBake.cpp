@@ -176,18 +176,9 @@ namespace Helios
         }
         capture_fb->Unbind();
 
-        /* 捕获过程中改写了全局共享的 View 常量（上面每面都调用 SetViewUniforms 换成
-         * 捕获相机）。ViewUniformBuffer 是全局唯一的，若不恢复，本 Pass 之后的
-         * ScenePass 会继续用最后一个捕获面的视角（探针位置、90° FOV）绘制主视图。 */
-        if (render_view)
-        {
-            if (const Camera* culling_camera = render_view->GetCullingCamera())
-            {
-                Renderer::SetViewUniforms(culling_camera->GetViewMatrix(),
-                    culling_camera->GetProjectionMatrix(), culling_camera->GetPosition());
-            }
-        }
-
+        /* 捕获改写了全局共享的 View 常量（上面每面都调用 SetViewUniforms 换成
+         * 捕获相机）。ViewUniformBuffer 是全局唯一的，必须换回宿主相机的视角 ——
+         * 这里拿的是捕获视图（没有相机），恢复交给调用的 ReflectionProbeManager。 */
     }
 
     void ReflectionProbe::BakeIrradianceMapFace(uint32_t face)

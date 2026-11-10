@@ -249,6 +249,10 @@ namespace Helios
         if (m_NeedBakeProbes.empty())
             return;
 
+        /* 捕获走自己的视图：管线、视图变体、调试档位都不沾宿主相机 */
+        if (m_pCaptureView == nullptr)
+            m_pCaptureView = CreateSharedPtr<RenderView>("ReflectionProbeCaptureView");
+
         /* Probe 捕获使用中性阴影图，不复用主相机的级联阴影。 */
         const auto no_shadow_map_handle = frame_graph->GetBlackboard()
             .GetResourceHandle<FrameGraphTexture>("NoShadowMapHandle");
@@ -269,13 +273,32 @@ namespace Helios
                     builder.BindInputResource(data.NoShadowMap, FrameGraphTexture::Usage::Sampleable);
                     builder.AsSideEffect(true);
                 },
-                [probe, render_view](const FrameGraphResources& resources, const BakeProbePassData& data)
+                [this, probe, render_view](const FrameGraphResources& resources, const BakeProbePassData& data)
                 {
                     ScopedShadowMapBinding shadow_map(resources.Get(data.NoShadowMap).Texture);
-                    probe->Bake(render_view);
+
+                    /* 捕获期间全局视图变体表切到捕获视图，结束后恢复宿主视图 ——
+                     * 同一张渲染图里后面的 Pass 还要按宿主视图的档位画 */
+                    const ShaderVariantDefines host_defines = Renderer::GetViewVariantDefines();
+                    const Camera* host_camera = render_view->GetCullingCamera();
+
+                    const uint32_t size = std::max(1u, probe->GetBakeConfig().EnvSize);
+                    m_pCaptureView->PrepareCapture(render_view->GetOwnerScene(), probe->GetCullingMask(),
+                        ViewportRegion{ 0, 0, size, size });
+
+                    probe->Bake(m_pCaptureView.get());
+
+                    Renderer::SetViewVariantDefines(host_defines);
+                    if (host_camera != nullptr)
+                    {
+                        Renderer::SetViewUniforms(host_camera->GetViewMatrix(),
+                            host_camera->GetProjectionMatrix(), host_camera->GetPosition());
+                    }
                 });
         }
     }
+
+    ReflectionProbeManager::~ReflectionProbeManager() = default;
 
     /* 烘焙BRDF查找表 */
     void ReflectionProbeManager::BakeBRDFLutMap()

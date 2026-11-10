@@ -25,9 +25,19 @@ namespace Helios
 	RenderView::RenderView(Camera* owner_camera)
 		: m_pOwnerCamera(owner_camera)
 	{
+		Init(m_pOwnerCamera->GetDebugName());
+	}
+
+	RenderView::RenderView(std::string debug_name)
+	{
+		Init(debug_name);
+	}
+
+	void RenderView::Init(const std::string& debug_name)
+	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
-		m_pFrameGraph = CreateSharedPtr<FrameGraph>(m_pOwnerCamera->GetDebugName() + "_FrameGraph");
+		m_pFrameGraph = CreateSharedPtr<FrameGraph>(debug_name + "_FrameGraph");
 		m_pShadowMapManager = CreateSharedPtr<ShadowMapManager>();
 	}
 
@@ -106,6 +116,26 @@ namespace Helios
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
 		
+	}
+
+	/* 探针捕获前的准备：捕获没有相机，不收集可见对象、也不建阴影 Pass（绑中性阴影图）。
+	 * 管线固定前向 —— 立方图要的是颜色；调试档位强制关掉，读数不该被烘进环境。 */
+	void RenderView::PrepareCapture(const SharedPtr<Scene>& scene, LayerMask culling_mask,
+		const ViewportRegion& region)
+	{
+		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
+
+		m_pOwnerScene = scene;
+		m_CullingMask = culling_mask;
+		m_ViewportRegion = region;
+		m_RenderPipeline = RenderPipeline::Forward;
+		m_DebugViewMode = DebugViewMode::None;
+
+		PrepareLights(false);
+
+		SetVariantDefine("RENDER_PIPELINE", 1);
+		/* 捕获期间全局表切到本视图，调用方负责在结束后恢复宿主视图的那份 */
+		Renderer::SetViewVariantDefines(m_VariantDefines);
 	}
 
 	void RenderView::SetVariantDefine(const std::string& name, int value)
@@ -478,7 +508,7 @@ namespace Helios
 	}
 
 	/* 准备光源信息 */
-	void RenderView::PrepareLights()
+	void RenderView::PrepareLights(bool register_shadows)
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
@@ -537,6 +567,12 @@ namespace Helios
 			});
 
 		/* 投影光源是同一批就沿用上一帧的注册结果（级联矩阵的脏检测另有方向 / 相机比较） */
+		if (!register_shadows)
+		{
+			m_IsHasShadowCast = false;
+			return;
+		}
+
 		std::vector<uint64_t> signatures;
 		signatures.reserve(shadow_lights.size());
 		for (const auto& light : shadow_lights)
