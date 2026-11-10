@@ -135,6 +135,8 @@ namespace Helios
 
 		SetVariantDefine("RENDER_PIPELINE", 1);
 		SetVariantDefine("DEBUG_VIEW", 0);
+		/* 探针捕获不是编辑器视图，不写拾取通道 */
+		SetVariantDefine("HELIOS_EDITOR", 0);
 		/* 捕获期间全局表切到本视图，调用方负责在结束后恢复宿主视图的那份 */
 		Renderer::SetViewVariantDefines(m_VariantDefines);
 	}
@@ -158,10 +160,11 @@ namespace Helios
 
 		/* 收集当前RenderView可见的对象 */
 		PrepareVisibleObjects();
-		/* 管线与调试档位都是视图自己的属性：同一帧里不同视图可以各走一套。声明成 view 级的
-		 * 变体从这里取值，逐笔传既啰嗦又会漏 */
+		/* 管线、调试档位、编辑器视图都是视图自己的属性：同一帧里不同视图可以各走一套。
+		 * 声明成 view 级的变体从这里取值，逐笔传既啰嗦又会漏 */
 		SetVariantDefine("RENDER_PIPELINE", GetRenderPipeline() == RenderPipeline::Forward ? 1 : 0);
 		SetVariantDefine("DEBUG_VIEW", GetDebugViewMode() != DebugViewMode::None ? 1 : 0);
+		SetVariantDefine("HELIOS_EDITOR", m_IsEditorView ? 1 : 0);
 		/* 本视图的变体取值交给渲染器：变体在 SubmitDraw 里按来源合成 */
 		Renderer::SetViewVariantDefines(m_VariantDefines);
 		/* 补上一帧的世界矩阵：运动矢量靠它区分"相机在动"和"物体自己在动" */

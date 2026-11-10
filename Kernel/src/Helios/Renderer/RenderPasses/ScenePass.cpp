@@ -424,6 +424,53 @@ namespace Helios
 				});
 		}
 
+		/* 草的 G-Buffer 材质：一份着色器服务整场草，外观参数由 per-draw 逐片带过来 */
+		SharedPtr<Material> GetGrassGBufferMaterial()
+		{
+			static BuiltinAsset<DeviceShader> s_shader("Shaders/Grass/GrassGBuffer.glsl");
+			static SharedPtr<Material> s_material;
+			const auto shader = s_shader.Get();
+			if (s_material == nullptr || s_material->GetShader() != shader)
+			{
+				s_material = Material::Create(shader);
+				/* 叶片是单面几何，两面都要画 */
+				s_material->GetRasterState().CullMode = CullMode::Cull_None;
+			}
+			return s_material;
+		}
+
+		/* 草的 G-Buffer 提交：与可见着色同一套剔除与实例缓冲，只换材质。
+		 * 注意 headless 检查工具里草不出现，编辑器视口正常 */
+		void SubmitGrassGBuffer(RenderView& render_view, Scene& scene)
+		{
+			PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
+
+			const SharedPtr<Material> material = GetGrassGBufferMaterial();
+			if (material == nullptr)
+				return;
+
+			SubmitGrassDraws(render_view, scene, RenderStatistics::GrassPass::Visible,
+				[&material](const GrassComponent&) { return material; },
+				[](const GrassComponent& grass, DrawParams& per_draw)
+				{
+					/* 与调试重绘同一条路：外观参数从源材质逐片带过来 */
+					for (const auto& [key, info] : grass.GetMaterial()->GetAllParameters())
+					{
+						(void)key;
+						if (info.Type == ParamType::Texture)
+							continue;
+						const bool overridden = std::any_of(per_draw.Overrides.begin(), per_draw.Overrides.end(),
+							[&info](const MaterialParamInfo& existing) { return existing.Name == info.Name; });
+						if (!overridden)
+							per_draw.Overrides.push_back(info);
+					}
+					/* 上一帧风相位：G-Buffer 顶点要用它算运动矢量 */
+					per_draw.Overrides.emplace_back(ParamType::Float, "u_PrevWindPhase", grass.m_PrevWindPhase);
+					/* 光栅状态跟着源材质：双面、深度测写都按草的配置来 */
+					per_draw.RasterStateOverride = grass.GetMaterial()->GetRasterState();
+				});
+		}
+
 		bool HasVisibleGrassFields(const Scene& scene, LayerMask culling_mask)
 		{
 			for (auto [entity, grass] : scene.GetRegistry().view<GrassComponent>().each())
@@ -572,21 +619,20 @@ namespace Helios
 							Renderer::Submit(caster, mesh_object->MeshSegment->GetMeshPrimitive(), &per_draw);
 						}
 
-						/* 草：叶形在顶点里展开，得用上一帧的风相位才能算出上一帧在哪 */
-						SubmitGrassDraws(*render_view, *scene, RenderStatistics::GrassPass::Velocity,
-							[grass_material](const GrassComponent&) { return grass_material; },
-							[](const GrassComponent& grass, DrawParams& per_draw_grass)
-							{
-								per_draw_grass.Overrides.emplace_back(ParamType::Float,
-									"u_PrevWindPhase", grass.m_PrevWindPhase);
-								per_draw_grass.RasterStateOverride =
-									MakeVelocityRasterState(grass.GetMaterial()->GetRasterState());
-							});
-
-						/* 地形同样不在可见对象表里：静止几何的位移全部来自相机。
-						 * 叠到 G-Buffer 已有的速度图上时跳过它 —— 那张图里地形已经写过了 */
+						/* 草与地形都已经写进 G-Buffer 的速度图，只有自建速度图（前向直画）时才补 */
 						if (owns_target)
+						{
+							SubmitGrassDraws(*render_view, *scene, RenderStatistics::GrassPass::Velocity,
+								[grass_material](const GrassComponent&) { return grass_material; },
+								[](const GrassComponent& grass, DrawParams& per_draw_grass)
+								{
+									per_draw_grass.Overrides.emplace_back(ParamType::Float,
+										"u_PrevWindPhase", grass.m_PrevWindPhase);
+									per_draw_grass.RasterStateOverride =
+										MakeVelocityRasterState(grass.GetMaterial()->GetRasterState());
+								});
 							TerrainDraw::SubmitVelocity(*render_view, *scene);
+						}
 					}
 					render_pass_info->Unbind();
 					Renderer::GetRenderAPI()->Flush();

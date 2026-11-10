@@ -5,8 +5,8 @@
  * 写颜色还是填 G-Buffer 只看视图管线：前向（含探针捕获）写颜色，延迟才写运动矢量。 */
 // @variant(RENDER_PIPELINE, view)
 // @variant(DEBUG_VIEW, view)
-/* 拾取通道开关：与 GBuffer.glsl 同一维度，关掉时速度图顶到 6 */
-// @variant(OBJECT_ID, draw)
+/* 编辑器视图开关：与 GBuffer.glsl 同一维度，关掉时速度图顶到 6 */
+// @variant(HELIOS_EDITOR, view)
 
 layout(location = 0) in vec2 a_Uv;
 /* 实例数据：每 patch 一条 */
@@ -60,6 +60,7 @@ void main()
 #include "TerrainMaterial.glsl"
 #include "TerrainVTSample.glsl"
 #include "../Builtin/Math.glsl"
+#include "../DeferredShaders/ShadingModel.glsl"
 
 /* 两条管线要的东西不一样：前向自己算光照，延迟只填 G-Buffer。
  * 包在 #if 里是为了让各自的反射表干净，别带上一堆用不到的采样器 */
@@ -84,7 +85,7 @@ layout(location = 2) out vec4 GBufferTexture2; /* r: Roughness; g: Metallic; b: 
 layout(location = 3) out vec4 GBufferTexture3; /* rgb: Emission; a: IOR */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
 layout(location = 5) out vec4 GBufferTexture5; /* rgb: WorldPosition */
-#if OBJECT_ID
+#if HELIOS_EDITOR
 layout(location = 6) out float ObjectId;
 layout(location = 7) out vec2 Velocity;
 #else
@@ -168,14 +169,16 @@ void main()
 	GBufferTexture0 = vec4(surface.Albedo, 1.0f);
 	/* 法线按 n * 0.5 + 0.5 编码，与 GBuffer.glsl 同一约定 */
 	GBufferTexture1 = vec4(surface.Normal * 0.5f + 0.5f, vert2frag.ReceiveShadow);
-	/* 地形没有金属度与高光贴图，常数填满；alpha 的模型 ID 记 0 */
-	GBufferTexture2 = vec4(surface.Roughness, 0.0f, 0.04f, 0.0f);
+	/* 地形没有金属度与高光贴图：前向的 MakeMaterialInput 这两个都是 0，这里也要填 0，
+	 * 填 0.04 会让高光档与 IBL 的菲涅尔跟前向对不上 */
+	GBufferTexture2 = vec4(surface.Roughness, 0.0f, 0.0f, SHADING_MODEL_STANDARD);
 	GBufferTexture3 = vec4(0.0f);
-	GBufferTexture4 = vec4(0.0f);
+	/* 环境兜底色写白（三个通道都是 1）：前向的 MakeMaterialInput 默认就是 vec3(1)，a 是各向异性 */
+	GBufferTexture4 = vec4(1.0f, 1.0f, 1.0f, 0.0f);
 	GBufferTexture5 = vec4(vert2frag.WorldPosition, 0.0f);
 
 	/* 地形可以按像素拾取：写实体 id，跟模型走同一套 */
-#if OBJECT_ID
+#if HELIOS_EDITOR
 	ObjectId = float(u_TerrainObjectId);
 #endif
 	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);

@@ -79,7 +79,9 @@ void main()
 		/* G-Buffer 里高光只存一个标量，调试读数按灰度显示 */
 		mtl.Specular = vec3(gbuffer.Specular);
 		mtl.AO = gbuffer.AO;
-		mtl.Emission = gbuffer.Emission;
+		/* CustomData.rgb 只有模型 ID 0 是自发光，草那张是透射色，不能当 Emission 显示 */
+		mtl.Emission = ShadingModelIs(gbuffer.ShadingModel, SHADING_MODEL_FOLIAGE)
+			? vec3(0.0f) : gbuffer.CustomData.rgb;
 		mtl.Ambient = gbuffer.Ambient;
 		debug_color = DebugSurfaceChannel(u_DebugMode, mtl);
 	}

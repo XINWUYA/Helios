@@ -100,10 +100,10 @@ namespace Helios
 		void SetDebugViewMode(DebugViewMode mode) { m_DebugViewMode = mode; }
 		[[nodiscard]] DebugViewMode GetDebugViewMode() const { return m_DebugViewMode; }
 
-		/* 拾取通道：G-Buffer 里那张实体 id 附件（ObjectId）。只有编辑器视口要，
-		 * 相机视图与探针捕获都不需要，缺省关着，省 4 字节/像素 */
-		void SetObjectIdEnabled(bool enable) { m_IsObjectIdEnabled = enable; }
-		[[nodiscard]] bool IsObjectIdEnabled() const { return m_IsObjectIdEnabled; }
+		/* 编辑器视图：目前只控制 G-Buffer 的拾取通道（实体 id 附件）。
+		 * 相机视图与探针捕获都不要，缺省关着，省 4 字节/像素 */
+		void SetEditorView(bool enable) { m_IsEditorView = enable; }
+		[[nodiscard]] bool IsEditorView() const { return m_IsEditorView; }
 
 		/* 可见层掩码：与对象的 LayerMask 相交非空才进可见列表（阴影投射同源）。
 		 * 缺省全部层；相机上有同名转发（Camera::SetCullingMask）。 */
@@ -257,8 +257,8 @@ namespace Helios
 		DebugViewMode m_DebugViewMode{ DebugViewMode::None };
 		/* 可见层掩码：与对象 LayerMask 相交为空的对象不渲染 */
 		LayerMask m_CullingMask{ Layers::All };
-		/* 是否写拾取通道（实体 id 附件）：只有编辑器视口需要 */
-		bool m_IsObjectIdEnabled{ false };
+		/* 是不是编辑器视图：决定写不写拾取通道 */
+		bool m_IsEditorView{ false };
 		/* 视图级变体取值，逐绘制提交时并进变体请求 */
 		ShaderVariantDefines m_VariantDefines{};
 		/* 后处理设置快照（每视图一份；Scene 解析写入，缺省空 = 全部效果关闭） */

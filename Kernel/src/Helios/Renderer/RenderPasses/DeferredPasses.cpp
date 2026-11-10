@@ -138,7 +138,7 @@ namespace Helios
 
 				auto& frame_graph = render_view.GetFrameGraph();
 				const auto& viewport_region = render_view.GetViewportRegion();
-				const bool object_id_enabled = render_view.IsObjectIdEnabled();
+				const bool object_id_enabled = render_view.IsEditorView();
 
 				FrameGraphTexture::Descriptor color_target_desc;
 				color_target_desc.Width = viewport_region.Width;
@@ -257,8 +257,6 @@ namespace Helios
 							 * 不写会残留上一个对象的取值 */
 							DrawParams per_draw;
 							per_draw.FillMissing = MaterialFill::Values;
-							/* 拾取通道跟着视图开关走：关了就不请求那套输出 */
-							per_draw.VariantDefines["OBJECT_ID"] = object_id_enabled ? 1 : 0;
 
 							/* 组批：列表已经按材质 + 网格排过序，同材质同网格的连续对象合成一笔实例化绘制。
 							 * 物体的世界矩阵与 ObjectId 走实例数据，不再逐对象写 UBO */
@@ -325,9 +323,12 @@ namespace Helios
 										range.Buffer, range.FirstInstance + batch.First, batch.Count, &per_draw);
 							}
 
-							/* 地形不是 MeshSegment，进不了上面那批；在同一套附件上补一趟 */
-							if (const auto terrain_scene = render_view.GetOwnerScene())
-								TerrainDraw::SubmitGBuffer(render_view, *terrain_scene);
+							/* 地形与草都不是 MeshSegment，进不了上面那批；在同一套附件上补两趟 */
+							if (const auto scene = render_view.GetOwnerScene())
+							{
+								TerrainDraw::SubmitGBuffer(render_view, *scene);
+								Forward::SubmitGrassGBuffer(render_view, *scene);
+							}
 						}
 						render_pass_info->Unbind();
 						Renderer::GetRenderAPI()->Flush();
@@ -578,11 +579,9 @@ namespace Helios
 						render_pass_info->Bind();
 						{
 							ScopedShadowMapBinding shadow_map_binding(resources.Get(data.ShadowMapHandle).Texture);
+							/* 只画不支持 G-Buffer 的自定义着色器 */
 							Forward::SubmitSceneObjects(render_view, *scene, false,
 								Forward::SubmitBatch::UnsupportedGBuffer);
-							/* 草不装进 G-Buffer（要双面与透射），跟自定义着色器同一趟前向直画。
-							 * 它自己填主方向光，不进 SubmitSceneObjects 的逐光源循环 */
-							Forward::SubmitGrassFields(render_view, *scene);
 						}
 						render_pass_info->Unbind();
 					}
@@ -744,19 +743,15 @@ namespace Helios
 			if (render_view->GetDebugViewMode() == DebugViewMode::None)
 			{
 				const auto& visible_objects = render_view->GetVisibleMeshObjects();
-				const auto scene = render_view->GetOwnerScene();
-				const bool has_grass = scene != nullptr
-					&& Forward::HasVisibleGrassFields(*scene, render_view->GetCullingMask());
-				if (has_grass || RenderSorting::HasForwardOnlyOpaqueObjects(visible_objects))
+				if (RenderSorting::HasForwardOnlyOpaqueObjects(visible_objects))
 				{
 					AddForwardOpaquePass(*render_view);
 
-					/* 运动矢量：G-Buffer 只覆盖装得进 G-Buffer 的材质，
-					 * 草与前向直画的那批在这里补一笔，写到同一张速度图上 */
+					/* 运动矢量：自定义着色器不进 G-Buffer，在这里补一笔，写到同一张速度图上 */
 					if (PostProcess::UsesTemporalJitter(*render_view))
 					{
 						const auto velocity = render_view->GetFrameGraph()->GetBlackboard()
-							.GetResourceHandle<FrameGraphTexture>("Velocity");
+							.GetResourceHandle<FrameGraphTexture>("GBufferVelocity");
 						Forward::AddVelocityPass(render_view, Forward::SubmitBatch::UnsupportedGBuffer, velocity);
 					}
 				}

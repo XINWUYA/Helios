@@ -293,10 +293,6 @@ namespace Helios::TerrainDraw
 				DrawParams per_draw;
 				BuildDrawParams(*batch.Field, *batch.Component, batch.EntityId, per_draw);
 
-				/* 拾取通道跟着视图开关走，地形与 GBuffer.glsl 用同一个维度 */
-				if (!forward && view != nullptr)
-					per_draw.VariantDefines["OBJECT_ID"] = view->IsObjectIdEnabled() ? 1 : 0;
-
 				/* 走前向还是延迟由视图级变体 RENDER_PIPELINE 决定，这里只补前向要的环境项 */
 				if (forward && view != nullptr)
 					BindForwardIBL(*view, *batch.Field, per_draw);

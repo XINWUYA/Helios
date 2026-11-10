@@ -1,6 +1,8 @@
 #ifndef GBUFFER_COMMON_GLSL
 #define GBUFFER_COMMON_GLSL
 
+#include "ShadingModel.glsl"
+
 /* 通道分组按访问模式排：基色与 AO 一起读、法线与接受阴影同属几何、
  * 三个 BRDF 标量挤一张。改布局要同步 GBuffer.glsl 与 Terrain.glsl 的写出。 */
 struct SGBufferData
@@ -13,11 +15,7 @@ struct SGBufferData
 	float Metallic;       /* Texture2.g */
 	float Specular;       /* Texture2.b，标量，材质里三通道通常一样 */
 	float ShadingModel;   /* Texture2.a，0 = 标准 PBR，1 = 双面植被 */
-	vec4 CustomData;      /* Texture3，语义按 ShadingModel 解释 */
-	vec3 Emission;        /* CustomData.rgb（模型 ID 0） */
-	float IOR;            /* CustomData.a（模型 ID 0） */
-	vec3 TransmissionColor; /* CustomData.rgb（模型 ID 1） */
-	float Transmission;   /* CustomData.a（模型 ID 1） */
+	vec4 CustomData;      /* Texture3，语义按 ShadingModel 解释，取值处各自说明 */
 	vec3 Ambient;         /* Texture4.rgb */
 	float Anisotropy;     /* Texture4.a */
 	vec3 WorldPosition;   /* Texture5.rgb */
@@ -48,14 +46,8 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 	gbuffer.Metallic = color2.g;
 	gbuffer.Specular = color2.b;
 	gbuffer.ShadingModel = color2.a;
-	/* 第三张是自定义数据：0 = 标准 PBR（自发光 + IOR），1 = 双面植被（透射色 + 强度）。
-	 * 写入方按 ID 填不同语义，读取方在这里一次解释清楚 */
+	/* 第三张是自定义数据，语义由 ShadingModel 决定，用到的两处各自解释 */
 	gbuffer.CustomData = color3;
-	const bool foliage = gbuffer.ShadingModel > 0.5f;
-	gbuffer.Emission = foliage ? vec3(0.0f) : color3.rgb;
-	gbuffer.IOR = foliage ? 0.0f : color3.a;
-	gbuffer.TransmissionColor = foliage ? color3.rgb : vec3(0.0f);
-	gbuffer.Transmission = foliage ? color3.a : 0.0f;
 	gbuffer.Ambient = color4.rgb;
 	gbuffer.Anisotropy = color4.a;
 	gbuffer.WorldPosition = color5.rgb;

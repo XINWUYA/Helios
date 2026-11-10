@@ -69,6 +69,10 @@ namespace Helios
 		 * 所以一件调试材质能服务整场草。调用方负责绑目标、深度与阴影纹理。 */
 		void SubmitGrassDebug(RenderView& render_view, Scene& scene, const SharedPtr<Material>& material);
 
+		/* 草的 G-Buffer 提交：与可见着色同一套剔除与实例缓冲，换成写 G-Buffer 的材质。
+		 * 调用方负责绑目标（含深度）与视口。 */
+		void SubmitGrassGBuffer(RenderView& render_view, Scene& scene);
+
 		/* 场景里有没有本视图可见的草地（延迟管线据此决定挂不挂前向不透明那一趟） */
 		bool HasVisibleGrassFields(const Scene& scene, LayerMask culling_mask);
 

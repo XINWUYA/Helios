@@ -244,6 +244,41 @@ void main()
 		return;
 	}
 
+	/* 双面植被（草）：环绕漫反射加逆光透射，没有镜面项。
+	 * 两个系数取草的默认值，材质里逐片改的值不会生效 */
+	if (ShadingModelIs(gbuffer.ShadingModel, SHADING_MODEL_FOLIAGE))
+	{
+		const float wrap = 0.4f;
+		const float transmission_power = 4.0f;
+		const float ndl = clamp((dot(n, l) + wrap) / (1.0f + wrap), 0.0f, 1.0f);
+		vec3 grass_color = gbuffer.Albedo * ndl * INV_PI * LightFactor(attenuation, shadow);
+		const float back_light = pow(max(dot(-l, v), 0.0f), transmission_power);
+		/* CustomData 在模型 ID 1 下是透射色（rgb）与透射强度（a） */
+		grass_color += gbuffer.CustomData.rgb * gbuffer.Albedo * gbuffer.CustomData.a
+			* back_light * LightFactor(attenuation, shadow);
+
+		if (u_ComposeAmbientEmission > 0)
+		{
+			const float visibility = AmbientShadowVisibility(n, l, shadow);
+			vec3 ambient;
+			if (u_ProbeCount > 0)
+			{
+				const SProbeSelection selection = SelectIBLProbes(world_pos);
+				ambient = max(vec3(0.0f),
+					EvaluateProbeIBL(selection, n, v, gbuffer.Roughness, 0.0f, gbuffer.Albedo));
+			}
+			else
+			{
+				ambient = max(vec3(0.0f),
+					ComposeFallbackAmbient(gbuffer.Ambient, gbuffer.Albedo, gbuffer.AO));
+			}
+			grass_color += ambient * visibility * gbuffer.AO;
+		}
+
+		OutFragColor = vec4(grass_color, 1.0f);
+		return;
+	}
+
 	lighting_result = ComposeDirectLight(l, v, n, gbuffer.Metallic, gbuffer.Roughness, gbuffer.Albedo,
 		attenuation, shadow);
 
@@ -264,7 +299,8 @@ void main()
 			/* 平面环境项与前向的无 IBL 回退走同一份合成 */
 			lighting_result += max(vec3(0.0f), ComposeFallbackAmbient(gbuffer.Ambient, gbuffer.Albedo, gbuffer.AO)) * ambient_visibility;
 		}
-		lighting_result += gbuffer.Emission;
+		/* 走到这里的都是模型 ID 0，CustomData.rgb 是自发光 */
+		lighting_result += gbuffer.CustomData.rgb;
 	}
 
 	OutFragColor = vec4(lighting_result, 1.0f);

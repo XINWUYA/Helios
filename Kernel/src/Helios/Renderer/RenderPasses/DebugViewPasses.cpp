@@ -842,11 +842,9 @@ namespace Helios
 			case DebugViewMode::AmbientOcclusion:
 			case DebugViewMode::Emission:
 			case DebugViewMode::Ambient:
+				/* 草写进 G-Buffer 后，合成 Pass 直读就包含它，不再单独补画 */
 				if (target.HasGBuffer)
-				{
 					AddCompositePass(render_view, target, mode, {}, {});
-					AddGrassOverlayPass(render_view, target, mode);
-				}
 				return;
 			}
 		}
