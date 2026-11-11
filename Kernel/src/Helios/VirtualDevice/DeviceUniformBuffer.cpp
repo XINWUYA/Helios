@@ -1,7 +1,9 @@
 ﻿#include "Pch.h"
 #include "DeviceUniformBuffer.h"
 #include "Helios/Renderer/Renderer.h"
+#if HELIOS_PLATFORM_DESKTOP
 #include "GraphicsAPI/OpenGL/OpenGLUniformBuffer.h"
+#endif
 #if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalUniformBuffer.h"
 #endif
@@ -15,8 +17,10 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLUniformBuffer>(size, binding_point);
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalUniformBuffer>(size, binding_point);

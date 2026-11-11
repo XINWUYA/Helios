@@ -4,7 +4,9 @@
 #include "Helios/Renderer/ShaderCompiler.h"
 #include "Helios/Renderer/GlslDeclScan.h"
 #include "Helios/Renderer/ShaderAnnotation.h"
+#if HELIOS_PLATFORM_DESKTOP
 #include "GraphicsAPI/OpenGL/OpenGLShader.h"
+#endif
 #if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalShader.h"
 #endif
@@ -45,9 +47,11 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			shader = CreateSharedPtr<OpenGLShader>(filepath, defines);
 			break;
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			shader = CreateSharedPtr<MetalShader>(filepath, defines);
@@ -75,8 +79,10 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLShader>(name, vertex_src, pixel_src);
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalShader>(name, vertex_src, pixel_src);

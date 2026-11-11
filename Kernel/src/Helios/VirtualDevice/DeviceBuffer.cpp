@@ -1,7 +1,9 @@
 ﻿#include "Pch.h"
 #include "DeviceBuffer.h"
 #include "Helios/Renderer/Renderer.h"
+#if HELIOS_PLATFORM_DESKTOP
 #include "GraphicsAPI/OpenGL/OpenGLBuffer.h"
+#endif
 #if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalBuffer.h"
 #endif
@@ -87,8 +89,10 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLVertexBuffer>(name, size);
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalVertexBuffer>(name, size);
@@ -129,8 +133,10 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLVertexBuffer>(name, vertices, size);
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalVertexBuffer>(name, vertices, size);
@@ -148,8 +154,10 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLIndexBuffer>(name, indices, count, type);
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalIndexBuffer>(name, indices, count, type);
@@ -167,8 +175,10 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLIndexBuffer>(name, count, type);
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalIndexBuffer>(name, count, type);
@@ -189,6 +199,7 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 #ifdef __APPLE__
 			/* macOS 只有 GL 4.1，没有 SSBO */
@@ -196,6 +207,7 @@ namespace Helios
 			return nullptr;
 #else
 			return CreateSharedPtr<OpenGLStorageBuffer>(name, data, size);
+#endif
 #endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:

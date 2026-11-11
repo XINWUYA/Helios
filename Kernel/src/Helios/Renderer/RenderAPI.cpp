@@ -1,6 +1,8 @@
 ﻿#include "Pch.h"
 #include "RenderAPI.h"
+#if HELIOS_PLATFORM_DESKTOP
 #include "GraphicsAPI/OpenGL/OpenGLRenderAPI.h"
+#endif
 #if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalRenderAPI.h"
 #endif
@@ -22,9 +24,11 @@ namespace Helios
 		case None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case OpenGL:
 			CORE_LOG_INFO("Creating OpenGL RenderAPI...");
 			return CreateSharedPtr<OpenGLRenderAPI>();
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case Metal:
 			CORE_LOG_INFO("Creating Metal RenderAPI...");

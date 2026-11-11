@@ -2,7 +2,9 @@
 #include "DeviceTexture.h"
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/Renderer/Renderer.h"
+#if HELIOS_PLATFORM_DESKTOP
 #include "GraphicsAPI/OpenGL/OpenGLTexture.h"
+#endif
 #if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalTexture.h"
 #endif
@@ -48,8 +50,10 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLTexture>(name, texture_desc);
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalTexture>(name, texture_desc);
@@ -72,9 +76,11 @@ namespace Helios
 		case RenderAPI::None:
 			CORE_LOG_ERROR("RenderAPI can't be None!");
 			return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
 		case RenderAPI::OpenGL:
 			texture = CreateSharedPtr<OpenGLTexture>(path, resolved);
 			break;
+#endif
 #if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			texture = CreateSharedPtr<MetalTexture>(path, resolved);
