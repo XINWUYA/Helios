@@ -1,8 +1,6 @@
 #include "Pch.h"
 #include "UIRmlInterfaces.h"
 
-#include <GLFW/glfw3.h>
-
 #include "Helios/Application/Application.h"
 
 #include "Helios/Common/AssetPath.h"
@@ -20,11 +18,10 @@ namespace Helios
 			}
 
 			/* 没有窗口（headless 检查）时返回空，调用方回落到基类的进程内剪贴板 */
-			GLFWwindow* InputWindow()
+			DeviceWindow* CurrentWindow()
 			{
 				Application* application = Application::Instance();
-				return (application != nullptr)
-					? static_cast<GLFWwindow*>(application->GetWindow().GetNativeWindow()) : nullptr;
+				return (application != nullptr) ? &application->GetWindow() : nullptr;
 			}
 
 			/* 缺失清单只留最近的几条：href 写错这类问题要能一眼看到，别攒成日志 */
@@ -33,22 +30,21 @@ namespace Helios
 
 		void UISystemInterface::SetClipboardText(const Rml::String& text)
 		{
-			if (GLFWwindow* window = InputWindow())
-				glfwSetClipboardString(window, text.c_str());
-			else
+			DeviceWindow* window = CurrentWindow();
+			if (window == nullptr || !window->SetClipboardText(ToUtf8(text)))
 				Rml::SystemInterface::SetClipboardText(text);
 		}
 
 		void UISystemInterface::GetClipboardText(Rml::String& text)
 		{
-			if (GLFWwindow* window = InputWindow())
+			std::string clipboard;
+			DeviceWindow* window = CurrentWindow();
+			if (window != nullptr && window->GetClipboardText(clipboard))
 			{
-				if (const char* clipboard = glfwGetClipboardString(window))
-				{
-					text = clipboard;
-					return;
-				}
+				text = clipboard;
+				return;
 			}
+
 			Rml::SystemInterface::GetClipboardText(text);
 		}
 

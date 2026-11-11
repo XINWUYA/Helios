@@ -3,6 +3,7 @@
 #include "Pch.h"
 #include "MetalWindow.h"
 #include "MetalRenderAPI.h"
+#include "GraphicsAPI/Desktop/DesktopWindowServices.h"
 #include <GLFW/glfw3.h>
 #include <objc/message.h>
 #include <objc/objc.h>
@@ -256,6 +257,36 @@ namespace Helios
 
         m_WindowInfo.Descriptor.Title = title;
         glfwSetWindowTitle(m_pGLFWWindow, title.c_str());
+    }
+
+    bool MetalWindow::QueryKeyPressed(int key) const
+    {
+        return Desktop::IsKeyPressed(m_pGLFWWindow, key);
+    }
+
+    bool MetalWindow::QueryPointerButtonPressed(int button) const
+    {
+        return Desktop::IsPointerButtonPressed(m_pGLFWWindow, button);
+    }
+
+    glm::vec2 MetalWindow::QueryPointerPosition() const
+    {
+        return Desktop::PointerPosition(m_pGLFWWindow);
+    }
+
+    bool MetalWindow::HasFocus() const
+    {
+        return Desktop::HasFocus(m_pGLFWWindow);
+    }
+
+    bool MetalWindow::SetClipboardText(const std::string& text)
+    {
+        return Desktop::SetClipboardText(m_pGLFWWindow, text);
+    }
+
+    bool MetalWindow::GetClipboardText(std::string& text)
+    {
+        return Desktop::GetClipboardText(m_pGLFWWindow, text);
     }
 
     void MetalWindow::Build(const WindowDesc& desc)

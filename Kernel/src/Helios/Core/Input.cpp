@@ -1,20 +1,17 @@
 ﻿#include "Pch.h"
 #include "Input.h"
-#include <GLFW/glfw3.h>
 #include "Helios/Application/Application.h"
 
 namespace Helios
 {
 	namespace
 	{
-		/* 拿本帧输入用的窗口：无窗口环境（headless 检查直接驱动相机这类）没有应用实例，
+		/* 拿输入用的窗口：无窗口环境（headless 检查直接驱动相机这类）没有应用实例，
 		 * 返回空 —— 各接口按"没按下 / 指针在原点"兜底 */
-		GLFWwindow* CurrentInputWindow()
+		DeviceWindow* CurrentInputWindow()
 		{
 			Application* application = Application::Instance();
-			return (application != nullptr)
-				? static_cast<GLFWwindow*>(application->GetWindow().GetNativeWindow())
-				: nullptr;
+			return (application != nullptr) ? &application->GetWindow() : nullptr;
 		}
 
 		/* 闸的当前状态：默认开着、没有画面区域 —— 没人调 SetGameInput 时一切照旧 */
@@ -27,8 +24,8 @@ namespace Helios
 			if (!s_GameFocused)
 				return false;
 
-			GLFWwindow* window = CurrentInputWindow();
-			return window != nullptr && glfwGetWindowAttrib(window, GLFW_FOCUSED) != 0;
+			const DeviceWindow* window = CurrentInputWindow();
+			return window != nullptr && window->HasFocus();
 		}
 	}
 
@@ -40,34 +37,20 @@ namespace Helios
 
 	bool Input::IsKeyPressedRaw(const KeyCode key)
 	{
-		GLFWwindow* window = CurrentInputWindow();
-		if (window == nullptr)
-			return false;
-
-		auto state = glfwGetKey(window, static_cast<int32_t>(key));
-		return state == GLFW_PRESS || state == GLFW_REPEAT;
+		const DeviceWindow* window = CurrentInputWindow();
+		return window != nullptr && window->QueryKeyPressed(static_cast<int>(key));
 	}
 
 	bool Input::IsMouseButtonPressedRaw(const MouseCode btn)
 	{
-		GLFWwindow* window = CurrentInputWindow();
-		if (window == nullptr)
-			return false;
-
-		auto state = glfwGetMouseButton(window, static_cast<int32_t>(btn));
-		return state == GLFW_PRESS;
+		const DeviceWindow* window = CurrentInputWindow();
+		return window != nullptr && window->QueryPointerButtonPressed(static_cast<int>(btn));
 	}
 
 	glm::vec2 Input::GetMousePosRaw()
 	{
-		GLFWwindow* window = CurrentInputWindow();
-		if (window == nullptr)
-			return glm::vec2(0.0f);
-
-		double pos_x, pos_y;
-		glfwGetCursorPos(window, &pos_x, &pos_y);
-
-		return glm::vec2(static_cast<float>(pos_x), static_cast<float>(pos_y));
+		const DeviceWindow* window = CurrentInputWindow();
+		return (window != nullptr) ? window->QueryPointerPosition() : glm::vec2(0.0f);
 	}
 
 	bool Input::IsKeyPressed(const KeyCode key)

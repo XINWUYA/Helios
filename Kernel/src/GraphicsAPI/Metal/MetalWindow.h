@@ -70,6 +70,14 @@ namespace Helios
         MetalContext* GetMetalContext() const { return m_pMetalContext.get(); }
         void InitGraphicsContext() override { m_pMetalContext->Init(); }
 
+        /* 输入与时钟：转给 GLFW，见 DeviceWindow 的口径 */
+        [[nodiscard]] bool QueryKeyPressed(int key) const override;
+        [[nodiscard]] bool QueryPointerButtonPressed(int button) const override;
+        [[nodiscard]] glm::vec2 QueryPointerPosition() const override;
+        [[nodiscard]] bool HasFocus() const override;
+        [[nodiscard]] bool SetClipboardText(const std::string& text) override;
+        [[nodiscard]] bool GetClipboardText(std::string& text) override;
+
     private:
         void Build(const WindowDesc& desc);
         void Destroy();

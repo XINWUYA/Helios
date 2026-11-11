@@ -34,6 +34,14 @@ namespace Helios
 		/* 设置响应事件 */
 		virtual void SetEventCallback(const EventCallbackFunc& callback) override { m_WindowInfo.CallBackFunc = callback; }
 
+		/* 输入与时钟：转给 GLFW，见 DeviceWindow 的口径 */
+		[[nodiscard]] bool QueryKeyPressed(int key) const override;
+		[[nodiscard]] bool QueryPointerButtonPressed(int button) const override;
+		[[nodiscard]] glm::vec2 QueryPointerPosition() const override;
+		[[nodiscard]] bool HasFocus() const override;
+		[[nodiscard]] bool SetClipboardText(const std::string& text) override;
+		[[nodiscard]] bool GetClipboardText(std::string& text) override;
+
 	private:
 		/* 创建窗口；创建上下文；绑定响应事件 */
 		void Build(const WindowDesc& desc);

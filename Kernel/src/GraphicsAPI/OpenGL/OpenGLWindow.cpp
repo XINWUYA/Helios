@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "OpenGLWindow.h"
 #include <GLFW/glfw3.h>
+#include "GraphicsAPI/Desktop/DesktopWindowServices.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Events/KeyEvent.h"
 #include "Helios/Events/MouseEvent.h"
@@ -50,6 +51,36 @@ namespace Helios
 
 		m_WindowInfo.Descriptor.Title = title;
 		glfwSetWindowTitle(m_pGLFWWindow, title.c_str());
+	}
+
+	bool OpenGLWindow::QueryKeyPressed(int key) const
+	{
+		return Desktop::IsKeyPressed(m_pGLFWWindow, key);
+	}
+
+	bool OpenGLWindow::QueryPointerButtonPressed(int button) const
+	{
+		return Desktop::IsPointerButtonPressed(m_pGLFWWindow, button);
+	}
+
+	glm::vec2 OpenGLWindow::QueryPointerPosition() const
+	{
+		return Desktop::PointerPosition(m_pGLFWWindow);
+	}
+
+	bool OpenGLWindow::HasFocus() const
+	{
+		return Desktop::HasFocus(m_pGLFWWindow);
+	}
+
+	bool OpenGLWindow::SetClipboardText(const std::string& text)
+	{
+		return Desktop::SetClipboardText(m_pGLFWWindow, text);
+	}
+
+	bool OpenGLWindow::GetClipboardText(std::string& text)
+	{
+		return Desktop::GetClipboardText(m_pGLFWWindow, text);
 	}
 
 	/* 创建窗口；创建上下文；绑定响应事件 */

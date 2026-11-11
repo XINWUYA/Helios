@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <glm/glm.hpp>
 #include "Helios/Events/Event.h"
 
 namespace Helios
@@ -51,6 +52,26 @@ namespace Helios
 
 	/* 设置响应事件 */
 	virtual void SetEventCallback(const EventCallbackFunc& callback) = 0;
+
+	/* ---- 输入与时钟 ----
+	 * 各平台窗口在这里回自己那套：桌面转 GLFW，移动端转触摸状态表。
+	 * Input 与主循环只认这几个接口，不认具体平台。 */
+
+	/* 按键是否按下（KeyCode 取值；移动端没有物理键盘时恒为 false） */
+	[[nodiscard]] virtual bool QueryKeyPressed(int key) const { (void)key; return false; }
+	/* 指针按键是否按下（MouseCode 取值；移动端把第一根手指映射到左键） */
+	[[nodiscard]] virtual bool QueryPointerButtonPressed(int button) const { (void)button; return false; }
+	/* 指针位置（窗口坐标，左上角原点，逻辑点） */
+	[[nodiscard]] virtual glm::vec2 QueryPointerPosition() const { return glm::vec2(0.0f); }
+	/* 窗口是否拿着系统焦点：没焦点时脚本侧输入一律不放行 */
+	[[nodiscard]] virtual bool HasFocus() const { return true; }
+	/* 单调时钟（秒）。帧间隔与动画按它算，各平台同一口径 */
+	[[nodiscard]] double GetTimeSeconds() const;
+
+	/* 系统剪贴板。返回 false 表示这平台没有可用的系统剪贴板，
+	 * 调用方（例如运行时 UI）回落到进程内实现。 */
+	[[nodiscard]] virtual bool SetClipboardText(const std::string& text) { (void)text; return false; }
+	[[nodiscard]] virtual bool GetClipboardText(std::string& text) { (void)text; return false; }
 
 	/* 在Renderer::Init()之后初始化窗口图形上下文（如Metal需等RenderAPI创建后设置MetalLayer） */
 	virtual void InitGraphicsContext() {}
