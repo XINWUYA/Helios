@@ -19,9 +19,13 @@ namespace Helios
 		[[nodiscard]] Camera* GetCamera() const;
 		/* 视口与相机比例按窗口物理像素走 */
 		void ApplyViewport();
+		/* 指针交给场景画布：HUD 的按钮与摇杆要在 Player 里也能按 */
+		void ForwardUIInput();
 		bool OnWindowResize(WindowResizeEvent* event);
 
 		SharedPtr<Scene> m_pScene{ nullptr };
 		entt::entity m_Camera{ entt::null };
+		/* 三个按键上一帧的按下状态，用来判按下沿与抬起沿 */
+		bool m_MouseDown[3]{ false, false, false };
 	};
 }

@@ -3,8 +3,10 @@
 
 #include "Helios/Application/Application.h"
 #include "Helios/Application/ProjectConfig.h"
+#include "Helios/Core/Input.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Scene/SceneCommon.h"
+#include "Helios/UI/UISystem.h"
 
 namespace Helios
 {
@@ -38,8 +40,10 @@ namespace Helios
 		m_Camera = static_cast<entt::entity>(m_pScene->GetPrimaryCameraEntity());
 		if (Camera* camera = GetCamera())
 		{
-			/* 直出默认目标：没有编辑器，也没有合成 Pass 要接 */
+			/* 直出默认目标，但要叠场景自己的画布（HUD）
+			 * 合成 Pass 需要一张颜色纹理，所以开后置 UI 后走「渲染到纹理再呈现」这条链 */
 			camera->GetRenderView()->SetOutputToTexture(false);
+			camera->GetRenderView()->SetDrawUI(true);
 			ApplyViewport();
 		}
 		else
@@ -57,8 +61,36 @@ namespace Helios
 		if (m_pScene == nullptr || GetCamera() == nullptr)
 			return;
 
+		ForwardUIInput();
+
 		m_pScene->OnUpdate(delta_time);
 		m_pScene->Render();
+	}
+
+	/* 指针是逻辑点，画布按视口物理像素做命中测试，这里按内容缩放换算 */
+	void PlayerLayer::ForwardUIInput()
+	{
+		if (m_pScene == nullptr || !m_pScene->HasUICanvas())
+			return;
+
+		UI::UISystem& ui = m_pScene->GetUISystem();
+
+		const float scale = Application::Instance()->GetWindow().GetContentScale();
+		const glm::vec2 mouse = Input::GetMousePosRaw() * scale;
+		ui.ProcessMouseMove(mouse.x, mouse.y);
+
+		for (int button = 0; button < 3; ++button)
+		{
+			const bool pressed = Input::IsMouseButtonPressedRaw(static_cast<MouseCode>(button));
+			if (pressed != m_MouseDown[button])
+			{
+				if (pressed)
+					ui.ProcessMouseButtonDown(button);
+				else
+					ui.ProcessMouseButtonUp(button);
+			}
+			m_MouseDown[button] = pressed;
+		}
 	}
 
 	void PlayerLayer::OnEvent(IEvent* event)

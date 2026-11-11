@@ -67,17 +67,23 @@ if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
             VERBATIM
         )
 
-        set(PLAYER_PROJECT_PARTS Scenes Materials Textures Models Terrains BakedReflectionProbes Scripts)
+        # 工程的资源目录整个随包，只排除生成物与本机状态。
+        # 用 glob 而不是写死清单：以后加资源目录不用再改这里。
+        file(GLOB PLAYER_PROJECT_DIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true
+             RELATIVE "${HELIOS_PROJECT_DIR}" "${HELIOS_PROJECT_DIR}/*")
         set(PLAYER_BUNDLE_PROJECT_COMMANDS
             COMMAND ${CMAKE_COMMAND} -E make_directory "${PLAYER_BUNDLE_DIR}/Project"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${HELIOS_PROJECT_DIR}/Project.xml" "${PLAYER_BUNDLE_DIR}/Project/Project.xml"
         )
-        foreach(part IN LISTS PLAYER_PROJECT_PARTS)
-            if(IS_DIRECTORY "${HELIOS_PROJECT_DIR}/${part}")
+        foreach(entry IN LISTS PLAYER_PROJECT_DIRS)
+            if(entry STREQUAL "Cache" OR entry STREQUAL ".helios")
+                continue()
+            endif()
+            if(IS_DIRECTORY "${HELIOS_PROJECT_DIR}/${entry}")
                 list(APPEND PLAYER_BUNDLE_PROJECT_COMMANDS
                     COMMAND ${CMAKE_COMMAND} -E copy_directory
-                            "${HELIOS_PROJECT_DIR}/${part}" "${PLAYER_BUNDLE_DIR}/Project/${part}")
+                            "${HELIOS_PROJECT_DIR}/${entry}" "${PLAYER_BUNDLE_DIR}/Project/${entry}")
             endif()
         endforeach()
 
