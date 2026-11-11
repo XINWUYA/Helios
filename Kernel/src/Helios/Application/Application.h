@@ -66,6 +66,14 @@ namespace Helios
 		/* 首帧出图只打一次日志：冷启动预算按这个点量 */
 		bool m_FirstFrameLogged{ false };
 		double m_LastFrameTime{ 0.0 };
+
+		/* 帧时间统计的滑动窗口（5 秒一行），见 Tick */
+		float m_FrameStatsSeconds{ 0.0f };
+		float m_FrameStatsTotalMs{ 0.0f };
+		float m_FrameStatsCpuMs{ 0.0f };
+		float m_FrameStatsMaxMs{ 0.0f };
+		uint32_t m_FrameStatsCount{ 0 };
+		uint32_t m_FrameStatsSlowCount{ 0 };
 	};
 
 	// Implement in clients

@@ -113,7 +113,9 @@ namespace Helios
 			}
 
 			/* CPU 函数级采集的帧边界：在垂直同步等待之后 —— 与 Frame 卡的
-			 * CPU 口径一致（FrameTotal 不含等待） */
+			 * CPU 口径一致（FrameTotal 不含等待）。帧统计的 CPU 也从这里起算，
+			 * 否则取 drawable 的等待会被算成 CPU 耗时。 */
+			const auto cpu_begin = std::chrono::steady_clock::now();
 			Profiler::Instance().BeginCPUTiming();
 
 			{
@@ -155,6 +157,10 @@ namespace Helios
 				/* 层已经画完：这时增删层不会打断上面的遍历 */
 				OnFrameEnd();
 			}
+
+			/* CPU 侧耗时：从帧开始到提交前，不含垂直同步与呈现等待 */
+			m_FrameStatsCpuMs += std::chrono::duration<float, std::milli>(
+				std::chrono::steady_clock::now() - cpu_begin).count();
 		}
 
 		{
@@ -169,6 +175,34 @@ namespace Helios
 		{
 			m_FirstFrameLogged = true;
 			CORE_LOG_INFO("Startup: first frame presented in {:.1f} ms", ElapsedSinceProcessStartMs());
+		}
+
+		/* 帧时间统计：移动端没有 Tracy，留一条常开的观测线。每 5 秒一行，
+		 * 慢帧按低于 30 fps 算，先能看见「稳不稳」再谈优化。 */
+		{
+			m_FrameStatsSeconds += delta_time;
+			m_FrameStatsTotalMs += delta_time;
+			++m_FrameStatsCount;
+			m_FrameStatsMaxMs = std::max(m_FrameStatsMaxMs, delta_time);
+			if (delta_time > 0.0333f)
+				++m_FrameStatsSlowCount;
+
+			if (m_FrameStatsSeconds >= 5.0f)
+			{
+				const float average_ms = m_FrameStatsTotalMs / static_cast<float>(m_FrameStatsCount) * 1000.0f;
+				const float max_ms = m_FrameStatsMaxMs * 1000.0f;
+				const float cpu_ms = m_FrameStatsCpuMs / static_cast<float>(m_FrameStatsCount);
+				const float slow_ratio = static_cast<float>(m_FrameStatsSlowCount) / static_cast<float>(m_FrameStatsCount);
+				CORE_LOG_INFO("Frame stats: {:.1f} fps, avg {:.2f} ms, cpu {:.2f} ms, max {:.1f} ms, slow {:.0f}%",
+					1.0f / (average_ms / 1000.0f), average_ms, cpu_ms, max_ms, slow_ratio * 100.0f);
+
+				m_FrameStatsSeconds = 0.0f;
+				m_FrameStatsTotalMs = 0.0f;
+				m_FrameStatsCpuMs = 0.0f;
+				m_FrameStatsCount = 0;
+				m_FrameStatsSlowCount = 0;
+				m_FrameStatsMaxMs = 0.0f;
+			}
 		}
 
 		/* 结算本帧的 CPU 侧数据；GPU 结果解析出来后由渲染器在 EndGPUFrame 里
