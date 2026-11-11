@@ -174,12 +174,22 @@ if(WIN32)
         PRIVATE "STBIDEF=__declspec(dllexport)"
         INTERFACE "STBIDEF=__declspec(dllimport)"
     )
-elseif(APPLE)
+elseif(HELIOS_TARGET_PLATFORM STREQUAL "macOS")
     target_compile_definitions(Kernel PRIVATE PLATFORM_MACOS)
     # Files that need to be compiled as Objective-C++ on macOS
     # (ImGuiLayer/MetalQuery use Metal APIs)
     set(KERNEL_OBJCXX_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/Helios/ImGui/ImGuiLayer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsAPI/Metal/MetalQuery.cpp"
+    )
+    set_source_files_properties(${KERNEL_OBJCXX_SOURCES} PROPERTIES
+        COMPILE_FLAGS "-x objective-c++"
+        SKIP_PRECOMPILE_HEADERS ON
+    )
+elseif(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+    target_compile_definitions(Kernel PRIVATE PLATFORM_IOS)
+    # 移动端不带 ImGui，只有 Metal 查询要按 Objective-C++ 编
+    set(KERNEL_OBJCXX_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsAPI/Metal/MetalQuery.cpp"
     )
     set_source_files_properties(${KERNEL_OBJCXX_SOURCES} PROPERTIES

@@ -5,7 +5,7 @@
 #include "Helios/Renderer/GlslDeclScan.h"
 #include "Helios/Renderer/ShaderAnnotation.h"
 #include "GraphicsAPI/OpenGL/OpenGLShader.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalShader.h"
 #endif
 #include <regex>
@@ -48,7 +48,7 @@ namespace Helios
 		case RenderAPI::OpenGL:
 			shader = CreateSharedPtr<OpenGLShader>(filepath, defines);
 			break;
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			shader = CreateSharedPtr<MetalShader>(filepath, defines);
 			break;
@@ -77,7 +77,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLShader>(name, vertex_src, pixel_src);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalShader>(name, vertex_src, pixel_src);
 #endif

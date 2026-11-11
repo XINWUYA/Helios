@@ -2,7 +2,7 @@
 #include "DeviceVertexArray.h"
 #include "Helios/Renderer/Renderer.h"
 #include "GraphicsAPI/OpenGL/OpenGLVertexArray.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalVertexArray.h"
 #endif
 
@@ -17,7 +17,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLVertexArray>(name);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalVertexArray>(name);
 #endif

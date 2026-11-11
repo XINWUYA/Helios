@@ -12,6 +12,9 @@
 #pragma execution_character_set("utf-8")
 #endif
 
+/* 平台判定先于一切头文件，后面到处都要用 */
+#include "Helios/Common/Platform.h"
+
 /* === Standard Library (stable, frequently used) === */
 #include <cstdint>
 #include <string>

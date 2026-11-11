@@ -2,7 +2,7 @@
 #include "DeviceQueryNode.h"
 #include "Helios/Renderer/Renderer.h"
 #include "GraphicsAPI/OpenGL/OpenGLQueryNode.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalQuery.h"
 #endif
 
@@ -17,7 +17,7 @@ namespace Helios
 			break;
 		case RenderAPI::OpenGL:
 			return new OpenGLQueryNode;
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return new MetalQueryNode;
 #endif

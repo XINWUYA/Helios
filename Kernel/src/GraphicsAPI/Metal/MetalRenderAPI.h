@@ -1,9 +1,10 @@
 ﻿#pragma once
+#include "Helios/Common/Platform.h"
 #include <string>
 #include <vector>
 #include <utility>
 
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 
 #include "Helios/Renderer/RenderAPI.h"
 #include "MetalShader.h"
@@ -273,4 +274,4 @@ namespace Helios
     };
 }
 
-#endif /* PLATFORM_MACOS */
+#endif /* HELIOS_PLATFORM_APPLE */

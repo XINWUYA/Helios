@@ -1,4 +1,6 @@
-﻿#ifdef PLATFORM_MACOS
+﻿#include "Helios/Common/Platform.h"
+
+#if HELIOS_PLATFORM_APPLE
 
 #include "Pch.h"
 #include "MetalShader.h"
@@ -1605,4 +1607,4 @@ namespace Helios
     }
 }
 
-#endif /* PLATFORM_MACOS */
+#endif /* HELIOS_PLATFORM_APPLE */

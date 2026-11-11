@@ -1,6 +1,7 @@
 ﻿#pragma once
+#include "Helios/Common/Platform.h"
 
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 
 #include "Helios/VirtualDevice/DeviceQueryNode.h"
 #include "Helios/VirtualDevice/DeviceQueryBuffer.h"
@@ -58,4 +59,4 @@ namespace Helios
     };
 }
 
-#endif /* PLATFORM_MACOS */
+#endif /* HELIOS_PLATFORM_APPLE */

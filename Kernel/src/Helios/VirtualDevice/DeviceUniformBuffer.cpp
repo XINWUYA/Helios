@@ -2,7 +2,7 @@
 #include "DeviceUniformBuffer.h"
 #include "Helios/Renderer/Renderer.h"
 #include "GraphicsAPI/OpenGL/OpenGLUniformBuffer.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalUniformBuffer.h"
 #endif
 
@@ -17,7 +17,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLUniformBuffer>(size, binding_point);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalUniformBuffer>(size, binding_point);
 #endif

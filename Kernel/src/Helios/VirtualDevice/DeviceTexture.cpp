@@ -3,7 +3,7 @@
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/Renderer/Renderer.h"
 #include "GraphicsAPI/OpenGL/OpenGLTexture.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalTexture.h"
 #endif
 
@@ -50,7 +50,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLTexture>(name, texture_desc);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalTexture>(name, texture_desc);
 #endif
@@ -75,7 +75,7 @@ namespace Helios
 		case RenderAPI::OpenGL:
 			texture = CreateSharedPtr<OpenGLTexture>(path, resolved);
 			break;
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			texture = CreateSharedPtr<MetalTexture>(path, resolved);
 			break;

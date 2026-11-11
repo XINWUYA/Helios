@@ -2,7 +2,7 @@
 #include "DeviceBuffer.h"
 #include "Helios/Renderer/Renderer.h"
 #include "GraphicsAPI/OpenGL/OpenGLBuffer.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalBuffer.h"
 #endif
 
@@ -89,7 +89,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLVertexBuffer>(name, size);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalVertexBuffer>(name, size);
 #endif
@@ -111,7 +111,7 @@ namespace Helios
 				return CreateSharedPtr<OpenGLVertexBuffer>(name, gl_storage->GetBufferID(), size);
 		}
 #endif
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		if (Renderer::CurrentAPI() == RenderAPI::Metal)
 		{
 			auto metal_storage = std::dynamic_pointer_cast<MetalStorageBuffer>(storage);
@@ -131,7 +131,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLVertexBuffer>(name, vertices, size);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalVertexBuffer>(name, vertices, size);
 #endif
@@ -150,7 +150,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLIndexBuffer>(name, indices, count, type);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalIndexBuffer>(name, indices, count, type);
 #endif
@@ -169,7 +169,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateSharedPtr<OpenGLIndexBuffer>(name, count, type);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalIndexBuffer>(name, count, type);
 #endif
@@ -197,7 +197,7 @@ namespace Helios
 #else
 			return CreateSharedPtr<OpenGLStorageBuffer>(name, data, size);
 #endif
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return CreateSharedPtr<MetalStorageBuffer>(name, data, size);
 #endif

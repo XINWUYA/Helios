@@ -11,6 +11,9 @@
 #pragma execution_character_set("utf-8")
 #endif
 
+/* 平台判定与 Kernel 同一口径，编辑器里也按 HELIOS_PLATFORM_* 分支 */
+#include "Helios/Common/Platform.h"
+
 /* === Third-party UI (stable, very large) === */
 #include <imgui.h>
 #include <imgui_internal.h>

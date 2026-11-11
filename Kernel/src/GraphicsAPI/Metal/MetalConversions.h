@@ -1,6 +1,7 @@
 #pragma once
+#include "Helios/Common/Platform.h"
 
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 
 #include <Metal/Metal.hpp>
 #include <cstdint>
@@ -462,4 +463,4 @@ namespace Helios
     }
 }
 
-#endif /* PLATFORM_MACOS */
+#endif /* HELIOS_PLATFORM_APPLE */

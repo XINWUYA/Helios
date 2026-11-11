@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "DeviceQueryBuffer.h"
 #include "Helios/Renderer/Renderer.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalQuery.h"
 #endif
 
@@ -17,7 +17,7 @@ namespace Helios
 		case RenderAPI::OpenGL:
 			/* OpenGL 的时间戳查询与渲染通道无关（见 OpenGLQueryNode），不需要通道采样 */
 			break;
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case RenderAPI::Metal:
 			return new MetalQueryBuffer;
 #endif

@@ -1,13 +1,13 @@
 ﻿#include "Pch.h"
 #include "RenderAPI.h"
 #include "GraphicsAPI/OpenGL/OpenGLRenderAPI.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 #include "GraphicsAPI/Metal/MetalRenderAPI.h"
 #endif
 
 namespace Helios
 {
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 	/* macOS平台默认使用Metal */
 	int RenderAPI::m_API = RenderAPI::Metal;
 #else
@@ -25,7 +25,7 @@ namespace Helios
 		case OpenGL:
 			CORE_LOG_INFO("Creating OpenGL RenderAPI...");
 			return CreateSharedPtr<OpenGLRenderAPI>();
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
 		case Metal:
 			CORE_LOG_INFO("Creating Metal RenderAPI...");
 			return CreateSharedPtr<MetalRenderAPI>();

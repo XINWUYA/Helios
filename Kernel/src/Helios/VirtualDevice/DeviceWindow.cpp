@@ -2,7 +2,7 @@
 #include "DeviceWindow.h"
 #include "Helios/Renderer/Renderer.h"
 #include "GraphicsAPI/OpenGL/OpenGLWindow.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_MACOS
 #include "GraphicsAPI/Metal/MetalWindow.h"
 #endif
 
@@ -18,7 +18,7 @@ namespace Helios
             return nullptr;
         case RenderAPI::OpenGL:
             return CreateUniquePtr<OpenGLWindow>(desc);
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_MACOS
         case RenderAPI::Metal:
             return CreateUniquePtr<MetalWindow>(desc);
 #endif
@@ -26,5 +26,12 @@ namespace Helios
             CORE_LOG_ERROR("Unknown RenderAPI is unsupported!");
             return nullptr;
         }
+    }
+
+    double DeviceWindow::GetTimeSeconds() const
+    {
+        /* 单调时钟，只做差用：首次调用时刻当零点，不依赖系统墙钟 */
+        static const auto start = std::chrono::steady_clock::now();
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     }
 }

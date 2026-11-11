@@ -104,16 +104,36 @@ endif()
 add_compile_definitions(GLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 # Platform-specific definitions
-if(WIN32)
+# 目标平台名：平台宏、脚本模板、签名都按它分，别在各处重复判 APPLE / UNIX
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(HELIOS_TARGET_PLATFORM "iOS")
+elseif(APPLE)
+    set(HELIOS_TARGET_PLATFORM "macOS")
+elseif(WIN32)
+    set(HELIOS_TARGET_PLATFORM "Windows")
+else()
+    set(HELIOS_TARGET_PLATFORM "Linux")
+endif()
+
+if(HELIOS_TARGET_PLATFORM STREQUAL "Windows")
     add_compile_definitions(PLATFORM_WINDOWS)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
-elseif(APPLE)
+elseif(HELIOS_TARGET_PLATFORM STREQUAL "macOS")
     add_compile_definitions(PLATFORM_MACOS)
+elseif(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+    add_compile_definitions(PLATFORM_IOS)
+else()
+    add_compile_definitions(PLATFORM_LINUX)
+endif()
+
+if(APPLE)
     # Fix spdlog consteval issue on AppleClang
     # AppleClang has incomplete support for consteval in C++20
     # This forces fmt library to use constexpr instead of consteval
     add_compile_definitions(FMT_CONSTEVAL=)
+endif()
 
+if(HELIOS_TARGET_PLATFORM STREQUAL "macOS")
     # macOS 要求可执行文件至少带有 ad-hoc 签名：未签名的 arm64 二进制会在启动
     # 瞬间被内核以 SIGKILL 终止（表现为“无任何输出地立即退出”，退出码 137）。
     # Xcode 生成器在链接阶段传入了 -no_adhoc_codesign（期望之后由 Xcode 签名），
@@ -134,8 +154,6 @@ elseif(APPLE)
             VERBATIM
         )
     endfunction()
-elseif(UNIX)
-    add_compile_definitions(PLATFORM_LINUX)
 endif()
 
 # macOS 把图标放进 .app 的 Resources，Windows 编进 exe 资源
@@ -237,12 +255,13 @@ endif()
 # 编辑器打开任意位置的项目时，用这份模板套项目自己的 Scripts 现场生成一个小工程，
 # 产物落在项目的 Cache 下。引擎构建目录不需要知道项目在哪，换盘换目录都不用重配。
 set(HELIOS_SCRIPT_KERNEL_DIR "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}")
-if(WIN32)
+if(HELIOS_TARGET_PLATFORM STREQUAL "Windows")
     set(HELIOS_SCRIPT_PLATFORM_DEFINE "PLATFORM_WINDOWS")
-elseif(APPLE)
-    set(HELIOS_SCRIPT_PLATFORM_DEFINE "PLATFORM_MACOS")
-else()
+elseif(HELIOS_TARGET_PLATFORM STREQUAL "Linux")
     set(HELIOS_SCRIPT_PLATFORM_DEFINE "PLATFORM_LINUX")
+else()
+    # 脚本模块只在桌面构建，macOS 用自己那套宏
+    set(HELIOS_SCRIPT_PLATFORM_DEFINE "PLATFORM_MACOS")
 endif()
 
 set(HELIOS_SCRIPT_INCLUDE_BLOCK "")

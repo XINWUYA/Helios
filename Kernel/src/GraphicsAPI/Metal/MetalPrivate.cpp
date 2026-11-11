@@ -1,4 +1,6 @@
-#ifdef PLATFORM_MACOS
+#include "Helios/Common/Platform.h"
+
+#if HELIOS_PLATFORM_APPLE
 
 #define NS_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION

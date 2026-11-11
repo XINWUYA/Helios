@@ -2,7 +2,7 @@
 #include "DeviceContext.h"
 #include "Helios/Renderer/Renderer.h"
 #include "GraphicsAPI/OpenGL/OpenGLContext.h"
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_MACOS
 #include "GraphicsAPI/Metal/MetalWindow.h"
 #endif
 
@@ -17,7 +17,7 @@ namespace Helios
 			return nullptr;
 		case RenderAPI::OpenGL:
 			return CreateUniquePtr<OpenGLContext>(static_cast<GLFWwindow*>(window));
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_MACOS
 		case RenderAPI::Metal:
 			return CreateUniquePtr<MetalContext>(static_cast<GLFWwindow*>(window));
 #endif

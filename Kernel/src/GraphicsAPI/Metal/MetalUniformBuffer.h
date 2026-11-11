@@ -1,5 +1,6 @@
 ﻿#pragma once
-#ifdef PLATFORM_MACOS
+#include "Helios/Common/Platform.h"
+#if HELIOS_PLATFORM_APPLE
 
 #include "Helios/VirtualDevice/DeviceUniformBuffer.h"
 #include <Metal/Metal.hpp>
@@ -71,4 +72,4 @@ namespace Helios
     };
 }
 
-#endif /* PLATFORM_MACOS */
+#endif /* HELIOS_PLATFORM_APPLE */
