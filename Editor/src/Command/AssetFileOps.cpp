@@ -204,6 +204,8 @@ namespace Helios
 			{ ".PROBE", AssetFileKind::Probe },
 			/* 动画片段（属性面板的 Animator 卡拖进去就能播） */
 			{ ".ANIM", AssetFileKind::Animation },
+			/* 运行时 UI：文档 / 样式 / 字符串表，三类都算"界面资产" */
+			{ ".RML", AssetFileKind::UI }, { ".RCSS", AssetFileKind::UI }, { ".UILANG", AssetFileKind::UI },
 			/* 脚本源码：项目 Scripts 下的 C++ 文件，浏览器里按头文件 / 源文件分两档 */
 			{ ".H", AssetFileKind::CppHeader }, { ".HPP", AssetFileKind::CppHeader },
 			{ ".CPP", AssetFileKind::CppSource }, { ".CC", AssetFileKind::CppSource },
@@ -299,6 +301,35 @@ namespace Helios
 		{
 			if (character >= 'A' && character <= 'Z')
 				character = static_cast<char>(character - 'A' + 'a');
+		}
+
+		/* UI 文档：一份能直接挂到 Canvas 上的最小文档，样式从同名 .rcss 来 */
+		if (ext == ".rml")
+		{
+			return "<rml>\n"
+				"<head>\n"
+				"\t<link type=\"text/css\" href=\"" + stem + ".rcss\" />\n"
+				"\t<title>" + stem + "</title>\n"
+				"</head>\n"
+				"<body>\n"
+				"\t<div id=\"root\">Hello UI</div>\n"
+				"</body>\n"
+				"</rml>\n";
+		}
+
+		/* UI 样式：只给 body 定基础字号与颜色，其余按块自己写 */
+		if (ext == ".rcss")
+		{
+			return "body\n"
+				"{\n"
+				"\tdisplay: block;\n"
+				"\tmargin: 0px;\n"
+				"\twidth: 100%;\n"
+				"\theight: 100%;\n"
+				"\tfont-family: Open Sans;\n"
+				"\tfont-size: 16dp;\n"
+				"\tcolor: #f2f4f8;\n"
+				"}\n";
 		}
 
 		/* 空场景：跟 Serializer 写出的"没有任何实体"的场景同构 —— 加载器只要求 <Scene>/<Entities>，

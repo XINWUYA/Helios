@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include "FrameGraphPanel.h"
 #include "GameViewPanel.h"
+#include "Panels/UIPreview/UIPreviewPanel.h"
 #include "RenderStatsPanel.h"
 #include "ShaderVariantPanel.h"
 #include "PlaySession.h"
@@ -21,7 +22,7 @@ namespace Helios
 	{
 	public:
 		SceneEditorLayer();
-		~SceneEditorLayer() override = default;
+		~SceneEditorLayer() override;
 
 		void OnAttached() override;
 		void OnDetached() override;
@@ -38,6 +39,9 @@ namespace Helios
 		void OpenScene(const std::string& path);
 		/* 双击 .anim：加载片段并让时间轴独立编辑它（自动打开时间轴面板并切到前台） */
 		void OpenAnimationClip(const std::string& path);
+		/* 打开游戏 UI 文档：切到 Game UI 面板并打开这份 .rml（资源浏览器双击、
+		 * 属性面板 Canvas 卡的按钮都走这里）。path 是绝对路径或相对项目根都行 */
+		void OpenGameUIDocument(const std::string& path);
 
 		/* 方向键此刻归不归时间轴（鼠标停在时刻区）：主壳层据此压掉 ImGui 的导航移动 */
 		[[nodiscard]] bool WantsTimelineArrowKeys() const;
@@ -46,19 +50,20 @@ namespace Helios
 		/* 保存场景到指定路径 */
 		void SaveSceneAs();
 
-		/* 编辑历史 */
+		/* 编辑历史：撤哪一条按焦点定 —— 游戏 UI 面板拿着焦点时先撤它的文档，
+		 * 在场景视口里按下鼠标就交回场景。两边的记录互不相干 */
 		bool Undo();
 		bool Redo();
-		/* 当前该用哪条历史：运行期用运行世界的独立栈（Stop 时连同记录一起丢），
-		 * 编辑态用编辑栈。Gizmo、属性面板、时间轴都走它 */
+		/* 当前该用哪条历史（写命令用）：运行期用运行世界的独立栈（Stop 时连同记录一起丢），
+		 * 编辑态用编辑栈。Gizmo、属性面板、时间轴都走它；游戏 UI 的自有历史不在这里 */
 		CommandStack& ActiveCommandStack() { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack : m_CommandStack; }
 		/* 资产命令入口（资源浏览器的新建 / 重命名 / 删除）：资产不属于场景内容，
 		 * 一律进编辑栈 —— 进运行期栈会在 Stop 时连撤销记录一起丢 */
 		void ExecuteAssetCommand(UniquePtr<ICommand> command) { m_CommandStack.Execute(std::move(command)); }
-		[[nodiscard]] bool CanUndo() const { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.CanUndo() : m_CommandStack.CanUndo(); }
-		[[nodiscard]] bool CanRedo() const { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.CanRedo() : m_CommandStack.CanRedo(); }
-		[[nodiscard]] const char* GetUndoLabel() const { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.GetUndoLabel() : m_CommandStack.GetUndoLabel(); }
-		[[nodiscard]] const char* GetRedoLabel() const { return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.GetRedoLabel() : m_CommandStack.GetRedoLabel(); }
+		[[nodiscard]] bool CanUndo() const;
+		[[nodiscard]] bool CanRedo() const;
+		[[nodiscard]] const char* GetUndoLabel() const;
+		[[nodiscard]] const char* GetRedoLabel() const;
 
 		/* 场景有没有未保存的改动（层级面板根节点据此显示脏标记）。
 		 * 主判据是编辑历史的位置与上次保存时是否一致 —— 撤销回保存点即视为干净；
@@ -160,6 +165,9 @@ namespace Helios
 		void CollectCameraEntries();
 		/* 响应键盘 */
 		bool OnKeyPressed(class KeyPressedEvent* event);
+		bool OnKeyReleased(class KeyReleasedEvent* event);
+		/* 运行态且 Game 面板拿着键盘时，按键先给运行时 UI（焦点 / Tab 导航 / 回车触发） */
+		bool ForwardUIKey(KeyCode key, bool pressed);
 		/* 响应鼠标 */
 		bool OnMouseButtonPressed(class MouseButtonPressedEvent* event);
 		/* 响应鼠标滚轮（缩放 / 飞行速度） */
@@ -204,6 +212,8 @@ namespace Helios
 		void CommitGameViewState(const GameViewPanel::Result& result, GameViewFrame& frame);
 		/* 把面板算出的画面区域落给相机（视口区域 + 投影比例） */
 		void ApplyGameViewport(const GameViewPanel::Result& result, const GameViewFrame& frame);
+		/* 指针事件转发给运行世界的运行时 UI（坐标换算成视口物理像素） */
+		void ForwardUIInput(const GameViewPanel::Result& result, const GameViewFrame& frame);
 		/* 运行态标识：视口描一圈状态色（Scene 视口；Game 面板的画框在 GameViewPanel 里） */
 		void DrawPlayBorder(const ImVec2& min, const ImVec2& max) const;
 		/* 脚本执行顺序总表：全场景挂载点按 Order 排，行内可改 */
@@ -324,8 +334,15 @@ namespace Helios
 		TimelinePanel m_TimelinePanel;
 		/* 打开片段后要求把时间轴页签切到前台（下一帧 SetWindowFocus） */
 		bool m_FocusTimelineRequested{ false };
+		/* 打开游戏 UI 文档后要求把面板切到前台（下一帧 SetWindowFocus） */
+		bool m_FocusGameUIRequested{ false };
+		/* 撤销此刻归游戏 UI 面板：面板拿到过焦点之后为真，在场景视口里按下就交回场景 */
+		bool m_UIOwnsUndo{ false };
 		/* 顺序表的草稿：key = 实体句柄 << 32 | 槽位下标，点 Apply 才写进组件 */
 		std::unordered_map<uint64_t, int> m_ScriptOrderDraft;
+		/* 游戏 UI 面板：离线画布 + 文档编辑，状态由面板自己持有 */
+		UIEditor::UIPreviewPanel m_UIPreviewPanel;
+
 		/* 本帧可视化可选的相机（渲染图与相机同生命周期，指针跨帧稳定） */
 		std::vector<FrameGraphPanel::CameraEntry> m_CameraEntries;
 		/* 渲染统计面板（每帧 CPU / GPU 耗时；绘制逻辑在面板自身） */

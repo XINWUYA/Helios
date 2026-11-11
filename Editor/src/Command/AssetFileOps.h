@@ -21,6 +21,7 @@ namespace Helios
 		Terrain,     /* .terrain（高度图 + 范围 + 材质引用） */
 		Probe,       /* .probe（反射探针的烘焙缓存：属性面板里直接预览烘焙结果） */
 		Animation,   /* .anim（动画片段：轨道 + 关键帧） */
+		UI,          /* .rml / .rcss / .uilang（运行时 UI 的文档、样式与字符串表） */
 		CppHeader,   /* .h / .hpp（脚本头文件） */
 		CppSource,   /* .cpp / .cc（脚本源文件） */
 	};

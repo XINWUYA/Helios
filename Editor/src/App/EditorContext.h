@@ -25,6 +25,8 @@ namespace Helios
 		void OpenScene(const std::string& path);
 		/* 双击 .anim：让时间轴独立编辑这个片段（不需要实体） */
 		void OpenAnimationClip(const std::string& path);
+		/* 双击 .rml：在 Game UI 面板里打开这份文档（path 为绝对路径） */
+		void OpenGameUIDocument(const std::string& path);
 		/* 方向键是否归时间轴微调（鼠标在时刻区）：主壳层据此压掉这一帧的导航移动 */
 		[[nodiscard]] bool WantsTimelineArrowKeys();
 		void SaveScene();

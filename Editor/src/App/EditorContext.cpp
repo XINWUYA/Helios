@@ -52,6 +52,12 @@ namespace Helios
 			layer->OpenAnimationClip(path);
 	}
 
+	void EditorContext::OpenGameUIDocument(const std::string& path)
+	{
+		if (auto* layer = GetSceneLayer())
+			layer->OpenGameUIDocument(path);
+	}
+
 	bool EditorContext::WantsTimelineArrowKeys()
 	{
 		const auto* layer = GetSceneLayer();

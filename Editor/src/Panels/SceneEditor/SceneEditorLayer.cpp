@@ -7,12 +7,12 @@
 #include <iomanip>
 #include <glm/gtc/type_ptr.hpp>
 #include "Viewport/EditorBuiltinCamera.h"
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Viewport/SceneGizmos.h"
 #include "Viewport/ViewGizmo.h"
 #include "Viewport/TerrainBrushPreview.h"
-#include "UI/PanelChrome.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/PanelChrome.h"
+#include "EditorUI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
 #include "Command/AssetFileOps.h"
 #include "Command/TransformCommand.h"
@@ -27,6 +27,10 @@
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Scene/TerrainField.h"
 #include "Helios/Scene/GrassField.h"
+#include "EditorUI/Widgets/SlidingTabs.h"
+#include "Helios/Core/Input.h"
+#include "Helios/UI/UISystem.h"
+#include "Common/EditorSettings.h"
 #include "Common/ProjectConfig.h"
 #include "Helios/Script/ScriptRuntime.h"
 
@@ -124,6 +128,8 @@ namespace Helios
 		constexpr float kViewAutosaveSeconds = 1.5f;
 	}
 
+	SceneEditorLayer::~SceneEditorLayer() = default;
+
 	SceneEditorLayer::SceneEditorLayer()
 		: ILayer("SceneEditorLayer", 10) /* 外壳之上：场景视口和它自己的面板 */
 	{
@@ -152,6 +158,10 @@ namespace Helios
 
 		/* 层级树双击 = 镜头定位到该实体（与 F 键同一套取景） */
 		m_SceneHierarchy.SetFocusEntityFunc([this](const Entity& entity) { FocusEntity(entity); });
+
+		/* 属性面板 Canvas 卡的「Open in Game UI」：面板就在本层，直接接过来 */
+		m_SceneHierarchy.GetInspector().SetGameUIDocumentFunc(
+			[this](const std::string& path) { OpenGameUIDocument(path); });
 
 		/* 启动就开一个场景：上次打开的那个，没有才退回项目配的启动场景 */
 		OpenStartupScene();
@@ -257,6 +267,21 @@ namespace Helios
 		m_ShaderVariantPanel.OnImGuiRender();
 
 		DrawScriptOrderWindow();
+		m_UIPreviewPanel.OnImGuiRender();
+
+		/* 面板拿到焦点 = 接下来在改这份文档：撤销先撤它，直到在场景视口里按下；
+		 * 面板收起来就交回场景，别让 Ctrl+Z 撤掉看不见的东西 */
+		if (m_UIPreviewPanel.HasFocus())
+			m_UIOwnsUndo = true;
+		else if (!Panel::IsVisible(Panel::kGameUI))
+			m_UIOwnsUndo = false;
+
+		/* 打开文档后切页签：面板提交过之后再 SetWindowFocus 才有效 */
+		if (m_FocusGameUIRequested)
+		{
+			m_FocusGameUIRequested = false;
+			ImGui::SetWindowFocus(Panel::kGameUI);
+		}
 
 		/* 游戏画面：运行世界主相机的渲染结果（运行态才画内容） */
 		ShowGameViewportUI();
@@ -294,6 +319,7 @@ namespace Helios
 
 		EventDispatcher dispatcher(event);
 		dispatcher.Dispatch<KeyPressedEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnKeyPressed));
+		dispatcher.Dispatch<KeyReleasedEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnKeyReleased));
 		dispatcher.Dispatch<MouseButtonPressedEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnMouseButtonPressed));
 		dispatcher.Dispatch<MouseScrolledEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnMouseScrolled));
 		dispatcher.Dispatch<WindowFileDropEvent>(BIND_EVENT_FUNC(SceneEditorLayer::OnFileDrop));
@@ -382,6 +408,9 @@ namespace Helios
 				&& entity == static_cast<entt::entity>(primary_camera);
 			render_view->SetEnableRender(game_view || viewed);
 			render_view->SetOutputToTexture(true);
+			/* 运行时 UI 只叠在真正画游戏画面的那个视图上：一个画布只按一个尺寸布局，
+			 * 两个视图各画一遍会让布局每帧来回重排 */
+			render_view->SetDrawUI(game_view);
 		}
 
 		/* 编辑器相机：Scene 页签被挡住或关掉时不渲染（运行期间通常在看 Game 页签）。
@@ -418,9 +447,39 @@ namespace Helios
 		}
 	}
 
+	/* UI 吃掉的就别再当编辑器快捷键：Tab / 回车 / 方向键在 RmlUi 里有自己的语义 */
+	bool SceneEditorLayer::ForwardUIKey(KeyCode key, bool pressed)
+	{
+		if (!m_PlaySession.IsPlaying() || !m_GameViewportFocused)
+			return false;
+		if (!m_pMainScene || !m_pMainScene->HasUICanvas())
+			return false;
+
+		UI::UISystem& ui_system = m_pMainScene->GetUISystem();
+		return pressed ? ui_system.ProcessKeyDown(key) : ui_system.ProcessKeyUp(key);
+	}
+
+	bool SceneEditorLayer::OnKeyReleased(KeyReleasedEvent* event)
+	{
+		PROFILE_CPU_FUNCTION();
+
+		if (m_UIPreviewPanel.ProcessKeyUp(event->GetKeyCode()))
+			return true;
+
+		return ForwardUIKey(event->GetKeyCode(), false);
+	}
+
 	bool SceneEditorLayer::OnKeyPressed(KeyPressedEvent* event)
 	{
 		PROFILE_CPU_FUNCTION();
+
+		/* 预览面板的键盘：撤销、存盘与控件输入都在面板内部结算 */
+		if (m_UIPreviewPanel.ProcessKeyDown(event->GetKeyCode()))
+			return true;
+
+		/* 同一批按键也可能被编辑器快捷键用到；UI 先拿，消费掉就直接返回 */
+		if (ForwardUIKey(event->GetKeyCode(), true))
+			return true;
 
 		/* 全屏覆盖层优先：Esc 不论键盘被谁拿走都先退全屏 */
 		if (m_GameFullscreen && event->GetKeyCode() == Key::Escape)
@@ -491,6 +550,10 @@ namespace Helios
 
 		if (event->GetMouseButton() == Mouse::ButtonLeft)
 		{
+			/* 在场景里按下：撤销交回场景，游戏 UI 那份历史留在面板里 */
+			if (m_IsViewportHovered)
+				m_UIOwnsUndo = false;
+
 			/* 笔刷模式下、选中的是地形时左键是用来画的，不改选中；选中别的照常点选 */
 			const Entity selected = m_SceneHierarchy.GetSelectedEntity();
 			if (m_IsViewportHovered && selected && !IsGizmoHovered()
@@ -980,6 +1043,17 @@ namespace Helios
 		m_FocusTimelineRequested = true;
 	}
 
+	/* 打开游戏 UI 文档：面板先亮出来（隐藏时画布是关着的，开文档要等它重新建），
+	 * 再交给面板加载；页签切到前台放到面板提交之后 */
+	void SceneEditorLayer::OpenGameUIDocument(const std::string& path)
+	{
+		PROFILE_CPU_FUNCTION();
+
+		Panel::SetVisible(Panel::kGameUI, true);
+		m_UIPreviewPanel.OpenDocumentAt(path);
+		m_FocusGameUIRequested = true;
+	}
+
 	void SceneEditorLayer::ImportScene()
 	{
 		PROFILE_CPU_FUNCTION();
@@ -1345,6 +1419,11 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION();
 		FinishGrassPaint();
+
+		/* 焦点在游戏 UI 上就撤那份文档，别把场景里的改动撤掉 */
+		if (m_UIOwnsUndo)
+			return m_UIPreviewPanel.Undo();
+
 		return ActiveCommandStack().Undo();
 	}
 
@@ -1352,7 +1431,43 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION();
 		FinishGrassPaint();
+
+		if (m_UIOwnsUndo)
+			return m_UIPreviewPanel.Redo();
+
 		return ActiveCommandStack().Redo();
+	}
+
+	bool SceneEditorLayer::CanUndo() const
+	{
+		if (m_UIOwnsUndo)
+			return m_UIPreviewPanel.CanUndo();
+
+		return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.CanUndo() : m_CommandStack.CanUndo();
+	}
+
+	bool SceneEditorLayer::CanRedo() const
+	{
+		if (m_UIOwnsUndo)
+			return m_UIPreviewPanel.CanRedo();
+
+		return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.CanRedo() : m_CommandStack.CanRedo();
+	}
+
+	const char* SceneEditorLayer::GetUndoLabel() const
+	{
+		if (m_UIOwnsUndo)
+			return m_UIPreviewPanel.GetUndoLabel();
+
+		return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.GetUndoLabel() : m_CommandStack.GetUndoLabel();
+	}
+
+	const char* SceneEditorLayer::GetRedoLabel() const
+	{
+		if (m_UIOwnsUndo)
+			return m_UIPreviewPanel.GetRedoLabel();
+
+		return m_PlaySession.IsPlaying() ? m_RuntimeCommandStack.GetRedoLabel() : m_CommandStack.GetRedoLabel();
 	}
 
 	void SceneEditorLayer::ShowSceneViewportUI()
@@ -1523,6 +1638,59 @@ namespace Helios
 			frame.Camera->SetAspectRatio(aspect);
 	}
 
+	/* 指针转发给运行时 UI：ImGui 逻辑点 → 画面区域内的视口物理像素。
+	 * 只在运行态且指针落在画面上（或正按着键拖拽）时喂，离开就发 leave 收掉悬停态 */
+	void SceneEditorLayer::ForwardUIInput(const GameViewPanel::Result& result, const GameViewFrame& frame)
+	{
+		if (!m_PlaySession.IsPlaying() || frame.View == nullptr || !result.Drawable)
+			return;
+		if (result.Region.Width == 0 || result.Region.Height == 0)
+			return;
+
+		SharedPtr<Scene> scene = m_pMainScene;
+		if (!scene)
+			return;
+
+		/* 场景里没挂画布就不建 UISystem：编辑器多数场景用不到 */
+		if (!scene->HasUICanvas())
+			return;
+
+		UI::UISystem& ui_system = scene->GetUISystem();
+
+		const bool dragging = ImGui::IsAnyMouseDown();
+		if (!result.Hovered && !dragging)
+		{
+			ui_system.ProcessMouseLeave();
+			return;
+		}
+
+		/* 画面区域是逻辑点，视图纹理是物理像素（可能还被 ClampRenderSize 缩过），按比例换算 */
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		const auto& viewport = frame.View->GetViewportRegion();
+		const float u = (mouse.x - static_cast<float>(result.Region.MinX)) / static_cast<float>(result.Region.Width);
+		const float v = (mouse.y - static_cast<float>(result.Region.MinY)) / static_cast<float>(result.Region.Height);
+		ui_system.ProcessMouseMove(u * static_cast<float>(viewport.Width), v * static_cast<float>(viewport.Height));
+
+		for (int button = 0; button < 3; ++button)
+		{
+			if (ImGui::IsMouseClicked(button))
+				ui_system.ProcessMouseButtonDown(button);
+			if (ImGui::IsMouseReleased(button))
+				ui_system.ProcessMouseButtonUp(button);
+		}
+
+		const float wheel = ImGui::GetIO().MouseWheel;
+		if (wheel != 0.0f)
+			ui_system.ProcessMouseWheel(wheel);
+
+		/* 打字发给 UI：ImGui 自己的输入框在用时让位（两边抢同一批字符会重复） */
+		if (!ImGui::GetIO().WantTextInput)
+		{
+			for (const ImWchar character : ImGui::GetIO().InputQueueCharacters)
+				ui_system.ProcessTextInput(static_cast<uint32_t>(character));
+		}
+	}
+
 	/* 面板改的值落回去：时间缩放归 PlaySession，比例归窗口设置，全屏按钮翻转覆盖层 */
 	void SceneEditorLayer::CommitGameViewState(const GameViewPanel::Result& result, GameViewFrame& frame)
 	{
@@ -1542,6 +1710,9 @@ namespace Helios
 		m_GameViewportHovered = result.Hovered;
 		m_GameViewportFocused = result.Focused;
 		ApplyGameViewport(result, frame);
+
+		/* 画面区域定下来之后再喂 UI：换算用的就是这一份 */
+		ForwardUIInput(result, frame);
 	}
 
 	/* 游戏画面：运行世界主相机的渲染结果。编辑态不画内容 —— 场景相机在编辑态本来就不渲染，
@@ -2463,6 +2634,7 @@ namespace Helios
 		UpdateViewport();
 		UpdateSceneCameraViewports();
 		UpdateSceneCameraRendering();
+		m_UIPreviewPanel.Update();
 
 		/* 相机列表与面板 UI 同源：即使本帧不渲染（视口为 0）也刷新，面板不读过期条目 */
 		CollectCameraEntries();

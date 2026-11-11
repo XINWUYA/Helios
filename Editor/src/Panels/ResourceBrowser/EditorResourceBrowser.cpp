@@ -1,9 +1,9 @@
 ﻿#include "Pch.h"
 #include "EditorResourceBrowser.h"
 #include "Common/EditorCommon.h"
-#include "UI/EditorIcons.h"
-#include "UI/PanelChrome.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/EditorIcons.h"
+#include "EditorUI/PanelChrome.h"
+#include "EditorUI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
 #include "Command/AssetFileOps.h"
 #include "Command/CreateAssetFileCommand.h"
@@ -12,8 +12,8 @@
 #include "Command/RenameAssetCommand.h"
 #include "Common/FileDialog.h"
 #include "Helios/Core/TextureSettings.h"
-#include "UI/EditorTheme.h"
-#include "UI/ImGuiExtensions.h"
+#include "EditorUI/EditorTheme.h"
+#include "EditorUI/ImGuiExtensions.h"
 #include <utility>
 #include <vector>
 
@@ -99,6 +99,9 @@ namespace Helios
 			/* 项目里的 shader 走同一套相对路径：写在 Shaders 下，材质里填 Shaders/<名字>.glsl */
 			{ "Shader",         ".glsl",     "NewShader",          Icons::Id::FileShader,    "Shaders" },
 			{ "Animation Clip", ".anim",     "New Animation",      Icons::Id::AnimationClip, nullptr },
+			/* 运行时 UI：文档与样式成对出现，两个入口共用一枚图标 */
+			{ "UI Document",    ".rml",      "NewUI",              Icons::Id::FileUI,        nullptr },
+			{ "UI Style",       ".rcss",     "NewStyle",           Icons::Id::FileUI,        nullptr },
 			/* 脚本只认项目根下的 Scripts：脚本构建收不到别处的 .cpp，建了也是死文件 */
 			{ "Script",         ".cpp",      "NewScript",          Icons::Id::FileCppSource, "Scripts" },
 			{ "File...",        "",          "New File",           Icons::Id::File,          nullptr },
@@ -334,6 +337,7 @@ namespace Helios
 		case FileType::Probe:    return Icons::Id::FileProbe;
 		case FileType::Animation: return Icons::Id::AnimationClip;
 		case FileType::CppHeader: return Icons::Id::FileCppHeader;
+		case FileType::UI: return Icons::Id::FileUI;
 		case FileType::CppSource: return Icons::Id::FileCppSource;
 		}
 
@@ -358,6 +362,7 @@ namespace Helios
 		case AssetFileKind::Probe:    return FileType::Probe;
 		case AssetFileKind::Animation: return FileType::Animation;
 		case AssetFileKind::CppHeader: return FileType::CppHeader;
+		case AssetFileKind::UI: return FileType::UI;
 		case AssetFileKind::CppSource: return FileType::CppSource;
 		}
 
@@ -381,6 +386,7 @@ namespace Helios
 		case FileType::Probe:    return AssetFileKind::Probe;
 		case FileType::Animation: return AssetFileKind::Animation;
 		case FileType::CppHeader: return AssetFileKind::CppHeader;
+		case FileType::UI: return AssetFileKind::UI;
 		case FileType::CppSource: return AssetFileKind::CppSource;
 		case FileType::Folder:   return AssetFileKind::Other;   /* 文件夹不看大类（看 IsFolder） */
 		}
@@ -407,6 +413,7 @@ namespace Helios
 		case TypeFilter::Probe:    return "Reflection Probes";
 		case TypeFilter::Animation: return "Animations";
 		case TypeFilter::CppHeader: return "C++ Headers";
+		case TypeFilter::UI: return "UI";
 		case TypeFilter::CppSource: return "C++ Sources";
 		}
 
@@ -430,6 +437,7 @@ namespace Helios
 		case TypeFilter::Probe:    return type == FileType::Probe;
 		case TypeFilter::Animation: return type == FileType::Animation;
 		case TypeFilter::CppHeader: return type == FileType::CppHeader;
+		case TypeFilter::UI: return type == FileType::UI;
 		case TypeFilter::CppSource: return type == FileType::CppSource;
 		}
 
@@ -1585,6 +1593,7 @@ namespace Helios
 		case TypeFilter::Probe:    return Icons::Id::FileProbe;
 		case TypeFilter::Animation: return Icons::Id::AnimationClip;
 		case TypeFilter::CppHeader: return Icons::Id::FileCppHeader;
+		case TypeFilter::UI: return Icons::Id::FileUI;
 		case TypeFilter::CppSource: return Icons::Id::FileCppSource;
 		}
 
@@ -2531,6 +2540,13 @@ namespace Helios
 								ClearRenameCandidate();
 								m_AnimationClipOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
 							}
+							else if (child_node->Type == FileType::UI && m_GameUIDocumentOpenSink.Open
+								&& EndsWithIgnoreCase(child_node->FilePath, ".rml"))
+							{
+								/* 双击 .rml：在游戏 UI 面板里打开；.rcss / .uilang 还是改名 */
+								ClearRenameCandidate();
+								m_GameUIDocumentOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
+							}
 							else
 							{
 								BeginInlineRename(child_node);
@@ -2772,6 +2788,13 @@ namespace Helios
 						/* 双击 .anim：交给时间轴独立编辑 */
 						ClearRenameCandidate();
 						m_AnimationClipOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
+					}
+					else if (child_node->Type == FileType::UI && m_GameUIDocumentOpenSink.Open
+						&& EndsWithIgnoreCase(child_node->FilePath, ".rml"))
+					{
+						/* 双击 .rml：在游戏 UI 面板里打开 */
+						ClearRenameCandidate();
+						m_GameUIDocumentOpenSink.Open(PathToUtf8(AbsoluteAssetPath(child_node->FilePath)));
 					}
 					else
 					{

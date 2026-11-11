@@ -3,12 +3,16 @@
 
 namespace Helios
 {
-	void CommandStack::Execute(UniquePtr<ICommand> command)
+	bool CommandStack::Execute(UniquePtr<ICommand> command)
 	{
 		if (command == nullptr)
-			return;
+			return false;
 
 		command->Do();
+
+		/* 没做成（写盘失败）：当作没发生过，历史与重做分支都不动 */
+		if (command->DidFail())
+			return false;
 
 		/* 新操作产生后，原有的重做分支失效 */
 		m_Commands.resize(m_NextIndex);
@@ -23,11 +27,12 @@ namespace Helios
 			m_Commands.back()->TryMerge(*command);
 
 		if (can_merge)
-			return;
+			return true;
 
 		m_Commands.emplace_back(std::move(command));
 		m_CommandTransactions.emplace_back(m_TransactionId);
 		m_NextIndex = m_Commands.size();
+		return true;
 	}
 
 	void CommandStack::BeginTransaction()

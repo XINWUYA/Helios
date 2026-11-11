@@ -1,21 +1,21 @@
 ﻿#include "Pch.h"
 #include "MainEditorLayer.h"
-#include "UI/DebugViewMenu.h"
-#include "UI/ImGuiExtensions.h"
+#include "EditorUI/DebugViewMenu.h"
+#include "EditorUI/ImGuiExtensions.h"
 #include "Panels/PanelWindow.h"
 #include "Viewport/EditorBuiltinCamera.h"
 #include <cstdio>
 #include "Viewport/SceneGizmos.h"
-#include "UI/EditorIcons.h"
-#include "UI/PanelChrome.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/EditorIcons.h"
+#include "EditorUI/PanelChrome.h"
+#include "EditorUI/PanelRegistry.h"
 #include "Common/FileDialog.h"
 #include "Common/EditorLayouts.h"
 #include "Command/AssetFileOps.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Core/AssetManager.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Helios/Renderer/Renderer.h"
 #include <fstream>
 
@@ -48,6 +48,11 @@ namespace Helios
 		EditorResourceBrowser::AnimationClipOpenSink clip_open;
 		clip_open.Open = [this](const std::string& path) { m_Context.OpenAnimationClip(path); };
 		m_ResourceBrowser.SetAnimationClipOpenSink(std::move(clip_open));
+
+		/* 双击 .rml → Game UI 面板里打开（同 .anim，面板不认识场景层） */
+		EditorResourceBrowser::GameUIDocumentOpenSink ui_document_open;
+		ui_document_open.Open = [this](const std::string& path) { m_Context.OpenGameUIDocument(path); };
+		m_ResourceBrowser.SetGameUIDocumentOpenSink(std::move(ui_document_open));
 
 		/* 项目本地设置先读：脚本开关要赶在首次编译 / 加载之前生效 */
 		m_Settings = EditorSettings::Load();

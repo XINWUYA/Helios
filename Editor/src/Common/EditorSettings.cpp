@@ -1,6 +1,6 @@
 ﻿#include "Pch.h"
 #include "EditorSettings.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Scene/GrassField.h"
 #include "Helios/Scene/SkeletonModel.h"
@@ -71,6 +71,22 @@ namespace Helios::EditorSettings
 				state.AutoReloadShaders = value;
 			else if (key == "Theme")
 				state.Theme = std::atoi(raw.c_str());
+			else if (key == "UIPreviewDocument")
+				state.UIPreview.Document = raw;
+			else if (key == "UIPreviewResolution")
+				state.UIPreview.Resolution = std::atoi(raw.c_str());
+			else if (key == "UIPreviewGuides")
+				state.UIPreview.Guides = value;
+			else if (key == "UIPreviewEditing")
+				state.UIPreview.Editing = value;
+			else if (key == "UIPreviewTree")
+				state.UIPreview.Tree = value;
+			else if (key == "UIPreviewTreeFraction")
+				state.UIPreview.TreeFraction = static_cast<float>(std::atof(raw.c_str()));
+			else if (key == "UIPreviewCodeFraction")
+				state.UIPreview.CodeFraction = static_cast<float>(std::atof(raw.c_str()));
+			else if (key == "UIPreviewInspectorFraction")
+				state.UIPreview.InspectorFraction = static_cast<float>(std::atof(raw.c_str()));
 		}
 
 		/* 配置文件里的主题序号可能来自旧版本（主题表增删过），越界就回落到默认档 */
@@ -105,6 +121,14 @@ namespace Helios::EditorSettings
 		file << "AutoCompileScripts=" << (state.AutoCompileScripts ? 1 : 0) << "\n";
 		file << "AutoReloadShaders=" << (state.AutoReloadShaders ? 1 : 0) << "\n";
 		file << "Theme=" << state.Theme << "\n";
+		file << "UIPreviewDocument=" << state.UIPreview.Document << "\n";
+		file << "UIPreviewResolution=" << state.UIPreview.Resolution << "\n";
+		file << "UIPreviewGuides=" << (state.UIPreview.Guides ? 1 : 0) << "\n";
+		file << "UIPreviewEditing=" << (state.UIPreview.Editing ? 1 : 0) << "\n";
+		file << "UIPreviewTree=" << (state.UIPreview.Tree ? 1 : 0) << "\n";
+		file << "UIPreviewTreeFraction=" << state.UIPreview.TreeFraction << "\n";
+		file << "UIPreviewCodeFraction=" << state.UIPreview.CodeFraction << "\n";
+		file << "UIPreviewInspectorFraction=" << state.UIPreview.InspectorFraction << "\n";
 	}
 
 	void Apply(const State& state)

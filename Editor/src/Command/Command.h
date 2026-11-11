@@ -21,6 +21,9 @@ namespace Helios
 			return false;
 		}
 
+		/* Do() 没做成（写盘失败这类）：命令栈不把它记进历史 */
+		[[nodiscard]] virtual bool DidFail() const { return false; }
+
 		/* 历史记录里显示的名称 */
 		[[nodiscard]] virtual const char* GetLabel() const = 0;
 

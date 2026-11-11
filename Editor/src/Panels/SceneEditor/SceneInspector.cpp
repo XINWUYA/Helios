@@ -4,14 +4,14 @@
 #include "ComponentEditors/ComponentEditors.h"
 #include "Material/MaterialSlotEditing.h"
 #include "Common/EditorCommon.h"
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Assets/Gif.h"
 #include "Material/MaterialParamUI.h"
 #include "Command/AssetFileOps.h"
-#include "UI/PanelChrome.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/PanelChrome.h"
+#include "EditorUI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
-#include "UI/Svg.h"
+#include "EditorUI/Svg.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/Common/PathUtils.h"
@@ -20,13 +20,13 @@
 #include "Helios/Scene/ReflectionProbe.h"	/* .probe 详情的烘焙结果预览（BuildPreviewTexture） */
 #include "Helios/Scene/TerrainAsset.h"
 #include "Helios/Scene/AnimationClip.h"
-#include "UI/ImGuiExtensions.h"
+#include "EditorUI/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Command/ComponentFieldCommand.h"
 #include "Command/AddComponentCommand.h"
 #include "Command/RemoveComponentCommand.h"
 #include "Command/SetComponentOrderCommand.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Renderer/PostProcess/Effects/Bloom.h"
 #include "Helios/Renderer/PostProcess/Effects/Fog.h"
@@ -506,6 +506,7 @@ namespace Helios
 			case AssetFileKind::Probe:    return Icons::Id::FileProbe;
 			case AssetFileKind::Animation: return Icons::Id::AnimationClip;
 			case AssetFileKind::CppHeader: return Icons::Id::FileCppHeader;
+			case AssetFileKind::UI: return Icons::Id::FileUI;
 			case AssetFileKind::CppSource: return Icons::Id::FileCppSource;
 			case AssetFileKind::Other:    return Icons::Id::File;
 			}
@@ -533,6 +534,7 @@ namespace Helios
 			case AssetFileKind::Probe:    return "Reflection Probe";
 			case AssetFileKind::Animation: return "Animation Clip";
 			case AssetFileKind::CppHeader: return "C++ Header";
+			case AssetFileKind::UI: return "UI Document";
 			case AssetFileKind::CppSource: return "C++ Source";
 			}
 
@@ -1555,6 +1557,26 @@ namespace Helios
 			const float value_width = ImGuiExt::BeginPropertyRow(field.Name);
 			ImGui::SetNextItemWidth(value_width);
 			InputTextString("##value", *reinterpret_cast<std::string*>(field_ptr));
+			ImGuiExt::EndPropertyRow();
+			break;
+		}
+		case FieldType::AssetRef:
+		{
+			/* 资源引用：路径按文本改，也能从资源浏览器拖一份进来 */
+			auto& value = *reinterpret_cast<std::string*>(field_ptr);
+			const float value_width = ImGuiExt::BeginPropertyRow(field.Name);
+			ImGui::SetNextItemWidth(value_width);
+			InputTextString("##value", value);
+
+			if (ImGui::BeginDragDropTarget())
+			{
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RESOURCE_BROWSER_ITEM"))
+					value = static_cast<const char*>(payload->Data);
+				ImGui::EndDragDropTarget();
+			}
+
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Drop an asset from the Resource Browser");
 			ImGuiExt::EndPropertyRow();
 			break;
 		}
@@ -2694,8 +2716,8 @@ namespace Helios
 
 			ImGui::PushID(static_cast<int>(desc.Type.hash_code()));
 
-			/* Model 卡尾部的模型编辑器入口：文件模型才有路径可交（内建 / 空模型不画） */
-			ComponentCardFooter model_footer;
+			/* 卡片尾部的入口：模型给模型编辑器，画布给游戏 UI 面板（没有可交的路径就不画） */
+			ComponentCardFooter footer;
 			if (component != nullptr && desc.Type == std::type_index(typeid(ModelComponent)))
 			{
 				const SharedPtr<Model>& model = static_cast<ModelComponent*>(component)->m_Model;
@@ -2703,11 +2725,24 @@ namespace Helios
 				if (model != nullptr && !model->TryGetBuiltinType(builtin_type))
 				{
 					const std::string path = model->GetPath();
-					model_footer.Label = "Open in Model Editor";
-					model_footer.Clicked = [this, path]()
+					footer.Label = "Open in Model Editor";
+					footer.Clicked = [this, path]()
 					{
 						if (m_ModelEditorFunc)
 							m_ModelEditorFunc(path);
+					};
+				}
+			}
+			else if (component != nullptr && desc.Type == std::type_index(typeid(CanvasComponent)))
+			{
+				const std::string document = static_cast<CanvasComponent*>(component)->m_DocumentPath;
+				if (!document.empty())
+				{
+					footer.Label = "Open in Game UI";
+					footer.Clicked = [this, document]()
+					{
+						if (m_GameUIDocumentFunc)
+							m_GameUIDocumentFunc(document);
 					};
 				}
 			}
@@ -2716,7 +2751,7 @@ namespace Helios
 			if (desc.Type == std::type_index(typeid(TerrainComponent)) && desc.CustomDraw != nullptr)
 				body = [&]() { return DrawTerrainPanel(desc, m_Entity, *static_cast<TerrainComponent*>(component)); };
 			DrawComponentBlock(desc, m_Entity, component, i, count,
-				model_footer.Label != nullptr ? &model_footer : nullptr, body);
+				footer.Label != nullptr ? &footer : nullptr, body);
 
 			/* 卡头菜单里的 Remove 当场就把组件销毁了，上面拿的指针已经悬空，
 			 * 附加卡动笔前重新查一次，组件没了就跳过。 */

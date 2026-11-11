@@ -40,6 +40,9 @@ namespace Helios
 		 * 同样由上层接线注入，未注入时点击无动作。 */
 		using ModelEditorFunc = std::function<void(const std::string&)>;
 		void SetModelEditorFunc(ModelEditorFunc func) { m_ModelEditorFunc = std::move(func); }
+		/* 游戏 UI 入口：Canvas 卡里的「Open in Game UI」按钮点击 → 在面板里打开这份 .rml。
+		 * 面板就在同一个 Layer 里，直接由 SceneEditorLayer 接线。 */
+		void SetGameUIDocumentFunc(ModelEditorFunc func) { m_GameUIDocumentFunc = std::move(func); }
 
 		/* 资源选中（跨面板能力，由外壳接线：资源浏览器 → 这里）：
 		 * 属性面板切换到该资源的详细内容；最近一次选择说了算 —— 点实体即切回组件视图
@@ -254,6 +257,8 @@ namespace Helios
 		AssetRevealFunc m_AssetRevealFunc;
 		/* 模型编辑器入口（Model 卡的按钮）；由上层注入，未注入时点击无动作 */
 		ModelEditorFunc m_ModelEditorFunc;
+		/* 游戏 UI 入口（Canvas 卡的按钮）；同上 */
+		ModelEditorFunc m_GameUIDocumentFunc;
 		/* 本帧预览卡要看的场景相机（帧首清零、预览卡画出来才置位） */
 		const Camera* m_pPreviewCamera{ nullptr };
 		/* 上一帧每张组件卡的矩形（自检用） */

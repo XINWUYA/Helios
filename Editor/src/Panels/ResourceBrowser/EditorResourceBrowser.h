@@ -5,9 +5,9 @@
 #include <unordered_set>
 #include <vector>
 #include <imgui.h>
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Assets/Gif.h"
-#include "UI/Svg.h"
+#include "EditorUI/Svg.h"
 #include "Command/AssetFileOps.h"
 #include "Command/Command.h"
 #include "Helios/Common/Common.h"
@@ -63,6 +63,14 @@ namespace Helios
 
 		void SetAnimationClipOpenSink(AnimationClipOpenSink sink) { m_AnimationClipOpenSink = std::move(sink); }
 
+		/* 双击 .rml → 交给游戏 UI 面板（同 SceneOpenSink，由主壳层注入） */
+		struct GameUIDocumentOpenSink
+		{
+			std::function<void(const std::string&)> Open;
+		};
+
+		void SetGameUIDocumentOpenSink(GameUIDocumentOpenSink sink) { m_GameUIDocumentOpenSink = std::move(sink); }
+
 		/* 在浏览器里定位一个资源（跨面板能力：属性面板点贴图 → 跳到这里）：
 		 * 切到它所在目录并选中它。路径按相对 Assets 的口径给；
 		 * 找不到（外部新增、轮询未到）就记为待选中并触发一次重建。 */
@@ -89,6 +97,7 @@ namespace Helios
 			Terrain,
 			Probe,
 			Animation,
+			UI,
 			CppHeader,
 			CppSource,
 		};
@@ -110,6 +119,7 @@ namespace Helios
 			Terrain,
 			Probe,
 			Animation,
+			UI,
 			CppHeader,
 			CppSource,
 			COUNT
@@ -374,6 +384,8 @@ namespace Helios
 		SceneOpenSink m_SceneOpenSink;
 		/* 双击 .anim → 时间轴（见 AnimationClipOpenSink） */
 		AnimationClipOpenSink m_AnimationClipOpenSink;
+		/* 双击 .rml → 游戏 UI 面板（见 GameUIDocumentOpenSink） */
+		GameUIDocumentOpenSink m_GameUIDocumentOpenSink;
 		/* 本帧有"选择动作"（点选 / 清空）—— 同一项被再次点选也要重新通知一次，
 		 * 否则"点资源 → 点实体 → 再点同一资源"的第三次点击不会把属性面板切回来。
 		 * 切目录的静默清空把它也一并吞掉（那次清空不通知面板，见 ApplyCurrentNode）。 */

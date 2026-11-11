@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <filesystem>
+#include <string>
 
 namespace Helios::EditorSettings
 {
@@ -32,6 +33,21 @@ namespace Helios::EditorSettings
 		bool AutoReloadShaders{ true };
 		/* 编辑器强调色主题（EditorTheme::kThemePresets 的下标） */
 		int Theme{ 0 };
+
+		/* 游戏 UI 面板的上次状态：重开编辑器接着看同一份文档、
+		 * 同样的分辨率与开关 */
+		struct UIPreviewState
+		{
+			std::string Document{};      /* 相对项目根，空 = 没选过 */
+			int Resolution{ 0 };
+			bool Guides{ false };
+			bool Editing{ false };
+			bool Tree{ true };
+			float CodeFraction{ 0.40f };
+			float TreeFraction{ 0.22f };
+			float InspectorFraction{ 0.28f };
+		};
+		UIPreviewState UIPreview{};
 	};
 
 	/* 读当前项目的设置；文件缺失时按引擎当前默认值起步 */

@@ -18,8 +18,8 @@ namespace Helios
 		CommandStack(const CommandStack&) = delete;
 		CommandStack& operator=(const CommandStack&) = delete;
 
-		/* 执行并入栈；命令为空时不产生任何改动 */
-		void Execute(UniquePtr<ICommand> command);
+		/* 执行并入栈；命令为空或 Do() 失败时返回 false，且不进历史、不动重做分支 */
+		bool Execute(UniquePtr<ICommand> command);
 
 		/* 合并窗口：连续操作（如一次拖拽）开始 / 结束时调用。
 		 * 窗口内新命令若能并入栈顶，则整段操作只留一条历史。 */
