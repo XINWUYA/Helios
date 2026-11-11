@@ -2,10 +2,20 @@
 
 project(Kernel LANGUAGES CXX)
 
-# 脚本模块在运行期要调用引擎里任意函数，所以 Kernel 一律编成动态库：
-#   脚本 DLL / bundle 链接它，符号由链接器解析，三个平台走同一套机制。
-# Windows 只导出标了 HELIOS_API 的符号（见 Common/Export.h），漏标就是链接错误。
-add_library(Kernel SHARED)
+option(HELIOS_KERNEL_STATIC "Link Kernel as a static library (desktop dry run of the iOS shape)" OFF)
+
+# 内核的库类型跟平台和脚本能力绑定：
+#   桌面是动态库 —— 脚本模块运行期编译完要按链接器解析引擎符号，三个平台走同一套机制；
+#   iOS 是静态库 —— 不能运行期加载代码，脚本编进主二进制，静态链接顺带省掉 dyld
+#   的加载开销与整份导出符号表。
+# Windows 上动态库只导出标了 HELIOS_API 的符号（见 Common/Export.h），漏标就是链接错误。
+if(HELIOS_TARGET_PLATFORM STREQUAL "iOS" OR HELIOS_KERNEL_STATIC)
+    add_library(Kernel STATIC)
+    # 静态链接没有模块边界，导出标注要展开为空
+    target_compile_definitions(Kernel PUBLIC HELIOS_KERNEL_STATIC)
+else()
+    add_library(Kernel SHARED)
+endif()
 
 # Source files
 # CONFIGURE_DEPENDS 让新增/删除源文件后无需手动重新配置即可被自动收录
