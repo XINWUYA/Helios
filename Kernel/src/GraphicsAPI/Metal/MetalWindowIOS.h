@@ -78,6 +78,8 @@ namespace Helios
 		void OnPointerUp(float x, float y);
 		/* 视图布局变化：同步尺寸并派发 resize 事件 */
 		void OnViewLayout(float width_points, float height_points);
+		/* 回前台后重新对齐 drawable：系统可能在后台改过视图几何 */
+		void RefreshDrawableSize();
 
 		/* 显示链路的一帧 */
 		void OnDisplayLink();

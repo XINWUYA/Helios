@@ -5,6 +5,7 @@
 #include "Pch.h"
 
 #include "Helios/Application/Application.h"
+#include "Helios/Common/AssetPath.h"
 #include "Helios/Core/Logger.h"
 
 #import <UIKit/UIKit.h>
@@ -30,7 +31,6 @@ namespace Helios
 	(void)application;
 	(void)launchOptions;
 
-	Helios::Logger::Init();
 	_app = Helios::CreateApplication();
 	return YES;
 }
@@ -39,6 +39,11 @@ namespace Helios
 
 int main(int argc, char* argv[])
 {
+	/* 日志先起来，再解析参数：解析里会打日志。
+	 * --project 在 iOS 上也照样认（simctl launch 后面接参数即可），显式工程优先于随包那份。 */
+	Helios::Logger::Init();
+	Helios::ParseProjectArgument(argc, argv);
+
 	@autoreleasepool
 	{
 		return UIApplicationMain(argc, argv, nil, NSStringFromClass([HeliosPlayerDelegate class]));

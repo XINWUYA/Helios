@@ -354,6 +354,9 @@ namespace Helios
 				(void)note;
 				if (Application* app = Application::Instance())
 					app->SetPaused(false);
+
+				/* 退后台期间系统可能改过视图几何，drawable 重新对齐一次 */
+				this->RefreshDrawableSize();
 			}] retain];
 	}
 
@@ -466,6 +469,19 @@ namespace Helios
 			return;
 
 		app->Tick();
+	}
+
+	void IOSWindow::RefreshDrawableSize()
+	{
+		if (m_View == nullptr)
+			return;
+
+		const CGSize bounds = ((__bridge UIView*)m_View).bounds.size;
+		m_Width = static_cast<uint32_t>(bounds.width * m_ContentScale + 0.5f);
+		m_Height = static_cast<uint32_t>(bounds.height * m_ContentScale + 0.5f);
+
+		if (m_pContext)
+			m_pContext->OnResize(m_Width, m_Height);
 	}
 }
 
