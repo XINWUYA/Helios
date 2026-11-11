@@ -1,6 +1,7 @@
 #include "Pch.h"
 #include "ShaderCompiler.h"
 #include "Helios/Common/AssetPath.h"
+#include "Helios/Core/FileSystem.h"
 
 #include "Helios/Common/Assert.h"
 #include "Helios/Common/Utils.h"
@@ -1058,13 +1059,13 @@ namespace Helios
 
         AddDependency(context.Dependencies, filepath);
 
-        std::ifstream in(filepath, std::ios::in | std::ios::binary);
-        if (!in)
+        std::string raw;
+        std::filesystem::path shader_path;
+        if (!TryPathFromUtf8(filepath, shader_path) || !FileSystem::ReadText(shader_path, raw))
         {
             CORE_LOG_ERROR("Could not open shader file: {}", filepath);
             return {};
         }
-        const std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 
         /* 原始字节只记第一次读到的那份，跟依赖表一一对应 */
         if (context.Contents != nullptr)
@@ -1536,10 +1537,12 @@ namespace Helios
         contents.reserve(dependencies.size());
         for (const std::string& path : dependencies)
         {
-            std::ifstream in(path, std::ios::in | std::ios::binary);
-            if (!in)
+            std::string text;
+            std::filesystem::path file_path;
+            if (!TryPathFromUtf8(path, file_path) || !FileSystem::ReadText(file_path, text))
                 return {};
-            contents.emplace_back(path, std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()));
+
+            contents.emplace_back(path, std::move(text));
         }
         return HashContents(contents);
     }
@@ -1582,17 +1585,9 @@ namespace Helios
 
     bool ShaderCompiler::TryLoadCache(const std::string& cache_path, std::string& output)
     {
-        std::ifstream in(cache_path, std::ios::in | std::ios::binary);
-        if (!in.is_open())
+        std::filesystem::path file_path;
+        if (!TryPathFromUtf8(cache_path, file_path) || !FileSystem::ReadText(file_path, output))
             return false;
-
-        in.seekg(0, std::ios::end);
-        const size_t size = static_cast<size_t>(in.tellg());
-        in.seekg(0, std::ios::beg);
-
-        output.resize(size);
-        in.read(output.data(), size);
-        in.close();
 
         /* 命中就是"这份产物还在用"：刷新修改时间，清理按它判多久没被读过。
          * 一天最多写一次，避免每次启动给几百个文件各改一遍时间戳。 */

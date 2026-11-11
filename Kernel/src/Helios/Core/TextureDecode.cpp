@@ -1,8 +1,10 @@
 #include "Pch.h"
 #include "TextureDecode.h"
+#include "FileSystem.h"
 #include "Jobs.h"
 #include "TextureSettings.h"
 #include "Helios/Common/AssetPath.h"
+#include "Helios/Common/PathUtils.h"
 #include "Helios/Renderer/RenderCommon.h"
 #include "Helios/Renderer/Renderer.h"
 #include <tinyxml2.h>
@@ -74,12 +76,19 @@ namespace Helios
 			/* 线程局部开关：并行解码时不能动 stb 的全局翻转 */
 			stbi_set_flip_vertically_on_load_thread(config.IsFlipV ? 1 : 0);
 
+			/* 先读进内存再交给 stb：怎么读到字节由 FileSystem 决定，stb 只认缓冲 */
+			std::filesystem::path file_path;
+			std::vector<uint8_t> bytes;
+			if (!TryPathFromUtf8(path, file_path) || !FileSystem::ReadFile(file_path, bytes) || bytes.empty())
+				return false;
+
 			int width = 0;
 			int height = 0;
 			int channels = 0;
+			const int byte_count = static_cast<int>(bytes.size());
 			void* pixels = config.IsHdr
-				? static_cast<void*>(stbi_loadf(path.c_str(), &width, &height, &channels, 4))
-				: static_cast<void*>(stbi_load(path.c_str(), &width, &height, &channels, 4));
+				? static_cast<void*>(stbi_loadf_from_memory(bytes.data(), byte_count, &width, &height, &channels, 4))
+				: static_cast<void*>(stbi_load_from_memory(bytes.data(), byte_count, &width, &height, &channels, 4));
 			if (pixels == nullptr)
 				return false;
 
