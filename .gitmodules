@@ -46,3 +46,9 @@
 [submodule "Libraries/ThirdParty/spirv-cross"]
 	path = Libraries/ThirdParty/spirv-cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross.git
+[submodule "Libraries/ThirdParty/rmlui"]
+	path = Libraries/ThirdParty/rmlui
+	url = https://github.com/mikke89/RmlUi.git
+[submodule "Libraries/ThirdParty/freetype"]
+	path = Libraries/ThirdParty/freetype
+	url = https://github.com/freetype/freetype.git

@@ -9,17 +9,17 @@
 #include <functional>
 #include <unordered_map>
 #include <vector>
-#include "UI/EditorIcons.h"
-#include "UI/PanelChrome.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/EditorIcons.h"
+#include "EditorUI/PanelChrome.h"
+#include "EditorUI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
 #include "Common/FileDialog.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Core/Logger.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Common/EditorCommon.h"
-#include "UI/ImGuiExtensions.h"
-#include "UI/Widgets/FrameSlider.h"
+#include "EditorUI/ImGuiExtensions.h"
+#include "EditorUI/Widgets/FrameSlider.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Profiler/ProfilerExport.h"
 
@@ -153,6 +153,9 @@ namespace Helios
 			out_rows.push_back({ "Triangles", kNoDataText, {} });
 			out_rows.push_back({ "Vertices", kNoDataText, {} });
 			out_rows.push_back({ "Instances", kNoDataText, {} });
+			out_rows.push_back({ "UI Draw Calls", kNoDataText, {} });
+			out_rows.push_back({ "UI CPU", kNoDataText, {} });
+			out_rows.push_back({ "UI Atlas", kNoDataText, {} });
 			return;
 		}
 
@@ -183,6 +186,32 @@ namespace Helios
 		out_rows.push_back({ "Triangles", FormatCount(stats.Triangles, value_text, sizeof(value_text)), {} });
 		out_rows.push_back({ "Vertices", FormatCount(stats.Vertices, value_text, sizeof(value_text)), {} });
 		out_rows.push_back({ "Instances", FormatCount(stats.Instances, value_text, sizeof(value_text)), {} });
+
+		/* 运行时 UI：与上面几行不同源，它不走 Renderer::Submit。
+		 * 布局与绘制分开记，闸门卡的是两段之和（200 格背包小于 2ms） */
+		char ui_draw_text[48];
+		std::snprintf(ui_draw_text, sizeof(ui_draw_text), "%llu (%s verts)",
+			static_cast<unsigned long long>(stats.UIDrawCalls),
+			FormatCount(stats.UIVertices, value_text, sizeof(value_text)));
+		out_rows.push_back({ "UI Draw Calls", ui_draw_text,
+			"One call per RmlUi geometry batch. No cross-element merging yet" });
+
+		char ui_cpu_text[48];
+		std::snprintf(ui_cpu_text, sizeof(ui_cpu_text), "%.2f ms (layout %.2f)",
+			static_cast<double>(stats.UIUpdateMs) + static_cast<double>(stats.UIRenderMs),
+			static_cast<double>(stats.UIUpdateMs));
+		out_rows.push_back({ "UI CPU", ui_cpu_text,
+			"Context update plus render. Gate: a 200 slot backpack stays under 2 ms" });
+
+		char atlas_text[32];
+		if (stats.UIFontAtlasBytes >= 1024ull * 1024ull)
+			std::snprintf(atlas_text, sizeof(atlas_text), "%.1f MB",
+				static_cast<double>(stats.UIFontAtlasBytes) / (1024.0 * 1024.0));
+		else
+			std::snprintf(atlas_text, sizeof(atlas_text), "%.0f KB",
+				static_cast<double>(stats.UIFontAtlasBytes) / 1024.0);
+		out_rows.push_back({ "UI Atlas", atlas_text,
+			"Generated font atlas pages. RGBA8, four times an R8 estimate" });
 	}
 
 	/* 面板自身的开销不计入采集树：这一段里把 Editor 通道关掉（其它子系统照常收）。

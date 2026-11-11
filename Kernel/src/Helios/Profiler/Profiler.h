@@ -239,6 +239,14 @@ namespace Helios
 		uint64_t GrassVisibleDrawCalls{ 0 };
 		uint64_t GrassShadowDrawCalls{ 0 };
 		uint64_t GrassVelocityDrawCalls{ 0 };
+		/* 运行时 UI 单列：它不走 Renderer::Submit，混进 DrawCalls 会看不出是谁；
+		 * 布局与绘制分开计时，闸门卡的是「200 格背包 UI CPU 小于 2ms」 */
+		uint64_t UIDrawCalls{ 0 };
+		uint64_t UIVertices{ 0 };
+		float UIUpdateMs{ 0.0f };
+		float UIRenderMs{ 0.0f };
+		/* 字体图集（含后续补字生成的页）占的显存字节 */
+		uint64_t UIFontAtlasBytes{ 0 };
 		bool Valid{ false };
 	};
 

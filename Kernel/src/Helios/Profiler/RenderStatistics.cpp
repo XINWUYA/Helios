@@ -56,6 +56,27 @@ namespace Helios
 		}
 	}
 
+	void RenderStatistics::AddUIDrawCall(uint64_t vertices)
+	{
+		++m_Pending.UIDrawCalls;
+		m_Pending.UIVertices += vertices;
+	}
+
+	void RenderStatistics::AddUIUpdateMs(float milliseconds)
+	{
+		m_Pending.UIUpdateMs += milliseconds;
+	}
+
+	void RenderStatistics::AddUIRenderMs(float milliseconds)
+	{
+		m_Pending.UIRenderMs += milliseconds;
+	}
+
+	void RenderStatistics::SetUIFontAtlasBytes(uint64_t bytes)
+	{
+		m_Pending.UIFontAtlasBytes = bytes;
+	}
+
 	void RenderStatistics::EndFrame()
 	{
 		m_Snapshot = m_Pending;

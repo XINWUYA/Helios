@@ -94,6 +94,8 @@ target_link_libraries(Kernel
         glslang
         SPIRV
         glslang-default-resource-limits
+        # 运行时 UI 内核（RmlUi）与它的字体引擎
+        RmlUi
 )
 
 # 任务调度库只在这里链接一次，保证进程里只有一个线程池

@@ -389,6 +389,7 @@ TimeCostProfiler-Startup.json
 TimeCostProfiler-Runtime.json
 
 build/
+build-release/
 build-xcode/
 cache/
 cmake-build-debug/

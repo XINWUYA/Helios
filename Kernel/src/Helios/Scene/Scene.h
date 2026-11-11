@@ -22,6 +22,11 @@ namespace Helios
 	class ReflectionProbeManager;
 	class ScriptRuntime;
 
+	namespace UI
+	{
+		class UISystem;
+	}
+
 	/* 场景类 */
 	class HELIOS_API Scene final : public std::enable_shared_from_this<Scene>
 	{
@@ -140,6 +145,12 @@ namespace Helios
 		/* 脚本运行时：进 Runtime 模式 Start、退出 Stop，由编辑器驱动（见 SceneEditorLayer） */
 		ScriptRuntime& GetScriptRuntime();
 
+		/* 运行时 UI：画布的 Context 与元素树都在这里。第一次取时创建；
+		 * 只有场景里真有画布时才会被取到（见 UI::AddCompositePass / 输入转发） */
+		UI::UISystem& GetUISystem();
+		/* 场景里挂没挂画布：渲染与输入转发据此决定要不要碰 UISystem */
+		[[nodiscard]] bool HasUICanvas() const;
+
 		/* 属性面板里组件卡的显示顺序（组件名，按显示先后）。空表 = 按注册顺序。
 		 * 只是编辑器排版数据，随场景保存；运行时不用。返回的引用在组件被改写前有效。 */
 		[[nodiscard]] const std::vector<std::string>& GetComponentOrder(entt::entity entity) const;
@@ -231,6 +242,9 @@ namespace Helios
 
 		/* 脚本运行时：同样在变换推送之前 tick */
 		UniquePtr<ScriptRuntime> m_pScriptRuntime;
+
+		/* 运行时 UI：画布、输入与渲染都在这里（见 Helios/UI/UISystem.h） */
+		UniquePtr<UI::UISystem> m_pUISystem;
 
 		/* 等待本帧末处理的销毁请求（脚本删实体走这里） */
 		std::vector<entt::entity> m_PendingDestroy;

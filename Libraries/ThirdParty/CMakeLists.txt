@@ -410,3 +410,88 @@ set_target_properties(spirv-cross PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
 )
+
+# FreeType（RmlUi 默认字体引擎的字形光栅化）。构建走本文件，
+# 不用上游自带的 CMake —— 那份会引入 CPack 与 install 规则。
+# 源文件按模块入口逐个列：src 下还有工具程序（gxvalid 生成器之类）不能一起编。
+set(FREETYPE_MODULE_SOURCES
+    autofit/autofit.c
+    bdf/bdf.c
+    cff/cff.c
+    cid/type1cid.c
+    gzip/ftgzip.c
+    lzw/ftlzw.c
+    pcf/pcf.c
+    pfr/pfr.c
+    psaux/psaux.c
+    pshinter/pshinter.c
+    psnames/psnames.c
+    raster/raster.c
+    sdf/sdf.c
+    sfnt/sfnt.c
+    smooth/smooth.c
+    svg/svg.c
+    truetype/truetype.c
+    type1/type1.c
+    type42/type42.c
+    winfonts/winfnt.c
+)
+set(FREETYPE_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftbase.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftbbox.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftbitmap.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftdebug.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftfstype.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftgasp.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftglyph.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftinit.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftmm.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftstroke.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftsynth.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/fttype1.c"
+    # 平台 system 层统一用 stdio 实现，Windows 与 Unix 的 builds/ 目录没有随源码收录
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/base/ftsystem.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/cache/ftcache.c"
+)
+foreach(FREETYPE_MODULE_SOURCE IN LISTS FREETYPE_MODULE_SOURCES)
+    list(APPEND FREETYPE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/freetype/src/${FREETYPE_MODULE_SOURCE}")
+endforeach()
+
+add_library(freetype STATIC ${FREETYPE_SOURCES})
+target_include_directories(freetype PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/freetype/include")
+target_compile_definitions(freetype PRIVATE FT2_BUILD_LIBRARY)
+if(MSVC)
+    target_compile_options(freetype PRIVATE /W0)
+else()
+    target_compile_options(freetype PRIVATE -w)
+endif()
+set_target_properties(freetype PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
+    FOLDER "Libraries/ThirdParty"
+)
+
+# RmlUi 6.3 内核（运行时 UI 的布局 / 文字 / 控件 / 数据绑定），只编 Source/Core。
+# 渲染与输入由引擎侧实现，Backends / Samples / Tests 都不编。
+# 共享库：编辑器要直接操作 RmlUi 的元素与属性（预览画布），静态库的符号不会从 Kernel 导出。
+file(GLOB_RECURSE RMLUI_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/rmlui/Source/Core/*.cpp"
+)
+add_library(RmlUi SHARED ${RMLUI_SOURCES})
+target_include_directories(RmlUi PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/rmlui/Include")
+# Windows 上共享库要自己导出（RMLUI_CORE_EXPORTS），不能再定义 RMLUI_STATIC_LIB
+target_compile_definitions(RmlUi
+    PRIVATE RMLUI_CORE_EXPORTS
+    PRIVATE RMLUI_FONT_ENGINE_FREETYPE
+)
+target_link_libraries(RmlUi PUBLIC freetype)
+if(MSVC)
+    target_compile_options(RmlUi PRIVATE /W0)
+else()
+    target_compile_options(RmlUi PRIVATE -w)
+endif()
+set_target_properties(RmlUi PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/${OUTPUT_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${OUTPUT_DIR}"
+    FOLDER "Libraries/ThirdParty"
+)

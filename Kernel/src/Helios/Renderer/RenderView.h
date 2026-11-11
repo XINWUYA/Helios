@@ -84,6 +84,12 @@ namespace Helios
 		void SetOutputToTexture(bool enable) { m_IsOutputToTexture = enable; }
 		[[nodiscard]] bool IsOutputToTexture() const { return m_IsOutputToTexture; }
 
+		/* 这个视图要不要叠运行时 UI（缺省不叠）：只有画游戏画面的视图开，
+		 * 编辑器相机与探针捕获都不要 —— 一个 Context 只按一个尺寸布局，
+		 * 两个尺寸不同的视图一起画会让布局每帧来回重排 */
+		void SetDrawUI(bool enable) { m_IsDrawUI = enable; }
+		[[nodiscard]] bool IsDrawUI() const { return m_IsDrawUI; }
+
 		/* 本帧由这个视图推进探针烘焙（场景每帧只挑一个视图，见 Scene::OnUpdate） */
 		void SetBakeReflectionProbes(bool enable) { m_IsBakeReflectionProbes = enable; }
 		[[nodiscard]] bool IsBakeReflectionProbes() const { return m_IsBakeReflectionProbes; }
@@ -249,6 +255,8 @@ namespace Helios
 		bool m_IsEnableRender{ true };
 		/* 前向默认渲染图是否画到视图纹理 */
 		bool m_IsOutputToTexture{ false };
+		/* 本视图是否叠运行时 UI */
+		bool m_IsDrawUI{ false };
 		/* 本帧是否推进探针烘焙 */
 		bool m_IsBakeReflectionProbes{ false };
 		/* 渲染管线（前向 / 延迟） */

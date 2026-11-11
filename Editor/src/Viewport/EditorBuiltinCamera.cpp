@@ -8,6 +8,7 @@
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderPasses/DeferredPasses.h"
 #include "Helios/Renderer/RenderPasses/ScenePass.h"
+#include "Helios/UI/UICompositePass.h"
 #include "Renderer/RenderPasses/SelectionOutlinePass.h"
 
 namespace Helios
@@ -242,6 +243,11 @@ namespace Helios
 			overlay_output = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("PostProcessOutput");
 			overlay_depth = frame_graph->GetBlackboard().GetResourceHandle<FrameGraphTexture>("ScenePassDepth");
 		}
+
+		/* 运行时 UI：后处理之后、叠加层之前 —— 描边与 gizmo 要压在 UI 上面。
+		 * 视图没开 UI 时原样返回，等于零改动 */
+		overlay_output = UI::AddCompositePass(render_view, overlay_output);
+		render_view.SetRenderTargetHandle(overlay_output);
 
 		/* 选中实体描边：读场景的实体 id 附件（与拾取同一张），在输出上勾一圈强调色。
 		 * 挂在 gizmo 之前 —— 操作手柄与图标压在线条上面。 */

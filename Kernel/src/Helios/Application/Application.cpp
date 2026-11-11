@@ -7,6 +7,7 @@
 #include "Helios/ImGui/ImGuiLayer.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/Renderer/RenderAPI.h"
+#include "Helios/UI/UISystem.h"
 
 namespace Helios 
 {
@@ -40,6 +41,8 @@ namespace Helios
 		Jobs::Shutdown();
 
 		m_LayerStack.Release();
+		/* RmlUi 的全局状态（字体图集、渲染层）最后收：场景里的画布已经随层拆掉 */
+		UI::Shutdown();
 		Renderer::Release();
 	}
 

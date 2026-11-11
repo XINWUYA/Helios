@@ -5,8 +5,8 @@
 #include <vector>
 #include "Common/EditorCommon.h"
 #include "Helios/Profiler/Profiler.h"
-#include "UI/Widgets/SlidingTabs.h"
-#include "UI/Widgets/TimingChart.h"
+#include "EditorUI/Widgets/SlidingTabs.h"
+#include "EditorUI/Widgets/TimingChart.h"
 
 namespace Helios
 {

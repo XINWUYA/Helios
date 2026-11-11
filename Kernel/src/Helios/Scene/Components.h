@@ -556,6 +556,22 @@ namespace Helios
 		SkyComponent& operator=(const SkyComponent&) = default;
 	};
 
+	/* 运行时 UI 画布：文档路径相对项目根，Context 与元素树在 Scene 侧的 UISystem 里。
+	 * 组件只存配置，撤销与存盘碰不到元素树（见设计文档 D2）。 */
+	struct HELIOS_API CanvasComponent : ComponentBase
+	{
+		/* 相对 Assets 的文档路径，如 "UI/Joystick.rml" */
+		std::string m_DocumentPath;
+		/* 多张画布时的先后：小的先画，大的压在上面 */
+		int32_t m_SortingOrder{ 0 };
+		/* 是否接收指针输入：纯展示的 HUD 关掉，免得挡住游戏操作 */
+		bool m_ReceiveInput{ true };
+
+		CanvasComponent() = default;
+		CanvasComponent(const CanvasComponent&) = default;
+		CanvasComponent& operator=(const CanvasComponent&) = default;
+	};
+
 	/* 场景中需要接入on_construct/on_destroy信号分发的全部组件类型 */
 	using SceneComponentList = std::tuple<
 		NameComponent,
@@ -571,6 +587,7 @@ namespace Helios
 		GrassComponent,
 		GrassBendComponent,
 		TerrainComponent,
-		SkyComponent
+		SkyComponent,
+		CanvasComponent
 	>;
 }

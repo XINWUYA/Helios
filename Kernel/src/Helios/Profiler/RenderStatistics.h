@@ -28,6 +28,13 @@ namespace Helios
 		};
 		void AddGrassDrawCall(GrassPass pass);
 
+		/* ---- 运行时 UI ---- */
+		void AddUIDrawCall(uint64_t vertices);
+		void AddUIUpdateMs(float milliseconds);
+		void AddUIRenderMs(float milliseconds);
+		/* 图集是资产式的常驻占用，按当前总量覆盖写，不累加 */
+		void SetUIFontAtlasBytes(uint64_t bytes);
+
 		/* 帧边界：累计值结算成快照，随后清零 */
 		void EndFrame();
 

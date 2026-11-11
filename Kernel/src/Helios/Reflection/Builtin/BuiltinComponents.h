@@ -21,6 +21,7 @@ namespace Helios
 	void RegisterGrassBendComponent();       /* GrassBend（压草的物体） */
 	void RegisterTerrainComponent();         /* Terrain（高度场地形） */
 	void RegisterSkyComponent();             /* Sky（天空与昼夜） */
+	void RegisterCanvasComponent();          /* Canvas（运行时 UI 画布） */
 
 	/* 按清单顺序注册全部内置组件（由 ComponentRegistry 启动时调用一次） */
 	void RegisterBuiltinComponents();

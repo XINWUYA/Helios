@@ -6,8 +6,9 @@
 #include "Panels/ModelEditor/ModelEditorLayer.h"
 #include "Panels/ProjectLauncher/RecentProjects.h"
 #include "Helios/Common/PathUtils.h"
+#include "Helios/UI/UISystem.h"
 #include "Common/ProjectConfig.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 
 namespace Helios
@@ -46,6 +47,9 @@ namespace Helios
 
 		/* 日志窗口的捕获通道：在 Logger::Init()（main）之后、任何层绘出之前接上 */
 		AttachLogCapture();
+
+		/* 编辑器里改 .rml / .rcss 即时生效；游戏构建不打开这条（不轮询磁盘） */
+		UI::SetHotReloadEnabled(true);
 
 		/* 启动页是整屏覆盖层：编辑器层在后面建起来的那几帧，它还得盖在最上面。
 		 * 命令行指定了工程的话，也先进这一页 —— 建层那几秒有一块进度可看，不至于空窗。 */

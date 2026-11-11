@@ -19,5 +19,6 @@ namespace Helios
 		RegisterTerrainComponent();
 		RegisterPostProcessComponents();
 		RegisterSkyComponent();
+		RegisterCanvasComponent();
 	}
 }

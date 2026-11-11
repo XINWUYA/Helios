@@ -19,6 +19,7 @@
 #include <Helios/Renderer/RenderPasses/GrassPasses.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
 #include <Helios/Renderer/RenderPasses/TerrainPasses.h>
+#include <Helios/UI/UICompositePass.h>
 
 namespace Helios
 {
@@ -819,6 +820,15 @@ namespace Helios
 				else
 					Forward::AddScenePass(this);
 			}
+		}
+
+		/* 视图合成：开了 UI 的视图在后处理之后多一张输出纹理，UI 画在上面 */
+		if (m_IsDrawUI)
+		{
+			const auto view_output = UI::AddCompositePass(*this,
+				FrameGraphResourceHandleTyped<FrameGraphTexture>(m_RenderTargetHandle));
+			if (view_output)
+				m_RenderTargetHandle = view_output;
 		}
 
 		/* 探针烘焙挂在管线之后，结果从下一帧起被场景 / 光照采样；

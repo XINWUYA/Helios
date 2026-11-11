@@ -19,6 +19,7 @@
 #include "Helios/Renderer/PostProcess/PostProcessEffectRegistry.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Script/ScriptRuntime.h"
+#include "Helios/UI/UISystem.h"
 #include "SceneCommon.h"
 
 namespace Helios
@@ -419,6 +420,18 @@ namespace Helios
 	ScriptRuntime& Scene::GetScriptRuntime()
 	{
 		return *m_pScriptRuntime;
+	}
+
+	UI::UISystem& Scene::GetUISystem()
+	{
+		if (m_pUISystem == nullptr)
+			m_pUISystem = CreateUniquePtr<UI::UISystem>(*this);
+		return *m_pUISystem;
+	}
+
+	bool Scene::HasUICanvas() const
+	{
+		return !m_Registry.view<CanvasComponent>().empty();
 	}
 
 	void Scene::PrepareGrassIndirect(RenderView& view)
@@ -882,6 +895,11 @@ namespace Helios
 				render_view->SetSkyState(sky_state);
 			}
 		}
+
+		/* 运行时 UI：脚本这帧写下的值已经齐了，统一布局一次。
+		 * 场景里挂了画布才建 UISystem —— 没有画布的场景整段零开销 */
+		if (m_pUISystem != nullptr || HasUICanvas())
+			GetUISystem().Tick();
 
 		/* 脚本请求的销毁放到最后：脚本 tick 与各趟视图遍历都跑完，registry 稳定了再删 */
 		FlushPendingDestroy();

@@ -60,7 +60,8 @@ namespace Helios
 			case FieldType::Vec3:   element->SetAttribute(name, ToString(*static_cast<const glm::vec3*>(value)).c_str()); break;
 			case FieldType::Vec4:
 			case FieldType::Color:  element->SetAttribute(name, ToString(*static_cast<const glm::vec4*>(value)).c_str()); break;
-			case FieldType::String: element->SetAttribute(name, static_cast<const std::string*>(value)->c_str()); break;
+			case FieldType::String:
+			case FieldType::AssetRef: element->SetAttribute(name, static_cast<const std::string*>(value)->c_str()); break;
 			default: break;
 			}
 		}
@@ -92,7 +93,8 @@ namespace Helios
 			case FieldType::Vec3:   *static_cast<glm::vec3*>(target) = ToVec3(attribute->Value()); break;
 			case FieldType::Vec4:
 			case FieldType::Color:  *static_cast<glm::vec4*>(target) = ToVec4(attribute->Value()); break;
-			case FieldType::String: *static_cast<std::string*>(target) = attribute->Value(); break;
+			case FieldType::String:
+			case FieldType::AssetRef: *static_cast<std::string*>(target) = attribute->Value(); break;
 			default: return;
 			}
 
