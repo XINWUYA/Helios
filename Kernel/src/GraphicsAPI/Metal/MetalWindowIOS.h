@@ -93,8 +93,8 @@ namespace Helios
 		void* m_View{ nullptr };            /* UIView* */
 		void* m_DisplayLink{ nullptr };     /* CADisplayLink* */
 		void* m_DisplayLinkTarget{ nullptr }; /* 持有 window 指针的转发对象 */
-		void* m_EnterBackgroundObserver{ nullptr };
-		void* m_EnterForegroundObserver{ nullptr };
+		void* m_ResignActiveObserver{ nullptr };
+		void* m_BecomeActiveObserver{ nullptr };
 
 		UniquePtr<MetalContextIOS> m_pContext{ nullptr };
 

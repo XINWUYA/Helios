@@ -293,17 +293,17 @@ namespace Helios
 		}
 
 		NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-		if (m_EnterBackgroundObserver != nullptr)
+		if (m_ResignActiveObserver != nullptr)
 		{
-			[center removeObserver:(id)m_EnterBackgroundObserver];
-			[(id)m_EnterBackgroundObserver release];
-			m_EnterBackgroundObserver = nullptr;
+			[center removeObserver:(id)m_ResignActiveObserver];
+			[(id)m_ResignActiveObserver release];
+			m_ResignActiveObserver = nullptr;
 		}
-		if (m_EnterForegroundObserver != nullptr)
+		if (m_BecomeActiveObserver != nullptr)
 		{
-			[center removeObserver:(id)m_EnterForegroundObserver];
-			[(id)m_EnterForegroundObserver release];
-			m_EnterForegroundObserver = nullptr;
+			[center removeObserver:(id)m_BecomeActiveObserver];
+			[(id)m_BecomeActiveObserver release];
+			m_BecomeActiveObserver = nullptr;
 		}
 
 		m_pContext.reset();
@@ -339,24 +339,25 @@ namespace Helios
 		m_DisplayLinkTarget = target;
 		m_DisplayLink = link;
 
-		/* 退后台停帧：drawable 会被系统收回，继续画就是崩 */
+		/* 失去活动状态就停帧：退后台、来电、控制中心都会走到这里，
+		 * 这期间 drawable 可能被系统收回，继续画就是崩。回到活动状态再恢复。 */
 		NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
-		m_EnterBackgroundObserver = [[center addObserverForName:UIApplicationDidEnterBackgroundNotification
+		m_ResignActiveObserver = [[center addObserverForName:UIApplicationWillResignActiveNotification
 			object:nil queue:nil usingBlock:^(NSNotification* note)
 			{
 				(void)note;
 				if (Application* app = Application::Instance())
 					app->SetPaused(true);
 			}] retain];
-		m_EnterForegroundObserver = [[center addObserverForName:UIApplicationWillEnterForegroundNotification
+		m_BecomeActiveObserver = [[center addObserverForName:UIApplicationDidBecomeActiveNotification
 			object:nil queue:nil usingBlock:^(NSNotification* note)
 			{
 				(void)note;
+				/* 停帧期间系统可能改过视图几何，drawable 重新对齐一次 */
+				this->RefreshDrawableSize();
+
 				if (Application* app = Application::Instance())
 					app->SetPaused(false);
-
-				/* 退后台期间系统可能改过视图几何，drawable 重新对齐一次 */
-				this->RefreshDrawableSize();
 			}] retain];
 	}
 
