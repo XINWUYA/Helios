@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project Name="Sample" StartupScene="Scenes/test.scn">
+<Project Name="Sample" StartupScene="Scenes/demo_grass.scn">
   <Rendering MSAA="0" GPUSkinning="1" GpuGrassPlacement="1" GpuGrassIndirect="1"
              GpuGrassChunkMask="1" GrassBatching="1" GrassDensityScale="1.5"
              TerrainVirtualTexture="1" TerrainVirtualTextureTexels="256"/>
