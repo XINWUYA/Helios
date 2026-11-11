@@ -121,8 +121,9 @@ namespace Helios
 			{
 				PROFILE_CPU_SCOPE_CH(ProfileChannel::UI, "UI");
 
+#if HELIOS_PLATFORM_DESKTOP
 				/* 没装 UI 层就整段跳过：层里的 OnImGuiRender 可以放心直接调 UI 接口，
-				 * 不用自己判空。 */
+				 * 不用自己判空。移动端没有 ImGui，界面在场景里由运行时 UI 画。 */
 				if (m_pUILayer)
 				{
 					m_pUILayer->Begin();
@@ -134,6 +135,7 @@ namespace Helios
 					}
 					m_pUILayer->End();
 				}
+#endif
 
 				/* 层已经画完：这时增删层不会打断上面的遍历 */
 				OnFrameEnd();

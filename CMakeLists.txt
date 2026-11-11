@@ -247,6 +247,9 @@ endif()
 # Add Kernel
 add_subdirectory(Kernel)
 
+# 玩家形态的应用：桌面与 iOS 共用同一份源码，差别都在平台层
+add_subdirectory(Player)
+
 # 编辑器与示例都依赖 GLFW、ImGui 与 assimp，iOS 上不参与构建
 if(NOT HELIOS_TARGET_PLATFORM STREQUAL "iOS")
     # Add applications

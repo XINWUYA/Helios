@@ -423,4 +423,4 @@ Projects/*/.helios/
 renderdoc-mcp-export
 .codebuddy
 
-build-ios/
+build-ios*/

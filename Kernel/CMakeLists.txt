@@ -26,7 +26,7 @@ file(GLOB_RECURSE KERNEL_SOURCES CONFIGURE_DEPENDS
 if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
     list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/GraphicsAPI/OpenGL/")
     list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/Helios/ImGui/")
-    list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/GraphicsAPI/Metal/MetalWindow\\.")
+    list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/GraphicsAPI/Metal/MetalWindow\\.(cpp|h)$")
     list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/Helios/VirtualDevice/DeviceContext\\.cpp")
 endif()
 
@@ -101,9 +101,6 @@ target_compile_definitions(Kernel
 # 等于让每个链接方都背上整套模型导入器（移动端包体吃不消）。
 target_link_libraries(Kernel
     PUBLIC
-        GLFW
-        Glad
-        ImGui
         tinyxml2
         xxHash
         spirv-cross
@@ -114,6 +111,12 @@ target_link_libraries(Kernel
         # 运行时 UI 内核（RmlUi）与它的字体引擎
         RmlUi
 )
+
+# 桌面专属：窗口系统、GL 加载器与 ImGui。iOS 上这三样都不参与构建，
+# 也不能留在链接接口里，否则会以 -lGLFW 的形式传给链接器。
+if(NOT HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+    target_link_libraries(Kernel PUBLIC GLFW Glad ImGui)
+endif()
 
 # 任务调度库只在这里链接一次，保证进程里只有一个线程池
 target_link_libraries(Kernel PRIVATE HeliosJobs)
@@ -222,6 +225,8 @@ elseif(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
         COMPILE_FLAGS "-x objective-c++"
         SKIP_PRECOMPILE_HEADERS ON
     )
+    # .mm 不在上面的 glob 里（只收了 cpp/h），要单独挂进目标
+    target_sources(Kernel PRIVATE ${KERNEL_OBJCXX_SOURCES})
 elseif(UNIX)
     target_compile_definitions(Kernel PRIVATE PLATFORM_LINUX)
 endif()
