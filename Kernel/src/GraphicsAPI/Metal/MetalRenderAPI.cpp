@@ -852,7 +852,17 @@ namespace Helios
         CloseRenderEncoder();
 
         if (!m_CurrentCommandBuffer)
+        {
+            /* 本帧没有任何绘制：命令缓冲区是空的，但帧级池一定要收。
+             * 移动端每帧跑在一次 run loop 回调里，池留到下一帧再排空会跨过
+             * run loop 自己的池，直接 badPop。 */
+            if (m_FrameAutoreleasePool)
+            {
+                m_FrameAutoreleasePool->drain();
+                m_FrameAutoreleasePool = nullptr;
+            }
             return;
+        }
 
         if (m_CurrentDrawable)
         {
