@@ -776,14 +776,14 @@ namespace Helios
             auto scene = render_view->GetOwnerScene();
             if (!scene) return;
 
-			/* 视图开着后处理（场景里有生效的「后处理对象」）：旁路到纹理 —— 场景 → 视图纹理 →
-			 * 后处理链 → 呈现 Pass 全屏画回默认目标；否则照旧直渲（"关闭 = 零改动"基线）。
+			/* 视图开着后处理，或者要叠 UI：旁路到纹理 —— 场景 → 视图纹理 → 后处理链。
+			 * 收尾交给视图自己：叠了 UI 就等合成之后再呈现，直出视图统一由 RenderView 呈现一次。
 			 * 调试视图非 None 时 HasEnabledEffects 恒假（与纹理路径的"调试视图直通"同一语义）。 */
-			if (PostProcess::HasEnabledEffects(*render_view))
+			if (PostProcess::HasEnabledEffects(*render_view) || render_view->IsDrawUI())
 			{
 				const auto scene_color = AddScenePassToTextureCore(render_view);
 				const auto final_color = PostProcess::AddPostProcessPasses(*render_view, scene_color);
-				PostProcess::AddPresentToDefaultTarget(*render_view, final_color);
+				render_view->SetRenderTargetHandle(final_color);
 				return;
 			}
 

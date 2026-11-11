@@ -19,6 +19,7 @@
 #include <Helios/Renderer/RenderPasses/GrassPasses.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
 #include <Helios/Renderer/RenderPasses/TerrainPasses.h>
+#include <Helios/Renderer/PostProcess/PostProcessPasses.h>
 #include <Helios/UI/UICompositePass.h>
 
 namespace Helios
@@ -830,6 +831,12 @@ namespace Helios
 			if (view_output)
 				m_RenderTargetHandle = view_output;
 		}
+
+		/* 直出视图的收尾：把最终颜色（后处理链或 UI 合成之后的那张）画回默认目标。
+		 * 直渲路径（场景直接画窗口）没有颜色纹理，不需要呈现；输出到纹理的视图由使用方显示。 */
+		if (!m_IsOutputToTexture && m_RenderTargetHandle)
+			PostProcess::AddPresentToDefaultTarget(*this,
+				FrameGraphResourceHandleTyped<FrameGraphTexture>(m_RenderTargetHandle));
 
 		/* 探针烘焙挂在管线之后，结果从下一帧起被场景 / 光照采样；
 		 * 自己组织渲染图的相机（编辑器相机）也可能被选中来推进 */
