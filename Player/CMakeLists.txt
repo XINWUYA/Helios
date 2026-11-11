@@ -52,6 +52,41 @@ if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
         MACOSX_BUNDLE_BUNDLE_VERSION "1"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
     )
+
+    # 随包资源：默认不拷，跑打包形态时打开。
+    # Cache 是生成物，不随包；工程里其余目录跟着包走，运行期在可执行文件旁找 Project。
+    option(HELIOS_BUNDLE_ASSETS "Copy engine and project assets into the app bundle" OFF)
+    if(HELIOS_BUNDLE_ASSETS)
+        set(PLAYER_BUNDLE_DIR "$<TARGET_BUNDLE_DIR:Player>")
+
+        add_custom_command(TARGET Player POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${ENGINE_RES_PATH}"
+                    "${PLAYER_BUNDLE_DIR}/EngineRes"
+            COMMENT "Bundling engine resources"
+            VERBATIM
+        )
+
+        set(PLAYER_PROJECT_PARTS Scenes Materials Textures Models Terrains BakedReflectionProbes Scripts)
+        set(PLAYER_BUNDLE_PROJECT_COMMANDS
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${PLAYER_BUNDLE_DIR}/Project"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${HELIOS_PROJECT_DIR}/Project.xml" "${PLAYER_BUNDLE_DIR}/Project/Project.xml"
+        )
+        foreach(part IN LISTS PLAYER_PROJECT_PARTS)
+            if(IS_DIRECTORY "${HELIOS_PROJECT_DIR}/${part}")
+                list(APPEND PLAYER_BUNDLE_PROJECT_COMMANDS
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                            "${HELIOS_PROJECT_DIR}/${part}" "${PLAYER_BUNDLE_DIR}/Project/${part}")
+            endif()
+        endforeach()
+
+        add_custom_command(TARGET Player POST_BUILD
+            ${PLAYER_BUNDLE_PROJECT_COMMANDS}
+            COMMENT "Bundling project assets"
+            VERBATIM
+        )
+    endif()
 elseif(APPLE)
     set_target_properties(Player PROPERTIES
         MACOSX_BUNDLE ON

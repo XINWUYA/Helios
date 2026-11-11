@@ -33,6 +33,24 @@ namespace Helios
 			std::error_code error;
 			return std::filesystem::is_directory(root / "EngineRes", error);
 		}
+
+		/* 可执行文件旁的 Project 目录：打包时随包的单个工程，带 Project.xml 才认。
+		 * 认到就换过去 —— 包里那份才是这个包该跑的资源。 */
+		bool UseBundledProject(const std::filesystem::path& dir)
+		{
+			if (dir.empty())
+				return false;
+
+			const std::filesystem::path bundled = dir / "Project";
+			std::error_code error;
+			if (!std::filesystem::is_regular_file(bundled / "Project.xml", error))
+				return false;
+
+			g_ProjectPath = bundled;
+			++s_ProjectPathGeneration;
+			CORE_LOG_INFO("Project root (bundled): {}", PathToUtf8(g_ProjectPath));
+			return true;
+		}
 	}
 
 	bool LocateAssetRoots(const std::filesystem::path& executable_path)
@@ -60,6 +78,9 @@ namespace Helios
 
 				g_EngineResPath = candidate / "EngineRes";
 				CORE_LOG_INFO("Engine resource root: {}", PathToUtf8(g_EngineResPath));
+
+				/* 包里带了工程就跟着包走；没带才继续用编译期那份（开发态） */
+				UseBundledProject(dir);
 				return true;
 			}
 		}
@@ -67,6 +88,10 @@ namespace Helios
 		/* 产物和源码在同一台机器：直接用源码树里那份 */
 		g_EngineResPath = PathFromUtf8(ENGINE_RES_PATH);
 		CORE_LOG_INFO("Engine resource root (source tree): {}", PathToUtf8(g_EngineResPath));
+
+		if (!executable.empty())
+			UseBundledProject(executable.parent_path());
+
 		return false;
 	}
 
