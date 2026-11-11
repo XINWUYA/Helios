@@ -29,6 +29,13 @@
 	NSUInteger _activeTouches;
 }
 
+/* 视图的根层直接就是 Metal 层：iOS 上不能给 UIView 换 layer，
+ * 只能靠 layerClass 指定，之后 view.layer 就是这个类型。 */
++ (Class)layerClass
+{
+	return [CAMetalLayer class];
+}
+
 - (instancetype)initWithFrame:(CGRect)frame
 {
 	self = [super initWithFrame:frame];
@@ -149,19 +156,20 @@ namespace Helios
 
 		m_Device = metal_render_api->GetDevice();
 
-		m_MetalLayer = CA::MetalLayer::layer();
+		UIView* view = (__bridge UIView*)m_View;
+		const CGFloat scale = view.contentScaleFactor;
+
+		/* 视图的根层由 +layerClass 指定成 CAMetalLayer，这里只配参数，不换层 */
+		m_MetalLayer = reinterpret_cast<CA::MetalLayer*>(view.layer);
 		m_MetalLayer->setDevice(m_Device);
 		m_MetalLayer->setPixelFormat(MTL::PixelFormatRGBA8Unorm);
 		/* 默认目标快照要把 drawable 当 blit 源读，不能只当渲染目标 */
 		m_MetalLayer->setFramebufferOnly(false);
-
-		UIView* view = (__bridge UIView*)m_View;
-		const CGFloat scale = view.contentScaleFactor;
+		/* contentsScale 与视图对齐，否则 drawable 会被降采样 */
 		[(id)m_MetalLayer setContentsScale:scale];
-		view.layer = (CALayer*)m_MetalLayer;
 
 		const CGSize bounds = view.bounds.size;
-		m_MetalLayer->setDrawableSize(MTL::CGSizeMake(bounds.width * scale, bounds.height * scale));
+		m_MetalLayer->setDrawableSize(CGSizeMake(bounds.width * scale, bounds.height * scale));
 
 		m_RenderPassDescriptor = MTL::RenderPassDescriptor::alloc()->init();
 		RecreateDepthTexture(static_cast<uint32_t>(bounds.width * scale),
@@ -186,7 +194,7 @@ namespace Helios
 		if (!m_MetalLayer || width == 0 || height == 0)
 			return;
 
-		m_MetalLayer->setDrawableSize(MTL::CGSizeMake(width, height));
+		m_MetalLayer->setDrawableSize(CGSizeMake(width, height));
 		RecreateDepthTexture(width, height);
 	}
 
