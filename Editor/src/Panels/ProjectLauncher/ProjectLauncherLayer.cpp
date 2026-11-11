@@ -8,7 +8,7 @@
 
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/PathUtils.h"
-#include "Common/ProjectConfig.h"
+#include "Helios/Application/ProjectConfig.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Renderer/Renderer.h"
 #include "EditorUI/EditorTheme.h"

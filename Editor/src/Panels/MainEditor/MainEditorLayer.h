@@ -4,6 +4,7 @@
 #include "Common/EditorCommon.h"
 #include "App/EditorContext.h"
 #include "Common/EditorSettings.h"
+#include "Helios/Application/ProjectConfig.h"
 #include "Panels/ResourceBrowser/EditorResourceBrowser.h"
 #include "Panels/Log/LogPanel.h"
 #include "Panels/PanelLayoutRestore.h"
@@ -89,8 +90,10 @@ namespace Helios
 		ScriptModule m_ScriptModule;
 		/* 着色器热重载：盯依赖文件的修改时间，改了就地换掉 */
 		ShaderReloader m_ShaderReloader;
-		/* Rendering 菜单的画质设置，按项目保存 */
+		/* 本机的编辑器状态（主题、热重载、UI 预览视图） */
 		EditorSettings::State m_Settings{};
+		/* 项目配置：画质开关存 Project.xml，跟项目走 */
+		ProjectConfig m_ProjectConfig{};
 		/* 菜单栏左端的品牌记号：白色线稿贴图，按强调色着色（与启动页同一张） */
 		SharedPtr<DeviceTexture> m_pEmblem;
 		bool m_EmblemRequested{ false };

@@ -12,7 +12,7 @@
 
 #include "Common/EditorCommon.h"
 #include "Common/EditorSettings.h"
-#include "Common/ProjectConfig.h"
+#include "Helios/Application/ProjectConfig.h"
 #include "Helios/Core/Input.h"
 #include "Panels/PanelWindow.h"
 #include "EditorUI/EditorIcons.h"

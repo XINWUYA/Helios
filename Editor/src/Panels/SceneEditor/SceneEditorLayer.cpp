@@ -31,7 +31,7 @@
 #include "Helios/Core/Input.h"
 #include "Helios/UI/UISystem.h"
 #include "Common/EditorSettings.h"
-#include "Common/ProjectConfig.h"
+#include "Helios/Application/ProjectConfig.h"
 #include "Helios/Script/ScriptRuntime.h"
 
 namespace Helios

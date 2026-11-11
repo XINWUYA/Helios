@@ -6,7 +6,7 @@
 #include <fstream>
 #include <iterator>
 
-#include "Common/ProjectConfig.h"
+#include "Helios/Application/ProjectConfig.h"
 #include "CssPatch.h"
 #include "EditorUI/EditorIcons.h"
 #include "EditorUI/EditorTheme.h"

@@ -7,7 +7,7 @@
 #include "Panels/ProjectLauncher/RecentProjects.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/UI/UISystem.h"
-#include "Common/ProjectConfig.h"
+#include "Helios/Application/ProjectConfig.h"
 #include "EditorUI/EditorTheme.h"
 #include "Helios/ImGui/ImGuiLayer.h"
 

@@ -54,9 +54,13 @@ namespace Helios
 		ui_document_open.Open = [this](const std::string& path) { m_Context.OpenGameUIDocument(path); };
 		m_ResourceBrowser.SetGameUIDocumentOpenSink(std::move(ui_document_open));
 
-		/* 项目本地设置先读：脚本开关要赶在首次编译 / 加载之前生效 */
+		/* 画质开关跟项目走：按 Project.xml 推给引擎，换台机器打开还是同一套 */
+		m_ProjectConfig = LoadProjectConfig();
+		ApplyProjectSettings(m_ProjectConfig);
+
+		/* 本机设置先读：脚本开关要赶在首次编译 / 加载之前生效 */
 		m_Settings = EditorSettings::Load();
-		EditorSettings::Apply(m_Settings);
+		EditorTheme::SetTheme(m_Settings.Theme);
 		m_ScriptModule.SetAutoReloadEnabled(m_Settings.AutoReloadScripts);
 		m_ScriptModule.SetAutoCompileEnabled(m_Settings.AutoCompileScripts);
 		m_ShaderReloader.SetAutoReloadEnabled(m_Settings.AutoReloadShaders);
@@ -647,16 +651,17 @@ namespace Helios
 		EndBarMenu();
 	}
 
-	/* Rendering：渲染管线与画质开关（对所有视口生效） */
+	/* Rendering：渲染管线与画质开关（对所有视口生效）。
+	 * 画质开关存 Project.xml，跟项目走；管线是每个视图自己的事，不落盘。 */
 	void MainEditorLayer::ShowRenderingMenu()
 	{
 		if (!BeginBarMenu("Rendering"))
 			return;
 
-		const auto apply_settings = [this]()
+		const auto apply_rendering = [this]()
 		{
-			EditorSettings::Apply(m_Settings);
-			EditorSettings::Save(m_Settings);
+			ApplyProjectSettings(m_ProjectConfig);
+			SaveProjectConfig(m_ProjectConfig);
 		};
 
 		PanelChrome::MenuSectionHeader("PIPELINE");
@@ -670,20 +675,20 @@ namespace Helios
 		ImGui::Separator();
 		PanelChrome::MenuSectionHeader("QUALITY");
 
-		bool msaa = m_Settings.MSAA;
+		bool msaa = m_ProjectConfig.Rendering.MSAA;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "MSAA", &msaa))
 		{
-			m_Settings.MSAA = msaa;
-			apply_settings();
+			m_ProjectConfig.Rendering.MSAA = msaa;
+			apply_rendering();
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("On: 4x MSAA on the scene pass, smoother object edges. Off: back to single sample.\nWith TAA enabled the geometry pass stays single sampled so depth can be sampled");
 
-		bool gpu_skinning = m_Settings.GPUSkinning;
+		bool gpu_skinning = m_ProjectConfig.Rendering.GPUSkinning;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "GPU Skinning", &gpu_skinning))
 		{
-			m_Settings.GPUSkinning = gpu_skinning;
-			apply_settings();
+			m_ProjectConfig.Rendering.GPUSkinning = gpu_skinning;
+			apply_rendering();
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("On: vertices are skinned in a compute shader. Off: back to CPU skinning");
@@ -691,11 +696,11 @@ namespace Helios
 		ImGui::Separator();
 		PanelChrome::MenuSectionHeader("TERRAIN");
 
-		bool terrain_vt = m_Settings.TerrainVirtualTexture;
+		bool terrain_vt = m_ProjectConfig.Rendering.TerrainVirtualTexture;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Terrain Virtual Texture", &terrain_vt))
 		{
-			m_Settings.TerrainVirtualTexture = terrain_vt;
-			apply_settings();
+			m_ProjectConfig.Rendering.TerrainVirtualTexture = terrain_vt;
+			apply_rendering();
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("On: terrain color comes from a paged cache around the camera. Off: shaded per pixel. Both look the same up close to within a couple of levels");
@@ -709,10 +714,10 @@ namespace Helios
 				char label[32];
 				std::snprintf(label, sizeof(label), "%u px", size);
 				if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::None, label,
-					m_Settings.TerrainVirtualTextureTexels == size))
+					m_ProjectConfig.Rendering.TerrainVirtualTextureTexels == size))
 				{
-					m_Settings.TerrainVirtualTextureTexels = size;
-					apply_settings();
+					m_ProjectConfig.Rendering.TerrainVirtualTextureTexels = size;
+					apply_rendering();
 				}
 			}
 			PanelChrome::EndMenuWithIcon();
@@ -723,32 +728,32 @@ namespace Helios
 		ImGui::Separator();
 		PanelChrome::MenuSectionHeader("GRASS");
 
-		bool gpu_grass = m_Settings.GpuGrassPlacement;
+		bool gpu_grass = m_ProjectConfig.Rendering.GpuGrassPlacement;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "GPU Grass Placement", &gpu_grass))
 		{
-			m_Settings.GpuGrassPlacement = gpu_grass;
-			apply_settings();
+			m_ProjectConfig.Rendering.GpuGrassPlacement = gpu_grass;
+			apply_rendering();
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("On: blade positions are generated in a compute shader. Off: back to per-blade CPU placement. Needs compute shader support\nA grass component shows which path it actually runs");
 
-		bool gpu_grass_indirect = m_Settings.GpuGrassIndirect;
+		bool gpu_grass_indirect = m_ProjectConfig.Rendering.GpuGrassIndirect;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "GPU Grass Indirect Draw", &gpu_grass_indirect))
 		{
-			m_Settings.GpuGrassIndirect = gpu_grass_indirect;
-			apply_settings();
+			m_ProjectConfig.Rendering.GpuGrassIndirect = gpu_grass_indirect;
+			apply_rendering();
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("On: grass is culled on the GPU and drawn with one indirect call. Off: one submit per chunk. Needs compute shader support");
 
 		/* 只影响间接路径的剔除层次：间接关着时切它没有任何效果，直接置灰 */
-		const bool grass_indirect_on = m_Settings.GpuGrassIndirect;
+		const bool grass_indirect_on = m_ProjectConfig.Rendering.GpuGrassIndirect;
 		ImGui::BeginDisabled(!grass_indirect_on);
-		bool grass_chunk_mask = m_Settings.GpuGrassChunkMask;
+		bool grass_chunk_mask = m_ProjectConfig.Rendering.GpuGrassChunkMask;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Grass Chunk Mask Culling", &grass_chunk_mask))
 		{
-			m_Settings.GpuGrassChunkMask = grass_chunk_mask;
-			apply_settings();
+			m_ProjectConfig.Rendering.GpuGrassChunkMask = grass_chunk_mask;
+			apply_rendering();
 		}
 		if (ImGui::IsItemHovered(grass_indirect_on ? 0 : ImGuiHoveredFlags_AllowWhenDisabled))
 			ImGui::SetTooltip(grass_indirect_on
@@ -758,11 +763,11 @@ namespace Helios
 
 		/* 间接开着时由它接管提交，批表开关不起作用：置灰说明原因 */
 		ImGui::BeginDisabled(grass_indirect_on);
-		bool grass_batching = m_Settings.GrassBatching;
+		bool grass_batching = m_ProjectConfig.Rendering.GrassBatching;
 		if (PanelChrome::MenuItemToggleWithIcon(Icons::Id::None, "Grass Block Batching", &grass_batching))
 		{
-			m_Settings.GrassBatching = grass_batching;
-			apply_settings();
+			m_ProjectConfig.Rendering.GrassBatching = grass_batching;
+			apply_rendering();
 		}
 		if (ImGui::IsItemHovered(grass_indirect_on ? ImGuiHoveredFlags_AllowWhenDisabled : 0))
 			ImGui::SetTooltip(grass_indirect_on
@@ -770,10 +775,10 @@ namespace Helios
 				: "On: adjacent chunks are merged into one draw by instance budget. Off: one submit per chunk");
 		ImGui::EndDisabled();
 
-		/* 草密度：连续值留在编辑器设置里，菜单只给三档 */
+		/* 草密度：连续值存项目配置里，菜单只给三档 */
 		if (BeginBarSubmenu("Grass Density"))
 		{
-			const float density = m_Settings.GrassDensityScale;
+			const float density = m_ProjectConfig.Rendering.GrassDensityScale;
 			const struct { const char* Label; float Value; } levels[] = {
 				{ "Low", 0.5f }, { "Normal", 1.0f }, { "High", 1.5f },
 			};
@@ -782,12 +787,15 @@ namespace Helios
 				if (PanelChrome::MenuItemSelectWithIcon(Icons::Id::None, level.Label,
 					std::abs(density - level.Value) < 0.01f))
 				{
-					m_Settings.GrassDensityScale = level.Value;
-					apply_settings();
+					m_ProjectConfig.Rendering.GrassDensityScale = level.Value;
+					apply_rendering();
 				}
 			}
 			PanelChrome::EndMenuWithIcon();
 		}
+
+		ImGui::Separator();
+		PanelChrome::MenuStatusText("Quality switches are saved in Project.xml");
 
 		EndBarMenu();
 	}
@@ -797,12 +805,6 @@ namespace Helios
 	{
 		if (!BeginBarMenu("Scripts"))
 			return;
-
-		const auto apply_settings = [this]()
-		{
-			EditorSettings::Apply(m_Settings);
-			EditorSettings::Save(m_Settings);
-		};
 
 		if (BarMenuItem("Recompile Scripts"))
 			m_Context.ReloadScripts([this]() { return m_ScriptModule.Recompile(); });
@@ -821,7 +823,7 @@ namespace Helios
 		{
 			m_Settings.AutoReloadScripts = auto_reload;
 			m_ScriptModule.SetAutoReloadEnabled(auto_reload);
-			apply_settings();
+			EditorSettings::Save(m_Settings);
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Reload the module as soon as a new build shows up");
@@ -831,7 +833,7 @@ namespace Helios
 		{
 			m_Settings.AutoCompileScripts = auto_compile;
 			m_ScriptModule.SetAutoCompileEnabled(auto_compile);
-			apply_settings();
+			EditorSettings::Save(m_Settings);
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Build the project scripts on open when no module exists yet");
@@ -858,12 +860,6 @@ namespace Helios
 		if (!BeginBarMenu("Shaders"))
 			return;
 
-		const auto apply_settings = [this]()
-		{
-			EditorSettings::Apply(m_Settings);
-			EditorSettings::Save(m_Settings);
-		};
-
 		if (BarMenuItem("Reload All"))
 		{
 			const size_t reloaded = m_ShaderReloader.ReloadAll();
@@ -885,7 +881,7 @@ namespace Helios
 		{
 			m_Settings.AutoReloadShaders = auto_reload_shaders;
 			m_ShaderReloader.SetAutoReloadEnabled(auto_reload_shaders);
-			apply_settings();
+			EditorSettings::Save(m_Settings);
 		}
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Reload a shader as soon as its file or an included file changes");
