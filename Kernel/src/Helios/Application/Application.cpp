@@ -13,6 +13,18 @@ namespace Helios
 {
 	Application* Application::s_pInstance = nullptr;
 
+	namespace
+	{
+		/* 进程起点：这条 TU 一定被链接，静态初始化足够早，用来量冷启动各段耗时 */
+		const std::chrono::steady_clock::time_point g_ProcessStart = std::chrono::steady_clock::now();
+
+		double ElapsedSinceProcessStartMs()
+		{
+			return std::chrono::duration<double, std::milli>(
+				std::chrono::steady_clock::now() - g_ProcessStart).count();
+		}
+	}
+
 	Application::Application(const std::string& window_title, uint32_t width, uint32_t height, bool start_maximized)
 	{
 		PROFILE_CPU_FUNCTION();
@@ -37,6 +49,9 @@ namespace Helios
 
 		/* 首帧的 delta 从建窗口那刻起算，不然会多出一大截 */
 		m_LastFrameTime = m_pWindow->GetTimeSeconds();
+
+		/* 冷启动分段：窗口与渲染器就绪。后面场景载入、首帧各自的耗时另打 */
+		CORE_LOG_INFO("Startup: engine ready in {:.1f} ms", ElapsedSinceProcessStartMs());
 	}
 
 	Application::~Application()
@@ -147,6 +162,13 @@ namespace Helios
 
 			// SwapBuffer，显示帧画面到屏幕
 			m_pWindow->OnUpdate();
+		}
+
+		/* 首帧出图：冷启动预算是按这个点量的 */
+		if (!m_FirstFrameLogged)
+		{
+			m_FirstFrameLogged = true;
+			CORE_LOG_INFO("Startup: first frame presented in {:.1f} ms", ElapsedSinceProcessStartMs());
 		}
 
 		/* 结算本帧的 CPU 侧数据；GPU 结果解析出来后由渲染器在 EndGPUFrame 里

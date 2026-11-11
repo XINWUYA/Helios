@@ -63,6 +63,8 @@ namespace Helios
 		bool m_IsRunning{ true };
 		bool m_IsMinimized{ false };
 		bool m_IsPaused{ false };
+		/* 首帧出图只打一次日志：冷启动预算按这个点量 */
+		bool m_FirstFrameLogged{ false };
 		double m_LastFrameTime{ 0.0 };
 	};
 
