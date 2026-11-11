@@ -81,13 +81,14 @@ target_compile_definitions(Kernel
 )
 
 # Link libraries
+# assimp 只有编辑器导入模型时用，引擎一次都不引用：留在 Kernel 的公开链接里
+# 等于让每个链接方都背上整套模型导入器（移动端包体吃不消）。
 target_link_libraries(Kernel
     PUBLIC
         GLFW
         Glad
         ImGui
         tinyxml2
-        assimp
         xxHash
         spirv-cross
         spdlog

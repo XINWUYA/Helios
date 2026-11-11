@@ -48,9 +48,11 @@ target_include_directories(Editor
 )
 
 # Link libraries
+# assimp 只在这里用（导入模型），Kernel 不引用，所以由编辑器自己链
 target_link_libraries(Editor
     PRIVATE
         Kernel
+        assimp
 )
 
 # 脚本模块在运行期调用引擎函数：Kernel 是动态库，符号由链接器解析，
