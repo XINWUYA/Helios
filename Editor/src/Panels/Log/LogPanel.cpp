@@ -5,11 +5,11 @@
 #include <cstring>
 #include <ctime>
 #include "Common/EditorCommon.h"
-#include "UI/EditorIcons.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/EditorIcons.h"
+#include "EditorUI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
 #include "Helios/Core/Logger.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 
 namespace Helios
 {

@@ -1,6 +1,6 @@
 #include "Pch.h"
 #include "ComponentEditors.h"
-#include "UI/ImGuiExtensions.h"
+#include "EditorUI/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"

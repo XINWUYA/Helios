@@ -2,7 +2,7 @@
 #include "ComponentEditors.h"
 #include "Common/TextMatch.h"
 #include "Helios/Core/AssetManager.h"
-#include "UI/ImGuiExtensions.h"
+#include "EditorUI/ImGuiExtensions.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 #include "Helios/Scene/AnimationClip.h"
 #include "Helios/Scene/Components.h"

@@ -29,6 +29,8 @@ namespace Helios
 		inline constexpr const char* kEditorCamera   = "Editor Camera";
 		/* 着色器变体：源码声明的维度、已加载的变体与各自加载耗时 */
 		inline constexpr const char* kShaderVariants = "Shader Variants";
+		/* 游戏 UI：挑一份 .rml 直接看渲染结果，也能就地改文档与样式，存盘后自动重载 */
+		inline constexpr const char* kGameUI         = "Game UI";
 
 		/* 默认停靠的语义槽位，与 BuildDefaultLayout 里的 DockNode 划分一一对应 */
 		enum class DockSlot : uint8_t
@@ -79,6 +81,8 @@ namespace Helios
 				"Global script execution order, sorted by Order" },
 			{ kShaderVariants,  DockSlot::Floating,     Menu::Window,  "Shader Variants", false,
 				"Declared variant dimensions and loaded variants per shader" },
+			{ kGameUI,          DockSlot::Center,       Menu::Window,  "Game UI",        false,
+				"Preview and edit a .rml document, reloads when the file changes on disk" },
 		};
 
 		/* 窗口开关的唯一存放处：PanelWindow、菜单和各层读写的都是这一份。

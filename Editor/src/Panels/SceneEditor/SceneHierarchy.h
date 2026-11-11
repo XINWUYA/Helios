@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include <vector>
 #include "SceneInspector.h"
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Command/CommandStack.h"
 #include "Helios/Scene/Entity.h"
 

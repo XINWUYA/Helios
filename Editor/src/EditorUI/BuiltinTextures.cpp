@@ -4,7 +4,7 @@
 #include <cctype>
 #include <filesystem>
 #include "Command/AssetFileOps.h"
-#include "UI/PanelChrome.h"
+#include "EditorUI/PanelChrome.h"
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Core/AssetManager.h"

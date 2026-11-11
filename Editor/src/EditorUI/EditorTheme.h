@@ -120,6 +120,15 @@ namespace Helios::EditorTheme
         inline const ImVec4 White06 = ImVec4(1.0f, 1.0f, 1.0f, 0.06f);
         inline const ImVec4 White12 = ImVec4(1.0f, 1.0f, 1.0f, 0.12f);
 
+        /* ---- 游戏 UI 叠加层 ----
+         * 画在游戏像素之上，和面板里的控件分家：外框换色就是「输入归谁」的提示，
+         * 设计态用中性灰、交互态用运行绿；参考线用白色淡线，不跟游戏内容抢眼。 */
+        inline const ImVec4 UIFrameDesign   = Neutral6;                    /* #465363 设计态外框 */
+        inline const ImVec4 UIFrameInteract = ImVec4(0.302f, 0.827f, 0.478f, 1.00f); /* #4DD37A 交互态外框 */
+        inline const ImVec4 UIGuideGrid     = White06;
+        inline const ImVec4 UIGuideAxis     = ImVec4(1.0f, 1.0f, 1.0f, 0.18f);
+        inline const ImVec4 UISafeArea      = ImVec4(0.851f, 0.702f, 0.420f, 0.45f); /* Warning 半透明 */
+
         /* ---- 尺寸 ----
          * 每个尺寸都是"设计值常量（*Design）+ 运行时值"：设计值按逻辑像素书写，
          * 运行时值 = 设计值 × UiScale，由 ApplyUiScaleToTokens 在 SetupFonts 内落定。

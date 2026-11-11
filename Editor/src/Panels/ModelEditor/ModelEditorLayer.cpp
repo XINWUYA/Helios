@@ -7,19 +7,19 @@
 #include <cfloat>
 #include <limits>
 #include "Helios/Application/Application.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Assets/ModelImporter.h"
 #include "Helios/Scene/ModelManifest.h"
-#include "UI/DebugViewMenu.h"
+#include "EditorUI/DebugViewMenu.h"
 #include "Common/EditorCommon.h"
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Material/MaterialParamUI.h"
 #include "Command/AssetFileOps.h"
-#include "UI/ImGuiExtensions.h"
+#include "EditorUI/ImGuiExtensions.h"
 #include "Helios/Core/AssetManager.h"
 #include <glm/gtc/type_ptr.hpp>
-#include "UI/PanelChrome.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/PanelChrome.h"
+#include "EditorUI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
 
 namespace Helios

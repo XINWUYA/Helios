@@ -9,7 +9,7 @@
 /* 卡片背景要用 ImGuiWindow::InnerRect（滚动条之外的可用区域），故需要内部头 */
 #include <imgui_internal.h>
 #include "EditorIcons.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 
 namespace Helios::PanelChrome
 {

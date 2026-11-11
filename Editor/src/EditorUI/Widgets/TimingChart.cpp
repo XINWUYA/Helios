@@ -1,8 +1,8 @@
 #include "Pch.h"
 #include "TimingChart.h"
-#include "UI/EditorIcons.h"
-#include "UI/EditorTheme.h"
-#include "UI/ImGuiExtensions.h"
+#include "EditorUI/EditorIcons.h"
+#include "EditorUI/EditorTheme.h"
+#include "EditorUI/ImGuiExtensions.h"
 
 namespace Helios
 {

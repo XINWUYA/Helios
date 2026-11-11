@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Helios/Reflection/ComponentRegistry.h"
 
 namespace Helios

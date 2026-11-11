@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "EditorIcons.h"
 #include "Svg.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Helios/Scene/SceneCommon.h"
 #include <magic_enum.hpp>
 #include <tinyxml2.h>
@@ -481,7 +481,8 @@ namespace Helios::Icons
 
 		Draw(ImGui::GetWindowDrawList(), id, center, icon_size, color);
 
-		if (tooltip != nullptr && ImGui::IsItemHovered())
+		/* 禁用态也放行提示：灰掉的按钮更要说清为什么不能点 */
+		if (tooltip != nullptr && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 			ImGui::SetTooltip("%s", tooltip);
 
 		ImGui::PopID();

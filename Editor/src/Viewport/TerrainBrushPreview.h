@@ -2,7 +2,7 @@
 #include <array>
 #include <cmath>
 #include <imgui.h>
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Helios/Scene/TerrainField.h"
 
 namespace Helios::TerrainBrushPreview

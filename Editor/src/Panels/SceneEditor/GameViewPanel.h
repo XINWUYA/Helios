@@ -3,7 +3,7 @@
 
 #include "Common/EditorCommon.h"
 #include "Helios/Renderer/RenderCommon.h"
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 
 namespace Helios
 {

@@ -6,9 +6,9 @@
 #include <cstdio>
 #include <string>
 
-#include "UI/EditorTheme.h"
-#include "UI/ImGuiExtensions.h"
-#include "UI/PanelChrome.h"
+#include "EditorUI/EditorTheme.h"
+#include "EditorUI/ImGuiExtensions.h"
+#include "EditorUI/PanelChrome.h"
 
 namespace Helios
 {

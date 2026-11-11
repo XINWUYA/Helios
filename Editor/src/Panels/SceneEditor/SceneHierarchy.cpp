@@ -2,10 +2,10 @@
 #include "SceneHierarchy.h"
 #include "SceneHierarchyShared.h"
 #include "Common/EditorCommon.h"
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Command/AssetFileOps.h"
-#include "UI/PanelChrome.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/PanelChrome.h"
+#include "EditorUI/PanelRegistry.h"
 #include "Panels/PanelWindow.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/PathUtils.h"
@@ -17,7 +17,7 @@
 #include "Command/DeleteEntityCommand.h"
 #include "Command/ReparentEntityCommand.h"
 #include "Command/SetEntityVisibilityCommand.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include "Helios/Scene/Components.h"
 #include <algorithm>
 #include <cstring>

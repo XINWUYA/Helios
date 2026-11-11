@@ -7,12 +7,12 @@
 #include <imgui.h>
 #include <glm/gtc/type_ptr.hpp>
 #include "Common/EditorCommon.h"
-#include "UI/EditorIcons.h"
-#include "UI/PanelChrome.h"
+#include "EditorUI/EditorIcons.h"
+#include "EditorUI/PanelChrome.h"
 #include "Command/AssetFileOps.h"
-#include "UI/EditorTheme.h"
-#include "UI/ImGuiExtensions.h"
-#include "UI/BuiltinTextures.h"
+#include "EditorUI/EditorTheme.h"
+#include "EditorUI/ImGuiExtensions.h"
+#include "EditorUI/BuiltinTextures.h"
 #include "Helios/Core/AssetManager.h"
 
 namespace Helios::MaterialParamUI

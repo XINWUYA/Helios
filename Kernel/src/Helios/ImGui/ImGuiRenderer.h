@@ -51,7 +51,7 @@ namespace Helios
         /* 创建字体图集纹理 */
         void CreateFontTexture();
         /* 创建UI着色器 */
-        void CreateUIShader();
+        void CreateShader();
         /* 创建深度变体着色器（深度纹理预览：阴影图 / GBuffer 深度按 depth2d 采样） */
         void CreateDepthShader();
         /* 创建缓冲区 */
@@ -69,9 +69,9 @@ namespace Helios
         SharedPtr<DeviceTexture> m_FontTexture{ nullptr };
 
         /* UI着色器 */
-        SharedPtr<DeviceShader> m_UIShader{ nullptr };
+        SharedPtr<DeviceShader> m_Shader{ nullptr };
         /* 深度变体着色器：深度格式纹理（深度附件预览）按 depth2d 采样、灰度输出 */
-        SharedPtr<DeviceShader> m_UIDepthShader{ nullptr };
+        SharedPtr<DeviceShader> m_DepthShader{ nullptr };
 
         /* 顶点 / 索引缓冲：三槽轮转 —— GPU 在飞帧仍读旧槽，CPU 只覆写下一槽才安全
          *（对齐 ImGui 官方 Metal 后端的 frames-in-flight；drawable 池天然限流 ≤3 帧在飞）。

@@ -2,16 +2,16 @@
 #include "ProjectLauncherLayer.h"
 
 #include "Common/EditorCommon.h"
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Common/FileDialog.h"
-#include "UI/PanelChrome.h"
+#include "EditorUI/PanelChrome.h"
 
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/PathUtils.h"
 #include "Common/ProjectConfig.h"
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Renderer/Renderer.h"
-#include "UI/EditorTheme.h"
+#include "EditorUI/EditorTheme.h"
 #include <cstdio>
 
 namespace Helios

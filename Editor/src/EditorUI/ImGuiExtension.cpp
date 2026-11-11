@@ -5,11 +5,11 @@
 #include <imgui_internal.h>
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Common/Math.h"
-#include "UI/AxisGlyph.h"
+#include "EditorUI/AxisGlyph.h"
 #include "Helios/VirtualDevice/DeviceTexture.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/Scene/LayerMask.h"
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 
 namespace Helios::ImGuiExt
 {
@@ -1183,5 +1183,38 @@ namespace Helios::ImGuiExt
 		ImGui::SameLine(0.0f, 0.0f);
 		const ImGuiWindow* window = ImGui::GetCurrentWindow();
 		ImGui::SetCursorPosX(window->DC.Indent.x + window->DC.ColumnsOffset.x + offset_from_line_start);
+	}
+
+	namespace
+	{
+		int StringResizeCallback(ImGuiInputTextCallbackData* data)
+		{
+			if (data->EventFlag == ImGuiInputTextFlags_CallbackResize)
+			{
+				auto* text = static_cast<std::string*>(data->UserData);
+				text->resize(static_cast<size_t>(data->BufTextLen));
+				data->Buf = text->data();
+			}
+			return 0;
+		}
+	}
+
+	bool InputTextString(const char* label, std::string& text, ImGuiInputTextFlags flags)
+	{
+		if (text.capacity() < 64)
+			text.reserve(64);
+
+		return ImGui::InputText(label, text.data(), text.capacity() + 1,
+			flags | ImGuiInputTextFlags_CallbackResize, StringResizeCallback, &text);
+	}
+
+	bool InputTextMultilineString(const char* label, std::string& text, const ImVec2& size,
+		ImGuiInputTextFlags flags)
+	{
+		if (text.capacity() < 64)
+			text.reserve(64);
+
+		return ImGui::InputTextMultiline(label, text.data(), text.capacity() + 1, size,
+			flags | ImGuiInputTextFlags_CallbackResize, StringResizeCallback, &text);
 	}
 }

@@ -32,7 +32,7 @@ namespace Helios
         EnsureBuffersCapacity(1000, 2000);
 
         /* 创建UI着色器 - 需要在VertexBuffer设置好布局后创建 */
-        CreateUIShader();
+        CreateShader();
 
         /* 创建深度变体着色器（与 UI 着色器共用顶点布局） */
         CreateDepthShader();
@@ -55,8 +55,8 @@ namespace Helios
             m_IndexBuffers[slot].reset();
         }
         m_FrameSlot = 0;
-        m_UIShader.reset();
-        m_UIDepthShader.reset();
+        m_Shader.reset();
+        m_DepthShader.reset();
         m_FontTexture.reset();
         m_UIUniformBuffer.reset();
     }
@@ -168,12 +168,12 @@ namespace Helios
 
         /* 绑定着色器、UI uniform buffer 与顶点数组。布局每帧同步一次（命中缓存只是查表）：
          * 着色器热重载后属性位置变了，描述符要按新反射重建 */
-        m_UIShader->BindVertexArray(vertex_array);
-        if (m_UIDepthShader)
-            m_UIDepthShader->BindVertexArray(vertex_array);
-        m_UIShader->Bind();
+        m_Shader->BindVertexArray(vertex_array);
+        if (m_DepthShader)
+            m_DepthShader->BindVertexArray(vertex_array);
+        m_Shader->Bind();
         /* 字体纹理绑定到纹理槽 0（与 GLSL 中 sampler2D u_FontTexture 的 binding 一致） */
-        m_UIShader->SetInt("u_FontTexture", 0);
+        m_Shader->SetInt("u_FontTexture", 0);
 
         /* UIUniformBuffer 在 GLSL 中声明了 binding = 4，由 MetalUniformBuffer/OpenGL
          * 各自的 Bind() 落到后端对应的槽位，调用方无需关心具体索引。 */
@@ -192,7 +192,7 @@ namespace Helios
          *（表现为整窗 / 整块显示成别的贴图 —— 常见的即字体图集）。 */
         ImTextureID last_texture_id = reinterpret_cast<ImTextureID>(-1);
         /* 当前登记的着色器：默认 UI 变体，绘制深度纹理时切到深度变体（见纹理绑定处） */
-        DeviceShader* bound_shader = m_UIShader.get();
+        DeviceShader* bound_shader = m_Shader.get();
         /* 诊断（临时）：本帧"FrameGraph 资源节点图"（预览 RT，名字前缀 FrameGraphCapture/）
          * 的实际绑定记录——缩放闪烁复现时据此从日志区分"图绑的是预览 RT 还是字体图集" */
         int frame_graph_image_binds = 0;
@@ -252,15 +252,15 @@ namespace Helios
                         }
 
                         /* 深度纹理（阴影图 / GBuffer 深度等预览）必须按 depth2d 采样
-                         * （深度格式不能绑到 texture2d<float>，见 Overlay/ImGuiUIDepth.glsl 与
+                         * （深度格式不能绑到 texture2d<float>，见 Overlay/ImGuiDepth.glsl 与
                          * ShaderCompiler 的 @depth-texture 标注）：按纹理格式切着色器 */
                         const bool is_depth = texture != nullptr
                             && IsDepthFormat(texture->GetTextureDesc().Format);
-                        DeviceShader* wanted = (is_depth && m_UIDepthShader)
-                            ? m_UIDepthShader.get() : m_UIShader.get();
+                        DeviceShader* wanted = (is_depth && m_DepthShader)
+                            ? m_DepthShader.get() : m_Shader.get();
 
                         /* 采样器槽位是自动分配的，按名字查 */
-                        const char* sampler_name = wanted == m_UIDepthShader.get() ? "u_DepthTexture" : "u_FontTexture";
+                        const char* sampler_name = wanted == m_DepthShader.get() ? "u_DepthTexture" : "u_FontTexture";
                         const int sampler_slot = wanted != nullptr ? std::max(wanted->GetUniformBinding(sampler_name), 0) : 0;
 
                         if (texture)
@@ -294,10 +294,10 @@ namespace Helios
 
                         /* 深度纹理的显示范围（FrameGraphCapture 刷新写入；无效范围时着色器回退
                          * 提亮曲线）—— 纹理换一档就要重设，与采样器同理 */
-                        if (is_depth && m_UIDepthShader != nullptr)
+                        if (is_depth && m_DepthShader != nullptr)
                         {
-                            m_UIDepthShader->SetFloat("u_DepthMin", texture->GetDisplayRangeMin());
-                            m_UIDepthShader->SetFloat("u_DepthMax", texture->GetDisplayRangeMax());
+                            m_DepthShader->SetFloat("u_DepthMin", texture->GetDisplayRangeMin());
+                            m_DepthShader->SetFloat("u_DepthMax", texture->GetDisplayRangeMax());
                         }
 
                         last_texture_id = pcmd->TextureId;
@@ -327,7 +327,7 @@ namespace Helios
         }
 
         vertex_array->Unbind();
-        m_UIShader->Unbind();
+        m_Shader->Unbind();
     }
 
     void ImGuiRenderer::SetDisplaySize(int width, int height, float scale_x, float scale_y)
@@ -412,12 +412,12 @@ namespace Helios
         CORE_LOG_INFO("ImGui font texture rebuilt for content scale change");
     }
 
-    void ImGuiRenderer::CreateUIShader()
+    void ImGuiRenderer::CreateShader()
     {
         /* 走资产缓存而不是直建实例：编辑器改 overlay 着色器后热重载能覆盖到 */
-        m_UIShader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-            ABSOLUTE_PATH("Shaders/Overlay/ImGuiUI.glsl"));
-        if (m_UIShader)
+        m_Shader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+            ABSOLUTE_PATH("Shaders/Overlay/ImGui.glsl"));
+        if (m_Shader)
         {
             /* 把顶点布局交给着色器：OpenGL 在 VAO 中记录属性位置，Metal 需要据此
              * 生成顶点描述符与管线状态。由后端在内部消化，调用方无需区分平台。
@@ -425,25 +425,25 @@ namespace Helios
             for (int slot = 0; slot < kFramesInFlight; ++slot)
             {
                 if (m_VertexArrays[slot])
-                    m_UIShader->BindVertexArray(m_VertexArrays[slot]);
+                    m_Shader->BindVertexArray(m_VertexArrays[slot]);
             }
         }
 
-        CORE_LOG_INFO("ImGui UI shader created from embedded resource");
+        CORE_LOG_INFO("ImGui shader created from embedded resource");
     }
 
     void ImGuiRenderer::CreateDepthShader()
     {
         /* 深度变体：同一顶点布局，片元按 depth2d<float>（Metal）/ 标准深度采样
          * （OpenGL）读取深度并输出灰度，供 Frame Graph 页显示深度附件预览 */
-        m_UIDepthShader = AssetManager::Instance().GetOrLoad<DeviceShader>(
-            ABSOLUTE_PATH("Shaders/Overlay/ImGuiUIDepth.glsl"));
-        if (m_UIDepthShader)
+        m_DepthShader = AssetManager::Instance().GetOrLoad<DeviceShader>(
+            ABSOLUTE_PATH("Shaders/Overlay/ImGuiDepth.glsl"));
+        if (m_DepthShader)
         {
             for (int slot = 0; slot < kFramesInFlight; ++slot)
             {
                 if (m_VertexArrays[slot])
-                    m_UIDepthShader->BindVertexArray(m_VertexArrays[slot]);
+                    m_DepthShader->BindVertexArray(m_VertexArrays[slot]);
             }
         }
 
@@ -486,7 +486,7 @@ namespace Helios
             m_VertexBuffers[slot] = DeviceVertexBuffer::Create("ImGui_VertexBuffer",
                 static_cast<uint32_t>(m_VertexBufferSize) * sizeof(ImDrawVert));
 
-            /* 设置顶点布局：名字要和 ImGuiUI.glsl 的 in 声明一致，顶点属性按名字对位 */
+            /* 设置顶点布局：名字要和 ImGui.glsl 的 in 声明一致，顶点属性按名字对位 */
             VertexBufferLayout layout;
             layout.EmplaceElement(BufferElement{"a_Position", BufferDataType::Float2});
             layout.EmplaceElement(BufferElement{"a_TexCoord", BufferDataType::Float2});
@@ -500,11 +500,11 @@ namespace Helios
             m_VertexArrays[slot]->AddVertexBuffer(m_VertexBuffers[slot]);
             m_VertexArrays[slot]->SetIndexBuffer(m_IndexBuffers[slot]);
 
-            /* 顶点数组被重建，重新把布局同步给着色器（见 CreateUIShader） */
-            if (m_UIShader)
-                m_UIShader->BindVertexArray(m_VertexArrays[slot]);
-            if (m_UIDepthShader)
-                m_UIDepthShader->BindVertexArray(m_VertexArrays[slot]);
+            /* 顶点数组被重建，重新把布局同步给着色器（见 CreateShader） */
+            if (m_Shader)
+                m_Shader->BindVertexArray(m_VertexArrays[slot]);
+            if (m_DepthShader)
+                m_DepthShader->BindVertexArray(m_VertexArrays[slot]);
         }
     }
 

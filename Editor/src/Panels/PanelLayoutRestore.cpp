@@ -1,6 +1,6 @@
 ﻿#include "Pch.h"
 #include "PanelLayoutRestore.h"
-#include "UI/PanelRegistry.h"
+#include "EditorUI/PanelRegistry.h"
 
 #include <cstdio>
 #include <cstdlib>

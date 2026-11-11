@@ -1,6 +1,6 @@
 #pragma once
 #include <imgui.h>
-#include "UI/EditorIcons.h"
+#include "EditorUI/EditorIcons.h"
 #include "Helios/Common/Common.h"
 
 namespace Helios
