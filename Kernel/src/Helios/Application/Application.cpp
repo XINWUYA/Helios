@@ -61,8 +61,13 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION();
 
+#if HELIOS_PLATFORM_MOBILE
+		/* 移动端没有主循环：进平台 run loop，帧由窗口的显示链路推 */
+		RunPlatformEventLoop();
+#else
 		while (m_IsRunning)
 			Tick();
+#endif
 	}
 
 	void Application::Tick()

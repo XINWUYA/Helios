@@ -1,9 +1,14 @@
 ﻿#include "Pch.h"
 #include "DeviceWindow.h"
 #include "Helios/Renderer/Renderer.h"
+#if HELIOS_PLATFORM_DESKTOP
 #include "GraphicsAPI/OpenGL/OpenGLWindow.h"
+#endif
 #if HELIOS_PLATFORM_MACOS
 #include "GraphicsAPI/Metal/MetalWindow.h"
+#endif
+#if HELIOS_PLATFORM_IOS
+#include "GraphicsAPI/Metal/MetalWindowIOS.h"
 #endif
 
 namespace Helios
@@ -16,11 +21,16 @@ namespace Helios
         case RenderAPI::None:
             CORE_LOG_ERROR("RenderAPI can't be None!");
             return nullptr;
+#if HELIOS_PLATFORM_DESKTOP
         case RenderAPI::OpenGL:
             return CreateUniquePtr<OpenGLWindow>(desc);
+#endif
 #if HELIOS_PLATFORM_MACOS
         case RenderAPI::Metal:
             return CreateUniquePtr<MetalWindow>(desc);
+#elif HELIOS_PLATFORM_IOS
+        case RenderAPI::Metal:
+            return CreateUniquePtr<IOSWindow>(desc);
 #endif
         default:
             CORE_LOG_ERROR("Unknown RenderAPI is unsupported!");

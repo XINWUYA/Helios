@@ -68,4 +68,8 @@ namespace Helios
 
 	// Implement in clients
 	UniquePtr<Application> CreateApplication();
+
+	/* 平台事件循环：移动端进系统 run loop，帧由窗口的显示链路推；
+	 * 桌面的 Run 自己走 while，不经过这里。 */
+	HELIOS_API void RunPlatformEventLoop();
 }

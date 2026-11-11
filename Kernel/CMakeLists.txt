@@ -213,9 +213,10 @@ elseif(HELIOS_TARGET_PLATFORM STREQUAL "macOS")
     )
 elseif(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
     target_compile_definitions(Kernel PRIVATE PLATFORM_IOS)
-    # 移动端不带 ImGui，只有 Metal 查询要按 Objective-C++ 编
+    # 移动端不带 ImGui；窗口与 Metal 查询要按 Objective-C++ 编
     set(KERNEL_OBJCXX_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsAPI/Metal/MetalQuery.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsAPI/Metal/MetalWindowIOS.mm"
     )
     set_source_files_properties(${KERNEL_OBJCXX_SOURCES} PROPERTIES
         COMPILE_FLAGS "-x objective-c++"
