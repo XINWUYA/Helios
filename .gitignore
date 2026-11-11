@@ -406,6 +406,8 @@ cmake_install.cmake
 Makefile
 *.cmake
 !CMakeLists.txt
+# 交叉编译工具链是源码，不是生成物
+!cmake/toolchains/*.cmake
 
 /Kernel/src/Helios/Profiler/Tracy/TracyClient.cpp
 
@@ -420,3 +422,5 @@ Projects/*/Cache/
 Projects/*/.helios/
 renderdoc-mcp-export
 .codebuddy
+
+build-ios/

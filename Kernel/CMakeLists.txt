@@ -2,14 +2,11 @@
 
 project(Kernel LANGUAGES CXX)
 
-option(HELIOS_KERNEL_STATIC "Link Kernel as a static library (desktop dry run of the iOS shape)" OFF)
-
 # 内核的库类型跟平台和脚本能力绑定：
 #   桌面是动态库 —— 脚本模块运行期编译完要按链接器解析引擎符号，三个平台走同一套机制；
 #   iOS 是静态库 —— 不能运行期加载代码，脚本编进主二进制，静态链接顺带省掉 dyld
-#   的加载开销与整份导出符号表。
-# Windows 上动态库只导出标了 HELIOS_API 的符号（见 Common/Export.h），漏标就是链接错误。
-if(HELIOS_TARGET_PLATFORM STREQUAL "iOS" OR HELIOS_KERNEL_STATIC)
+#   的加载开销与整份导出符号表。形态由根 CMakeLists 的 HELIOS_LIBRARY_TYPE 决定。
+if(HELIOS_LIBRARY_TYPE STREQUAL "STATIC")
     add_library(Kernel STATIC)
     # 静态链接没有模块边界，导出标注要展开为空
     target_compile_definitions(Kernel PUBLIC HELIOS_KERNEL_STATIC)
@@ -23,6 +20,15 @@ file(GLOB_RECURSE KERNEL_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
+
+# iOS 上只有 Metal：桌面 GL 后端、ImGui、GLFW 窗口与上下文都不参与编译。
+# 窗口与上下文本身就是平台实现，等 iOS 那一份接进来再换。
+if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+    list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/GraphicsAPI/OpenGL/")
+    list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/Helios/ImGui/")
+    list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/GraphicsAPI/Metal/MetalWindow\\.")
+    list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/Helios/VirtualDevice/DeviceContext\\.cpp")
+endif()
 
 # Precompiled header header path
 set(PCH_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/Pch.h")
@@ -128,6 +134,14 @@ if(WIN32)
     if(VULKAN_SDK)
         target_link_libraries(Kernel PRIVATE ${VULKAN_SDK}/Lib/shaderc_shared.lib)
     endif()
+elseif(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+    # iOS 只有 Metal 与 UIKit，没有桌面 GL 与 Cocoa
+    find_library(METAL_FRAMEWORK Metal REQUIRED)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(UIKIT_FRAMEWORK UIKit REQUIRED)
+    find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    target_link_libraries(Kernel PRIVATE ${METAL_FRAMEWORK} ${QUARTZCORE_FRAMEWORK}
+        ${UIKIT_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
 elseif(APPLE)
     find_library(OPENGL_FRAMEWORK OpenGL REQUIRED)
     find_library(COCOA_FRAMEWORK Cocoa REQUIRED)

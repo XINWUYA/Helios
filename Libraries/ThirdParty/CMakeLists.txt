@@ -2,6 +2,10 @@
 
 # Third-party libraries configuration
 
+# 下面这几套只服务桌面：GLFW 没有 iOS 后端，Glad 是桌面 GL 加载器，
+# ImGui 与 assimp 只给编辑器用。iOS 一律跳过。
+if(NOT HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+
 # GLFW
 project(GLFW C)
 
@@ -154,10 +158,12 @@ set_target_properties(ImGui PROPERTIES
     FOLDER "Libraries/ThirdParty"
 )
 
+endif()
+
 # tinyxml2
 project(tinyxml2 CXX)
 
-add_library(tinyxml2 SHARED)
+add_library(tinyxml2 ${HELIOS_LIBRARY_TYPE})
 
 file(GLOB TINYXML2_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/tinyxml2/*.cpp"
@@ -175,7 +181,7 @@ set_target_properties(tinyxml2 PROPERTIES
 # xxHash
 project(xxHash C)
 
-add_library(xxHash SHARED)
+add_library(xxHash ${HELIOS_LIBRARY_TYPE})
 
 file(GLOB XXHASH_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/xxHash/*.c"
@@ -213,7 +219,7 @@ set_target_properties(magic_enum PROPERTIES
 # SPDLOG_COMPILED_LIB 要全局一致，靠 PUBLIC 往使用方传。
 project(spdlog CXX)
 
-add_library(spdlog SHARED)
+add_library(spdlog ${HELIOS_LIBRARY_TYPE})
 
 file(GLOB SPDLOG_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/spdlog/src/*.cpp"
@@ -232,6 +238,8 @@ target_compile_definitions(spdlog PRIVATE FMT_EXPORT PUBLIC FMT_SHARED)
 set_target_properties(spdlog PROPERTIES
     FOLDER "Libraries/ThirdParty"
 )
+
+if(NOT HELIOS_TARGET_PLATFORM STREQUAL "iOS")
 
 # assimp
 project(assimp CXX)
@@ -363,6 +371,8 @@ set_target_properties(assimp PROPERTIES
     FOLDER "Libraries/ThirdParty"
 )
 
+endif()
+
 # glslang (GLSL to SPIR-V compiler, no external deps, no binaries/tests)
 set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)
 set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
@@ -371,7 +381,11 @@ set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)
 set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
 set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 # glslang 自带 CMake，用 BUILD_SHARED_LIBS 控制库类型；只在这个子目录生效
-set(BUILD_SHARED_LIBS ON)
+if(HELIOS_LIBRARY_TYPE STREQUAL "STATIC")
+    set(BUILD_SHARED_LIBS OFF)
+else()
+    set(BUILD_SHARED_LIBS ON)
+endif()
 add_subdirectory(glslang)
 unset(BUILD_SHARED_LIBS)
 set_target_properties(glslang PROPERTIES FOLDER "Libraries/ThirdParty")
@@ -380,7 +394,7 @@ set_target_properties(SPIRV PROPERTIES FOLDER "Libraries/ThirdParty")
 # SPIRV-Cross (MSL backend only, no CLI/tests)
 project(SPIRV-Cross CXX)
 
-add_library(spirv-cross SHARED)
+add_library(spirv-cross ${HELIOS_LIBRARY_TYPE})
 
 target_sources(spirv-cross PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/spirv-cross/spirv_cross.cpp
@@ -476,7 +490,7 @@ set_target_properties(freetype PROPERTIES
 file(GLOB_RECURSE RMLUI_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/rmlui/Source/Core/*.cpp"
 )
-add_library(RmlUi SHARED ${RMLUI_SOURCES})
+add_library(RmlUi ${HELIOS_LIBRARY_TYPE} ${RMLUI_SOURCES})
 target_include_directories(RmlUi PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/rmlui/Include")
 # Windows 上共享库要自己导出（RMLUI_CORE_EXPORTS），不能再定义 RMLUI_STATIC_LIB
 target_compile_definitions(RmlUi

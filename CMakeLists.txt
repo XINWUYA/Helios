@@ -156,6 +156,16 @@ if(HELIOS_TARGET_PLATFORM STREQUAL "macOS")
     endfunction()
 endif()
 
+# 库形态：桌面是动态库（脚本模块要按链接器解析引擎符号），移动端一律静态。
+# 三方库跟内核必须是同一种形态，混着来 iOS 上会出现一部分 dylib 没法随包走的问题。
+# HELIOS_KERNEL_STATIC 让桌面也按 iOS 的形态编一遍，用来验证静态链路。
+option(HELIOS_KERNEL_STATIC "Build libraries as static libraries (desktop dry run of the iOS shape)" OFF)
+if(HELIOS_TARGET_PLATFORM STREQUAL "iOS" OR HELIOS_KERNEL_STATIC)
+    set(HELIOS_LIBRARY_TYPE STATIC)
+else()
+    set(HELIOS_LIBRARY_TYPE SHARED)
+endif()
+
 # macOS 把图标放进 .app 的 Resources，Windows 编进 exe 资源
 set(HELIOS_APP_ICON_DIR "${HELIOS_ENGINE_ROOT}/EngineRes/AppIcon")
 if(WIN32)
@@ -237,18 +247,21 @@ endif()
 # Add Kernel
 add_subdirectory(Kernel)
 
-# Add applications
-# 说明：旧的 ModelEditor 独立编辑器已废弃（其场景/模型编辑能力已并入 Editor 的
-# MainEditor / SceneEditor / ModelEditor 三个面板层），源目录与 target 一并移除。
-add_subdirectory(Editor)
+# 编辑器与示例都依赖 GLFW、ImGui 与 assimp，iOS 上不参与构建
+if(NOT HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+    # Add applications
+    # 说明：旧的 ModelEditor 独立编辑器已废弃（其场景/模型编辑能力已并入 Editor 的
+    # MainEditor / SceneEditor / ModelEditor 三个面板层），源目录与 target 一并移除。
+    add_subdirectory(Editor)
 
-# Add samples (optional)
-option(BUILD_SAMPLES "Build sample projects" ON)  # Disabled for macOS compatibility
-if(BUILD_SAMPLES)
-    add_subdirectory(Samples/Sample_SkyBox)
-    add_subdirectory(Samples/Sample_CSM)
-    add_subdirectory(Samples/Sample_IBL)
-    add_subdirectory(Samples/Sample_Scene)
+    # Add samples (optional)
+    option(BUILD_SAMPLES "Build sample projects" ON)  # Disabled for macOS compatibility
+    if(BUILD_SAMPLES)
+        add_subdirectory(Samples/Sample_SkyBox)
+        add_subdirectory(Samples/Sample_CSM)
+        add_subdirectory(Samples/Sample_IBL)
+        add_subdirectory(Samples/Sample_Scene)
+    endif()
 endif()
 
 # 项目脚本模板
