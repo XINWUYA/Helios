@@ -1,0 +1,24 @@
+<rml>
+<head>
+	<link type="text/css" href="Joystick.rcss" />
+	<title>Runtime UI</title>
+</head>
+<body>
+	<div id="hud">
+		<div id="panel">
+			<div id="title">Runtime UI</div>
+			<div id="subtitle">Drag the stick to fly the camera</div>
+			<input id="name-field" type="text" value="type here" />
+		</div>
+
+		<div id="actions">
+			<button id="btn-start" class="btn">Start</button>
+			<button id="btn-reset" class="btn">Reset</button>
+		</div>
+
+		<joystick name="move" id="stick">
+			<knob id="knob" />
+		</joystick>
+	</div>
+</body>
+</rml>

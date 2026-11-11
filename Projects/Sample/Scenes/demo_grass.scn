@@ -44,5 +44,12 @@
             <Visibility Visible="false"/>
             <ReflectionProbe BakeCachePath="BakedReflectionProbes/Scenes/demo_grass/Reflection_Probe.probe" BakeFromSkyTexture="false" Realtime="false" BoxSize="10.000000 10.000000 10.000000" BlendDistance="0" CullingMask="4294967263" EnvSize="512" IrradianceSize="32" PrefilterSize="128" PrefilterMipLevels="0" BakeDiffuse="true" BakeSpecular="true"/>
         </Entity>
+        <Entity ID="9" Name="UI Canvas">
+            <Transform Position="0.000000 0.000000 0.000000" Rotation="0.000000 0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
+            <Canvas Document="UI/Joystick.rml" SortingOrder="0" ReceiveInput="true"/>
+            <Script>
+                <Entry Class="CameraJoystick" Order="0"/>
+            </Script>
+        </Entity>
     </Entities>
 </Scene>

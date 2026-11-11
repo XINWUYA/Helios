@@ -1,0 +1,140 @@
+/* 运行时 UI 的示例样式：左上角一块说明，左下角一个摇杆。
+ * 单位按物理像素写，Context 的 dp-ratio 当前是 1。
+ * RmlUi 没有内建的标签默认样式，display 一律显式给。 */
+
+body
+{
+	display: block;
+	margin: 0px;
+	width: 100%;
+	height: 100%;
+	font-family: Open Sans;
+	font-size: 16dp;
+	color: #f2f4f8;
+}
+
+#hud
+{
+	display: block;
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	width: 100%;
+	height: 100%;
+	/* 整层不吃指针，摇杆单独打开：免得 HUD 挡住游戏画面的操作 */
+	pointer-events: none;
+}
+
+#panel
+{
+	display: block;
+	position: absolute;
+	left: 36dp;
+	top: 28dp;
+	/* 定宽：绝对定位的块是收缩宽度，不带宽度时文本框会把它撑破 */
+	width: 320dp;
+	padding: 14dp;
+	background-color: rgba(12, 16, 24, 140);
+	border-radius: 10dp;
+	border: 1dp rgba(255, 255, 255, 40);
+}
+
+#title
+{
+	display: block;
+	font-size: 22dp;
+	font-weight: bold;
+}
+
+#subtitle
+{
+	display: block;
+	margin-top: 6dp;
+	font-size: 14dp;
+	color: rgba(242, 244, 248, 170);
+}
+
+/* 面板里的文本框：点进去就能打字，验证输入转发 */
+#name-field
+{
+	display: block;
+	/* hud 整层是 pointer-events: none（不挡游戏操作），要点的控件必须自己打开 */
+	pointer-events: auto;
+	margin-top: 10dp;
+	width: 288dp;
+	height: 26dp;
+	padding: 1dp 8dp;
+	background-color: rgba(255, 255, 255, 24);
+	border: 1dp rgba(255, 255, 255, 70);
+	border-radius: 6dp;
+	font-size: 14dp;
+}
+
+/* 右下角一排按钮：Tab 切焦点，回车触发（回调还没接，先看焦点框） */
+#actions
+{
+	display: flex;
+	position: absolute;
+	right: 36dp;
+	bottom: 36dp;
+	gap: 10dp;
+	pointer-events: auto;
+}
+
+.btn
+{
+	display: inline-block;
+	/* RmlUi 的 <button> 本身不是表单控件，不写 tab-index 就进不了 Tab 序列 */
+	tab-index: auto;
+	/* 方向键换焦点：nav 必须是按钮自己的本地属性，写在父容器上无效 */
+	nav: horizontal;
+	padding: 8dp 18dp;
+	border-radius: 8dp;
+	background-color: rgba(24, 30, 42, 200);
+	border: 1dp rgba(255, 255, 255, 60);
+	font-size: 15dp;
+}
+
+.btn:hover
+{
+	background-color: rgba(40, 48, 66, 220);
+}
+
+.btn:active
+{
+	background-color: rgba(16, 20, 30, 230);
+}
+
+.btn:focus
+{
+	border: 2dp #7f77dd;
+}
+
+#stick
+{
+	display: block;
+	position: absolute;
+	left: 48dp;
+	bottom: 48dp;
+	width: 180dp;
+	height: 180dp;
+	border-radius: 90dp;
+	background-color: rgba(12, 16, 24, 120);
+	border: 2dp rgba(255, 255, 255, 70);
+	pointer-events: auto;
+	/* 拖动由 RmlUi 的 drag 属性发起：指针落在底盘任意位置都能拖 */
+	drag: drag;
+}
+
+#knob
+{
+	display: block;
+	position: absolute;
+	left: 50dp;
+	top: 50dp;
+	width: 80dp;
+	height: 80dp;
+	border-radius: 40dp;
+	background-color: rgba(242, 244, 248, 210);
+	border: 2dp rgba(12, 16, 24, 60);
+}
