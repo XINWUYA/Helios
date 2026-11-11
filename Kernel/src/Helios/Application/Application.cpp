@@ -1,6 +1,5 @@
 ﻿#include "Pch.h"
 #include "Application.h"
-#include <GLFW/glfw3.h>
 #include "Helios/Profiler/CPUTimeScopeTree.h"
 #include "Helios/Core/Jobs.h"
 #include "Helios/Events/ApplicationEvent.h"
@@ -31,6 +30,9 @@ namespace Helios
 
 		/* 视口按物理像素建立（GetWidth/GetHeight 语义就是物理像素，与 RenderTarget 一致） */
 		Renderer::SetViewport(0, 0, m_pWindow->GetWidth(), m_pWindow->GetHeight());
+
+		/* 首帧的 delta 从建窗口那刻起算，不然会多出一大截 */
+		m_LastFrameTime = m_pWindow->GetTimeSeconds();
 	}
 
 	Application::~Application()
@@ -56,79 +58,98 @@ namespace Helios
 		PROFILE_CPU_FUNCTION();
 
 		while (m_IsRunning)
+			Tick();
+	}
+
+	void Application::Tick()
+	{
+		PROFILE_CPU_FUNCTION();
+
+		/* 暂停、或者已经关了：本帧什么都不做。退后台时 drawable 可能已被系统收回，
+		 * 这时候还提交绘制就是崩，慢一帧也无所谓。 */
+		if (!m_IsRunning || m_IsPaused)
+			return;
+
+		PROFILE_CPU_SCOPE("Running Loops");
+
+		const double time = m_pWindow->GetTimeSeconds();
+		const float delta_time = static_cast<float>(time - m_LastFrameTime);
+		m_LastFrameTime = time;
+
+		if (!m_IsMinimized)
 		{
-			PROFILE_CPU_SCOPE("Running Loops");
+			Profiler::Instance().BeginFrame();
 
-			const float time = static_cast<float>(glfwGetTime());
-			const float delta_time = time - m_LastFrameTime;
-			m_LastFrameTime = time;
-
-			if (!m_IsMinimized)
+			/* 帧开始时准备本帧的默认渲染目标（显式交换链后端在此取得 drawable，
+			 * 直接绘制到默认帧缓冲的后端为空实现），调用方无需区分平台。
+			 * 不计入 CPU 阶段：垂直同步的等待主要发生在这里。 */
+			if (auto render_api = Renderer::GetRenderAPI())
 			{
-				Profiler::Instance().BeginFrame();
+				render_api->PrepareNextFrame();
+			}
 
-				/* 帧开始时准备本帧的默认渲染目标（显式交换链后端在此取得 drawable，
-				 * 直接绘制到默认帧缓冲的后端为空实现），调用方无需区分平台。
-				 * 不计入 CPU 阶段：垂直同步的等待主要发生在这里。 */
-				if (auto render_api = Renderer::GetRenderAPI())
+			/* CPU 函数级采集的帧边界：在垂直同步等待之后 —— 与 Frame 卡的
+			 * CPU 口径一致（FrameTotal 不含等待） */
+			Profiler::Instance().BeginCPUTiming();
+
+			{
+				PROFILE_CPU_SCOPE_CH(ProfileChannel::Scene, "Update");
+
+				/* 帧级渲染准备：GPU 计时器的帧边界。
+				 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
+				Renderer::Update();
+
+				/* 后台任务的收尾回主线程执行，每帧最多花 2ms，剩下的留到下一帧 */
+				Jobs::DrainMain(2000);
+
+				/* 先更新逻辑层和渲染层 */
+				PROFILE_CPU_SCOPE("Update Layers");
+
+				for (const auto& layer : m_LayerStack)
+					layer->OnUpdate(delta_time);
+			}
+
+			{
+				PROFILE_CPU_SCOPE_CH(ProfileChannel::UI, "UI");
+
+				/* 没装 UI 层就整段跳过：层里的 OnImGuiRender 可以放心直接调 UI 接口，
+				 * 不用自己判空。 */
+				if (m_pUILayer)
 				{
-					render_api->PrepareNextFrame();
-				}
-
-				/* CPU 函数级采集的帧边界：在垂直同步等待之后 —— 与 Frame 卡的
-				 * CPU 口径一致（FrameTotal 不含等待） */
-				Profiler::Instance().BeginCPUTiming();
-
-				{
-					PROFILE_CPU_SCOPE_CH(ProfileChannel::Scene, "Update");
-
-					/* 帧级渲染准备：GPU 计时器的帧边界。
-					 * 放在帧循环里而不是渲染入口，保证一个应用帧只推进一次。 */
-					Renderer::Update();
-
-					/* 后台任务的收尾回主线程执行，每帧最多花 2ms，剩下的留到下一帧 */
-					Jobs::DrainMain(2000);
-
-					/* 先更新逻辑层和渲染层 */
-					PROFILE_CPU_SCOPE("Update Layers");
-
-					for (const auto& layer : m_LayerStack)
-						layer->OnUpdate(delta_time);
-				}
-
-				{
-					PROFILE_CPU_SCOPE_CH(ProfileChannel::UI, "UI");
-
-					/* 没装 UI 层就整段跳过：层里的 OnImGuiRender 可以放心直接调 UI 接口，
-					 * 不用自己判空。 */
-					if (m_pUILayer)
+					m_pUILayer->Begin();
 					{
-						m_pUILayer->Begin();
-						{
-							PROFILE_CPU_SCOPE("Render UI Layers");
+						PROFILE_CPU_SCOPE("Render UI Layers");
 
-							for (const auto& layer : m_LayerStack)
-								layer->OnImGuiRender();
-						}
-						m_pUILayer->End();
+						for (const auto& layer : m_LayerStack)
+							layer->OnImGuiRender();
 					}
-
-					/* 层已经画完：这时增删层不会打断上面的遍历 */
-					OnFrameEnd();
+					m_pUILayer->End();
 				}
+
+				/* 层已经画完：这时增删层不会打断上面的遍历 */
+				OnFrameEnd();
 			}
-
-			{
-				PROFILE_CPU_SCOPE_CH(ProfileChannel::Render, "Present");
-
-				// SwapBuffer，显示帧画面到屏幕
-				m_pWindow->OnUpdate();
-			}
-
-			/* 结算本帧的 CPU 侧数据；GPU 结果解析出来后由渲染器在 EndGPUFrame 里
-			 * 统一发布同一帧的两半 */
-			Profiler::Instance().EndFrame();
 		}
+
+		{
+			PROFILE_CPU_SCOPE_CH(ProfileChannel::Render, "Present");
+
+			// SwapBuffer，显示帧画面到屏幕
+			m_pWindow->OnUpdate();
+		}
+
+		/* 结算本帧的 CPU 侧数据；GPU 结果解析出来后由渲染器在 EndGPUFrame 里
+		 * 统一发布同一帧的两半 */
+		Profiler::Instance().EndFrame();
+	}
+
+	void Application::SetPaused(bool paused)
+	{
+		/* 恢复时把时间基准拨到当下，否则暂停的那段会被算进下一帧的 delta */
+		if (m_IsPaused && !paused)
+			m_LastFrameTime = m_pWindow->GetTimeSeconds();
+
+		m_IsPaused = paused;
 	}
 
 	void Application::Close()

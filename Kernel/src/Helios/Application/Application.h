@@ -24,7 +24,16 @@ namespace Helios
 		void SetUILayer(const SharedPtr<ImGuiLayer>& layer);
 
 		virtual void Run();
+
+		/* 推进一帧。桌面的 Run 就是循环调它；平台自己的回调（iOS 的 display link、
+		 * Android 的 looper）每帧调一次即可，不必进 Run。暂停期间整帧跳过。 */
+		void Tick();
 		void Close();
+
+		/* 进后台停帧、回前台恢复。暂停期间既不推进逻辑也不提交绘制 ——
+		 * 移动端退后台时 drawable 会被系统收回，这时再画就是崩。 */
+		void SetPaused(bool paused);
+		[[nodiscard]] bool IsPaused() const { return m_IsPaused; }
 
 		/* 层序由层自己的优先级决定（见 ILayer），同优先级按调用先后 */
 		void PushLayer(const SharedPtr<ILayer>& layer);
@@ -53,7 +62,8 @@ namespace Helios
 		std::string m_Name{};
 		bool m_IsRunning{ true };
 		bool m_IsMinimized{ false };
-		float m_LastFrameTime{ 0.0f };
+		bool m_IsPaused{ false };
+		double m_LastFrameTime{ 0.0 };
 	};
 
 	// Implement in clients
