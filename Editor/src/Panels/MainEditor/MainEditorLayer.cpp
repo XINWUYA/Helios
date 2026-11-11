@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "MainEditorLayer.h"
+#include "Packaging/Packager.h"
 #include "EditorUI/DebugViewMenu.h"
 #include "EditorUI/ImGuiExtensions.h"
 #include "Panels/PanelWindow.h"
@@ -360,6 +361,16 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION();
 
+		/* 后台打包跑完的结果在这里取：弹窗要开在宿主窗口的作用域里 */
+		Build::PackageResult package_result;
+		if (Build::Poll(package_result))
+		{
+			m_LastPackageSucceeded = package_result.Success;
+			m_LastPackagePath = std::move(package_result.OutputPath);
+			m_LastPackageLog = std::move(package_result.LogTail);
+			m_ShowPackageResult = true;
+		}
+
 		/* 宿主窗口铺满主视口、不参与停靠：菜单栏与工具栏都挂在它下面 */
 		const ImGuiViewport* viewport = ImGui::GetMainViewport();
 		ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -430,6 +441,7 @@ namespace Helios
 				ShowRenderingMenu();
 				ShowScriptsMenu();
 				ShowShadersMenu();
+				ShowBuildMenu();
 
 				ImGui::PopStyleColor();
 				ImGui::Unindent(Scaled(7.0f));
@@ -439,6 +451,9 @@ namespace Helios
 
 			/* 顶部工具栏：菜单栏与工作区之间的固定一行（不参与停靠） */
 			ShowToolbarUI();
+
+			/* 打包结果弹窗：跟着宿主窗口这一帧走 */
+			ShowPackageResultPopup();
 
 			/* DockSpace 占满工具条之后的剩余区域 */
 			ImGuiIO& io = ImGui::GetIO();
@@ -895,6 +910,80 @@ namespace Helios
 		PanelChrome::MenuStatusText(shader_status);
 
 		EndBarMenu();
+	}
+
+	/* Build：出包与生成 Xcode 工程。两种入口（这里与命令行 --package-*）走同一套实现 */
+	void MainEditorLayer::ShowBuildMenu()
+	{
+		if (!BeginBarMenu("Build"))
+			return;
+
+		const bool running = Build::IsRunning();
+
+		/* 正在跑时把目标名摆在最上面：一处状态，别让用户以为没反应 */
+		if (running)
+		{
+			PanelChrome::MenuStatusText(Build::RunningLabel());
+			ImGui::Separator();
+		}
+
+		if (BarMenuItem("Package iOS Simulator App", nullptr, !running))
+			Build::StartAsync(Build::PackageTarget::IOSSimulatorApp, g_ProjectPath);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Build Player.app for the simulator under build-ios-sim");
+
+		if (BarMenuItem("Package iOS Device App", nullptr, !running))
+			Build::StartAsync(Build::PackageTarget::IOSDeviceApp, g_ProjectPath);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Release build for a device under build-ios (signing must already be configured)");
+
+		if (BarMenuItem("Generate Xcode Project", nullptr, !running))
+			Build::StartAsync(Build::PackageTarget::IOSXcodeProject, g_ProjectPath);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Configure build-ios-xcode with the Xcode generator; set signing and run from Xcode");
+
+		ImGui::Separator();
+		PanelChrome::MenuStatusText(running ? "Packaging..." : "Idle");
+
+		EndBarMenu();
+	}
+
+	void MainEditorLayer::ShowPackageResultPopup()
+	{
+		if (m_ShowPackageResult)
+		{
+			m_ShowPackageResult = false;
+			ImGui::OpenPopup("Package Result");
+		}
+
+		if (!ImGui::BeginPopupModal("Package Result", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+			return;
+
+		if (m_LastPackageSucceeded)
+		{
+			ImGui::TextUnformatted("打包完成");
+			ImGui::Spacing();
+			ImGui::TextWrapped("%s", m_LastPackagePath.c_str());
+		}
+		else
+		{
+			ImGui::TextUnformatted("打包失败");
+			ImGui::Spacing();
+			/* 失败时给最后几行输出：不用再翻日志面板找原因 */
+			ImGui::BeginChild("##package_log", ImVec2(Scaled(560.0f), Scaled(220.0f)), true);
+			ImGui::TextUnformatted(m_LastPackageLog.c_str());
+			ImGui::EndChild();
+		}
+
+		ImGui::Spacing();
+		if (m_LastPackageSucceeded && BarMenuItem("Show in Finder"))
+			Build::RevealInFileManager(m_LastPackagePath);
+
+		ImGui::SameLine();
+		if (BarMenuItem("Close"))
+			ImGui::CloseCurrentPopup();
+
+		ImGui::EndPopup();
 	}
 
 	/* 顶部工具栏依次排列文件操作和变换工具，运行按钮居中，视图工具贴右。 */

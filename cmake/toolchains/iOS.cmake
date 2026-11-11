@@ -14,4 +14,8 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET 18.0)
 set(HELIOS_IOS_SYSROOT "iphoneos" CACHE STRING "iOS sysroot: iphoneos or iphonesimulator")
 set(CMAKE_OSX_SYSROOT ${HELIOS_IOS_SYSROOT})
 
-set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED OFF)
+# 命令行出包（make / ninja）不需要签名，关掉省事；
+# 交给 Xcode 的工程要留给人自己配团队，这里不能替它关。
+if(NOT CMAKE_GENERATOR MATCHES "Xcode")
+    set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED OFF)
+endif()

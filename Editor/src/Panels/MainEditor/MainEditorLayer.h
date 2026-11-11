@@ -58,6 +58,10 @@ namespace Helios
 		void ShowRenderingMenu();
 		void ShowScriptsMenu();
 		void ShowShadersMenu();
+		/* 打包下拉：iOS 应用包与 Xcode 工程都在这里出 */
+		void ShowBuildMenu();
+		/* 打包结果弹窗：成功给出产物路径，失败给最后几行输出 */
+		void ShowPackageResultPopup();
 		/* 显示顶部工具栏（菜单栏与工作区之间的固定一行） */
 		void ShowToolbarUI();
 		void ShowEditorCameraUI();
@@ -97,5 +101,10 @@ namespace Helios
 		/* 菜单栏左端的品牌记号：白色线稿贴图，按强调色着色（与启动页同一张） */
 		SharedPtr<DeviceTexture> m_pEmblem;
 		bool m_EmblemRequested{ false };
+		/* 打包结果：后台任务跑完由菜单栏下一帧取走，再弹窗 */
+		bool m_ShowPackageResult{ false };
+		bool m_LastPackageSucceeded{ false };
+		std::string m_LastPackagePath;
+		std::string m_LastPackageLog;
 	};
 }

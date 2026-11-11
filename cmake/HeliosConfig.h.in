@@ -14,6 +14,12 @@
 // Build directory: the editor uses it to rebuild the script module on demand
 #define HELIOS_BUILD_DIR "@CMAKE_BINARY_DIR@"
 
+// 引擎根：打包入口要在这里跑 CMake，不能靠运行期 PATH
+#define HELIOS_ENGINE_ROOT_DIR "@HELIOS_ENGINE_ROOT@"
+
+// 配置时用的 CMake 可执行文件：GUI 启动的编辑器没有完整 PATH，直接记下来
+#define HELIOS_CMAKE_PATH "@CMAKE_COMMAND@"
+
 // 构建产物的子目录名；多配置生成器（Xcode / Visual Studio）还会再套一层配置名
 #define HELIOS_BUILD_OUTPUT_DIR "@OUTPUT_DIR@"
 
