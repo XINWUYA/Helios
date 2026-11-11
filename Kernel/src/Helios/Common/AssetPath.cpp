@@ -13,6 +13,9 @@ namespace Helios
 	{
 		uint32_t s_ProjectPathGeneration = 1;
 
+		/* 有人显式指定过工程（命令行 / 启动页切换）：这时候随包的工程不能顶掉它 */
+		bool s_ProjectPathExplicit = false;
+
 		/* 相对路径里出现 .. 就说明跑到根外面去了，这一份不能当资产相对路径用 */
 		bool IsInsideRoot(const std::filesystem::path& relative)
 		{
@@ -38,7 +41,8 @@ namespace Helios
 		 * 认到就换过去 —— 包里那份才是这个包该跑的资源。 */
 		bool UseBundledProject(const std::filesystem::path& dir)
 		{
-			if (dir.empty())
+			/* 显式指定过工程就照它跑：调试时用 --project 换工程，不该被包里的顶掉 */
+			if (dir.empty() || s_ProjectPathExplicit)
 				return false;
 
 			const std::filesystem::path bundled = dir / "Project";
@@ -182,6 +186,7 @@ namespace Helios
 		}
 
 		g_ProjectPath = absolute;
+		s_ProjectPathExplicit = true;
 		++s_ProjectPathGeneration;
 		CORE_LOG_INFO("Project root: {}", PathToUtf8(g_ProjectPath));
 		return true;
