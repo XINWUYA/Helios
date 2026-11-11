@@ -7,11 +7,32 @@
 
 namespace Helios
 {
-	/* 引擎内置资源根：编译期固定，随引擎走，所有项目共享，只读 */
-	inline const std::filesystem::path g_EngineResPath = PathFromUtf8(ENGINE_RES_PATH);
+	/* 引擎内置资源根：启动时由 LocateAssetRoots 定位，所有项目共享，只读。
+	 * 没调定位的场合（headless 检查、工具）它就是编译期路径 —— 源码树里的开发态。 */
+	extern HELIOS_API std::filesystem::path g_EngineResPath;
+
+	/* 运行期定位资源根，摆脱编译期绝对路径：按「可执行文件旁 → 包内 Resources →
+	 * 编译期路径」依次试，用第一个含 EngineRes 的目录。executable_path 留空时取当前进程的。
+	 * 返回是否离开了编译期路径。 */
+	HELIOS_API bool LocateAssetRoots(const std::filesystem::path& executable_path = {});
+
+	/* 引擎自带的 Projects/ 目录：启动页列已有工程、新建工程默认落这里。
+	 * 取编译期默认工程根的上一级 —— 打包后资源根在包里，工程目录还在源码树，两者不能混。 */
+	HELIOS_API std::filesystem::path GetEngineProjectsDirectory();
 
 	/* 项目根：启动时确定（编译期默认 + --project 覆盖），工程里唯一可写根 */
 	extern HELIOS_API std::filesystem::path g_ProjectPath;
+
+	/* ---- 可写目录 ----
+	 * 只放能重建的东西：着色器产物、管线缓存、日志。打包后的 .app 是只读的，
+	 * 桌面跟着项目走，iOS 只能写沙箱，所以两边必须分开取，不能拼项目根。 */
+
+	/* 缓存根。桌面是 <项目>/Cache（改完能直接看到产物）；iOS 是沙箱的 Library/Caches，
+	 * 系统可随时清理，丢了重编即可。 */
+	HELIOS_API std::filesystem::path GetWritableCacheDirectory();
+
+	/* 日志目录。桌面与 iOS 都是用户目录下的 logs；取不到返回空，调用方退 cwd。 */
+	HELIOS_API std::filesystem::path GetWritableLogDirectory();
 
 	/* 读路径：项目根优先，找不到回落引擎根 —— 项目里放同名文件即可覆盖内置资源。
 	 * 两个根都没有时返回项目根下的路径，给调用方一个能报出来的位置。 */

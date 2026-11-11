@@ -1,6 +1,7 @@
 ﻿#include "Pch.h"
 #include "Application.h"
 #include "Helios/Profiler/CPUTimeScopeTree.h"
+#include "Helios/Common/AssetPath.h"
 #include "Helios/Core/Jobs.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/ImGui/ImGuiLayer.h"
@@ -19,6 +20,9 @@ namespace Helios
 		ASSERT(!s_pInstance, "Application already exist!");
 		s_pInstance = this;
 		m_Name = window_title;
+
+		/* 资源根先定位：后面读着色器、字体、图标全按它拼路径 */
+		LocateAssetRoots();
 
 		/* 线程池先于一切子系统建好，同时收编主线程 */
 		Jobs::Init();

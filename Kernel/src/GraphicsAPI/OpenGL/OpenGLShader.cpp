@@ -7,6 +7,7 @@
 #include <shaderc/shaderc.hpp>
 #endif
 
+#include "Helios/Common/AssetPath.h"
 #include "Helios/Renderer/ShaderCompiler.h"
 #include "Helios/Scene/SceneCommon.h"
 
@@ -17,7 +18,7 @@ namespace Helios
 {
 	static std::filesystem::path GetShaderCacheDirectory()
 	{
-		return g_ProjectPath / "Cache/shader/opengl";
+		return GetWritableCacheDirectory() / "shader/opengl";
 	}
 
 	static void CreateShaderCacheDirectoryIfNeed()

@@ -1,11 +1,13 @@
 ﻿#include "Pch.h"
 #include "AssetPath.h"
 #include "Helios/Core/Logger.h"
+#include <cstdlib>
 #include <string_view>
 
 namespace Helios
 {
 	std::filesystem::path g_ProjectPath = PathFromUtf8(HELIOS_PROJECT_PATH);
+	std::filesystem::path g_EngineResPath = PathFromUtf8(ENGINE_RES_PATH);
 
 	namespace
 	{
@@ -21,6 +23,83 @@ namespace Helios
 			}
 			return !relative.empty();
 		}
+
+		/* 这个目录是不是一个能用的资源根：底下得有 EngineRes */
+		bool HasEngineRes(const std::filesystem::path& root)
+		{
+			if (root.empty())
+				return false;
+
+			std::error_code error;
+			return std::filesystem::is_directory(root / "EngineRes", error);
+		}
+	}
+
+	bool LocateAssetRoots(const std::filesystem::path& executable_path)
+	{
+		std::filesystem::path executable = executable_path;
+		if (executable.empty())
+			executable = GetExecutablePath();
+
+		if (!executable.empty())
+		{
+			const std::filesystem::path dir = executable.parent_path();
+
+			/* 平铺打包（Windows / Linux / 可执行文件与 EngineRes 同级）、
+			 * 包内 Resources（macOS 与 iOS 的 .app）、包根 */
+			const std::filesystem::path candidates[] = {
+				dir,
+				dir.parent_path() / "Resources",
+				dir.parent_path(),
+			};
+
+			for (const std::filesystem::path& candidate : candidates)
+			{
+				if (!HasEngineRes(candidate))
+					continue;
+
+				g_EngineResPath = candidate / "EngineRes";
+				CORE_LOG_INFO("Engine resource root: {}", PathToUtf8(g_EngineResPath));
+				return true;
+			}
+		}
+
+		/* 产物和源码在同一台机器：直接用源码树里那份 */
+		g_EngineResPath = PathFromUtf8(ENGINE_RES_PATH);
+		CORE_LOG_INFO("Engine resource root (source tree): {}", PathToUtf8(g_EngineResPath));
+		return false;
+	}
+
+	std::filesystem::path GetEngineProjectsDirectory()
+	{
+		return PathFromUtf8(HELIOS_PROJECT_PATH).parent_path();
+	}
+
+	std::filesystem::path GetWritableCacheDirectory()
+	{
+#if HELIOS_PLATFORM_IOS
+		/* 沙箱里唯一能随便写的位置；系统会按空间压力清理，缓存本来就是可丢的 */
+		if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0')
+			return PathFromUtf8(home) / "Library" / "Caches";
+
+		/* HOME 取不到（理论上不会）就退临时目录，总比不落盘强 */
+		std::error_code error;
+		const std::filesystem::path temp = std::filesystem::temp_directory_path(error);
+		return error ? std::filesystem::path{} : temp;
+#else
+		/* 桌面跟项目走；Android 正式接入时换成平台给的私有目录，暂缓项 */
+		return g_ProjectPath / "Cache";
+#endif
+	}
+
+	std::filesystem::path GetWritableLogDirectory()
+	{
+#if HELIOS_PLATFORM_APPLE
+		/* 双击 .app 启动时 cwd 是 "/"，工程目录又受隐私保护，只有这里一定写得进去 */
+		if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0')
+			return PathFromUtf8(home) / "Library" / "Logs" / "Helios";
+#endif
+		return {};
 	}
 
 	std::filesystem::path ResolveAssetPath(const std::filesystem::path& path)

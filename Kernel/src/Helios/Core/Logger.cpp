@@ -1,5 +1,6 @@
 ﻿#include "Pch.h"
 #include "Logger.h"
+#include "Helios/Common/AssetPath.h"
 #include <cstdio>
 #include <cstdlib>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -11,22 +12,20 @@ namespace Helios
 	{
 		/* 依次尝试「cwd/Helios.log」（终端工作流的位置）和用户日志目录；都打不开返回空
 		 * （退化成纯控制台日志）。双击 .app 启动时 cwd 是「/」写不进去，且工程目录受 TCC
-		 * 保护（会弹授权框卡住启动），所以退到 ~/Library/Logs/Helios/。 */
+		 * 保护（会弹授权框卡住启动），所以退到用户日志目录。 */
 		spdlog::sink_ptr CreateFileSink()
 		{
 			std::vector<std::filesystem::path> candidates;
 			candidates.emplace_back("Helios.log");
 
-#ifdef PLATFORM_MACOS
-			if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0')
+			const std::filesystem::path log_dir = GetWritableLogDirectory();
+			if (!log_dir.empty())
 			{
-				const std::filesystem::path dir = std::filesystem::path(home) / "Library" / "Logs" / "Helios";
 				std::error_code error;
-				std::filesystem::create_directories(dir, error);
+				std::filesystem::create_directories(log_dir, error);
 				if (!error)
-					candidates.push_back(dir / "Helios.log");
+					candidates.push_back(log_dir / "Helios.log");
 			}
-#endif
 
 			for (const std::filesystem::path& path : candidates)
 			{

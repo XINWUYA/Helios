@@ -1,5 +1,6 @@
 #include "Pch.h"
 #include "ShaderCompiler.h"
+#include "Helios/Common/AssetPath.h"
 
 #include "Helios/Common/Assert.h"
 #include "Helios/Common/Utils.h"
@@ -619,7 +620,7 @@ namespace Helios
         }
     }
 
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
     namespace
     {
         /* 收集 GLSL 里显式声明 binding 的 uniform block 的 binding 值。只有块形式（layout(...)
@@ -1481,6 +1482,28 @@ namespace Helios
         return "Unknown";
     }
 
+    ShaderCompiler::ShaderPlatform ShaderCompiler::CurrentPlatform()
+    {
+#if HELIOS_PLATFORM_IOS
+        return ShaderPlatform::IOS;
+#elif HELIOS_PLATFORM_ANDROID
+        return ShaderPlatform::Android;
+#else
+        return ShaderPlatform::Desktop;
+#endif
+    }
+
+    const char* ShaderCompiler::PlatformToString(ShaderPlatform platform)
+    {
+        switch (platform)
+        {
+        case ShaderPlatform::IOS: return "iOS";
+        case ShaderPlatform::Android: return "Android";
+        case ShaderPlatform::Desktop: return "Desktop";
+        }
+        return "Desktop";
+    }
+
     std::string ShaderCompiler::GetFileExtension(ShaderTarget target)
     {
         switch (target)
@@ -1547,12 +1570,14 @@ namespace Helios
 
     std::filesystem::path ShaderCompiler::GetCacheDirectory(ShaderTarget target)
     {
+        const ShaderPlatform platform = CurrentPlatform();
+
         /* 自检用：产物写到临时目录，不往项目缓存里留夹具和测试着色器 */
         if (const char* override_dir = std::getenv("HELIOS_SHADER_CACHE_DIR");
             override_dir != nullptr && override_dir[0] != '\0')
-            return std::filesystem::path(override_dir) / TargetToString(target);
+            return std::filesystem::path(override_dir) / PlatformToString(platform) / TargetToString(target);
 
-        return g_ProjectPath / "Cache/Shaders" / TargetToString(target);
+        return GetWritableCacheDirectory() / "Shaders" / PlatformToString(platform) / TargetToString(target);
     }
 
     bool ShaderCompiler::TryLoadCache(const std::string& cache_path, std::string& output)
@@ -1657,7 +1682,7 @@ namespace Helios
         if (!name.empty())
             header += "// Source: " + name + "\n";
         header += "// Stage: " + std::string(ShaderStageToString(stage)) + "\n";
-        header += "// Target: " + TargetToString(target) + "\n";
+        header += "// Target: " + TargetToString(target) + " (" + PlatformToString(CurrentPlatform()) + ")\n";
         header += "\n";
         output = header + output;
     }
@@ -1992,13 +2017,17 @@ namespace Helios
             return false;
         }
 
-#ifdef PLATFORM_MACOS
+#if HELIOS_PLATFORM_APPLE
         try
         {
             spirv_cross::CompilerMSL compiler(spirv);
             spirv_cross::CompilerMSL::Options options;
+            /* MSL 版本先按 2.3（iOS 12 起就够）。产物的目标平台必须分开：
+             * air64-apple-macos 与 air64-apple-ios 不能互相加载。 */
             options.set_msl_version(spirv_cross::CompilerMSL::Options::make_msl_version(2, 3));
-            options.platform = spirv_cross::CompilerMSL::Options::macOS;
+            options.platform = (CurrentPlatform() == ShaderPlatform::IOS)
+                ? spirv_cross::CompilerMSL::Options::iOS
+                : spirv_cross::CompilerMSL::Options::macOS;
             options.enable_decoration_binding = true;
             compiler.set_msl_options(options);
 

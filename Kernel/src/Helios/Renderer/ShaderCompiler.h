@@ -44,6 +44,19 @@ namespace Helios
             Vulkan
         };
 
+        /* 产物平台：同一图形 API 在不同系统上产出的二进制不通用，
+         * MSL 目标与缓存目录都按它分 */
+        enum class ShaderPlatform
+        {
+            Desktop,
+            IOS,
+            Android
+        };
+
+        /* 当前构建的目标平台，编译期定，不跟运行期选择走 */
+        static ShaderPlatform CurrentPlatform();
+        static const char* PlatformToString(ShaderPlatform platform);
+
         static ShaderStage StringToShaderStage(const std::string& type);
         static const char* ShaderStageToString(ShaderStage stage);
 

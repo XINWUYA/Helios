@@ -1,7 +1,10 @@
-#ifdef PLATFORM_MACOS
+#include "Helios/Common/Platform.h"
+
+#if HELIOS_PLATFORM_APPLE
 
 #include "Pch.h"
 #include "MetalCommon.h"
+#include "Helios/Common/AssetPath.h"
 #include "Helios/Renderer/ShaderCompiler.h"
 #include "Helios/Scene/SceneCommon.h"
 
@@ -54,7 +57,10 @@ namespace Helios
 
             std::filesystem::path PipelineArchivePath()
             {
-                return g_ProjectPath / "Cache/Shaders/PipelineArchive.binary";
+                /* 管线缓存绑 GPU 与驱动，跟着色器产物一样按平台分开存 */
+                return GetWritableCacheDirectory() / "Shaders"
+                    / ShaderCompiler::PlatformToString(ShaderCompiler::CurrentPlatform())
+                    / "PipelineArchive.binary";
             }
 
             /* 管线缓存档的容量上限。Metal 的 BinaryArchive 只有 add、没有删条目的接口，
@@ -356,4 +362,4 @@ namespace Helios
     }
 }
 
-#endif /* PLATFORM_MACOS */
+#endif /* HELIOS_PLATFORM_APPLE */

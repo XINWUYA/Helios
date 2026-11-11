@@ -57,7 +57,7 @@ namespace Helios
 		/* 第一次运行时的默认列表：引擎自带的 Projects/ 下每个带 Project.xml 的目录 */
 		void SeedFromEngineProjects(std::vector<std::filesystem::path>& items)
 		{
-			const std::filesystem::path projects = g_EngineResPath.parent_path() / "Projects";
+			const std::filesystem::path projects = GetEngineProjectsDirectory();
 
 			std::error_code error;
 			if (!std::filesystem::is_directory(projects, error))

@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "Helios/Common/Export.h"
 
 namespace Helios
 {
@@ -142,4 +143,8 @@ namespace Helios
 		return std::fopen(path.c_str(), mode);
 #endif
 	}
+
+	/* 当前进程的可执行文件绝对路径，取不到返回空。
+	 * 资源根按它定位，所以 iOS 上拿到的是 .app 包里那个可执行文件。 */
+	HELIOS_API std::filesystem::path GetExecutablePath();
 }

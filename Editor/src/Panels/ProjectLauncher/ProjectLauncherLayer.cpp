@@ -670,7 +670,7 @@ namespace Helios
 			m_NewProjectName[0] = '\0';
 			m_FocusNameField = true;
 			/* 新工程默认落到引擎的 Projects/ 下：多个工程并排，和示例工程同一个地方 */
-			const std::string default_dir = PathToUtf8(g_EngineResPath.parent_path() / "Projects");
+			const std::string default_dir = PathToUtf8(GetEngineProjectsDirectory());
 			std::snprintf(m_NewProjectLocation, sizeof(m_NewProjectLocation), "%s", default_dir.c_str());
 			ImGui::OpenPopup("New Project");
 		}
