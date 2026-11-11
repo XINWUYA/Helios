@@ -8,7 +8,17 @@
 #include "Helios/Renderer/RenderCommon.h"
 #include "Helios/Renderer/Renderer.h"
 #include <tinyxml2.h>
+
+/* stb 的实现编进引擎库里，Editor 侧也要直接调用（非 Windows 默认可见，收紧可见性时要显式放开）。
+ * 放在这里而不是 GL 后端：解图跟图形 API 无关，移动端只有 Metal 也得有这一份。 */
+#if !defined(PLATFORM_WINDOWS)
+#pragma GCC visibility push(default)
+#endif
+#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#if !defined(PLATFORM_WINDOWS)
+#pragma GCC visibility pop
+#endif
 
 #include <condition_variable>
 #include <memory>
