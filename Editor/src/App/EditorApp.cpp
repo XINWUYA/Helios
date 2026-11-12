@@ -199,10 +199,4 @@ namespace Helios
 	{
 		return CreateUniquePtr<EditorApp>(show_launcher);
 	}
-
-	/* 引擎约定的应用入口（默认走启动页） */
-	UniquePtr<Application> CreateApplication()
-	{
-		return CreateEditorApplication(true);
-	}
 }

@@ -1,4 +1,6 @@
 ﻿#pragma once
+#include <functional>
+
 #include "Helios/VirtualDevice/DeviceWindow.h"
 #include "Helios/Core/LayerStack.h"
 
@@ -76,10 +78,8 @@ namespace Helios
 		uint32_t m_FrameStatsSlowCount{ 0 };
 	};
 
-	// Implement in clients
-	UniquePtr<Application> CreateApplication();
-
-	/* 平台事件循环：移动端进系统 run loop，帧由窗口的显示链路推；
-	 * 桌面的 Run 自己走 while，不经过这里。 */
-	HELIOS_API void RunPlatformEventLoop();
+	/* 应用入口：各端的 main 只调这一句，factory 负责建应用和装层。
+	 * 桌面在这里跑帧循环直到窗口关闭；iOS 交给系统 run loop，启动完成后才调 factory */
+	using ApplicationFactory = std::function<UniquePtr<Application>()>;
+	HELIOS_API int RunApplication(int argc, char** argv, ApplicationFactory factory);
 }

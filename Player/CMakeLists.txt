@@ -2,34 +2,30 @@ cmake_minimum_required(VERSION 3.20)
 
 project(Player LANGUAGES CXX)
 
-# 玩家形态的应用：桌面与 iOS 共用同一份源码。
-# 桌面由 main() 起 while 循环，iOS 由 UIApplicationMain 接管 run loop，
-# 帧由窗口的 display link 推 —— 差别全在平台层，这一层只负责载入场景与出图。
-add_executable(Player)
+# 玩家形态的应用：引擎里通用的外壳，跑的是 HELIOS_PROJECT_DIR 指向的那个项目。
+# 应用名与包标识跟项目走，新项目不用改这里；桌面与 iOS 的入口差别都在 Kernel 的平台层
+helios_add_app(Player SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src" FOLDER "Applications")
 
-file(GLOB_RECURSE PLAYER_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.mm"
+# 包名取 Project.xml 的 Name，包标识默认 com.helios.<名字小写>，要换就配置时传 -DHELIOS_APP_BUNDLE_ID
+get_filename_component(PLAYER_APP_NAME "${HELIOS_PROJECT_DIR}" NAME)
+if(EXISTS "${HELIOS_PROJECT_DIR}/Project.xml")
+    file(READ "${HELIOS_PROJECT_DIR}/Project.xml" PLAYER_PROJECT_XML)
+    if(PLAYER_PROJECT_XML MATCHES "<Project[^>]* Name=\"([^\"]+)\"")
+        set(PLAYER_APP_NAME "${CMAKE_MATCH_1}")
+    endif()
+endif()
+if(HELIOS_APP_BUNDLE_ID)
+    set(PLAYER_BUNDLE_ID "${HELIOS_APP_BUNDLE_ID}")
+else()
+    string(TOLOWER "${PLAYER_APP_NAME}" PLAYER_BUNDLE_SUFFIX)
+    string(REGEX REPLACE "[^a-z0-9-]" "-" PLAYER_BUNDLE_SUFFIX "${PLAYER_BUNDLE_SUFFIX}")
+    set(PLAYER_BUNDLE_ID "com.helios.${PLAYER_BUNDLE_SUFFIX}")
+endif()
+
+set_target_properties(Player PROPERTIES
+    MACOSX_BUNDLE_BUNDLE_NAME "${PLAYER_APP_NAME}"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "${PLAYER_BUNDLE_ID}"
 )
-
-target_sources(Player PRIVATE ${PLAYER_SOURCES})
-
-# iOS 入口是 Objective-C++；桌面这一份会被平台宏预处理成空文件
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/IOSMain.mm" PROPERTIES
-    COMPILE_FLAGS "-x objective-c++"
-    SKIP_PRECOMPILE_HEADERS ON
-)
-
-target_include_directories(Player
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${HELIOS_ENGINE_ROOT}/Kernel/src
-        # 引擎头文件依赖的第三方（glm / entt / spdlog 等），与脚本模块同一份清单
-        ${HELIOS_ENGINE_INCLUDE_DIRS}
-)
-
-target_link_libraries(Player PRIVATE Kernel)
 
 # iOS 不允许加载没签名的代码，项目脚本只能随包编进主二进制：
 # 源文件直接进 Player 目标，注册靠脚本末尾静态对象在启动时跑一遍。
@@ -43,26 +39,10 @@ if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
         set_source_files_properties(${PLAYER_SCRIPT_SOURCES} PROPERTIES
             COMPILE_FLAGS "-include ${HELIOS_ENGINE_ROOT}/Kernel/src/Helios/Script/ScriptPch.h")
     endif()
-endif()
 
-target_compile_definitions(Player
-    PRIVATE
-        $<$<CONFIG:Debug>:HELIOS_DEBUG>
-        $<$<CONFIG:Release>:HELIOS_RELEASE>
-        $<$<CONFIG:Shipping>:HELIOS_SHIPPING>
-)
-
-set_target_properties(Player PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${OUTPUT_DIR}"
-    FOLDER "Applications"
-)
-
-if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
     set_target_properties(Player PROPERTIES
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
-        MACOSX_BUNDLE_BUNDLE_NAME "Player"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.helios.player"
         MACOSX_BUNDLE_BUNDLE_VERSION "1"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
     )
@@ -122,13 +102,4 @@ if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
             VERBATIM
         )
     endif()
-elseif(APPLE)
-    set_target_properties(Player PROPERTIES
-        MACOSX_BUNDLE ON
-        MACOSX_BUNDLE_BUNDLE_NAME "Player"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.helios.player"
-    )
-
-    helios_set_app_icon(Player)
-    helios_sign_macos_bundle(Player)
 endif()

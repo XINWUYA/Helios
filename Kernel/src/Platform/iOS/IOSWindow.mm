@@ -163,16 +163,6 @@ static glm::vec4 ReadSafeArea(UIView* view)
 
 namespace Helios
 {
-	void RunPlatformEventLoop()
-	{
-		/* 移动端没有主循环：进系统 run loop，帧由 display link 推。
-		 * 这里正常不会返回，返回即意味着应用要退出。 */
-		@autoreleasepool
-		{
-			[[NSRunLoop mainRunLoop] run];
-		}
-	}
-
 	/* -----------------------------------------------------------------------
 	 * MetalContextIOS
 	 * --------------------------------------------------------------------- */

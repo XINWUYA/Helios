@@ -247,6 +247,9 @@ endif()
 # Add Kernel
 add_subdirectory(Kernel)
 
+# 应用的公共配置（helios_add_app）：Player、示例和项目自己的应用共用
+include("${HELIOS_ENGINE_ROOT}/cmake/HeliosApp.cmake")
+
 # 玩家形态的应用：桌面与 iOS 共用同一份源码，差别都在平台层
 add_subdirectory(Player)
 
@@ -257,13 +260,9 @@ if(NOT HELIOS_TARGET_PLATFORM STREQUAL "iOS")
     # MainEditor / SceneEditor / ModelEditor 三个面板层），源目录与 target 一并移除。
     add_subdirectory(Editor)
 
-    # Add samples (optional)
-    option(BUILD_SAMPLES "Build sample projects" ON)  # Disabled for macOS compatibility
+    option(BUILD_SAMPLES "Build sample projects" ON)
     if(BUILD_SAMPLES)
-        add_subdirectory(Samples/Sample_SkyBox)
-        add_subdirectory(Samples/Sample_CSM)
-        add_subdirectory(Samples/Sample_IBL)
-        add_subdirectory(Samples/Sample_Scene)
+        add_subdirectory(Samples)
     endif()
 endif()
 

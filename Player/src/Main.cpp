@@ -1,38 +1,19 @@
-#include "Pch.h"
+#include <Helios.h>
 
-#include "PlayerLayer.h"
+#include "Helios/Application/GameLayer.h"
+#include "Helios/Application/ProjectConfig.h"
 
-#include "Helios/Application/Application.h"
-#include "Helios/Common/AssetPath.h"
-#include "Helios/Core/Logger.h"
-
-namespace Helios
-{
-	/* 客户端实现：Application 负责窗口与渲染器，场景层负责载入与出图 */
-	UniquePtr<Application> CreateApplication()
-	{
-		UniquePtr<Application> app = CreateUniquePtr<Application>("Helios Player");
-		app->PushLayer(CreateSharedPtr<PlayerLayer>());
-		return app;
-	}
-}
-
-#if !HELIOS_PLATFORM_IOS
-
+/* 通用的玩家外壳：直接跑当前项目的启动场景，场景、脚本和画质都从项目里读，换项目不用改这里 */
 int main(int argc, char** argv)
 {
-	Helios::Logger::Init();
+	return Helios::RunApplication(argc, argv, []
+		{
+			using namespace Helios;
 
-	/* 项目根：编译期默认值，--project 可覆盖 */
-	Helios::ParseProjectArgument(argc, argv);
-
-	{
-		auto app = Helios::CreateApplication();
-		app->Run();
-	}
-
-	Helios::Logger::Shutdown();
-	return 0;
+			auto app = CreateUniquePtr<Application>("Helios Player");
+			/* 资源根在应用构造时才定下来（随包工程优先），标题等它定了再取项目名 */
+			app->GetWindow().SetWindowTitle(LoadProjectConfig().Name);
+			app->PushLayer(CreateSharedPtr<GameLayer>());
+			return app;
+		});
 }
-
-#endif
