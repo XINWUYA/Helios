@@ -87,6 +87,21 @@ if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
             endif()
         endforeach()
 
+        # 有 .astc 的贴图不再随包递 PNG：两份都带等于包体翻倍
+        file(GLOB_RECURSE PLAYER_PROJECT_PNGS RELATIVE "${HELIOS_PROJECT_DIR}"
+             "${HELIOS_PROJECT_DIR}/*.png")
+        set(PLAYER_STALE_PNGS "")
+        foreach(png IN LISTS PLAYER_PROJECT_PNGS)
+            string(REGEX REPLACE "\\.png$" ".astc" baked "${png}")
+            if(EXISTS "${HELIOS_PROJECT_DIR}/${baked}")
+                list(APPEND PLAYER_STALE_PNGS "${PLAYER_BUNDLE_DIR}/Project/${png}")
+            endif()
+        endforeach()
+        if(PLAYER_STALE_PNGS)
+            list(APPEND PLAYER_BUNDLE_PROJECT_COMMANDS
+                COMMAND ${CMAKE_COMMAND} -E rm -f ${PLAYER_STALE_PNGS})
+        endif()
+
         add_custom_command(TARGET Player POST_BUILD
             ${PLAYER_BUNDLE_PROJECT_COMMANDS}
             COMMENT "Bundling project assets"
