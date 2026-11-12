@@ -1,7 +1,5 @@
 ﻿#pragma once
 
-#ifdef PLATFORM_MACOS
-
 #include "Helios/VirtualDevice/DeviceWindow.h"
 #include "Helios/VirtualDevice/DeviceContext.h"
 #include <QuartzCore/CAMetalLayer.hpp>
@@ -101,5 +99,3 @@ namespace Helios
         UniquePtr<MetalContext> m_pMetalContext{ nullptr };
     };
 }
-
-#endif

@@ -1,6 +1,6 @@
 ﻿#include "Pch.h"
 #include "OpenGLContext.h"
-#include "OpenGLShader.h"
+#include "GraphicsAPI/OpenGL/OpenGLShader.h"
 #include <cstring>
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>

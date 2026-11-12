@@ -1,24 +1,15 @@
 #include "Pch.h"
 #include "ProjectScripts.h"
 
-#include "Helios/Common/Platform.h"
-#include "Helios/Script/ScriptRegistry.h"
-
-#if !HELIOS_PLATFORM_IOS
 #include <filesystem>
 
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/PathUtils.h"
-#ifdef PLATFORM_WINDOWS
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
-#endif
+#include "Helios/Script/ScriptRegistry.h"
+#include "Platform/DynamicLibrary.h"
 
 namespace Helios
 {
-#if !HELIOS_PLATFORM_IOS
 	namespace
 	{
 		/* 目录下最新的 .hsmod：多配置生成器（Xcode / Visual Studio）会再套一层配置目录，
@@ -47,18 +38,11 @@ namespace Helios
 			return newest;
 		}
 	}
-#endif
-
-	ProjectScripts::~ProjectScripts()
-	{
-		/* 故意不卸载：脚本类里的对象与字段回调都还指着这份映像 */
-	}
 
 	bool ProjectScripts::LoadLatest()
 	{
 #if HELIOS_PLATFORM_IOS
-		/* iOS 不允许加载没签名的代码：脚本在构建期就编进了主二进制，
-		 * 注册对象在进程启动时已经跑过，这里只看表里有没有类 */
+		/* 脚本在构建期就编进了主二进制，注册对象在进程启动时已经跑过，这里只看表里有没有类 */
 		const int count = GetClassCount();
 		if (count == 0)
 		{
@@ -80,24 +64,13 @@ namespace Helios
 			return false;
 		}
 
-#ifdef PLATFORM_WINDOWS
-		m_hModule = ::LoadLibraryA(path.c_str());
-		if (m_hModule == nullptr)
+		std::string error;
+		if (Platform::LoadDynamicLibrary(path, error) == nullptr)
 		{
 			m_Status = "Load failed";
-			CORE_LOG_ERROR("[Scripts] LoadLibrary failed: {}", path);
+			CORE_LOG_ERROR("[Scripts] Failed to load {}: {}", path, error);
 			return false;
 		}
-#else
-		m_hModule = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-		if (m_hModule == nullptr)
-		{
-			const char* error = dlerror();
-			m_Status = "Load failed";
-			CORE_LOG_ERROR("[Scripts] dlopen failed: {}", error != nullptr ? error : "unknown error");
-			return false;
-		}
-#endif
 
 		m_Status = "Loaded " + std::to_string(GetClassCount()) + " script class(es)";
 		CORE_LOG_INFO("[Scripts] {} from {}.", m_Status, path);

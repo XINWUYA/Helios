@@ -11,11 +11,6 @@ namespace Helios
 	class HELIOS_API ProjectScripts
 	{
 	public:
-		ProjectScripts() = default;
-		~ProjectScripts();
-		ProjectScripts(const ProjectScripts&) = delete;
-		ProjectScripts& operator=(const ProjectScripts&) = delete;
-
 		/* 挂最新产物；还没编过或平台不支持时返回 false，原因写在状态里 */
 		bool LoadLatest();
 
@@ -23,7 +18,6 @@ namespace Helios
 		[[nodiscard]] int GetClassCount() const;
 
 	private:
-		void*       m_hModule{ nullptr };
 		std::string m_Status{ "Scripts not loaded" };
 	};
 }

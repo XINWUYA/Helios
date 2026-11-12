@@ -2,13 +2,13 @@
 #include "DeviceWindow.h"
 #include "Helios/Renderer/Renderer.h"
 #if HELIOS_PLATFORM_DESKTOP
-#include "GraphicsAPI/OpenGL/OpenGLWindow.h"
+#include "Platform/Desktop/OpenGLWindow.h"
 #endif
 #if HELIOS_PLATFORM_MACOS
-#include "GraphicsAPI/Metal/MetalWindow.h"
+#include "Platform/macOS/MetalWindow.h"
 #endif
 #if HELIOS_PLATFORM_IOS
-#include "GraphicsAPI/Metal/MetalWindowIOS.h"
+#include "Platform/iOS/IOSWindow.h"
 #endif
 
 namespace Helios

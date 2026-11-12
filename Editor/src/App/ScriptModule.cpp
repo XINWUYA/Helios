@@ -3,18 +3,13 @@
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Script/ScriptRegistry.h"
+#include "Platform/DynamicLibrary.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <vector>
-
-#ifdef PLATFORM_WINDOWS
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
 
 namespace Helios
 {
@@ -339,28 +334,17 @@ namespace Helios
 
 		const std::string load_path = MakeUniqueCopy(path);
 
-#ifdef PLATFORM_WINDOWS
-		HMODULE handle = ::LoadLibraryA(load_path.c_str());
+		std::string error;
+		void* handle = Platform::LoadDynamicLibrary(load_path, error);
 		if (handle == nullptr)
 		{
-			ScriptRegistry::Instance().Restore(backup);
-			m_Status = "Load failed";
-			CORE_LOG_ERROR("[Script] LoadLibrary failed: {}", load_path);
-			return false;
-		}
-#else
-		void* handle = dlopen(load_path.c_str(), RTLD_NOW | RTLD_LOCAL);
-		if (handle == nullptr)
-		{
-			const char* error = dlerror();
-			CORE_LOG_ERROR("[Script] dlopen failed: {}", error != nullptr ? error : "unknown error");
+			CORE_LOG_ERROR("[Script] Failed to load {}: {}", load_path, error);
 			ScriptRegistry::Instance().Restore(backup);
 			m_Status = "Load failed";
 			return false;
 		}
-#endif
 
-		/* 类的注册是库的静态初始化做的，dlopen 返回时已经登记完 */
+		/* 类的注册是库的静态初始化做的，加载返回时已经登记完 */
 		m_hModule = handle;
 		m_Status = "Loaded " + std::to_string(GetClassCount()) + " script class(es)";
 		CORE_LOG_INFO("[Script] {}", m_Status);

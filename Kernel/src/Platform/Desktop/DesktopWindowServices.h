@@ -1,9 +1,5 @@
 #pragma once
 
-#include "Helios/Common/Platform.h"
-
-#if HELIOS_PLATFORM_DESKTOP
-
 #include <glm/glm.hpp>
 #include <string>
 #include <GLFW/glfw3.h>
@@ -70,5 +66,3 @@ namespace Helios::Desktop
 		return true;
 	}
 }
-
-#endif

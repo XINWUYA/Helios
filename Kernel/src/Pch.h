@@ -13,7 +13,7 @@
 #endif
 
 /* 平台判定先于一切头文件，后面到处都要用 */
-#include "Helios/Common/Platform.h"
+#include "Platform/Platform.h"
 
 /* === Standard Library (stable, frequently used) === */
 #include <cstdint>

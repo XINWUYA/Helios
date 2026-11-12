@@ -21,13 +21,38 @@ file(GLOB_RECURSE KERNEL_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-# iOS 上只有 Metal：桌面 GL 后端、ImGui、GLFW 窗口与上下文都不参与编译。
-# 窗口与上下文本身就是平台实现，等 iOS 那一份接进来再换。
+# 平台层按目录收：Platform 下每个子目录是一类平台，只编当前目标用得到的那几个。
+# 以后接 Android 之类的新平台，建个同名目录就会被收进来
+set(KERNEL_PLATFORM_DIRS ${HELIOS_TARGET_PLATFORM})
+if(HELIOS_TARGET_PLATFORM MATCHES "^(Windows|macOS|Linux)$")
+    list(APPEND KERNEL_PLATFORM_DIRS Desktop)
+endif()
+if(NOT HELIOS_TARGET_PLATFORM STREQUAL "Windows")
+    list(APPEND KERNEL_PLATFORM_DIRS Posix)
+endif()
+
+list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/src/Platform/[^/]+/")
+foreach(platform_dir IN LISTS KERNEL_PLATFORM_DIRS)
+    file(GLOB_RECURSE KERNEL_PLATFORM_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/${platform_dir}/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/${platform_dir}/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Platform/${platform_dir}/*.mm"
+    )
+    list(APPEND KERNEL_SOURCES ${KERNEL_PLATFORM_SOURCES})
+endforeach()
+
+# .mm 按 Objective-C++ 编，吃不到预编译头，文件里要自己 include Pch.h
+set(KERNEL_MM_SOURCES ${KERNEL_SOURCES})
+list(FILTER KERNEL_MM_SOURCES INCLUDE REGEX "\\.mm$")
+set_source_files_properties(${KERNEL_MM_SOURCES} PROPERTIES
+    COMPILE_FLAGS "-x objective-c++"
+    SKIP_PRECOMPILE_HEADERS ON
+)
+
+# iOS 上只有 Metal：桌面 GL 后端与 ImGui 不参与编译
 if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
     list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/GraphicsAPI/OpenGL/")
     list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/Helios/ImGui/")
-    list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/GraphicsAPI/Metal/MetalWindow\\.(cpp|h)$")
-    list(FILTER KERNEL_SOURCES EXCLUDE REGEX "/Helios/VirtualDevice/DeviceContext\\.cpp")
 endif()
 
 # Precompiled header header path
@@ -216,17 +241,11 @@ elseif(HELIOS_TARGET_PLATFORM STREQUAL "macOS")
     )
 elseif(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
     target_compile_definitions(Kernel PRIVATE PLATFORM_IOS)
-    # 移动端不带 ImGui；窗口与 Metal 查询要按 Objective-C++ 编
-    set(KERNEL_OBJCXX_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsAPI/Metal/MetalQuery.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsAPI/Metal/MetalWindowIOS.mm"
-    )
-    set_source_files_properties(${KERNEL_OBJCXX_SOURCES} PROPERTIES
+    # Metal 查询要按 Objective-C++ 编
+    set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/src/GraphicsAPI/Metal/MetalQuery.cpp" PROPERTIES
         COMPILE_FLAGS "-x objective-c++"
         SKIP_PRECOMPILE_HEADERS ON
     )
-    # .mm 不在上面的 glob 里（只收了 cpp/h），要单独挂进目标
-    target_sources(Kernel PRIVATE ${KERNEL_OBJCXX_SOURCES})
 elseif(UNIX)
     target_compile_definitions(Kernel PRIVATE PLATFORM_LINUX)
 endif()

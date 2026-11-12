@@ -1,9 +1,7 @@
-﻿#ifdef PLATFORM_MACOS
-
-#include "Pch.h"
+﻿#include "Pch.h"
 #include "MetalWindow.h"
-#include "MetalRenderAPI.h"
-#include "GraphicsAPI/Desktop/DesktopWindowServices.h"
+#include "GraphicsAPI/Metal/MetalRenderAPI.h"
+#include "Platform/Desktop/DesktopWindowServices.h"
 #include <GLFW/glfw3.h>
 #include <objc/message.h>
 #include <objc/objc.h>
@@ -526,5 +524,3 @@ namespace Helios
         glfwDestroyWindow(m_pGLFWWindow);
     }
 }
-
-#endif

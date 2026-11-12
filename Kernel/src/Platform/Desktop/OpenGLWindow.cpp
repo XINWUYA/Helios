@@ -1,7 +1,8 @@
 ﻿#include "Pch.h"
 #include "OpenGLWindow.h"
 #include <GLFW/glfw3.h>
-#include "GraphicsAPI/Desktop/DesktopWindowServices.h"
+#include "OpenGLContext.h"
+#include "DesktopWindowServices.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Events/KeyEvent.h"
 #include "Helios/Events/MouseEvent.h"
@@ -140,7 +141,7 @@ namespace Helios
 			++s_GLFWWindowCnt;
 		}
 
-		m_pRenderContext = DeviceContext::Create(m_pGLFWWindow);
+		m_pRenderContext = CreateUniquePtr<OpenGLContext>(m_pGLFWWindow);
 		m_pRenderContext->Init();
 
 		/* 回写帧缓冲实际的物理像素尺寸（可能被窗口服务器夹取） */

@@ -1,5 +1,5 @@
 ﻿#pragma once
-#include "Helios/Common/Platform.h"
+#include "Platform/Platform.h"
 #include <string>
 #include <vector>
 #include <utility>

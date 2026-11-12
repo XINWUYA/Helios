@@ -1,5 +1,5 @@
 #pragma once
-#include "Helios/Common/Platform.h"
+#include "Platform/Platform.h"
 
 #if HELIOS_PLATFORM_APPLE
 

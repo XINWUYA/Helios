@@ -1,9 +1,5 @@
 #pragma once
 
-#include "Helios/Common/Platform.h"
-
-#if HELIOS_PLATFORM_IOS
-
 #include "Helios/VirtualDevice/DeviceWindow.h"
 #include "Helios/VirtualDevice/DeviceContext.h"
 #include <Metal/Metal.hpp>
@@ -133,5 +129,3 @@ namespace Helios
 		EventCallbackFunc m_Callback{};
 	};
 }
-
-#endif

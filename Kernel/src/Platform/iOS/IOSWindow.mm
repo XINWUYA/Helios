@@ -1,10 +1,6 @@
-#include "Helios/Common/Platform.h"
-
-#if HELIOS_PLATFORM_IOS
-
 #include "Pch.h"
-#include "MetalWindowIOS.h"
-#include "MetalRenderAPI.h"
+#include "IOSWindow.h"
+#include "GraphicsAPI/Metal/MetalRenderAPI.h"
 
 #include "Helios/Application/Application.h"
 #include "Helios/Events/ApplicationEvent.h"
@@ -180,12 +176,6 @@ namespace Helios
 	/* -----------------------------------------------------------------------
 	 * MetalContextIOS
 	 * --------------------------------------------------------------------- */
-
-	/* 上下文工厂：DeviceContext.cpp 依赖 GLFW，iOS 不编它，这里的 window 就是 UIView* */
-	UniquePtr<DeviceContext> DeviceContext::Create(void* window)
-	{
-		return CreateUniquePtr<MetalContextIOS>(window);
-	}
 
 	MetalContextIOS::MetalContextIOS(void* native_view)
 		: m_View(native_view)
@@ -585,5 +575,3 @@ namespace Helios
 			m_pContext->OnResize(m_Width, m_Height);
 	}
 }
-
-#endif
