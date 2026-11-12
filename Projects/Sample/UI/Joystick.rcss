@@ -70,6 +70,66 @@ body
 	font-size: 14dp;
 }
 
+/* 面板里的两行调节：速度与视角灵敏度。滑杆和文本框一样要自己吃指针 */
+.setting
+{
+	display: block;
+	margin-top: 10dp;
+	height: 22dp;
+}
+
+.setting-label
+{
+	display: inline-block;
+	width: 44dp;
+	font-size: 13dp;
+	color: rgba(242, 244, 248, 170);
+	vertical-align: middle;
+}
+
+.setting-value
+{
+	display: inline-block;
+	width: 40dp;
+	font-size: 13dp;
+	text-align: right;
+	vertical-align: middle;
+}
+
+.slider
+{
+	display: inline-block;
+	width: 126dp;
+	height: 22dp;
+	vertical-align: middle;
+	pointer-events: auto;
+}
+
+.slider slidertrack
+{
+	margin-top: 8dp;
+	height: 6dp;
+	border-radius: 3dp;
+	background-color: rgba(255, 255, 255, 46);
+}
+
+.slider sliderprogress
+{
+	margin-top: 8dp;
+	height: 6dp;
+	border-radius: 3dp;
+	background-color: #7f77dd;
+}
+
+.slider sliderbar
+{
+	margin-top: 4dp;
+	width: 14dp;
+	height: 14dp;
+	border-radius: 7dp;
+	background-color: #f2f4f8;
+}
+
 /* 右下角一排按钮：Tab 切焦点，回车触发（回调还没接，先看焦点框） */
 #actions
 {

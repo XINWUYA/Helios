@@ -9,6 +9,18 @@
 			<div id="title">Runtime UI</div>
 			<div id="subtitle">Drag the stick to fly the camera</div>
 			<input id="name-field" type="text" value="type here" />
+
+			<!-- 滑杆值按 name 递给脚本，右侧的数字由脚本回写 -->
+			<div class="setting">
+				<span class="setting-label">Speed</span>
+				<input class="slider" type="range" name="move_speed" min="1" max="30" step="0.5" value="9" />
+				<span class="setting-value" id="speed-value">9.0</span>
+			</div>
+			<div class="setting">
+				<span class="setting-label">Look</span>
+				<input class="slider" type="range" name="look_sensitivity" min="0.05" max="1.5" step="0.05" value="0.3" />
+				<span class="setting-value" id="look-value">0.30</span>
+			</div>
 		</div>
 
 		<div id="actions">

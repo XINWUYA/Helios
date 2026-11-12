@@ -1,6 +1,8 @@
 /* 摇杆推相机、空白处拖拽转视角。两者共用主相机：
- * 摇杆值来自运行时的画布控件，视角由鼠标拖拽直接改相机的欧拉角。 */
+ * 摇杆的方向取自相机的水平朝向，转了视角，推摇杆就往新的方向走。
+ * 速度与视角灵敏度可以从 HUD 的两个滑杆上调。 */
 #include <cmath>
+#include <cstdio>
 
 #include <glm/glm.hpp>
 
@@ -27,12 +29,37 @@ namespace
 			if (!camera || !camera.HasComponent<Helios::TransformComponent>())
 				return;
 
+			ApplySettings(scene);
 			UpdateLook(scene, camera);
 			UpdateMove(scene, camera, delta_time);
 		}
 
 	private:
-		/* 摇杆平移：读画布的值，沿相机朝向在水平面走 */
+		/* HUD 的两个滑杆：挂了就以滑杆为准，没挂时用面板里填的脚本参数 */
+		void ApplySettings(const Helios::SharedPtr<Helios::Scene>& scene)
+		{
+			Helios::UI::UISystem& ui = scene->GetUISystem();
+			m_Speed = ui.GetNumber(GetEntity(), "move_speed", m_Speed);
+			m_LookSensitivity = ui.GetNumber(GetEntity(), "look_sensitivity", m_LookSensitivity);
+
+			ShowValue(ui, "speed-value", m_Speed, 1, m_SpeedText);
+			ShowValue(ui, "look-value", m_LookSensitivity, 2, m_LookText);
+		}
+
+		/* 值变了才写一次：每帧刷文本会连带重排 */
+		void ShowValue(Helios::UI::UISystem& ui, const char* element_id, float value, int decimals,
+			std::string& shown)
+		{
+			char buffer[32];
+			std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, static_cast<double>(value));
+			if (shown == buffer)
+				return;
+
+			shown = buffer;
+			ui.SetText(GetEntity(), element_id, shown);
+		}
+
+		/* 摇杆平移：读画布的值，沿相机的水平朝向走 */
 		void UpdateMove(const Helios::SharedPtr<Helios::Scene>& scene, const Helios::Entity camera,
 			float delta_time)
 		{
@@ -43,14 +70,17 @@ namespace
 			if (strength < 0.01f)
 				return;
 
+			/* 朝向只看水平分量：抬头低头只改视线，不改变往前走是往哪走 */
 			const glm::mat4 world = scene->GetWorldTransform(camera);
-			const glm::vec3 forward = glm::normalize(glm::vec3(-world[2].x, 0.0f, -world[2].z));
-			const glm::vec3 right = glm::normalize(glm::vec3(world[0].x, 0.0f, world[0].z));
+			glm::vec3 forward(-world[2].x, 0.0f, -world[2].z);
+			if (glm::dot(forward, forward) < 1e-6f)
+				return;
+
+			forward = glm::normalize(forward);
+			const glm::vec3 right(-forward.z, 0.0f, forward.x);
 
 			/* 屏幕的 y 向下为正，摇杆往上推是往前走 */
 			const glm::vec3 direction = right * axis.x - forward * axis.y;
-			if (glm::dot(direction, direction) < 1e-6f)
-				return;
 
 			Helios::TransformComponent& transform = camera.GetComponent<Helios::TransformComponent>();
 			transform.m_Position += glm::normalize(direction) * (m_Speed * strength * delta_time);
@@ -84,23 +114,29 @@ namespace
 				return;
 
 			Helios::TransformComponent& transform = camera.GetComponent<Helios::TransformComponent>();
-			/* 欧拉角是（俯仰, 偏航, 翻滚）：左右拖改偏航，上下拖改俯仰并夹到接近垂直 */
-			transform.m_Rotation.y -= delta.x * m_LookSensitivity;
-			constexpr float kPitchLimit = 1.5533f; /* 89 度 */
-			transform.m_Rotation.x = glm::clamp(transform.m_Rotation.x - delta.y * m_LookSensitivity,
+			/* 欧拉角是（俯仰, 偏航, 翻滚）：左右拖改偏航，上下拖改俯仰并夹到接近垂直。
+			 * 参数按「每个逻辑点转多少度」算，屏幕密度不同的设备手感一致 */
+			const float step = glm::radians(m_LookSensitivity);
+			transform.m_Rotation.y -= delta.x * step;
+			constexpr float kPitchLimit = 1.4835f; /* 85 度 */
+			transform.m_Rotation.x = glm::clamp(transform.m_Rotation.x - delta.y * step,
 				-kPitchLimit, kPitchLimit);
 		}
 
 	public:
 		/* 脚本参数：由扫描脚本字段的注册器按名字写入，必须是公开成员 */
 		float m_Speed{ 9.0f };
-		float m_LookSensitivity{ 0.12f };
+		/* 视角灵敏度：每个逻辑点转多少度 */
+		float m_LookSensitivity{ 0.3f };
 
 	private:
 
 		bool  m_Looking{ false };
 		bool  m_WasPressed{ false };
 		glm::vec2 m_LastMouse{ 0.0f };
+		/* 上一次写进 HUD 的显示文本 */
+		std::string m_SpeedText{};
+		std::string m_LookText{};
 	};
 }
 

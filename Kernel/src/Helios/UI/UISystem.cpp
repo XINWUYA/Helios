@@ -1,6 +1,8 @@
 #include "Pch.h"
 #include "UISystem.h"
 
+#include <cstdlib>
+
 #include <RmlUi/Core.h>
 
 #include "ElementJoystick.h"
@@ -89,6 +91,7 @@ namespace Helios
 					continue;
 
 				SyncJoysticks(*canvas);
+				SyncSliders(*canvas);
 				/* 尺寸取上一帧渲染时的视图尺寸：布局比画面慢一帧，命中测试也用它 */
 				canvas->Host.Update(m_ViewWidth, m_ViewHeight);
 			}
@@ -238,6 +241,28 @@ namespace Helios
 			}
 		}
 
+		void UISystem::SyncSliders(CanvasRuntime& canvas)
+		{
+			Rml::ElementDocument* document = canvas.Host.GetDocument();
+			if (document == nullptr)
+				return;
+
+			Rml::ElementList elements;
+			document->GetElementsByTagName(elements, "input");
+			for (Rml::Element* element : elements)
+			{
+				if (element->GetAttribute<Rml::String>("type", "") != "range")
+					continue;
+
+				const std::string name = element->GetAttribute<Rml::String>("name", "");
+				auto* input = dynamic_cast<Rml::ElementFormControlInput*>(element);
+				if (name.empty() || input == nullptr)
+					continue;
+
+				canvas.Numbers[name] = std::strtof(input->GetValue().c_str(), nullptr);
+			}
+		}
+
 		bool UISystem::ProcessMouseMove(float x, float y)
 		{
 			bool handled = false;
@@ -355,6 +380,19 @@ namespace Helios
 
 			const auto it = runtime->Numbers.find(name);
 			return it == runtime->Numbers.end() ? fallback : it->second;
+		}
+
+		void UISystem::SetText(entt::entity canvas, const std::string& element_id, const std::string& text)
+		{
+			const CanvasRuntime* runtime = FindCanvas(canvas);
+			if (runtime == nullptr || !runtime->Host.IsOpen())
+				return;
+
+			Rml::Element* element = runtime->Host.GetDocument()->GetElementById(element_id.c_str());
+			if (element == nullptr || element->GetInnerRML() == text.c_str())
+				return;
+
+			element->SetInnerRML(text.c_str());
 		}
 	}
 }

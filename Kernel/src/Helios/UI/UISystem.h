@@ -56,7 +56,10 @@ namespace Helios
 			[[nodiscard]] bool IsPointerOverControl() const;
 
 			/* ---- 脚本通道 ---- */
+			/* 控件值：摇杆按 name 给 <name>_x / <name>_y，滑杆按 name 给一个值 */
 			[[nodiscard]] float GetNumber(entt::entity canvas, const std::string& name, float fallback = 0.0f) const;
+			/* 按 id 改元素文本：脚本把数值显示出来，元素不在或文本没变就什么都不做 */
+			void SetText(entt::entity canvas, const std::string& element_id, const std::string& text);
 
 		private:
 			/* 一个画布实体的运行时状态。元素树不进组件 —— 组件快照按值拷贝，
@@ -70,6 +73,8 @@ namespace Helios
 
 			/* 把方向键推的值喂给画布里的摇杆，再把各控件本帧的值收进 Numbers */
 			void SyncJoysticks(CanvasRuntime& canvas);
+			/* 滑杆当前值收进 Numbers：脚本按 name 取，不用自己解析控件 */
+			void SyncSliders(CanvasRuntime& canvas);
 			/* 磁盘上的 .rml / .rcss 变了：文档改了拆掉重建，样式改了就地重排 */
 			void CheckHotReload();
 
