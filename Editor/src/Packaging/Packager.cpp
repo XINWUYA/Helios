@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <mutex>
@@ -167,6 +168,12 @@ namespace Helios::Build
 			const std::string project_arg = " -DHELIOS_PROJECT_DIR=" + Quoted(effective_project);
 			CORE_LOG_INFO("[Package] 工程：{}", effective_project.string());
 
+			/* 签名团队号从环境变量带进生成工程：重新生成之后 Xcode 里不用再选一次。
+			 * 没设就交给人在 Xcode 里配 */
+			std::string team_arg;
+			if (const char* team = std::getenv("HELIOS_IOS_DEVELOPMENT_TEAM"); team != nullptr && team[0] != '\0')
+				team_arg = " -DHELIOS_IOS_DEVELOPMENT_TEAM=" + std::string(team);
+
 			std::filesystem::path build_dir;
 			std::string configure;
 			std::string build;
@@ -179,7 +186,7 @@ namespace Helios::Build
 				configure = cmake + " -S " + Quoted(root) + " -B " + Quoted(build_dir)
 					+ " -DCMAKE_TOOLCHAIN_FILE=" + toolchain
 					+ " -DHELIOS_IOS_SYSROOT=iphonesimulator"
-					+ " -DCMAKE_BUILD_TYPE=Debug -DHELIOS_BUNDLE_ASSETS=ON" + project_arg;
+					+ " -DCMAKE_BUILD_TYPE=Debug -DHELIOS_BUNDLE_ASSETS=ON" + project_arg + team_arg;
 				break;
 			}
 			case PackageTarget::IOSDeviceApp:
@@ -187,7 +194,7 @@ namespace Helios::Build
 				build_dir = root / "build-ios";
 				configure = cmake + " -S " + Quoted(root) + " -B " + Quoted(build_dir)
 					+ " -DCMAKE_TOOLCHAIN_FILE=" + toolchain
-					+ " -DCMAKE_BUILD_TYPE=Release -DHELIOS_BUNDLE_ASSETS=ON" + project_arg;
+					+ " -DCMAKE_BUILD_TYPE=Release -DHELIOS_BUNDLE_ASSETS=ON" + project_arg + team_arg;
 				break;
 			}
 			case PackageTarget::IOSXcodeProject:
@@ -196,7 +203,7 @@ namespace Helios::Build
 				ResetBuildDirIfGeneratorDiffers(build_dir, "Xcode");
 				configure = cmake + " -S " + Quoted(root) + " -B " + Quoted(build_dir) + " -G Xcode"
 					+ " -DCMAKE_TOOLCHAIN_FILE=" + toolchain
-					+ " -DCMAKE_BUILD_TYPE=Debug -DHELIOS_BUNDLE_ASSETS=ON" + project_arg;
+					+ " -DCMAKE_BUILD_TYPE=Debug -DHELIOS_BUNDLE_ASSETS=ON" + project_arg + team_arg;
 				break;
 			}
 			}
