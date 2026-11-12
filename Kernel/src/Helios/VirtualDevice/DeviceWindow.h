@@ -65,6 +65,19 @@ namespace Helios
 	[[nodiscard]] virtual glm::vec2 QueryPointerPosition() const { return glm::vec2(0.0f); }
 	/* 窗口是否拿着系统焦点：没焦点时脚本侧输入一律不放行 */
 	[[nodiscard]] virtual bool HasFocus() const { return true; }
+	/* ---- 多指：一根手指点 UI，另一根转视角 ----
+	 * 触摸落下时问这个回调，落在画布控件上的那根归 UI，其余归指针（脚本拿去转视角）。
+	 * 坐标是逻辑点。桌面没有触摸，窗口不会调它。 */
+	using UITouchTest = std::function<bool(const glm::vec2&)>;
+	virtual void SetUITouchTest(UITouchTest test) { (void)test; }
+
+	/* 给 UI 的那一路指针（窗口坐标，逻辑点）。桌面与 QueryPointer* 同源，
+	 * 移动端是认领了 UI 的那根手指 —— 两根手指各喂各的，互不抢 */
+	[[nodiscard]] virtual glm::vec2 QueryUIPointerPosition() const { return QueryPointerPosition(); }
+	[[nodiscard]] virtual bool QueryUIPointerButtonPressed(int button) const
+	{
+		return QueryPointerButtonPressed(button);
+	}
 	/* 单调时钟（秒）。帧间隔与动画按它算，各平台同一口径 */
 	[[nodiscard]] double GetTimeSeconds() const;
 

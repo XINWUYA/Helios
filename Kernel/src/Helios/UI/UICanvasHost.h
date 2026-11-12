@@ -72,6 +72,8 @@ namespace Helios
 
 			/* 指针是否落在文档里的元素上：空白处命中的是文档本体，不算控件 */
 			[[nodiscard]] bool IsPointerOverControl() const;
+			/* 按坐标问同一个问题（物理像素，原点左上角）：触摸落下时用它决定这根手指归谁 */
+			[[nodiscard]] bool IsPointOverControl(float x, float y) const;
 
 			[[nodiscard]] Rml::Context* GetContext() const { return m_Context; }
 			[[nodiscard]] Rml::ElementDocument* GetDocument() const { return m_Document; }

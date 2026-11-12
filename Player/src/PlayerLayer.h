@@ -12,6 +12,7 @@ namespace Helios
 		PlayerLayer();
 
 		void OnAttached() override;
+		void OnDetached() override;
 		void OnUpdate(float delta_time) override;
 		void OnEvent(IEvent* event) override;
 
@@ -21,6 +22,8 @@ namespace Helios
 		void ApplyViewport();
 		/* 指针交给场景画布：HUD 的按钮与摇杆要在 Player 里也能按 */
 		void ForwardUIInput();
+		/* 触摸落点是否落在画布控件上，决定这根手指归 UI 还是归视角 */
+		[[nodiscard]] bool HitTestUI(const glm::vec2& point) const;
 		bool OnWindowResize(WindowResizeEvent* event);
 
 		SharedPtr<Scene> m_pScene{ nullptr };

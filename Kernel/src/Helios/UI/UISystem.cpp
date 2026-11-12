@@ -333,6 +333,16 @@ namespace Helios
 			return false;
 		}
 
+		bool UISystem::IsPointOverControl(float x, float y) const
+		{
+			for (auto it = m_Canvases.rbegin(); it != m_Canvases.rend(); ++it)
+			{
+				if ((*it)->ReceiveInput && (*it)->Host.IsPointOverControl(x, y))
+					return true;
+			}
+			return false;
+		}
+
 		bool UISystem::ProcessKeyDown(KeyCode key)
 		{
 			bool handled = false;

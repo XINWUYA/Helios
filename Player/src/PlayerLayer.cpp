@@ -3,7 +3,6 @@
 
 #include "Helios/Application/Application.h"
 #include "Helios/Application/ProjectConfig.h"
-#include "Helios/Core/Input.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Scene/SceneCommon.h"
 #include "Helios/UI/UISystem.h"
@@ -51,9 +50,19 @@ namespace Helios
 			CORE_LOG_ERROR("Player scene has no primary camera: {}.", scene_path);
 		}
 
+		/* 多指分路：落在画布控件上的手指喂 UI，另一根留给脚本转视角 */
+		Application::Instance()->GetWindow().SetUITouchTest(
+			[this](const glm::vec2& point) { return HitTestUI(point); });
+
 		CORE_LOG_INFO("Player loaded scene: {} ({}x{}).", scene_path,
 			Application::Instance()->GetWindow().GetWidth(),
 			Application::Instance()->GetWindow().GetHeight());
+	}
+
+	void PlayerLayer::OnDetached()
+	{
+		if (Application* application = Application::Instance())
+			application->GetWindow().SetUITouchTest({});
 	}
 
 	void PlayerLayer::OnUpdate(float delta_time)
@@ -75,13 +84,15 @@ namespace Helios
 
 		UI::UISystem& ui = m_pScene->GetUISystem();
 
-		const float scale = Application::Instance()->GetWindow().GetContentScale();
-		const glm::vec2 mouse = Input::GetMousePosRaw() * scale;
+		/* 走 UI 那一路指针：移动端是落在控件上的那根手指，桌面与鼠标同源 */
+		const DeviceWindow& window = Application::Instance()->GetWindow();
+		const float scale = window.GetContentScale();
+		const glm::vec2 mouse = window.QueryUIPointerPosition() * scale;
 		ui.ProcessMouseMove(mouse.x, mouse.y);
 
 		for (int button = 0; button < 3; ++button)
 		{
-			const bool pressed = Input::IsMouseButtonPressedRaw(static_cast<MouseCode>(button));
+			const bool pressed = window.QueryUIPointerButtonPressed(button);
 			if (pressed != m_MouseDown[button])
 			{
 				if (pressed)
@@ -91,6 +102,16 @@ namespace Helios
 			}
 			m_MouseDown[button] = pressed;
 		}
+	}
+
+	/* 触摸落点是不是在画布控件上：是就把它分给 UI，别拿去转视角 */
+	bool PlayerLayer::HitTestUI(const glm::vec2& point) const
+	{
+		if (m_pScene == nullptr)
+			return false;
+
+		const float scale = Application::Instance()->GetWindow().GetContentScale();
+		return m_pScene->GetUISystem().IsPointOverControl(point.x * scale, point.y * scale);
 	}
 
 	void PlayerLayer::OnEvent(IEvent* event)

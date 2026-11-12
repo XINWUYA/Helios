@@ -6,6 +6,7 @@
 
 #include <glm/glm.hpp>
 
+#include "Helios/Application/Application.h"
 #include "Helios/Core/Input.h"
 #include "Helios/Scene/Components.h"
 #include "Helios/Script/ScriptRegistry.h"
@@ -35,6 +36,18 @@ namespace
 		}
 
 	private:
+		/* 指针是不是压在画布控件上：按自己的位置问，别的手指动不影响这个判断。
+		 * 画布按物理像素布局，位置要按内容缩放换算 */
+		static bool PointerOverControl(const Helios::SharedPtr<Helios::Scene>& scene, const glm::vec2& point)
+		{
+			Helios::Application* application = Helios::Application::Instance();
+			if (application == nullptr)
+				return false;
+
+			const float scale = application->GetWindow().GetContentScale();
+			return scene->GetUISystem().IsPointOverControl(point.x * scale, point.y * scale);
+		}
+
 		/* HUD 的两个滑杆：挂了就以滑杆为准，没挂时用面板里填的脚本参数 */
 		void ApplySettings(const Helios::SharedPtr<Helios::Scene>& scene)
 		{
@@ -86,8 +99,8 @@ namespace
 			transform.m_Position += glm::normalize(direction) * (m_Speed * strength * delta_time);
 		}
 
-		/* 拖拽转视角：按下时指针落在 UI 控件上（摇杆、按钮、输入框）就整段不转，
-		 * 空白处才转。控件的悬停态一直跟着指针走，按下当帧就能定下来 */
+		/* 拖拽转视角：按下时指针落在 UI 控件上（摇杆、按钮、滑杆）就整段不转，
+		 * 空白处才转。移动端到这里的指针本来就是没被 UI 认领的那根手指 */
 		void UpdateLook(const Helios::SharedPtr<Helios::Scene>& scene, const Helios::Entity camera)
 		{
 			const glm::vec2 mouse = Helios::Input::GetMousePos();
@@ -95,7 +108,7 @@ namespace
 
 			if (pressed && !m_WasPressed)
 			{
-				m_Looking = !scene->GetUISystem().IsPointerOverControl();
+				m_Looking = !PointerOverControl(scene, mouse);
 				m_LastMouse = mouse;
 			}
 			m_WasPressed = pressed;

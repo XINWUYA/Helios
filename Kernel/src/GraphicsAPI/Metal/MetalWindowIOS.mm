@@ -26,7 +26,10 @@
 
 @implementation HeliosIOSView
 {
-	NSUInteger _activeTouches;
+	/* 一根手指点 UI、一根手指转视角：认下的触摸各自跟自己那条路，
+	 * 后落的手指不会把前一根的位置顶掉 */
+	UITouch* _uiTouch;
+	UITouch* _lookTouch;
 }
 
 /* 视图的根层直接就是 Metal 层：iOS 上不能给 UIView 换 layer，
@@ -43,38 +46,68 @@
 	{
 		self.multipleTouchEnabled = YES;
 		self.backgroundColor = [UIColor blackColor];
-		_activeTouches = 0;
+		_uiTouch = nil;
+		_lookTouch = nil;
 	}
 	return self;
 }
 
 - (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
-	_activeTouches += touches.count;
-	const CGPoint point = [touches.anyObject locationInView:self];
-	if (self.Owner != nullptr && touches.anyObject != nil)
-		self.Owner->OnPointerDown(static_cast<float>(point.x), static_cast<float>(point.y));
+	if (self.Owner == nullptr)
+		return;
+
+	for (UITouch* touch in touches)
+	{
+		const CGPoint point = [touch locationInView:self];
+		/* 先问这根手指落没落在控件上，落在控件上的归 UI，其余给视角 */
+		if (_uiTouch == nil && self.Owner->ShouldClaimUITouch(point.x, point.y))
+		{
+			_uiTouch = touch;
+			self.Owner->OnUIPointerDown(static_cast<float>(point.x), static_cast<float>(point.y));
+		}
+		else if (_lookTouch == nil)
+		{
+			_lookTouch = touch;
+			self.Owner->OnPointerDown(static_cast<float>(point.x), static_cast<float>(point.y));
+		}
+	}
 }
 
 - (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
-	const CGPoint point = [touches.anyObject locationInView:self];
-	if (self.Owner != nullptr && touches.anyObject != nil)
-		self.Owner->OnPointerMoved(static_cast<float>(point.x), static_cast<float>(point.y));
+	if (self.Owner == nullptr)
+		return;
+
+	for (UITouch* touch in touches)
+	{
+		const CGPoint point = [touch locationInView:self];
+		if (touch == _uiTouch)
+			self.Owner->OnUIPointerMoved(static_cast<float>(point.x), static_cast<float>(point.y));
+		else if (touch == _lookTouch)
+			self.Owner->OnPointerMoved(static_cast<float>(point.x), static_cast<float>(point.y));
+	}
 }
 
 - (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
 {
-	_activeTouches = (_activeTouches > touches.count) ? (_activeTouches - touches.count) : 0;
 	if (self.Owner == nullptr)
 		return;
 
-	/* 还有手指留在屏幕上就仍然是按下状态 */
-	if (_activeTouches > 0)
-		return;
-
-	const CGPoint point = [touches.anyObject locationInView:self];
-	self.Owner->OnPointerUp(static_cast<float>(point.x), static_cast<float>(point.y));
+	for (UITouch* touch in touches)
+	{
+		const CGPoint point = [touch locationInView:self];
+		if (touch == _uiTouch)
+		{
+			_uiTouch = nil;
+			self.Owner->OnUIPointerUp(static_cast<float>(point.x), static_cast<float>(point.y));
+		}
+		else if (touch == _lookTouch)
+		{
+			_lookTouch = nil;
+			self.Owner->OnPointerUp(static_cast<float>(point.x), static_cast<float>(point.y));
+		}
+	}
 }
 
 - (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event
@@ -438,6 +471,30 @@ namespace Helios
 			MouseButtonReleasedEvent event(0);
 			m_Callback(&event);
 		}
+	}
+
+	bool IOSWindow::ShouldClaimUITouch(float x, float y) const
+	{
+		return m_UITouchTest && m_UITouchTest(glm::vec2(x, y));
+	}
+
+	/* UI 那一路不派发鼠标事件：玩家形态每帧轮询它的位置与按下状态，
+	 * 派发了反而会让监听鼠标的地方把两根手指当成两路点击 */
+	void IOSWindow::OnUIPointerDown(float x, float y)
+	{
+		m_UIPointerPosition = { x, y };
+		m_UIPointerDown = true;
+	}
+
+	void IOSWindow::OnUIPointerMoved(float x, float y)
+	{
+		m_UIPointerPosition = { x, y };
+	}
+
+	void IOSWindow::OnUIPointerUp(float x, float y)
+	{
+		m_UIPointerPosition = { x, y };
+		m_UIPointerDown = false;
 	}
 
 	void IOSWindow::OnViewLayout(float width_points, float height_points)

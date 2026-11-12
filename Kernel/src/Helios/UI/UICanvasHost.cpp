@@ -336,6 +336,15 @@ namespace Helios
 			return hovered != nullptr && hovered != hovered->GetOwnerDocument();
 		}
 
+		bool UICanvasHost::IsPointOverControl(float x, float y) const
+		{
+			if (m_Context == nullptr)
+				return false;
+
+			const Rml::Element* hit = m_Context->GetElementAtPoint(Rml::Vector2f(x, y));
+			return hit != nullptr && hit != hit->GetOwnerDocument();
+		}
+
 		size_t UICanvasHost::CountElements() const
 		{
 			return m_Document != nullptr ? CountSubtree(m_Document) : 0;

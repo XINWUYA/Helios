@@ -34,6 +34,8 @@ body
 	/* 定宽：绝对定位的块是收缩宽度，不带宽度时文本框会把它撑破 */
 	width: 320dp;
 	padding: 14dp;
+	/* 整块吃指针：hud 那层是 none，这里不打开的话在面板上按下会被当成转视角 */
+	pointer-events: auto;
 	background-color: rgba(12, 16, 24, 140);
 	border-radius: 10dp;
 	border: 1dp rgba(255, 255, 255, 40);
@@ -58,8 +60,6 @@ body
 #name-field
 {
 	display: block;
-	/* hud 整层是 pointer-events: none（不挡游戏操作），要点的控件必须自己打开 */
-	pointer-events: auto;
 	margin-top: 10dp;
 	width: 288dp;
 	height: 26dp;
@@ -70,7 +70,7 @@ body
 	font-size: 14dp;
 }
 
-/* 面板里的两行调节：速度与视角灵敏度。滑杆和文本框一样要自己吃指针 */
+/* 面板里的两行调节：速度与视角灵敏度 */
 .setting
 {
 	display: block;
@@ -102,7 +102,6 @@ body
 	width: 126dp;
 	height: 22dp;
 	vertical-align: middle;
-	pointer-events: auto;
 }
 
 .slider slidertrack

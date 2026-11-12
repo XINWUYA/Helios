@@ -72,10 +72,25 @@ namespace Helios
 		[[nodiscard]] bool SetClipboardText(const std::string& text) override;
 		[[nodiscard]] bool GetClipboardText(std::string& text) override;
 
-		/* 视图转发进来的触摸，坐标是逻辑点 */
+		/* 多指：认领 UI 的那根手指单独喂一路指针，另一根继续走 QueryPointer* */
+		void SetUITouchTest(UITouchTest test) override { m_UITouchTest = std::move(test); }
+		[[nodiscard]] glm::vec2 QueryUIPointerPosition() const override { return m_UIPointerPosition; }
+		[[nodiscard]] bool QueryUIPointerButtonPressed(int button) const override
+		{
+			return button == 0 && m_UIPointerDown;
+		}
+
+		/* 这根手指是不是落在画布控件上：是就归 UI，别让它抢视角的指针 */
+		[[nodiscard]] bool ShouldClaimUITouch(float x, float y) const;
+
+		/* 视图转发进来的触摸，坐标是逻辑点。OnPointer* 是视角那一路，
+		 * OnUIPointer* 是认领了 UI 的那一路 */
 		void OnPointerDown(float x, float y);
 		void OnPointerMoved(float x, float y);
 		void OnPointerUp(float x, float y);
+		void OnUIPointerDown(float x, float y);
+		void OnUIPointerMoved(float x, float y);
+		void OnUIPointerUp(float x, float y);
 		/* 视图布局变化：同步尺寸并派发 resize 事件 */
 		void OnViewLayout(float width_points, float height_points);
 		/* 回前台后重新对齐 drawable：系统可能在后台改过视图几何 */
@@ -105,6 +120,14 @@ namespace Helios
 
 		glm::vec2 m_PointerPosition{ 0.0f };
 		bool m_PointerDown{ false };
+
+
+		/* UI 那一路指针：只有认领到 UI 的手指会写它 */
+		glm::vec2 m_UIPointerPosition{ -1.0f };
+		bool m_UIPointerDown{ false };
+		UITouchTest m_UITouchTest{};
+
+
 
 		EventCallbackFunc m_Callback{};
 	};

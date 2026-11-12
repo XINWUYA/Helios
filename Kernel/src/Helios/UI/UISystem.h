@@ -54,6 +54,8 @@ namespace Helios
 			/* 指针是否落在 UI 控件上：按当前悬停元素判定，空白处（只剩文档底色）
 			 * 算没落在 UI 上。脚本据此决定这一下给界面还是给游戏 */
 			[[nodiscard]] bool IsPointerOverControl() const;
+			/* 按坐标问同一个问题（视口物理像素）：触摸落下时用它给手指分路 */
+			[[nodiscard]] bool IsPointOverControl(float x, float y) const;
 
 			/* ---- 脚本通道 ---- */
 			/* 控件值：摇杆按 name 给 <name>_x / <name>_y，滑杆按 name 给一个值 */
