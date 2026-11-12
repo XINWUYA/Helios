@@ -181,8 +181,7 @@ namespace Helios
             if (!m_Buffer)
                 return;
 
-            /* 绑定当前帧对应的切片；帧数上限由 drawable 数量保证，
-             * 该切片对应的命令缓冲区已执行完毕。 */
+            /* 绑定当前帧对应的切片；帧开头已等过上一轮用这片的命令缓冲 */
             const uint32_t offset = MetalRuntime::FrameIndex() * m_SliceSize;
             memcpy(static_cast<uint8_t*>(m_Buffer->contents()) + offset, m_Shadow.data(), m_Size);
 

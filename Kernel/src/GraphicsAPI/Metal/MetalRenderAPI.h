@@ -9,6 +9,7 @@
 #include "Helios/Renderer/RenderAPI.h"
 #include "MetalShader.h"
 #include "MetalBindings.h"
+#include "MetalCommon.h"
 #include <Metal/Metal.hpp>
 #include <QuartzCore/QuartzCore.hpp>
 #include <unordered_map>
@@ -196,6 +197,9 @@ namespace Helios
          * getBytes 之类的 CPU 回读需要等它执行完，而 Present 提交后就丢掉了
          * m_CurrentCommandBuffer，故单独留一个句柄。 */
         MTL::CommandBuffer* m_LastSubmittedCommandBuffer{ nullptr };
+        /* 每个帧槽位最近一次提交的命令缓冲：复用槽位前要等它跑完，
+         * 否则按帧切片的 uniform 会在 GPU 还没读完时被下一轮覆盖 */
+        MTL::CommandBuffer* m_InFlightCommandBuffers[MetalConfig::MaxFramesInFlight]{};
         MTL::RenderCommandEncoder* m_CurrentRenderEncoder{ nullptr };
         CA::MetalDrawable* m_CurrentDrawable{ nullptr };
         /* 本帧 drawable 是否已开过通道：只有第一次清屏，之后的通道接着画 */

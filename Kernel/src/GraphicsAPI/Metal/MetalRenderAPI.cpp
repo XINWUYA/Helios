@@ -124,6 +124,13 @@ namespace Helios
             m_LastSubmittedCommandBuffer = nullptr;
         }
 
+        for (MTL::CommandBuffer*& command_buffer : m_InFlightCommandBuffers)
+        {
+            if (command_buffer)
+                command_buffer->release();
+            command_buffer = nullptr;
+        }
+
         if (m_CommandQueue)
         {
             m_CommandQueue->release();
@@ -880,6 +887,12 @@ namespace Helios
         m_LastSubmittedCommandBuffer = m_CurrentCommandBuffer;
         m_LastSubmittedCommandBuffer->retain();
 
+        MTL::CommandBuffer*& in_flight = m_InFlightCommandBuffers[MetalRuntime::FrameIndex()];
+        if (in_flight)
+            in_flight->release();
+        in_flight = m_CurrentCommandBuffer;
+        in_flight->retain();
+
         m_CurrentCommandBuffer = nullptr;
 
         m_ActivePipelineState = nullptr;
@@ -893,9 +906,8 @@ namespace Helios
             m_FrameAutoreleasePool = nullptr;
         }
 
-        /* 推进帧序号：按帧切片的 uniform 缓冲区据此切换到下一片。
-         * 帧数上限由 drawable 数量（nextDrawable 在无可用 drawable 时阻塞）
-         * 与 MetalConfig::MaxFramesInFlight 共同保证，二者取值一致。 */
+        /* 推进帧序号：按帧切片的 uniform 缓冲区据此切换到下一片，
+         * 下一帧开头会先等这一片上一轮的命令缓冲跑完 */
         MetalRuntime::AdvanceFrame();
     }
 
@@ -1118,6 +1130,15 @@ namespace Helios
             m_FrameAutoreleasePool = nullptr;
         }
         m_FrameAutoreleasePool = NS::AutoreleasePool::alloc()->init();
+
+        /* 光靠 drawable 数量限不住在途帧（启动阶段 nextDrawable 不阻塞），
+         * 写这一片 uniform 之前先等上一轮用它的命令缓冲跑完 */
+        if (MTL::CommandBuffer*& in_flight = m_InFlightCommandBuffers[MetalRuntime::FrameIndex()])
+        {
+            in_flight->waitUntilCompleted();
+            in_flight->release();
+            in_flight = nullptr;
+        }
 
         PrepareNextDrawable();
     }
