@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -13,7 +14,37 @@ namespace Helios::Jobs
 {
 	struct TaskAccess
 	{
-		static Task Make(void* job, uint32_t owner) { return Task(job, owner); }
+		static Task Make(void* job, uint32_t owner, std::shared_ptr<TaskControl> control)
+		{
+			return Task(job, owner, std::move(control));
+		}
+	};
+
+	/* 句柄与闭包共享的控制块：终态只在这里落定一次，
+	 * 所以句柄放手、线程池重建之后都还读得到结果 */
+	struct TaskControl
+	{
+		mutable std::mutex Mutex;
+		std::condition_variable Done;
+		TaskState State{ TaskState::Pending };
+
+		/* 只认第一次落定：跑完的不会被析构覆盖成跳过 */
+		void Finish(TaskState state)
+		{
+			{
+				std::lock_guard lock(Mutex);
+				if (State != TaskState::Pending)
+					return;
+				State = state;
+			}
+			Done.notify_all();
+		}
+
+		[[nodiscard]] TaskState Current() const
+		{
+			std::lock_guard lock(Mutex);
+			return State;
+		}
 	};
 
 	namespace
@@ -31,7 +62,16 @@ namespace Helios::Jobs
 		{
 			std::function<void()> Work;
 			std::function<void()> OnMain;
+			std::shared_ptr<TaskControl> Control;
 			uint32_t Generation = 0;
+
+			/* 跑完、取消、过期、池满被丢、退出清理都会析构到这里：
+			 * 还停在 Pending 就说明工作没跑成 */
+			~BackgroundPayload()
+			{
+				if (Control != nullptr)
+					Control->Finish(TaskState::Skipped);
+			}
 		};
 
 		thread_local const BackgroundPayload* t_CurrentPayload = nullptr;
@@ -215,7 +255,8 @@ namespace Helios::Jobs
 	}
 
 	Task::Task(Task&& other) noexcept
-		: m_Job(std::exchange(other.m_Job, nullptr)), m_Owner(other.m_Owner)
+		: m_Job(std::exchange(other.m_Job, nullptr)), m_Owner(other.m_Owner),
+		  m_Control(std::move(other.m_Control))
 	{
 	}
 
@@ -226,6 +267,7 @@ namespace Helios::Jobs
 			Reset();
 			m_Job = std::exchange(other.m_Job, nullptr);
 			m_Owner = other.m_Owner;
+			m_Control = std::move(other.m_Control);
 		}
 		return *this;
 	}
@@ -235,10 +277,26 @@ namespace Helios::Jobs
 		return (m_Job != nullptr && s_System != nullptr && m_Owner == s_SystemId) ? m_Job : nullptr;
 	}
 
-	bool Task::IsDone() const
+	TaskState Task::State() const
 	{
-		void* const job = Live();
-		return job == nullptr || JobSystem::IsFinished(AsJob(job));
+		if (m_Control == nullptr)
+			return TaskState::Completed; /* 默认句柄当作已完成 */
+		return m_Control->Current();
+	}
+
+	void Task::Wait() const
+	{
+		if (m_Control == nullptr)
+			return;
+
+		ASSERT(!IsWorkerThread(), "Task::Wait on a worker thread can starve the pool");
+
+		/* 排队中的先提档：主线程不执行后台任务，压在一堆长任务后面会等很久 */
+		if (void* const job = Live())
+			s_System->SetPriority(AsJob(job), HeliosJobs::Priority::High);
+
+		std::unique_lock lock(m_Control->Mutex);
+		m_Control->Done.wait(lock, [this] { return m_Control->State != TaskState::Pending; });
 	}
 
 	void Task::Cancel()
@@ -263,12 +321,17 @@ namespace Helios::Jobs
 
 	Task RunBackground(std::function<void()> work, Priority priority, std::function<void()> on_main)
 	{
+		auto control = std::make_shared<TaskControl>();
 		if (!work)
-			return {};
+		{
+			control->Finish(TaskState::Skipped);
+			return TaskAccess::Make(nullptr, 0, std::move(control));
+		}
 
 		auto payload = std::make_unique<BackgroundPayload>();
 		payload->Work = std::move(work);
 		payload->OnMain = std::move(on_main);
+		payload->Control = control;
 		payload->Generation = s_Generation.load(std::memory_order_acquire);
 
 		JobSystem* const system = s_System.get();
@@ -278,7 +341,10 @@ namespace Helios::Jobs
 			RunGuarded(payload->Work, "Background task");
 			if (payload->OnMain)
 				PostToMain(std::move(payload->OnMain));
-			return {};
+
+			/* 就地路径没有任务上下文：过期算跳过，其余算跑完 */
+			control->Finish(IsStale(*payload) ? TaskState::Skipped : TaskState::Completed);
+			return TaskAccess::Make(nullptr, 0, std::move(control));
 		}
 
 		/* 闭包持有 payload：被取消时不执行，但照样析构释放 */
@@ -286,13 +352,17 @@ namespace Helios::Jobs
 			[payload = std::move(payload)](JobSystem& js, JobSystem::Job* self)
 		{
 			if (IsStale(*payload))
-				return;
+				return; /* payload 析构时补 Skipped */
 
 			t_CurrentPayload = payload.get();
 			RunGuarded(payload->Work, "Background task");
 			t_CurrentPayload = nullptr;
 
-			if (payload->OnMain && !js.IsCancelled(self) && !IsStale(*payload))
+			/* 跑完但中途被取消（或已过期）也算没跑成 */
+			const bool cancelled = js.IsCancelled(self) || IsStale(*payload);
+			payload->Control->Finish(cancelled ? TaskState::Skipped : TaskState::Completed);
+
+			if (payload->OnMain && !cancelled)
 			{
 				const uint32_t generation = payload->Generation;
 				PostToMain([on_main = std::move(payload->OnMain), generation]()
@@ -305,12 +375,13 @@ namespace Helios::Jobs
 
 		if (job == nullptr)
 		{
+			/* 池满：闭包在 CreateJob 返回时已析构，状态落到 Skipped，句柄照样有效 */
 			CORE_LOG_ERROR("[Jobs] Job pool exhausted, background task dropped");
-			return {};
+			return TaskAccess::Make(nullptr, 0, std::move(control));
 		}
 
 		JobSystem::Job* retained = system->RunBackgroundAndRetain(job, static_cast<HeliosJobs::Priority>(priority));
-		return TaskAccess::Make(retained, s_SystemId);
+		return TaskAccess::Make(retained, s_SystemId, std::move(control));
 	}
 
 	bool IsCancelled()

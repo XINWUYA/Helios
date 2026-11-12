@@ -64,12 +64,10 @@ namespace Helios
 
 	namespace
 	{
-		/* 一张图在后台解码期间的状态：Done 之后 Image 才可读 */
+		/* 一张图在后台解码期间的状态：Task 的终态说了算，
+		 * 跑到 Completed 之后 Image / Failed 才可读（跳过就是没有结果） */
 		struct Slot
 		{
-			std::mutex Mutex{};
-			std::condition_variable Cv{};
-			bool Done{ false };
 			bool Failed{ false };
 			DecodedImage Image{};
 			Jobs::Task Task{};
@@ -127,13 +125,8 @@ namespace Helios
 		{
 			DecodedImage image;
 			const bool ok = DecodeNow(path, image);
-			{
-				std::lock_guard slot_lock(slot->Mutex);
-				slot->Image = std::move(image);
-				slot->Failed = !ok;
-				slot->Done = true;
-			}
-			slot->Cv.notify_all();
+			slot->Image = std::move(image);
+			slot->Failed = !ok;
 		});
 	}
 
@@ -187,10 +180,9 @@ namespace Helios
 			s_Slots.erase(it);
 		}
 
-		std::unique_lock slot_lock(slot->Mutex);
-		slot->Cv.wait(slot_lock, [&slot] { return slot->Done; });
-
-		if (slot->Failed)
+		/* 等任务结束：跑完或跳过都会返回；跳过说明这张图没解出来 */
+		slot->Task.Wait();
+		if (slot->Task.State() != Jobs::TaskState::Completed || slot->Failed)
 			return false;
 
 		out = std::move(slot->Image);

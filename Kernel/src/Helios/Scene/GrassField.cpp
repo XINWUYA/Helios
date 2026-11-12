@@ -264,17 +264,23 @@ namespace Helios
 		mix(&focus_min_key, sizeof(focus_min_key));
 		mix(&focus_max_key, sizeof(focus_max_key));
 
-		/* 后台重建的结果先收：key 还对得上才用，对不上说明参数又变了，直接丢 */
-		if (m_AsyncBuild != nullptr && m_AsyncBuild->Done.load(std::memory_order_acquire))
+		/* 后台重建的结果先收：跑完、key 还对得上才用。
+		 * 任务被跳过（取消 / 池满被丢）时没有结果，清掉让本帧重新提交 */
+		if (m_AsyncBuild != nullptr && m_AsyncTask.IsDone())
 		{
-			std::vector<GrassInstanceData> instances = std::move(m_AsyncBuild->Instances);
-			m_AsyncBuild.reset();
-			if (m_AsyncKey == m_BuildKey && m_InstanceStorage != nullptr)
+			if (m_AsyncTask.State() == Jobs::TaskState::Completed)
 			{
-				UploadInstances(instances, m_InstanceStorage);
-				m_InstanceBuffer = m_GpuVertexView;
-				m_CapacityBytes = static_cast<uint32_t>(instances.size() * sizeof(GrassInstanceData));
+				std::vector<GrassInstanceData> instances = std::move(m_AsyncBuild->Instances);
+				if (m_AsyncKey == m_BuildKey && m_InstanceStorage != nullptr)
+				{
+					UploadInstances(instances, m_InstanceStorage);
+					m_InstanceBuffer = m_GpuVertexView;
+					m_CapacityBytes = static_cast<uint32_t>(instances.size() * sizeof(GrassInstanceData));
+				}
 			}
+
+			m_AsyncBuild.reset();
+			m_AsyncTask.Reset();
 		}
 
 		if (key == m_BuildKey && m_InstanceBuffer != nullptr)
@@ -287,6 +293,7 @@ namespace Helios
 				return;
 			m_AsyncTask.Cancel();
 			m_AsyncBuild.reset();
+			m_AsyncTask.Reset();
 		}
 
 		m_BuildKey = key;
@@ -636,7 +643,6 @@ namespace Helios
 					if (Jobs::IsCancelled())
 						return;
 					state->Instances = std::move(instances);
-					state->Done.store(true, std::memory_order_release);
 				});
 
 				/* 旧缓冲装得下就先接着画，等后台算完再换；装不下只能空着等 */

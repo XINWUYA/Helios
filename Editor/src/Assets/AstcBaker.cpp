@@ -182,10 +182,21 @@ namespace Helios::AstcBake
 			s_Status.Message = message;
 		}
 
-		/* 被取消（切工程 / 退出）：状态回到空闲，别让面板停在 Running */
+		/* 被取消（过期 / 退出）：状态回到空闲，别让面板停在 Running */
 		void SetIdle()
 		{
 			std::lock_guard lock(s_Mutex);
+			s_Status = Status{};
+		}
+
+		/* 任务没跑成（取消 / 池满被丢）时没人会改状态：读写状态前顺手收尾。
+		 * 只在主线程持锁调用 */
+		void ReapSkippedLocked()
+		{
+			if (s_Status.Current != Status::State::Running)
+				return;
+			if (!s_Task.IsDone() || s_Task.State() == Jobs::TaskState::Completed)
+				return;
 			s_Status = Status{};
 		}
 
@@ -429,6 +440,7 @@ namespace Helios::AstcBake
 	{
 		{
 			std::lock_guard lock(s_Mutex);
+			ReapSkippedLocked();
 			if (s_Status.Current == Status::State::Running)
 				return false;
 
@@ -447,6 +459,7 @@ namespace Helios::AstcBake
 	Status Poll()
 	{
 		std::lock_guard lock(s_Mutex);
+		ReapSkippedLocked();
 		return s_Status;
 	}
 }

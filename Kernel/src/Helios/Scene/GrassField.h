@@ -254,7 +254,6 @@ namespace Helios
 		struct AsyncBuild
 		{
 			uint64_t Key{ 0 };
-			std::atomic<bool> Done{ false };
 			std::vector<GrassInstanceData> Instances;
 		};
 

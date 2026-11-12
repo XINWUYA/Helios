@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <type_traits>
 #include <utility>
 #include "Helios/Common/Export.h"
@@ -57,7 +58,18 @@ namespace Helios::Jobs
 	/* 主线程空闲时偷帧内小任务，最多占用 budget_us 微秒 */
 	HELIOS_API uint32_t HelpWhileIdle(uint32_t budget_us);
 
-	/* 后台任务句柄：只查状态不等待，析构时放手不取消 */
+	/* 后台任务的终态。Pending 表示还没结束：排队中、在跑、或正要开始都算 */
+	enum class TaskState : uint8_t
+	{
+		Pending,
+		Completed, /* 正常跑完 */
+		Skipped,   /* 没跑成：取消、过期、池满被丢、退出清理 */
+	};
+
+	struct TaskControl;
+
+	/* 后台任务句柄：查终态、可阻塞等待；析构时放手不取消。
+	 * 终态记在共享控制块里，句柄放手、线程池重建之后照样读得到。 */
 	class HELIOS_API Task
 	{
 	public:
@@ -68,8 +80,14 @@ namespace Helios::Jobs
 		Task(const Task&) = delete;
 		Task& operator=(const Task&) = delete;
 
+		/* 句柄是否还连着任务池里的任务（池满被丢、没建池就地执行时为空） */
 		[[nodiscard]] bool IsValid() const { return m_Job != nullptr; }
-		[[nodiscard]] bool IsDone() const;
+		[[nodiscard]] TaskState State() const;
+		[[nodiscard]] bool IsDone() const { return State() != TaskState::Pending; }
+		/* 阻塞到不再是 Pending。排队中的任务会先提到 High：
+		 * 主线程不执行后台任务，排在长任务后面会等很久。
+		 * 只给主线程或外部线程用，worker 里等会占着名额自锁。 */
+		void Wait() const;
 		/* 排队中的直接跳过，在跑的要任务自己查 Jobs::IsCancelled() */
 		void Cancel();
 		/* 还在排队时换档，比如缩略图滚出视野就降到 Low */
@@ -78,21 +96,25 @@ namespace Helios::Jobs
 
 	private:
 		friend struct TaskAccess;
-		Task(void* job, uint32_t owner) : m_Job(job), m_Owner(owner) {}
+		Task(void* job, uint32_t owner, std::shared_ptr<TaskControl> control)
+			: m_Job(job), m_Owner(owner), m_Control(std::move(control)) {}
 
 		/* 句柄记下建池代号：线程池重建后旧句柄一律视为已完成，不碰新任务池 */
 		[[nodiscard]] void* Live() const;
 
 		void* m_Job = nullptr;
 		uint32_t m_Owner = 0;
+		std::shared_ptr<TaskControl> m_Control{};
 	};
 
-	/* 投递后台任务：work 在 worker 上跑，on_main 在 work 完成后回主线程执行（被取消就不回） */
+	/* 投递后台任务：work 在 worker 上跑，on_main 在 work 完成后回主线程执行（被取消就不回）。
+	 * 返回的句柄总是有效：池满被丢或没建池就地执行时，State 也会落到终态 */
 	HELIOS_API Task RunBackground(std::function<void()> work, Priority priority = Priority::Normal,
 		std::function<void()> on_main = {});
 	/* 后台任务里查自己是否被取消或已过期 */
 	[[nodiscard]] HELIOS_API bool IsCancelled();
-	/* 切项目、关场景时调用：之前提交的后台任务全部视为过期，不再执行、不再回主线程 */
+	/* 让之前提交的后台任务全部过期：不再执行、不再回主线程。
+	 * 目前只有 Jobs::Shutdown 在调用；切项目接上它之前，消费者要先能处理"完成但没结果"。 */
 	HELIOS_API void InvalidateBackground();
 
 	/* 主线程回调队列：任何线程都能投，主线程每帧按预算执行 */
