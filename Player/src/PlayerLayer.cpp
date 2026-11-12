@@ -5,6 +5,7 @@
 #include "Helios/Application/ProjectConfig.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Scene/SceneCommon.h"
+#include "Helios/Script/ScriptRuntime.h"
 #include "Helios/UI/UISystem.h"
 
 namespace Helios
@@ -24,6 +25,9 @@ namespace Helios
 		/* 画质开关跟编辑器共用 Project.xml，不然草地与 MSAA 的形态对不上 */
 		const ProjectConfig config = LoadProjectConfig();
 		ApplyProjectSettings(config);
+
+		/* 脚本先挂上：场景里的挂载点按类名建实例，类得先在注册表里 */
+		m_Scripts.LoadLatest();
 
 		m_pScene = CreateSharedPtr<Scene>();
 
@@ -50,17 +54,25 @@ namespace Helios
 			CORE_LOG_ERROR("Player scene has no primary camera: {}.", scene_path);
 		}
 
+		/* 场景齐了再启动运行时：它按挂载点逐个建实例并调 OnCreate */
+		m_pScene->GetScriptRuntime().Start(*m_pScene);
+
 		/* 多指分路：落在画布控件上的手指喂 UI，另一根留给脚本转视角 */
 		Application::Instance()->GetWindow().SetUITouchTest(
 			[this](const glm::vec2& point) { return HitTestUI(point); });
 
-		CORE_LOG_INFO("Player loaded scene: {} ({}x{}).", scene_path,
+		CORE_LOG_INFO("Player loaded scene: {} ({}x{}), {} script instance(s).", scene_path,
 			Application::Instance()->GetWindow().GetWidth(),
-			Application::Instance()->GetWindow().GetHeight());
+			Application::Instance()->GetWindow().GetHeight(),
+			m_pScene->GetScriptRuntime().GetInstanceCount());
 	}
 
 	void PlayerLayer::OnDetached()
 	{
+		/* 先停脚本再丢场景：OnDestroy 里还能安全访问实体 */
+		if (m_pScene != nullptr)
+			m_pScene->GetScriptRuntime().Stop();
+
 		if (Application* application = Application::Instance())
 			application->GetWindow().SetUITouchTest({});
 	}

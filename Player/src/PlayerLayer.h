@@ -2,6 +2,8 @@
 
 #include <Helios.h>
 
+#include "Helios/Script/ProjectScripts.h"
+
 namespace Helios
 {
 	/* 玩家形态的场景层：载入项目配置里的启动场景，每帧直接渲染到默认目标。
@@ -27,6 +29,8 @@ namespace Helios
 		bool OnWindowResize(WindowResizeEvent* event);
 
 		SharedPtr<Scene> m_pScene{ nullptr };
+		/* 场景脚本：镜头与 HUD 的行为都在项目脚本里，Player 得自己挂 */
+		ProjectScripts m_Scripts{};
 		entt::entity m_Camera{ entt::null };
 		/* 三个按键上一帧的按下状态，用来判按下沿与抬起沿 */
 		bool m_MouseDown[3]{ false, false, false };

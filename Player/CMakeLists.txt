@@ -31,6 +31,20 @@ target_include_directories(Player
 
 target_link_libraries(Player PRIVATE Kernel)
 
+# iOS 不允许加载没签名的代码，项目脚本只能随包编进主二进制：
+# 源文件直接进 Player 目标，注册靠脚本末尾静态对象在启动时跑一遍。
+if(HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+    file(GLOB_RECURSE PLAYER_SCRIPT_SOURCES CONFIGURE_DEPENDS
+         "${HELIOS_PROJECT_DIR}/Scripts/*.cpp")
+    if(PLAYER_SCRIPT_SOURCES)
+        target_sources(Player PRIVATE ${PLAYER_SCRIPT_SOURCES})
+        target_include_directories(Player PRIVATE "${HELIOS_PROJECT_DIR}/Scripts")
+        # 脚本不写 #include "Pch.h"，引擎底座由编辑器那套预编译头带进来，这里照办
+        set_source_files_properties(${PLAYER_SCRIPT_SOURCES} PROPERTIES
+            COMPILE_FLAGS "-include ${HELIOS_ENGINE_ROOT}/Kernel/src/Helios/Script/ScriptPch.h")
+    endif()
+endif()
+
 target_compile_definitions(Player
     PRIVATE
         $<$<CONFIG:Debug>:HELIOS_DEBUG>

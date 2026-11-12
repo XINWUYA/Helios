@@ -6,7 +6,7 @@ project(Sample_Scene LANGUAGES CXX)
 add_executable(Sample_Scene)
 
 # Source files
-file(GLOB_RECURSE SAMPLE_SOURCES
+file(GLOB_RECURSE SAMPLE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )

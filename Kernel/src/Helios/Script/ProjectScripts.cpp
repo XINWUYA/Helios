@@ -1,20 +1,24 @@
 #include "Pch.h"
 #include "ProjectScripts.h"
 
+#include "Helios/Common/Platform.h"
+#include "Helios/Script/ScriptRegistry.h"
+
+#if !HELIOS_PLATFORM_IOS
 #include <filesystem>
 
 #include "Helios/Common/AssetPath.h"
 #include "Helios/Common/PathUtils.h"
-#include "Helios/Script/ScriptRegistry.h"
-
 #ifdef PLATFORM_WINDOWS
 #include <windows.h>
 #else
 #include <dlfcn.h>
 #endif
+#endif
 
 namespace Helios
 {
+#if !HELIOS_PLATFORM_IOS
 	namespace
 	{
 		/* 目录下最新的 .hsmod：多配置生成器（Xcode / Visual Studio）会再套一层配置目录，
@@ -43,6 +47,7 @@ namespace Helios
 			return newest;
 		}
 	}
+#endif
 
 	ProjectScripts::~ProjectScripts()
 	{
@@ -51,12 +56,27 @@ namespace Helios
 
 	bool ProjectScripts::LoadLatest()
 	{
+#if HELIOS_PLATFORM_IOS
+		/* iOS 不允许加载没签名的代码：脚本在构建期就编进了主二进制，
+		 * 注册对象在进程启动时已经跑过，这里只看表里有没有类 */
+		const int count = GetClassCount();
+		if (count == 0)
+		{
+			m_Status = "No scripts linked into the app";
+			CORE_LOG_WARN("[Scripts] No script classes are linked into the app.");
+			return false;
+		}
+
+		m_Status = "Linked " + std::to_string(count) + " script class(es)";
+		CORE_LOG_INFO("[Scripts] {}.", m_Status);
+		return true;
+#else
 		const std::filesystem::path directory = g_ProjectPath / "Cache" / "ScriptsBuild";
 		const std::string path = FindLatestModule(directory);
 		if (path.empty())
 		{
 			m_Status = "No built module. Open the project in the Editor once";
-			CORE_LOG_WARN("[Sample] No .hsmod under {}.", PathToUtf8(directory));
+			CORE_LOG_WARN("[Scripts] No .hsmod under {}.", PathToUtf8(directory));
 			return false;
 		}
 
@@ -65,7 +85,7 @@ namespace Helios
 		if (m_hModule == nullptr)
 		{
 			m_Status = "Load failed";
-			CORE_LOG_ERROR("[Sample] LoadLibrary failed: {}", path);
+			CORE_LOG_ERROR("[Scripts] LoadLibrary failed: {}", path);
 			return false;
 		}
 #else
@@ -74,14 +94,15 @@ namespace Helios
 		{
 			const char* error = dlerror();
 			m_Status = "Load failed";
-			CORE_LOG_ERROR("[Sample] dlopen failed: {}", error != nullptr ? error : "unknown error");
+			CORE_LOG_ERROR("[Scripts] dlopen failed: {}", error != nullptr ? error : "unknown error");
 			return false;
 		}
 #endif
 
 		m_Status = "Loaded " + std::to_string(GetClassCount()) + " script class(es)";
-		CORE_LOG_INFO("[Sample] {} from {}.", m_Status, path);
+		CORE_LOG_INFO("[Scripts] {} from {}.", m_Status, path);
 		return true;
+#endif
 	}
 
 	int ProjectScripts::GetClassCount() const

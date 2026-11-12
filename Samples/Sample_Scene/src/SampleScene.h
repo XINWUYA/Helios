@@ -1,6 +1,6 @@
 #pragma once
 #include <Helios.h>
-#include "ProjectScripts.h"
+#include "Helios/Script/ProjectScripts.h"
 
 namespace Helios
 {
