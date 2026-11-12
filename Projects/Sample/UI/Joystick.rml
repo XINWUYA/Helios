@@ -7,8 +7,8 @@
 	<div id="hud">
 		<div id="panel">
 			<div id="title">Runtime UI</div>
+			<span id="fps-value">-- fps</span>
 			<div id="subtitle">Drag the stick to fly the camera</div>
-			<input id="name-field" type="text" value="type here" />
 
 			<!-- 滑杆值按 name 递给脚本，右侧的数字由脚本回写 -->
 			<div class="setting">
@@ -24,9 +24,12 @@
 		</div>
 
 		<div id="actions">
-			<button id="btn-start" class="btn">Start</button>
-			<button id="btn-reset" class="btn">Reset</button>
+			<button id="btn-tod" class="btn">Pause TOD</button>
+			<button id="btn-grass" class="btn">Hide Grass</button>
 		</div>
+
+		<!-- 圆形按钮：相机回到出生位姿 -->
+		<button id="btn-camera" class="btn">Reset</button>
 
 		<joystick name="move" id="stick">
 			<knob id="knob" />

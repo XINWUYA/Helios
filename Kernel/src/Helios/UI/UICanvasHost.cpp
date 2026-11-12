@@ -17,6 +17,26 @@ namespace Helios
 	{
 		namespace
 		{
+			/* click 冒泡到文档时记一次 id：脚本按 id 取，省得每个按钮各挂一份监听 */
+			class ClickRecorder final : public Rml::EventListener
+			{
+			public:
+				explicit ClickRecorder(std::function<void(const std::string&)> on_click)
+					: m_OnClick(std::move(on_click))
+				{
+				}
+
+				void ProcessEvent(Rml::Event& event) override
+				{
+					Rml::Element* target = event.GetTargetElement();
+					if (target != nullptr && !target->GetId().empty())
+						m_OnClick(target->GetId().c_str());
+				}
+
+			private:
+				std::function<void(const std::string&)> m_OnClick;
+			};
+
 			/* 打开 / 布局期间把 RmlUi 的诊断写进本宿主：接口是进程级单例，进来换表、走时还回去 */
 			class DiagnosticsScope final
 			{
@@ -190,12 +210,25 @@ namespace Helios
 				return false;
 			}
 
+			m_ClickRecorder = CreateUniquePtr<ClickRecorder>([this](const std::string& element_id)
+			{
+				/* 只留最近几个：没有脚本问的点击也别越攒越多 */
+				if (m_Clicks.size() >= 8)
+					m_Clicks.erase(m_Clicks.begin());
+				m_Clicks.push_back(element_id);
+			});
+			m_Document->AddEventListener(Rml::EventId::Click, m_ClickRecorder.get(), true);
 			m_Document->Show();
 			return true;
 		}
 
 		void UICanvasHost::Close()
 		{
+			if (m_Document != nullptr && m_ClickRecorder != nullptr)
+				m_Document->RemoveEventListener(Rml::EventId::Click, m_ClickRecorder.get(), true);
+			m_ClickRecorder.reset();
+			m_Clicks.clear();
+
 			if (m_Context != nullptr)
 			{
 				m_Context->UnloadAllDocuments();
@@ -343,6 +376,16 @@ namespace Helios
 
 			const Rml::Element* hit = m_Context->GetElementAtPoint(Rml::Vector2f(x, y));
 			return hit != nullptr && hit != hit->GetOwnerDocument();
+		}
+
+		bool UICanvasHost::ConsumeClick(const std::string& element_id)
+		{
+			const auto it = std::find(m_Clicks.begin(), m_Clicks.end(), element_id);
+			if (it == m_Clicks.end())
+				return false;
+
+			m_Clicks.erase(it);
+			return true;
 		}
 
 		size_t UICanvasHost::CountElements() const

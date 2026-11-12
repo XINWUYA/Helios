@@ -62,6 +62,8 @@ namespace Helios
 			[[nodiscard]] float GetNumber(entt::entity canvas, const std::string& name, float fallback = 0.0f) const;
 			/* 按 id 改元素文本：脚本把数值显示出来，元素不在或文本没变就什么都不做 */
 			void SetText(entt::entity canvas, const std::string& element_id, const std::string& text);
+			/* 按 id 取一次点击：问一次消费一次，脚本拿它做开关 */
+			[[nodiscard]] bool ConsumeClick(entt::entity canvas, const std::string& element_id);
 
 		private:
 			/* 一个画布实体的运行时状态。元素树不进组件 —— 组件快照按值拷贝，

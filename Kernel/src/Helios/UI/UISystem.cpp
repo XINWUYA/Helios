@@ -404,5 +404,11 @@ namespace Helios
 
 			element->SetInnerRML(text.c_str());
 		}
+
+		bool UISystem::ConsumeClick(entt::entity canvas, const std::string& element_id)
+		{
+			CanvasRuntime* runtime = FindCanvas(canvas);
+			return runtime != nullptr && runtime->Host.ConsumeClick(element_id);
+		}
 	}
 }

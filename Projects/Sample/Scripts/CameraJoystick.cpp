@@ -1,6 +1,6 @@
-/* 摇杆推相机、空白处拖拽转视角。两者共用主相机：
- * 摇杆的方向取自相机的水平朝向，转了视角，推摇杆就往新的方向走。
- * 速度与视角灵敏度可以从 HUD 的两个滑杆上调。 */
+/* 摇杆推相机、空白处拖拽转视角，两者共用主相机。
+ * 摇杆沿视线飞，右上角显示帧率，滑杆调速度与灵敏度。
+ * 右下角两个按钮切 TOD 与草，圆形按钮把相机送回出生位姿。 */
 #include <cmath>
 #include <cstdio>
 
@@ -30,7 +30,18 @@ namespace
 			if (!camera || !camera.HasComponent<Helios::TransformComponent>())
 				return;
 
+			/* 第一帧记下相机的出生位姿，圆形按钮拿它复位 */
+			if (!m_HomeCaptured)
+			{
+				const Helios::TransformComponent& transform = camera.GetComponent<Helios::TransformComponent>();
+				m_HomePosition = transform.m_Position;
+				m_HomeRotation = transform.m_Rotation;
+				m_HomeCaptured = true;
+			}
+
 			ApplySettings(scene);
+			UpdateFps(scene, delta_time);
+			UpdateButtons(scene, camera);
 			UpdateLook(scene, camera);
 			UpdateMove(scene, camera, delta_time);
 		}
@@ -72,7 +83,107 @@ namespace
 			ui.SetText(GetEntity(), element_id, shown);
 		}
 
-		/* 摇杆平移：读画布的值，沿相机的水平朝向走 */
+		/* 帧率：指数平均压抖动，四分之一秒刷一次文本就够 */
+		void UpdateFps(const Helios::SharedPtr<Helios::Scene>& scene, float delta_time)
+		{
+			if (delta_time > 0.0f)
+			{
+				const float instant = 1.0f / delta_time;
+				m_Fps = m_Fps > 0.0f ? m_Fps * 0.9f + instant * 0.1f : instant;
+			}
+
+			m_FpsRefresh -= delta_time;
+			if (m_FpsRefresh > 0.0f)
+				return;
+
+			m_FpsRefresh = 0.25f;
+			char buffer[32];
+			std::snprintf(buffer, sizeof(buffer), "%.0f fps", static_cast<double>(m_Fps));
+			scene->GetUISystem().SetText(GetEntity(), "fps-value", buffer);
+		}
+
+		/* 显隐组件缺省就是可见，只有隐藏才需要挂 */
+		template <typename Registry>
+		static bool IsEntityVisible(const Registry& registry, entt::entity entity)
+		{
+			const auto* visibility = registry.template try_get<Helios::VisibilityComponent>(entity);
+			return visibility == nullptr || visibility->m_Visible;
+		}
+
+		template <typename Registry>
+		static void SetEntityVisible(Registry& registry, entt::entity entity, bool visible)
+		{
+			if (auto* visibility = registry.template try_get<Helios::VisibilityComponent>(entity))
+			{
+				visibility->m_Visible = visible;
+				return;
+			}
+
+			if (!visible)
+				registry.template emplace<Helios::VisibilityComponent>(entity, Helios::VisibilityComponent(false));
+		}
+
+		/* 右下角几个按钮：TOD 暂停或继续，草整体显隐，圆形按钮把相机送回出生位姿 */
+		void UpdateButtons(const Helios::SharedPtr<Helios::Scene>& scene, const Helios::Entity camera)
+		{
+			Helios::UI::UISystem& ui = scene->GetUISystem();
+			auto& registry = scene->GetRegistry();
+
+			if (ui.ConsumeClick(GetEntity(), "btn-camera") && m_HomeCaptured)
+			{
+				Helios::TransformComponent& transform = camera.GetComponent<Helios::TransformComponent>();
+				transform.m_Position = m_HomePosition;
+				transform.m_Rotation = m_HomeRotation;
+			}
+
+			/* 按钮文字跟着场景里的真实状态走，面板改过也对得上 */
+			bool auto_advance = true;
+			for (auto [entity, sky] : registry.view<Helios::SkyComponent>().each())
+			{
+				(void)entity;
+				auto_advance = sky.m_AutoAdvance;
+				break;
+			}
+
+			if (ui.ConsumeClick(GetEntity(), "btn-tod"))
+			{
+				for (auto [entity, sky] : registry.view<Helios::SkyComponent>().each())
+				{
+					(void)entity;
+					sky.m_AutoAdvance = !auto_advance;
+					break;
+				}
+				auto_advance = !auto_advance;
+			}
+			ui.SetText(GetEntity(), "btn-tod", auto_advance ? "Pause TOD" : "Play TOD");
+
+			/* 隐藏时记住藏了哪几片，恢复时只开回这些，别把本来就隐藏的也亮出来 */
+			if (ui.ConsumeClick(GetEntity(), "btn-grass"))
+			{
+				if (m_HiddenGrass.empty())
+				{
+					for (auto [entity, grass] : registry.view<Helios::GrassComponent>().each())
+					{
+						(void)grass;
+						if (!IsEntityVisible(registry, entity))
+							continue;
+
+						SetEntityVisible(registry, entity, false);
+						m_HiddenGrass.push_back(entity);
+					}
+				}
+				else
+				{
+					for (const entt::entity entity : m_HiddenGrass)
+					{
+						if (registry.valid(entity))
+							SetEntityVisible(registry, entity, true);
+					}
+					m_HiddenGrass.clear();
+				}
+			}
+			ui.SetText(GetEntity(), "btn-grass", m_HiddenGrass.empty() ? "Hide Grass" : "Show Grass");
+		}		/* 摇杆平移：沿视线方向飞，抬头就往天上走，低头能钻到地形之下 */
 		void UpdateMove(const Helios::SharedPtr<Helios::Scene>& scene, const Helios::Entity camera,
 			float delta_time)
 		{
@@ -83,14 +194,15 @@ namespace
 			if (strength < 0.01f)
 				return;
 
-			/* 朝向只看水平分量：抬头低头只改视线，不改变往前走是往哪走 */
+			/* 世界矩阵第三列是相机的后方，取反就是视线方向（含俯仰） */
 			const glm::mat4 world = scene->GetWorldTransform(camera);
-			glm::vec3 forward(-world[2].x, 0.0f, -world[2].z);
-			if (glm::dot(forward, forward) < 1e-6f)
-				return;
+			const glm::vec3 forward = -glm::normalize(glm::vec3(world[2]));
 
-			forward = glm::normalize(forward);
-			const glm::vec3 right(-forward.z, 0.0f, forward.x);
+			/* 右向量保持水平：横推不该把相机推上天。正上正下看时叉乘退化，给个兜底 */
+			glm::vec3 right = glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f));
+			if (glm::dot(right, right) < 1e-6f)
+				right = glm::vec3(1.0f, 0.0f, 0.0f);
+			right = glm::normalize(right);
 
 			/* 屏幕的 y 向下为正，摇杆往上推是往前走 */
 			const glm::vec3 direction = right * axis.x - forward * axis.y;
@@ -150,6 +262,15 @@ namespace
 		/* 上一次写进 HUD 的显示文本 */
 		std::string m_SpeedText{};
 		std::string m_LookText{};
+		/* 平滑后的帧率与下一次刷新的倒计时 */
+		float m_Fps{ 0.0f };
+		float m_FpsRefresh{ 0.0f };
+		/* 这次隐藏藏起来的草：恢复时只开回这些 */
+		std::vector<entt::entity> m_HiddenGrass{};
+		/* 出生位姿：圆形按钮复位用 */
+		glm::vec3 m_HomePosition{ 0.0f };
+		glm::vec3 m_HomeRotation{ 0.0f };
+		bool m_HomeCaptured{ false };
 	};
 }
 

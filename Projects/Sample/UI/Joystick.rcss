@@ -56,21 +56,7 @@ body
 	color: rgba(242, 244, 248, 170);
 }
 
-/* 面板里的文本框：点进去就能打字，验证输入转发 */
-#name-field
-{
-	display: block;
-	margin-top: 10dp;
-	width: 288dp;
-	height: 26dp;
-	padding: 1dp 8dp;
-	background-color: rgba(255, 255, 255, 24);
-	border: 1dp rgba(255, 255, 255, 70);
-	border-radius: 6dp;
-	font-size: 14dp;
-}
-
-/* 面板里的两行调节：速度与视角灵敏度 */
+/* 面板里的两行调节：速度与视角灵敏度。一行里三块都垂直居中 */
 .setting
 {
 	display: block;
@@ -81,7 +67,7 @@ body
 .setting-label
 {
 	display: inline-block;
-	width: 44dp;
+	width: 40dp;
 	font-size: 13dp;
 	color: rgba(242, 244, 248, 170);
 	vertical-align: middle;
@@ -90,7 +76,7 @@ body
 .setting-value
 {
 	display: inline-block;
-	width: 40dp;
+	width: 44dp;
 	font-size: 13dp;
 	text-align: right;
 	vertical-align: middle;
@@ -99,7 +85,7 @@ body
 .slider
 {
 	display: inline-block;
-	width: 126dp;
+	width: 160dp;
 	height: 22dp;
 	vertical-align: middle;
 }
@@ -112,9 +98,10 @@ body
 	background-color: rgba(255, 255, 255, 46);
 }
 
+/* 进度条的位置 = 轨道位置 + 它自己的 margin：给 0 才和轨道重合 */
 .slider sliderprogress
 {
-	margin-top: 8dp;
+	margin-top: 0;
 	height: 6dp;
 	border-radius: 3dp;
 	background-color: #7f77dd;
@@ -129,7 +116,18 @@ body
 	background-color: #f2f4f8;
 }
 
-/* 右下角一排按钮：Tab 切焦点，回车触发（回调还没接，先看焦点框） */
+/* 面板右上角的帧率：跟标题同一行 */
+#fps-value
+{
+	display: block;
+	position: absolute;
+	right: 14dp;
+	top: 18dp;
+	font-size: 13dp;
+	color: rgba(242, 244, 248, 170);
+}
+
+/* 右下角一排按钮：点一下脚本按 id 取，用来切 TOD 与草 */
 #actions
 {
 	display: flex;
@@ -157,6 +155,24 @@ body
 .btn:hover
 {
 	background-color: rgba(40, 48, 66, 220);
+}
+
+/* 圆形按钮：位置在按钮排上方，文字单行居中。它不在 #actions 里，
+ * 得自己打开指针，不然 hud 那层的 none 会把它一起关掉 */
+#btn-camera
+{
+	display: block;
+	position: absolute;
+	right: 16dp;
+	bottom: 64dp;
+	width: 52dp;
+	height: 52dp;
+	padding: 0px;
+	border-radius: 26dp;
+	font-size: 12dp;
+	text-align: center;
+	line-height: 50dp;
+	pointer-events: auto;
 }
 
 .btn:active

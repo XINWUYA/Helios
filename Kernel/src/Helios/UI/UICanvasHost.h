@@ -12,6 +12,7 @@ namespace Rml
 {
 	class Context;
 	class ElementDocument;
+	class EventListener;
 }
 
 namespace Helios
@@ -75,6 +76,9 @@ namespace Helios
 			/* 按坐标问同一个问题（物理像素，原点左上角）：触摸落下时用它决定这根手指归谁 */
 			[[nodiscard]] bool IsPointOverControl(float x, float y) const;
 
+			/* 按 id 取一次点击：问一次消费一次，脚本拿它做开关 */
+			[[nodiscard]] bool ConsumeClick(const std::string& element_id);
+
 			[[nodiscard]] Rml::Context* GetContext() const { return m_Context; }
 			[[nodiscard]] Rml::ElementDocument* GetDocument() const { return m_Document; }
 			[[nodiscard]] const std::string& GetDocumentPath() const { return m_DocumentPath; }
@@ -108,6 +112,9 @@ namespace Helios
 
 			std::filesystem::path m_DocumentFile{};
 			std::vector<WatchedFile> m_Watched{};
+			/* 文档冒泡上来的 click 记最近几个 id，等脚本消费 */
+			std::vector<std::string> m_Clicks{};
+			UniquePtr<Rml::EventListener> m_ClickRecorder{};
 			/* 诊断只记本宿主这一次加载 / 布局：别的画布出错不该串到这边 */
 			UniquePtr<UIDiagnostics> m_Diagnostics{};
 		};
