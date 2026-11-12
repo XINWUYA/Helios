@@ -9,6 +9,7 @@
 #include "MetalShader.h"
 #include "Helios/Core/TextureSettings.h"
 #include "Helios/Common/AssetPath.h"
+#include "Helios/Core/AstcFile.h"
 #include "Helios/Core/TextureDecode.h"
 
 #include <algorithm>
@@ -467,15 +468,7 @@ namespace Helios
 
     namespace
     {
-        /* 容器头与 astcenc 原生格式一致，烘图脚本见 Tools/astc_bake.py */
-        constexpr uint32_t kAstcMagic = 0x5CA1AB13;
-
-        uint32_t ReadU24(const uint8_t* bytes)
-        {
-            return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8)
-                | (static_cast<uint32_t>(bytes[2]) << 16);
-        }
-
+        /* 头格式与 AstcFile.h 共用一份 */
         MTL::PixelFormat ToAstcPixelFormat(uint8_t block_x, uint8_t block_y, bool srgb)
         {
             const int key = block_x * 100 + block_y;
@@ -513,7 +506,7 @@ namespace Helios
         file.seekg(0);
         file.read(reinterpret_cast<char*>(data.data()), size);
 
-        if (*reinterpret_cast<const uint32_t*>(data.data()) != kAstcMagic)
+        if (*reinterpret_cast<const uint32_t*>(data.data()) != AstcFile::kMagic)
         {
             CORE_LOG_WARN("MetalTexture: bad ASTC header, fallback to decode: {}", astc_path.string());
             return false;
@@ -521,8 +514,8 @@ namespace Helios
 
         const uint8_t block_x = data[4];
         const uint8_t block_y = data[5];
-        const uint32_t width = ReadU24(data.data() + 7);
-        const uint32_t height = ReadU24(data.data() + 10);
+        const uint32_t width = AstcFile::ReadU24(data.data() + 7);
+        const uint32_t height = AstcFile::ReadU24(data.data() + 10);
         if (width == 0 || height == 0)
             return false;
 

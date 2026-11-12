@@ -53,6 +53,7 @@ target_link_libraries(Editor
     PRIVATE
         Kernel
         assimp
+        ${ASTCENC_TARGET_LIB}
 )
 
 # 脚本模块在运行期调用引擎函数：Kernel 是动态库，符号由链接器解析，

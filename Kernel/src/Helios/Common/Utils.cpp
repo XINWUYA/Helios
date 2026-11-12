@@ -2,6 +2,8 @@
 #include "Utils.h"
 #include "xxhash.h"
 #include "stb_image.h"
+#include "Helios/Common/PathUtils.h"
+#include "Helios/Core/AstcFile.h"
 #include <chrono>
 #include <ctime>
 
@@ -127,6 +129,27 @@ namespace Helios
 
 	bool QueryImageInfo(const std::string& path, int& out_width, int& out_height, int& out_channels)
 	{
+		/* ASTC 是块数据，stb 认不出来：读 16 字节头，通道按 RGBA 记 */
+		std::filesystem::path file_path;
+		if (TryPathFromUtf8(path, file_path))
+		{
+			std::string extension = PathToUtf8(file_path.extension());
+			for (char& character : extension)
+				character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+
+			if (extension == ".astc")
+			{
+				AstcFile::Header header;
+				if (!AstcFile::ReadHeader(file_path, header))
+					return false;
+
+				out_width = header.Width;
+				out_height = header.Height;
+				out_channels = 4;
+				return true;
+			}
+		}
+
 		return stbi_info(path.c_str(), &out_width, &out_height, &out_channels) != 0;
 	}
 

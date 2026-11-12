@@ -119,6 +119,10 @@ namespace Helios
 		void DrawAssetDetailsCard(const AssetSelectionEntry& entry);
 		/* 图片的采样与格式设置（写 .texmeta 并原地重载，材质等持有者立即生效） */
 		void DrawTextureSettingsSection(const std::string& absolute_path);
+		/* 贴图的 ASTC 烘焙卡（与详情卡同级平铺）：块尺寸 / 目标尺寸 / 预估体积，烘完原地重载 */
+		void DrawAstcBakeCard(const std::string& absolute_path);
+		/* 每帧看一次烘焙进度：跑完的那一刻重载贴图（产物是新的 .astc 文件） */
+		void TickAstcBake();
 		/* shader 源码的 include 依赖（与深挖行同一个缓存键刷新）：相对路径 + 能不能在资源浏览器
 		 * 里定位 —— 引擎内置的不在浏览器那棵树上，点了没处去 */
 		struct ShaderIncludeRow
@@ -221,6 +225,13 @@ namespace Helios
 		TextureSettings m_TextureSettingsEdit;
 		TextureSettings m_TextureSettingsSaved;
 		bool m_TextureSettingsDirty{ false };
+		/* 贴图烘焙的选择：换贴图时重置；源尺寸只读一次文件头，给尺寸下拉与预估行用 */
+		std::string m_TextureBakePath;
+		int m_TextureBakeBlock{ 2 };      /* 索引到块尺寸表（默认 6x6） */
+		int m_TextureBakeMaxSize{ 0 };    /* 长边目标像素；0 = 源尺寸 */
+		int m_TextureBakeSourceWidth{ 0 };
+		int m_TextureBakeSourceHeight{ 0 };
+		bool m_TextureBakeRunning{ false }; /* 上一帧是否在跑：跑完那一帧重载贴图 */
 		/* .probe 文件的烘焙结果图卡（跟深挖行用同一个缓存键刷新；同级平铺在详情卡后面）：每张烘焙图
 		 * （环境 / 辐照度 / 预滤波）一张卡（名字 + 规格 + 十字展开预览）；多层带「Mip」切换。 */
 		struct ProbeImageCard

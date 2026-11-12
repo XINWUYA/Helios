@@ -6,6 +6,7 @@
 #include "Common/EditorCommon.h"
 #include "EditorUI/EditorIcons.h"
 #include "Assets/Gif.h"
+#include "Assets/AstcBaker.h"
 #include "Material/MaterialParamUI.h"
 #include "Command/AssetFileOps.h"
 #include "EditorUI/PanelChrome.h"
@@ -35,6 +36,7 @@
 #include "Helios/VirtualDevice/DeviceShader.h"
 #include <tinyxml2.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -57,6 +59,14 @@ namespace Helios
 		bool IsGlslSource(const std::filesystem::path& path)
 		{
 			return LowercaseExtension(path) == ".glsl";
+		}
+
+		/* 能烘成 ASTC 的图：stb 解得出 8 位像素的贴图。HDR 是浮点、DDS 自带块数据、GIF 走图集 */
+		bool SupportsAstcBake(const std::filesystem::path& path)
+		{
+			const std::string extension = LowercaseExtension(path);
+			return extension == ".png" || extension == ".jpg" || extension == ".jpeg"
+				|| extension == ".bmp" || extension == ".tga" || extension == ".psd";
 		}
 
 		class ComponentCustomDrawCommand final : public ICommand
@@ -250,6 +260,9 @@ namespace Helios
 		PROFILE_CPU_FUNCTION();
 
 		m_Entity = entity;
+
+		/* 烘焙在后台跑：面板哪怕被挡住也要收尾，跑完那一刻重载贴图 */
+		TickAstcBake();
 
 		/* 相机预览逐帧挣取：本帧真的画出了预览卡（可见且展开）才置位，
 		 * 换选中、切资源视图、收起卡片都会让预览自然停掉（见 DrawCameraPreviewCard） */
@@ -807,6 +820,177 @@ namespace Helios
 		}
 	}
 
+	void SceneInspector::DrawAstcBakeCard(const std::string& absolute_path)
+	{
+		/* 换贴图时重置：尺寸档按新图的边长重建，选择回到默认 */
+		if (m_TextureBakePath != absolute_path)
+		{
+			m_TextureBakePath = absolute_path;
+			m_TextureBakeBlock = 2;
+			m_TextureBakeMaxSize = 0;
+			m_TextureBakeSourceWidth = 0;
+			m_TextureBakeSourceHeight = 0;
+			AstcBake::SourceSize(absolute_path, m_TextureBakeSourceWidth, m_TextureBakeSourceHeight);
+		}
+
+		/* 单独一张卡：与详情卡同级平铺（卡片通道不可嵌套） */
+		const PanelChrome::Card card = PanelChrome::BeginCard("ASTC Bake", Icons::Id::FileImage);
+
+		const AstcBake::Status status = AstcBake::Poll();
+		const bool running = status.Current == AstcBake::Status::State::Running;
+		const AstcBake::BakedInfo baked = AstcBake::InspectBaked(absolute_path);
+
+		/* 卡头徽章：卡片折起来也知道这张图烘过没有 */
+		if (running)
+			PanelChrome::DrawCardBadge(card, "Baking");
+		else if (baked.Exists)
+			PanelChrome::DrawCardBadge(card, baked.Stale ? "Stale" : "Baked");
+
+		if (!card.Open)
+		{
+			PanelChrome::EndCard(card);
+			return;
+		}
+
+		/* 块尺寸决定每像素位数，引擎只认这四种 */
+		static constexpr int kBlocks[][2] = { { 4, 4 }, { 5, 5 }, { 6, 6 }, { 8, 8 } };
+		static const std::vector<std::string> block_options{
+			"4x4 (8 bpp)", "5x5 (5.1 bpp)", "6x6 (3.6 bpp)", "8x8 (2 bpp)"
+		};
+		ImGuiExt::DrawComboUI("Format", block_options, m_TextureBakeBlock);
+
+		/* 尺寸只列比源图小的档：放大没有意义，源图本身就小的话只剩 Source */
+		const int longest = std::max(m_TextureBakeSourceWidth, m_TextureBakeSourceHeight);
+		static constexpr int kSizes[] = { 4096, 2048, 1024, 512, 256 };
+		std::vector<int> size_values{ 0 };
+		std::vector<std::string> size_options{ "Source" };
+		for (const int size : kSizes)
+		{
+			if (size < longest)
+			{
+				size_values.push_back(size);
+				size_options.push_back(std::to_string(size));
+			}
+		}
+
+		int size_index = 0;
+		for (size_t index = 0; index < size_values.size(); ++index)
+		{
+			if (size_values[index] == m_TextureBakeMaxSize)
+			{
+				size_index = static_cast<int>(index);
+				break;
+			}
+		}
+		ImGuiExt::DrawComboUI("Size", size_options, size_index, [this, size_values](int picked)
+		{
+			m_TextureBakeMaxSize = size_values[static_cast<size_t>(picked)];
+		});
+
+		/* 体积预览：按当前块尺寸与目标尺寸算全 mip 链的字节数 */
+		int target_width = m_TextureBakeSourceWidth;
+		int target_height = m_TextureBakeSourceHeight;
+		if (m_TextureBakeMaxSize > 0 && longest > m_TextureBakeMaxSize)
+		{
+			const double scale = static_cast<double>(m_TextureBakeMaxSize) / longest;
+			target_width = std::max(1, static_cast<int>(std::lround(target_width * scale)));
+			target_height = std::max(1, static_cast<int>(std::lround(target_height * scale)));
+		}
+
+		if (target_width > 0 && target_height > 0)
+		{
+			const int block_x = kBlocks[m_TextureBakeBlock][0];
+			const int block_y = kBlocks[m_TextureBakeBlock][1];
+			const long long bytes = AstcBake::EstimateBytes(target_width, target_height, block_x, block_y);
+			ImGuiExt::DrawCommonTextUI("Output", std::to_string(target_width) + " x " + std::to_string(target_height)
+				+ ", ~" + FormatFileSize(static_cast<uintmax_t>(bytes)));
+		}
+
+		ImGui::Spacing();
+		ImGui::BeginDisabled(running);
+		if (ImGui::Button("Bake", ImVec2(ImGui::GetContentRegionAvail().x, 0.0f)))
+		{
+			AstcBake::Options options;
+			options.BlockX = kBlocks[m_TextureBakeBlock][0];
+			options.BlockY = kBlocks[m_TextureBakeBlock][1];
+			options.MaxSize = m_TextureBakeMaxSize;
+			/* 行序跟加载器走：改了 Flip V 就要重烘 */
+			options.FlipVertical = TextureSettingsStore::Instance().Resolve(absolute_path).IsFlipV;
+			AstcBake::Start(absolute_path, options);
+		}
+		ImGui::EndDisabled();
+
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Write a same-name .astc next to the image;\n"
+				"the Metal backend loads it instead of decoding the image.\n"
+				"Row order follows the current Flip V setting.");
+
+		/* 结果区：状态 / 产物路径 / 规格，与应用设置的控件分隔开 */
+		DrawCardSectionDivider();
+
+		const auto draw_status = [](const std::string& value, const ImVec4& color)
+		{
+			ImGui::PushStyleColor(ImGuiCol_Text, color);
+			ImGuiExt::DrawCommonTextUI("Status", value);
+			ImGui::PopStyleColor();
+		};
+
+		const bool status_is_here = status.SourcePath == absolute_path;
+		if (running)
+		{
+			draw_status("Baking " + std::to_string(status.Level) + "/" + std::to_string(status.LevelCount),
+				EditorTheme::Token::Text);
+		}
+		else if (status_is_here && status.Current == AstcBake::Status::State::Failed)
+		{
+			draw_status(status.Message, EditorTheme::Token::Danger);
+		}
+		else if (!baked.Exists)
+		{
+			draw_status("Not baked", EditorTheme::Token::TextDim);
+		}
+		else if (baked.Stale)
+		{
+			draw_status("Out of date, bake again", EditorTheme::Token::Warning);
+		}
+
+		if (baked.Exists)
+		{
+			/* 产物按资源相对路径给，和资源浏览器里看到的一致 */
+			std::filesystem::path baked_path = PathFromUtf8(absolute_path);
+			baked_path.replace_extension(".astc");
+			ImGuiExt::DrawCommonTextUI("File", AssetRelativePath(baked_path));
+
+			ImGuiExt::DrawCommonTextUI("Spec", "ASTC " + std::to_string(baked.BlockX)
+				+ "x" + std::to_string(baked.BlockY) + ", "
+				+ std::to_string(baked.Width) + " x " + std::to_string(baked.Height) + ", "
+				+ std::to_string(baked.Levels) + " mips, "
+				+ FormatFileSize(static_cast<uintmax_t>(baked.Bytes)));
+		}
+
+		PanelChrome::EndCard(card);
+	}
+
+	void SceneInspector::TickAstcBake()
+	{
+		const AstcBake::Status status = AstcBake::Poll();
+		const bool running = status.Current == AstcBake::Status::State::Running;
+		if (m_TextureBakeRunning && !running)
+		{
+			if (status.Current == AstcBake::Status::State::Succeeded)
+			{
+				CORE_LOG_INFO("[Bake] ASTC {}x{}，{} 级 mip：{}", status.Width, status.Height,
+					status.LevelCount, status.OutputPath);
+				AssetManager::Instance().ReloadTexture(status.SourcePath);
+			}
+			else if (status.Current == AstcBake::Status::State::Failed)
+			{
+				CORE_LOG_WARN("[Bake] 烘焙失败：{}", status.Message);
+			}
+		}
+		m_TextureBakeRunning = running;
+	}
+
 	void SceneInspector::DrawAssetDetailsCard(const AssetSelectionEntry& entry)
 	{
 		PROFILE_CPU_FUNCTION();
@@ -924,10 +1108,11 @@ namespace Helios
 			}
 		}
 
-		/* 图片的采样与格式：GIF 走自己的图集，不在这里配 */
+		/* 图片的采样与格式：GIF 走自己的图集，.astc 的设置跟着源图走，都不在这里配 */
 		if (!entry.IsFolder && entry.Kind == AssetFileKind::Image)
 		{
-			if (LowercaseExtension(absolute_path) != ".gif")
+			const std::string extension = LowercaseExtension(absolute_path);
+			if (extension != ".gif" && extension != ".astc")
 				DrawTextureSettingsSection(PathToUtf8(absolute_path));
 		}
 
@@ -975,6 +1160,10 @@ namespace Helios
 		}
 
 		PanelChrome::EndCard(card);
+
+		/* 贴图烘焙单独一张卡：与详情卡同级平铺，折叠状态自己存 */
+		if (!entry.IsFolder && entry.Kind == AssetFileKind::Image && SupportsAstcBake(absolute_path))
+			DrawAstcBakeCard(PathToUtf8(absolute_path));
 
 		/* .probe：三张烘焙图各一张卡片 —— 同级平铺在详情卡之后（卡片通道不可嵌套，
 		 * "卡中卡"画不出来，与材质卡排在组件卡之后是同一条路数）。
@@ -1221,6 +1410,25 @@ namespace Helios
 				m_AssetDetailRows.emplace_back("Dimensions",
 					std::to_string(width) + " x " + std::to_string(height));
 				m_AssetDetailRows.emplace_back("Channels", std::to_string(channels));
+			}
+
+			/* 块数据：块尺寸与 mip 级数是它自己的规格，源图还在就顺带标一下 */
+			if (LowercaseExtension(absolute_path) == ".astc")
+			{
+				const AstcBake::BakedInfo baked = AstcBake::InspectAstc(PathToUtf8(absolute_path));
+				if (baked.Exists)
+				{
+					m_AssetDetailRows.emplace_back("Format", "ASTC " + std::to_string(baked.BlockX)
+						+ "x" + std::to_string(baked.BlockY));
+					m_AssetDetailRows.emplace_back("Mips", std::to_string(baked.Levels));
+				}
+
+				std::filesystem::path source = absolute_path;
+				source.replace_extension(".png");
+				std::error_code source_error;
+				m_AssetDetailRows.emplace_back("Source",
+					std::filesystem::is_regular_file(source, source_error)
+						? PathToUtf8(source.filename()) : std::string("missing"));
 			}
 		}
 		else if (entry.Kind == AssetFileKind::Svg)

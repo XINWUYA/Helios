@@ -52,3 +52,6 @@
 [submodule "Libraries/ThirdParty/freetype"]
 	path = Libraries/ThirdParty/freetype
 	url = https://github.com/freetype/freetype.git
+[submodule "Libraries/ThirdParty/astc-encoder"]
+	path = Libraries/ThirdParty/astc-encoder
+	url = https://github.com/ARM-software/astc-encoder.git

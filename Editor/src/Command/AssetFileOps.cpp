@@ -185,6 +185,8 @@ namespace Helios
 			{ ".TGA", AssetFileKind::Image }, { ".PSD", AssetFileKind::Image },
 			{ ".GIF", AssetFileKind::Image }, { ".HDR", AssetFileKind::Image },
 			{ ".DDS", AssetFileKind::Image },
+			/* 烘好的块数据：stb 解不了，但 Metal 后端能直接上传，缩略图与尺寸行都有 */
+			{ ".ASTC", AssetFileKind::Image },
 			/* 矢量图：.svg 是编辑器图标源，资源面板直接按文件渲染预览（不进纹理解码器） */
 			{ ".SVG", AssetFileKind::Svg },
 			{ ".SCN", AssetFileKind::Scene },

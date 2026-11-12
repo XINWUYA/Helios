@@ -509,3 +509,31 @@ set_target_properties(RmlUi PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${OUTPUT_DIR}"
     FOLDER "Libraries/ThirdParty"
 )
+
+# astcenc 5.7.1（submodule）：贴图烘焙用的 ASTC 编码库，编辑器直接调库编块数据，
+# 不再依赖外部 astcenc 可执行文件。只出静态库、只编当前架构的一档 SIMD。
+if(NOT HELIOS_TARGET_PLATFORM STREQUAL "iOS")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        set(ASTCENC_ISA_NEON ON CACHE BOOL "" FORCE)
+        set(ASTCENC_ISA_SSE41 OFF CACHE BOOL "" FORCE)
+        set(ASTCENC_ISA_TAG neon)
+    else()
+        set(ASTCENC_ISA_NEON OFF CACHE BOOL "" FORCE)
+        set(ASTCENC_ISA_SSE41 ON CACHE BOOL "" FORCE)
+        set(ASTCENC_ISA_TAG sse4.1)
+    endif()
+
+    foreach(astcenc_option
+            ASTCENC_ISA_AVX2 ASTCENC_ISA_SSE2 ASTCENC_ISA_SVE_256 ASTCENC_ISA_SVE_128
+            ASTCENC_ISA_NONE ASTCENC_ISA_NATIVE ASTCENC_DECOMPRESSOR ASTCENC_SHAREDLIB
+            ASTCENC_BIG_ENDIAN ASTCENC_DIAGNOSTICS ASTCENC_ASAN ASTCENC_UBSAN
+            ASTCENC_UNITTEST ASTCENC_CLI ASTCENC_UNIVERSAL_BUILD ASTCENC_WERROR
+            ASTCENC_X86_GATHERS)
+        set(${astcenc_option} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    set(ASTCENC_INVARIANCE ON CACHE BOOL "" FORCE)
+
+    add_subdirectory(astc-encoder/Source astcenc)
+    set(ASTCENC_TARGET_LIB "astcenc-${ASTCENC_ISA_TAG}-static" CACHE INTERNAL "astcenc 静态库目标名")
+    set_target_properties(${ASTCENC_TARGET_LIB} PROPERTIES FOLDER "Libraries/ThirdParty")
+endif()
