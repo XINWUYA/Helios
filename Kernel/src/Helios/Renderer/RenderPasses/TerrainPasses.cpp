@@ -274,7 +274,8 @@ namespace Helios::TerrainDraw
 			Material::MakeIBLParamOverrides(per_draw.Overrides,
 				chosen != nullptr ? chosen->GetIrradianceMap() : nullptr,
 				chosen != nullptr ? chosen->GetPrefilterMap() : nullptr,
-				probe_manager != nullptr ? probe_manager->GetBRDFLutMap() : nullptr);
+				probe_manager != nullptr ? probe_manager->GetBRDFLutMap() : nullptr,
+				chosen != nullptr ? chosen->GetIntensity() : 1.0f);
 		}
 
 		void SubmitVisibleBatch(const FrameCache& frame, bool forward, DebugViewMode debug_view,

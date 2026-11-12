@@ -101,6 +101,12 @@ namespace Helios
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetBlendDistance, &ReflectionProbe::SetBlendDistance>(),
 				"BlendDistance", FieldType::Float, 0.01f)
+			/* 强调系数：缩放这份探针贡献的 IBL，只在采样时乘，改了不用重烤 */
+			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
+					&ReflectionProbe::GetIntensity, &ReflectionProbe::SetIntensity>(),
+				"Intensity", FieldType::Float, 0.01f)
+			.Range(0.0f, 8.0f)
+			.Slider()
 			/* 探针关心的层：烘焙只捕获这些层，视图也只在与自身可见层相交时使用它 */
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetCullingMask, &ReflectionProbe::SetCullingMask>(),

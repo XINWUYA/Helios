@@ -458,6 +458,7 @@ namespace Helios
 							material->SetParameters(ParamType::Int, "u_ProbeBlendEnabled", ibl_blend_enabled ? 1 : 0);
 							static constexpr const char* kProbePositionNames[] = { "u_ProbePosition0", "u_ProbePosition1", "u_ProbePosition2" };
 							static constexpr const char* kProbeExtentNames[] = { "u_ProbeExtent0", "u_ProbeExtent1", "u_ProbeExtent2" };
+							static constexpr const char* kProbeIntensityNames[] = { "u_ProbeIntensity0", "u_ProbeIntensity1", "u_ProbeIntensity2" };
 							static constexpr const char* kIrradianceNames[] = { "u_IrradianceMap0", "u_IrradianceMap1", "u_IrradianceMap2" };
 							static constexpr const char* kPrefilterNames[] = { "u_PrefilterMap0", "u_PrefilterMap1", "u_PrefilterMap2" };
 							static_assert(std::size(kProbePositionNames) == kMaxDeferredIBLProbes);
@@ -471,6 +472,9 @@ namespace Helios
 									valid ? glm::vec4(ibl_probes[probe_index]->GetBoxSize() * 0.5f,
 										ibl_probes[probe_index]->GetBlendDistance())
 									: glm::vec4(0.0f));
+								/* 强调系数：逐探针缩放采样结果，不参与烘焙 */
+								material->SetParameters(ParamType::Float, kProbeIntensityNames[probe_index],
+									valid ? ibl_probes[probe_index]->GetIntensity() : 1.0f);
 
 								material->SetTexture(kIrradianceNames[probe_index],
 									valid ? ibl_probes[probe_index]->GetIrradianceMap() : DeviceTexture::BlackCube());

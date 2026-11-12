@@ -10,6 +10,8 @@ uniform samplerCube u_IrradianceMap;
 uniform samplerCube u_PrefilterMap;
 uniform sampler2D   u_BRDFLut;
 uniform int u_UseIBL = 0;
+/* 强调系数：缩放这份探针贡献的 IBL，1 = 原样；同样只在采样时乘，不参与烘焙 */
+uniform float u_IBLIntensity = 1.0f;
 
 /* 间接光：辐照度图（半球卷积）+ 粗糙度预滤波镜面（mip m 对应 roughness = m/(层数-1)），
  * 采样层级 = roughness × 最大 mip 序号；合成走公共库（与延迟侧同一份），怎么与直接光叠加由调用方决定。
@@ -20,9 +22,9 @@ void EvaluateIBLComponents(vec3 N, vec3 V, float roughness, float metallic, vec3
 	roughness = clamp(roughness, 0.0f, 1.0f);
 	const float ndv = max(dot(N, V), 0.0f);
 
-	vec3 irradiance = texture(u_IrradianceMap, N).rgb;
+	vec3 irradiance = texture(u_IrradianceMap, N).rgb * u_IBLIntensity;
 	const float max_lod = log2(float(textureSize(u_PrefilterMap, 0).x));
-	vec3 prefiltered = textureLod(u_PrefilterMap, reflect(-V, N), roughness * max_lod).rgb;
+	vec3 prefiltered = textureLod(u_PrefilterMap, reflect(-V, N), roughness * max_lod).rgb * u_IBLIntensity;
 	vec2 brdf = texture(u_BRDFLut, vec2(ndv, roughness)).rg;
 
 	diffuse = ComposeIBLDiffuse(N, V, metallic, roughness, albedo, irradiance);

@@ -123,7 +123,8 @@ namespace Helios
 						Material::MakeIBLParamOverrides(per_draw.Overrides,
 							chosen != nullptr ? chosen->GetIrradianceMap() : nullptr,
 							chosen != nullptr ? chosen->GetPrefilterMap() : nullptr,
-							brdf_lut);
+							brdf_lut,
+							chosen != nullptr ? chosen->GetIntensity() : 1.0f);
 
 						if (debug_view == DebugViewMode::Probe)
 						{
@@ -400,7 +401,8 @@ namespace Helios
 					Material::MakeIBLParamOverrides(per_draw.Overrides,
 						chosen != nullptr ? chosen->GetIrradianceMap() : nullptr,
 						chosen != nullptr ? chosen->GetPrefilterMap() : nullptr,
-						probe_manager != nullptr ? probe_manager->GetBRDFLutMap() : nullptr);
+						probe_manager != nullptr ? probe_manager->GetBRDFLutMap() : nullptr,
+						chosen != nullptr ? chosen->GetIntensity() : 1.0f);
 				});
 		}
 

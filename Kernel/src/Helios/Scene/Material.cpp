@@ -633,12 +633,14 @@ namespace Helios
 	void Material::MakeIBLParamOverrides(std::vector<MaterialParamInfo>& overrides,
 		const SharedPtr<DeviceTexture>& irradiance_map,
 		const SharedPtr<DeviceTexture>& prefilter_map,
-		const SharedPtr<DeviceTexture>& brdf_lut)
+		const SharedPtr<DeviceTexture>& brdf_lut,
+		float intensity)
 	{
 		/* 三张图齐备才启用（与探针"可用"的判据同源：不齐视为无 IBL） */
 		const bool ibl_ready = irradiance_map != nullptr && prefilter_map != nullptr && brdf_lut != nullptr;
 
 		overrides.emplace_back(ParamType::Int, "u_UseIBL", ibl_ready ? 1 : 0);
+		overrides.emplace_back(ParamType::Float, "u_IBLIntensity", intensity);
 		overrides.emplace_back(MakeTextureParam("u_IrradianceMap",
 			ibl_ready ? irradiance_map : DeviceTexture::BlackCube()));
 		overrides.emplace_back(MakeTextureParam("u_PrefilterMap",

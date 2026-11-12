@@ -56,6 +56,10 @@ uniform vec3 u_ProbePosition2 = vec3(0.0f);
 uniform vec4 u_ProbeExtent0 = vec4(0.0f);
 uniform vec4 u_ProbeExtent1 = vec4(0.0f);
 uniform vec4 u_ProbeExtent2 = vec4(0.0f);
+/* 强调系数：逐探针缩放采样到的 IBL，1 = 原样 */
+uniform float u_ProbeIntensity0 = 1.0f;
+uniform float u_ProbeIntensity1 = 1.0f;
+uniform float u_ProbeIntensity2 = 1.0f;
 /* 混合开关：0 = 没有探针配过渡，走旧的"距离最近"路径 */
 uniform int u_ProbeBlendEnabled = 0;
 
@@ -159,9 +163,11 @@ SProbeSelection SelectIBLProbes(vec3 world_pos)
 }
 
 /* 单探针采样：辐照度与预滤波镜面（按粗糙度选 mip）——与合成拆开，混合路径下
- * 两个探针各调一次（F / kd / BRDF LUT 与探针无关，合成只算一次） */
+ * 两个探针各调一次（F / kd / BRDF LUT 与探针无关，合成只算一次）。
+ * 采样值当场乘上该探针的强调系数，混合的是已经缩放过结果 */
 void SampleProbeIBL(int probe, vec3 N, vec3 R, float roughness, out vec3 irradiance, out vec3 prefiltered)
 {
+	float intensity = u_ProbeIntensity0;
 	if (probe == 0)
 	{
 		irradiance = texture(u_IrradianceMap0, N).rgb;
@@ -169,14 +175,19 @@ void SampleProbeIBL(int probe, vec3 N, vec3 R, float roughness, out vec3 irradia
 	}
 	else if (probe == 1)
 	{
+		intensity = u_ProbeIntensity1;
 		irradiance = texture(u_IrradianceMap1, N).rgb;
 		prefiltered = textureLod(u_PrefilterMap1, R, roughness * log2(float(textureSize(u_PrefilterMap1, 0).x))).rgb;
 	}
 	else
 	{
+		intensity = u_ProbeIntensity2;
 		irradiance = texture(u_IrradianceMap2, N).rgb;
 		prefiltered = textureLod(u_PrefilterMap2, R, roughness * log2(float(textureSize(u_PrefilterMap2, 0).x))).rgb;
 	}
+
+	irradiance *= intensity;
+	prefiltered *= intensity;
 }
 
 /* 探针 IBL 的两个分量（支持 top2 混合）：取图在这里，合成走公共库。

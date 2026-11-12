@@ -85,6 +85,11 @@ namespace Helios
         void SetBlendDistance(float distance) { m_BlendDistance = distance; }
         float GetBlendDistance() const { return m_BlendDistance; }
 
+        /* 强调系数：着色时缩放这份探针的 IBL，漫反射与镜面同乘。只在采样时乘，
+         * 不参与烘焙 —— 改了不用重烤 */
+        void SetIntensity(float intensity) { m_Intensity = intensity < 0.0f ? 0.0f : intensity; }
+        [[nodiscard]] float GetIntensity() const { return m_Intensity; }
+
         /* 执行烘焙 */
         void Bake(RenderView* render_view);
 
@@ -259,6 +264,7 @@ namespace Helios
         /* IBL 应用参数（见上方 getter / setter 的说明） */
         glm::vec3 m_BoxSize{ 10.0f };
         float m_BlendDistance{ 0.0f };
+        float m_Intensity{ 1.0f };
         /* 探针关心的层（烘焙与视图使用共用这一份） */
         LayerMask m_CullingMask{ Layers::All };
 

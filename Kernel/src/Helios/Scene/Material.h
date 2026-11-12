@@ -141,11 +141,12 @@ namespace Helios
 
 		/* 组装 IBL 契约（u_UseIBL + 辐照度 / 预滤波 / BRDF LUT）的 per-draw 覆盖：三张图齐了就置一 +
 		 * 真实纹理；缺任何一张就置零 + 中性兜底。采样器每次绘制都必须有绑定（Metal 会校验断言），
-		 * 门控 uniform 只关取值、不省绑定，四个槽位始终有绑定。 */
+		 * 门控 uniform 只关取值、不省绑定，四个槽位始终有绑定。intensity 是探针的强调系数。 */
 		static void MakeIBLParamOverrides(std::vector<MaterialParamInfo>& overrides,
 			const SharedPtr<DeviceTexture>& irradiance_map,
 			const SharedPtr<DeviceTexture>& prefilter_map,
-			const SharedPtr<DeviceTexture>& brdf_lut);
+			const SharedPtr<DeviceTexture>& brdf_lut,
+			float intensity = 1.0f);
 
 		/* 克隆一个材质实例：共享 Shader 与纹理，复制参数表与光栅化状态；不带资产路径。
 		 * 用于"实例化材质"（实体级独立参数，见 ModelComponent::m_SlotOverrides）。 */
