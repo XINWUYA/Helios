@@ -25,6 +25,25 @@ namespace Helios::Build
 		std::string LogTail;
 	};
 
+	/* 打包过程的状态：界面每帧来读，画进度条用 */
+	struct Progress
+	{
+		/* 目标名，例如「打包 iOS 真机应用」 */
+		const char* Label{ "" };
+		/* 当前阶段：准备 / 配置工程 / 编译 / 收尾 */
+		const char* Stage{ "" };
+		/* 0~1 的整体进度；负数表示这一步拿不到百分比（CMake 配置阶段没有） */
+		float Fraction{ -1.0f };
+		/* 最近一行输出，显示当前在编什么 */
+		std::string LastLine;
+	};
+
+	/* 正在跑时填 out 并返回 true */
+	bool GetProgress(Progress& out);
+
+	/* 开跑前的环境检查（Xcode / CMake / 工具链）：不满足时把原因写进 reason */
+	bool CheckEnvironment(std::string& reason);
+
 	/* 跑一次打包，阻塞到结束。界面不要直接调，走 StartAsync。
 	 * project_dir 是打进包里的工程（当前打开的那个）；空则用 CMake 配的默认工程。 */
 	PackageResult Run(PackageTarget target, const std::filesystem::path& project_dir = {});

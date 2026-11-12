@@ -27,6 +27,8 @@ namespace Helios::Build
 			std::mutex Mutex;
 			bool Running{ false };
 			const char* Label{ "" };
+			const char* Stage{ "" };
+			float Fraction{ -1.0f };
 			std::string LastLine;
 			PackageResult Pending{};
 			bool HasPending{ false };
@@ -44,6 +46,34 @@ namespace Helios::Build
 			return "\"" + path.string() + "\"";
 		}
 
+		/* 从 "[ 42%] Building CXX object ..." 里取百分比 */
+		bool ParsePercent(const std::string& line, float& fraction)
+		{
+			if (line.empty() || line[0] != '[')
+				return false;
+
+			const size_t percent = line.find('%');
+			if (percent == std::string::npos || percent + 1 >= line.size() || line[percent + 1] != ']')
+				return false;
+
+			int value = 0;
+			bool has_digit = false;
+			for (size_t i = 1; i < percent; ++i)
+			{
+				if (line[i] < '0' || line[i] > '9')
+					continue;
+
+				value = value * 10 + (line[i] - '0');
+				has_digit = true;
+			}
+
+			if (!has_digit)
+				return false;
+
+			fraction = static_cast<float>(value) / 100.0f;
+			return true;
+		}
+
 		const char* LabelOf(PackageTarget target)
 		{
 			switch (target)
@@ -55,9 +85,22 @@ namespace Helios::Build
 			return "打包";
 		}
 
-		/* 跑一条命令，输出逐行转发到日志，末尾若干行留给界面 */
-		bool RunCommand(const std::string& command, std::string& log_tail)
+		/* 后台线程写进度：界面每帧来读，读写同一把锁。
+		 * fraction 传负数表示这一步没有百分比（CMake 配置阶段不打） */
+		void ReportProgress(const char* stage, float fraction)
 		{
+			std::lock_guard<std::mutex> lock(s_State.Mutex);
+			s_State.Stage = stage;
+			s_State.Fraction = fraction;
+		}
+
+		/* 跑一条命令，输出逐行转发到日志，末尾若干行留给界面。
+		 * progress_span > 0 时把输出里的 [NN%] 折算进整体进度；base 传负数是"这一步没有百分比" */
+		bool RunCommand(const std::string& command, std::string& log_tail,
+			const char* stage, float progress_base, float progress_span)
+		{
+			ReportProgress(stage, progress_base);
+
 			std::FILE* pipe = HELIOS_POPEN(command.c_str(), "r");
 			if (pipe == nullptr)
 			{
@@ -76,9 +119,17 @@ namespace Helios::Build
 					continue;
 
 				CORE_LOG_INFO("[Package] {}", line);
+
+				float percent = 0.0f;
+				const bool has_percent = progress_span > 0.0f && ParsePercent(line, percent);
 				{
 					std::lock_guard<std::mutex> lock(s_State.Mutex);
 					s_State.LastLine = line;
+					if (has_percent)
+					{
+						s_State.Stage = stage;
+						s_State.Fraction = progress_base + progress_span * percent;
+					}
 				}
 
 				lines.push_back(std::move(line));
@@ -155,6 +206,13 @@ namespace Helios::Build
 		{
 			PackageResult result;
 
+			std::string reason;
+			if (!CheckEnvironment(reason))
+			{
+				result.LogTail = reason;
+				return result;
+			}
+
 			const std::filesystem::path root = EngineRoot();
 			const std::string cmake = "\"" + std::string(HELIOS_CMAKE_PATH) + "\"";
 			const std::string toolchain = Quoted(root / "cmake" / "toolchains" / "iOS.cmake");
@@ -209,7 +267,9 @@ namespace Helios::Build
 			}
 
 			std::string log_tail;
-			if (!RunCommand(configure, log_tail))
+			/* CMake 配置阶段不打百分比，进度条走"来回滑"；编译阶段按 [NN%] 走，
+			 * 配置算前 15%，编译占剩下的 */
+			if (!RunCommand(configure, log_tail, "配置工程", -1.0f, 0.0f))
 			{
 				result.LogTail = std::move(log_tail);
 				return result;
@@ -218,6 +278,7 @@ namespace Helios::Build
 			/* Xcode 工程这一步只配置不出包：出包与签名留给 Xcode 自己 */
 			if (target == PackageTarget::IOSXcodeProject)
 			{
+				ReportProgress("收尾", 1.0f);
 				result.OutputPath = FindXcodeProject(build_dir);
 				result.Success = !result.OutputPath.empty();
 				if (!result.Success)
@@ -227,12 +288,13 @@ namespace Helios::Build
 
 			const unsigned jobs = std::max(2u, std::thread::hardware_concurrency());
 			build = cmake + " --build " + Quoted(build_dir) + " --target Player -j " + std::to_string(jobs);
-			if (!RunCommand(build, log_tail))
+			if (!RunCommand(build, log_tail, "编译", 0.15f, 0.85f))
 			{
 				result.LogTail = std::move(log_tail);
 				return result;
 			}
 
+			ReportProgress("收尾", 1.0f);
 			result.OutputPath = FindApp(build_dir);
 			result.Success = !result.OutputPath.empty();
 			if (!result.Success)
@@ -255,6 +317,8 @@ namespace Helios::Build
 
 			s_State.Running = true;
 			s_State.Label = LabelOf(target);
+			s_State.Stage = "准备";
+			s_State.Fraction = -1.0f;
 			s_State.LastLine.clear();
 			s_State.HasPending = false;
 		}
@@ -282,6 +346,51 @@ namespace Helios::Build
 	{
 		std::lock_guard<std::mutex> lock(s_State.Mutex);
 		return s_State.Label;
+	}
+
+	bool GetProgress(Progress& out)
+	{
+		std::lock_guard<std::mutex> lock(s_State.Mutex);
+		if (!s_State.Running)
+			return false;
+
+		out.Label = s_State.Label;
+		out.Stage = s_State.Stage;
+		out.Fraction = s_State.Fraction;
+		out.LastLine = s_State.LastLine;
+		return true;
+	}
+
+	bool CheckEnvironment(std::string& reason)
+	{
+#if !defined(__APPLE__)
+		reason = "iOS 应用只能在 macOS 上打包";
+		return false;
+#else
+		std::error_code error;
+
+		if (!std::filesystem::exists(HELIOS_CMAKE_PATH, error))
+		{
+			reason = std::string("找不到 CMake：") + HELIOS_CMAKE_PATH;
+			return false;
+		}
+
+		const std::filesystem::path toolchain =
+			EngineRoot() / "cmake" / "toolchains" / "iOS.cmake";
+		if (!std::filesystem::exists(toolchain, error))
+		{
+			reason = "找不到 iOS 工具链文件：" + toolchain.string();
+			return false;
+		}
+
+		if (!std::filesystem::exists("/usr/bin/xcodebuild", error))
+		{
+			reason = "没装 Xcode，或命令行工具没配置（xcode-select --install）";
+			return false;
+		}
+
+		return true;
+#endif
 	}
 
 	bool Poll(PackageResult& out)

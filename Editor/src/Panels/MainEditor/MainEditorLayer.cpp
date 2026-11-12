@@ -361,14 +361,16 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION();
 
-		/* 后台打包跑完的结果在这里取：弹窗要开在宿主窗口的作用域里 */
+		/* 后台打包的进度与结果都从这里取：弹窗要开在宿主窗口的作用域里 */
 		Build::PackageResult package_result;
 		if (Build::Poll(package_result))
 		{
-			m_LastPackageSucceeded = package_result.Success;
+			m_PackageDialogMode = package_result.Success
+				? EditorUI::PackageDialogMode::Success
+				: EditorUI::PackageDialogMode::Failed;
 			m_LastPackagePath = std::move(package_result.OutputPath);
 			m_LastPackageLog = std::move(package_result.LogTail);
-			m_ShowPackageResult = true;
+			m_ShowPackageDialog = true;
 		}
 
 		/* 宿主窗口铺满主视口、不参与停靠：菜单栏与工具栏都挂在它下面 */
@@ -452,8 +454,8 @@ namespace Helios
 			/* 顶部工具栏：菜单栏与工作区之间的固定一行（不参与停靠） */
 			ShowToolbarUI();
 
-			/* 打包结果弹窗：跟着宿主窗口这一帧走 */
-			ShowPackageResultPopup();
+			/* 打包弹窗：进度、结果、环境说明都在这一张卡上 */
+			ShowPackageDialog();
 
 			/* DockSpace 占满工具条之后的剩余区域 */
 			ImGuiIO& io = ImGui::GetIO();
@@ -920,6 +922,23 @@ namespace Helios
 
 		const bool running = Build::IsRunning();
 
+		/* 环境不满足就别开跑：直接把原因摆进弹窗，省得等一圈失败 */
+		const auto start = [this](Build::PackageTarget target)
+		{
+			std::string reason;
+			if (!Build::CheckEnvironment(reason))
+			{
+				m_PackageEnvReason = std::move(reason);
+				m_PackageDialogMode = EditorUI::PackageDialogMode::Environment;
+				m_ShowPackageDialog = true;
+				return;
+			}
+
+			Build::StartAsync(target, g_ProjectPath);
+			m_PackageDialogMode = EditorUI::PackageDialogMode::Progress;
+			m_ShowPackageDialog = true;
+		};
+
 		/* 正在跑时把目标名摆在最上面：一处状态，别让用户以为没反应 */
 		if (running)
 		{
@@ -928,17 +947,17 @@ namespace Helios
 		}
 
 		if (BarMenuItem("Package iOS Simulator App", nullptr, !running))
-			Build::StartAsync(Build::PackageTarget::IOSSimulatorApp, g_ProjectPath);
+			start(Build::PackageTarget::IOSSimulatorApp);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Build Player.app for the simulator under build-ios-sim");
 
 		if (BarMenuItem("Package iOS Device App", nullptr, !running))
-			Build::StartAsync(Build::PackageTarget::IOSDeviceApp, g_ProjectPath);
+			start(Build::PackageTarget::IOSDeviceApp);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Release build for a device under build-ios (signing must already be configured)");
 
 		if (BarMenuItem("Generate Xcode Project", nullptr, !running))
-			Build::StartAsync(Build::PackageTarget::IOSXcodeProject, g_ProjectPath);
+			start(Build::PackageTarget::IOSXcodeProject);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Configure build-ios-xcode with the Xcode generator; set signing and run from Xcode");
 
@@ -948,42 +967,33 @@ namespace Helios
 		EndBarMenu();
 	}
 
-	void MainEditorLayer::ShowPackageResultPopup()
+	void MainEditorLayer::ShowPackageDialog()
 	{
-		if (m_ShowPackageResult)
-		{
-			m_ShowPackageResult = false;
-			ImGui::OpenPopup("Package Result");
-		}
+		EditorUI::PackageDialogModel model;
 
-		if (!ImGui::BeginPopupModal("Package Result", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-			return;
-
-		if (m_LastPackageSucceeded)
+		/* 跑着就是进度页；跑完（或没开跑）看存下来的那一份 */
+		Build::Progress progress;
+		if (Build::GetProgress(progress))
 		{
-			ImGui::TextUnformatted("打包完成");
-			ImGui::Spacing();
-			ImGui::TextWrapped("%s", m_LastPackagePath.c_str());
+			model.Mode = EditorUI::PackageDialogMode::Progress;
+			model.Title = progress.Label;
+			model.Stage = progress.Stage;
+			model.Fraction = progress.Fraction;
+			model.LastLine = std::move(progress.LastLine);
 		}
 		else
 		{
-			ImGui::TextUnformatted("打包失败");
-			ImGui::Spacing();
-			/* 失败时给最后几行输出：不用再翻日志面板找原因 */
-			ImGui::BeginChild("##package_log", ImVec2(Scaled(560.0f), Scaled(220.0f)), true);
-			ImGui::TextUnformatted(m_LastPackageLog.c_str());
-			ImGui::EndChild();
+			model.Mode = m_PackageDialogMode;
+			model.Path = m_LastPackagePath;
+			model.Log = m_LastPackageLog;
+			model.Issue = m_PackageEnvReason;
 		}
 
-		ImGui::Spacing();
-		if (m_LastPackageSucceeded && BarMenuItem("Show in Finder"))
+		const bool request_open = m_ShowPackageDialog;
+		m_ShowPackageDialog = false;
+
+		if (EditorUI::ShowPackageDialog(request_open, model) && !m_LastPackagePath.empty())
 			Build::RevealInFileManager(m_LastPackagePath);
-
-		ImGui::SameLine();
-		if (BarMenuItem("Close"))
-			ImGui::CloseCurrentPopup();
-
-		ImGui::EndPopup();
 	}
 
 	/* 顶部工具栏依次排列文件操作和变换工具，运行按钮居中，视图工具贴右。 */
