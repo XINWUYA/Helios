@@ -31,11 +31,11 @@ bool TerrainVirtualTextureLookup(vec2 world_xz, out vec4 out_albedo)
 	if (layer < 0.5f)
 		return false;
 
-	/* 页内 uv 在页边界会从 0.99 跳到 0.01，自动梯度会炸，得手工给世界空间的导数 */
+	/* 页池只有一级 mip，直接取第 0 级：页内 uv 在页边界会从 0.99 跳到 0.01，
+	 * 自动导数会把 LOD 算飞；实测 iOS 真机上 textureGrad 采数组会算出发散地址，
+	 * 整个命令缓冲报 GPU 页错误。以后页池加 mip 再回来接显式梯度 */
 	const vec2 uv = local - cell;
-	const vec2 dx = dFdx(world_xz) / 64.0f;
-	const vec2 dy = dFdy(world_xz) / 64.0f;
-	out_albedo = textureGrad(u_VTPageAtlas, vec3(uv, layer - 1.0f), dx, dy);
+	out_albedo = textureLod(u_VTPageAtlas, vec3(uv, layer - 1.0f), 0.0);
 	return true;
 }
 
