@@ -7,6 +7,7 @@
 #include "Helios/Application/ProjectConfig.h"
 #include "Panels/ResourceBrowser/EditorResourceBrowser.h"
 #include "Panels/Log/LogPanel.h"
+#include "Panels/TextureOverview/TextureOverviewPanel.h"
 #include "Panels/PanelLayoutRestore.h"
 #include "App/ScriptModule.h"
 #include "Packaging/PackageDialog.h"
@@ -59,6 +60,8 @@ namespace Helios
 		void ShowRenderingMenu();
 		void ShowScriptsMenu();
 		void ShowShadersMenu();
+		/* 工程级小工具面板的开关（贴图总览这类，不属于场景编辑） */
+		void ShowToolsMenu();
 		/* 打包下拉：iOS 应用包与 Xcode 工程都在这里出 */
 		void ShowBuildMenu();
 		/* 打包弹窗：跑的时候看进度，跑完看结果，环境不满足时看说明 */
@@ -80,6 +83,8 @@ namespace Helios
 		EditorResourceBrowser m_ResourceBrowser;
 		/* 日志窗口（Kernel / Editor 的运行时输出；数据源 = LogBuffer） */
 		LogPanel m_LogPanel;
+		/* 贴图总览（Tools 菜单打开）：工程里每张贴图的路径 / 尺寸 / 显存 */
+		TextureOverviewPanel m_TextureOverviewPanel;
 		/* 上次关闭时的停靠前台页签恢复（等启动首帧的聚焦级联过去后逐帧应用） */
 		PanelLayoutRestore m_LayoutRestore;
 		/* 用户请求重置布局（Window → Layout → Default），下一帧生效 */

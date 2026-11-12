@@ -107,6 +107,8 @@ namespace Helios
 		m_ResourceBrowser.OnImGuiRenderer();
 		/* 日志窗口（Kernel / Editor 的运行时输出） */
 		m_LogPanel.OnImGuiRender(Panel::VisibleFlag(Panel::kLog));
+		/* 贴图总览（Tools 菜单，默认关着） */
+		m_TextureOverviewPanel.OnImGuiRender();
 		ShowEditorCameraUI();
 	}
 
@@ -443,6 +445,7 @@ namespace Helios
 				ShowRenderingMenu();
 				ShowScriptsMenu();
 				ShowShadersMenu();
+				ShowToolsMenu();
 				ShowBuildMenu();
 
 				ImGui::PopStyleColor();
@@ -910,6 +913,17 @@ namespace Helios
 			static_cast<int>(AssetManager::Instance().GetCount<DeviceShader>()),
 			static_cast<int>(m_ShaderReloader.GetPendingCount()));
 		PanelChrome::MenuStatusText(shader_status);
+
+		EndBarMenu();
+	}
+
+	/* Tools：工程级的小工具面板开关，跟场景编辑无关 */
+	void MainEditorLayer::ShowToolsMenu()
+	{
+		if (!BeginBarMenu("Tools"))
+			return;
+
+		Panel::DrawToggleMenuItems(Panel::Menu::Tools);
 
 		EndBarMenu();
 	}
