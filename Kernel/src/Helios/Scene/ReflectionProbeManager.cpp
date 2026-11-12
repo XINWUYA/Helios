@@ -52,12 +52,12 @@ namespace Helios
     namespace
     {
         /* 探针当前可否用于 IBL 着色：启用、已烘焙、双图（辐照度 + 预滤波）齐备，
-         * 且探针关心的层与视图可见层相交。缺图（烘焙配置关掉了漫反射 / 镜面）时按"不可用"
+         * 且探针所在层与视图可见层相交。缺图（烘焙配置关掉了漫反射 / 镜面）时按"不可用"
          * 处理 —— 采样未绑定的立方图在 Metal 校验层直接断言，不做猜测性兜底。 */
         bool IsProbeUsableForIBL(const SharedPtr<ReflectionProbe>& probe, LayerMask culling_mask)
         {
             return probe != nullptr && probe->GetEnable() && probe->IsBaked()
-                && Layers::IsVisible(probe->GetCullingMask(), culling_mask)
+                && Layers::IsVisible(probe->GetEntityLayerMask(), culling_mask)
                 && probe->GetIrradianceMap() != nullptr && probe->GetPrefilterMap() != nullptr;
         }
 

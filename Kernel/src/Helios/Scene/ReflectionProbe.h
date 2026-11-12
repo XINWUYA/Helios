@@ -97,8 +97,8 @@ namespace Helios
          * 返回 true 表示这一帧该烘了 */
         bool TickBakeInterval();
 
-        /* 探针关心的层：烘焙只捕获与它相交的层（剔除不想烘进去的物体），
-         * 视图也只在与自身可见层相交时使用这份 IBL。默认全部层。 */
+        /* 捕获层：烘焙只捕获与它相交的层（剔除不想烘进去的物体）。默认全部层。
+         * 只管"烘什么"，不决定哪些视图使用这份 IBL —— 那个看实体所在层。 */
         void SetCullingMask(LayerMask mask)
         {
             if (m_CullingMask == mask)
@@ -110,6 +110,13 @@ namespace Helios
             RequestRebake();
         }
         [[nodiscard]] LayerMask GetCullingMask() const { return m_CullingMask; }
+
+        /* 探针所在层：与相机可见层不相交时，本视图不用这份 IBL，与光源的判据一致。
+         * 每帧由 Scene::OnUpdate 从实体 LayerComponent 同步，实体上的 Layer 卡就是入口。
+         * 只筛使用范围，不影响烘焙内容。 */
+        void SetEntityLayerMask(LayerMask mask) { m_EntityLayerMask = mask; }
+        [[nodiscard]] LayerMask GetEntityLayerMask() const { return m_EntityLayerMask; }
+
         /* 重置烘焙状态、下次渲染重新烘焙。注意：它会当场销毁烘焙结果和预览纹理 —— 这些可能仍被
          * 当前帧的 ImGui 绘制列表引用，直接销毁会留下悬垂指针。UI（Rebake 按钮）走 RequestRebake 推迟执行。 */
         void Reset();
@@ -265,8 +272,10 @@ namespace Helios
         glm::vec3 m_BoxSize{ 10.0f };
         float m_BlendDistance{ 0.0f };
         float m_Intensity{ 1.0f };
-        /* 探针关心的层（烘焙与视图使用共用这一份） */
+        /* 捕获层（烘焙用，见 setter 说明） */
         LayerMask m_CullingMask{ Layers::All };
+        /* 探针所在层（视图使用范围，每帧从实体 LayerComponent 同步） */
+        LayerMask m_EntityLayerMask{ Layers::All };
 
         /* 烘焙结果缓存 */
         std::string m_BakeCachePath{};

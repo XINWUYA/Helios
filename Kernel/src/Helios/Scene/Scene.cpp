@@ -735,6 +735,9 @@ namespace Helios
 			 * 不参与 IBL 选择（注册保留，恢复可见即恢复参与） */
 			probe_component.m_ReflectionProbe->SetEnable(
 				m_FrameRecords[static_cast<size_t>(entt::to_entity(entity))].Visible);
+			/* 层同一处同步：相机可见层与它不相交的视图不使用这份 IBL，
+			 * 判据与光源完全一致，实体上的 Layer 卡就是配置入口 */
+			probe_component.m_ReflectionProbe->SetEntityLayerMask(GetEntityLayerMask(entity));
 		}
 		m_FrameRecordReadable = true;
 

@@ -107,7 +107,8 @@ namespace Helios
 				"Intensity", FieldType::Float, 0.01f)
 			.Range(0.0f, 8.0f)
 			.Slider()
-			/* 探针关心的层：烘焙只捕获这些层，视图也只在与自身可见层相交时使用它 */
+			/* 捕获层：烘焙只把这几层上的物体烘进立方图。哪些视图使用这份 IBL 看实体所在层，
+			 * 与光源同一条判据，不在这一项里配 */
 			.Field(MakeAccessor<&ReflectionProbeComponent::m_ReflectionProbe,
 					&ReflectionProbe::GetCullingMask, &ReflectionProbe::SetCullingMask>(),
 				"CullingMask", FieldType::LayerMask)
