@@ -55,6 +55,7 @@ namespace Helios
 		[[nodiscard]] uint32_t GetWidth() const override { return m_Width; }
 		[[nodiscard]] uint32_t GetHeight() const override { return m_Height; }
 		[[nodiscard]] float GetContentScale() const override { return m_ContentScale; }
+		[[nodiscard]] glm::vec4 GetSafeAreaInsets() const override { return m_SafeArea; }
 		[[nodiscard]] bool IsVSync() const override { return m_IsVSync; }
 		void SetVSync(bool enable) override;
 		void SetWindowTitle(const std::string& title) override;
@@ -93,6 +94,8 @@ namespace Helios
 		void OnUIPointerUp(float x, float y);
 		/* 视图布局变化：同步尺寸并派发 resize 事件 */
 		void OnViewLayout(float width_points, float height_points);
+		/* 安全区变了（转屏、进出全屏）：只更新记录，UI 下一帧自己取 */
+		void OnSafeAreaChange();
 		/* 回前台后重新对齐 drawable：系统可能在后台改过视图几何 */
 		void RefreshDrawableSize();
 
@@ -116,18 +119,16 @@ namespace Helios
 		uint32_t m_Width{ 0 };
 		uint32_t m_Height{ 0 };
 		float m_ContentScale{ 1.0f };
+		glm::vec4 m_SafeArea{ 0.0f };
 		bool m_IsVSync{ true };
 
 		glm::vec2 m_PointerPosition{ 0.0f };
 		bool m_PointerDown{ false };
 
-
 		/* UI 那一路指针：只有认领到 UI 的手指会写它 */
 		glm::vec2 m_UIPointerPosition{ -1.0f };
 		bool m_UIPointerDown{ false };
 		UITouchTest m_UITouchTest{};
-
-
 
 		EventCallbackFunc m_Callback{};
 	};

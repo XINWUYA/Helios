@@ -40,6 +40,10 @@ namespace Helios
 		 * 仅用于把 ImGui 的逻辑点坐标换算成像素。 */
 		[[nodiscard]] virtual float GetContentScale() const { return 1.0f; }
 
+		/* 安全区（逻辑点，左上下右）：刘海、圆角、home 条占掉的部分。
+		 * 桌面没有这些，返回全零；UI 侧按它缩进，别把控件摆到遮挡区里。 */
+		[[nodiscard]] virtual glm::vec4 GetSafeAreaInsets() const { return glm::vec4(0.0f); }
+
 		/* 设置垂直同步 */
 		[[nodiscard]] virtual bool IsVSync() const = 0;
 		virtual void SetVSync(bool enable) = 0;
@@ -65,6 +69,7 @@ namespace Helios
 	[[nodiscard]] virtual glm::vec2 QueryPointerPosition() const { return glm::vec2(0.0f); }
 	/* 窗口是否拿着系统焦点：没焦点时脚本侧输入一律不放行 */
 	[[nodiscard]] virtual bool HasFocus() const { return true; }
+
 	/* ---- 多指：一根手指点 UI，另一根转视角 ----
 	 * 触摸落下时问这个回调，落在画布控件上的那根归 UI，其余归指针（脚本拿去转视角）。
 	 * 坐标是逻辑点。桌面没有触摸，窗口不会调它。 */

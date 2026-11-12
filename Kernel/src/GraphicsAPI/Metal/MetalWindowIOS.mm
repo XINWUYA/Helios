@@ -19,6 +19,22 @@
  * 这两块只做转发，状态全在 IOSWindow 里，避免同一份状态跨语言两头存。
  * ------------------------------------------------------------------------- */
 
+/* 视图的 contentScaleFactor 要等入窗并跑完一次布局才是屏幕的 scale，
+ * 建窗口那一刻读它拿到的是 1，后备缓冲于是按 1x 建、再由系统放大三倍 */
+static CGFloat ScreenScaleOf(UIView* view)
+{
+	UIScreen* screen = view.window.screen != nil ? view.window.screen : [UIScreen mainScreen];
+	return screen.scale;
+}
+
+/* 安全区按逻辑点取，左上下右；引擎侧再用 scale 换成像素 */
+static glm::vec4 ReadSafeArea(UIView* view)
+{
+	const UIEdgeInsets insets = view.safeAreaInsets;
+	return glm::vec4(static_cast<float>(insets.left), static_cast<float>(insets.top),
+		static_cast<float>(insets.right), static_cast<float>(insets.bottom));
+}
+
 /* 触摸与布局变化要回给 C++ 窗口对象；视图只拿一个不透明指针 */
 @interface HeliosIOSView : UIView
 @property(nonatomic, assign) Helios::IOSWindow* Owner;
@@ -124,6 +140,14 @@
 		self.Owner->OnViewLayout(static_cast<float>(size.width), static_cast<float>(size.height));
 }
 
+- (void)safeAreaInsetsDidChange
+{
+	[super safeAreaInsetsDidChange];
+
+	if (self.Owner != nullptr)
+		self.Owner->OnSafeAreaChange();
+}
+
 @end
 
 /* CADisplayLink 要一个 ObjC target，这里只负责把每帧转给窗口 */
@@ -190,7 +214,7 @@ namespace Helios
 		m_Device = metal_render_api->GetDevice();
 
 		UIView* view = (__bridge UIView*)m_View;
-		const CGFloat scale = view.contentScaleFactor;
+		const CGFloat scale = ScreenScaleOf(view);
 
 		/* 视图的根层由 +layerClass 指定成 CAMetalLayer，这里只配参数，不换层 */
 		m_MetalLayer = reinterpret_cast<CA::MetalLayer*>(view.layer);
@@ -297,17 +321,22 @@ namespace Helios
 		window.rootViewController = controller;
 		[window makeKeyAndVisible];
 
+		/* 布局跑完才有屏幕的 scale 与安全区，后面算尺寸要用 */
+		[view layoutIfNeeded];
+
 		m_Window = window;
 		m_Controller = controller;
 		m_View = view;
-		m_ContentScale = static_cast<float>(view.contentScaleFactor);
+		m_ContentScale = static_cast<float>(ScreenScaleOf(view));
+		m_SafeArea = ReadSafeArea(view);
 
 		const CGSize bounds = view.bounds.size;
 		m_Width = static_cast<uint32_t>(bounds.width * m_ContentScale + 0.5);
 		m_Height = static_cast<uint32_t>(bounds.height * m_ContentScale + 0.5);
 
-		CORE_LOG_INFO("Create iOS window: {}x{} pixels, content scale {}",
-			m_Width, m_Height, static_cast<double>(m_ContentScale));
+		CORE_LOG_INFO("Create iOS window: {}x{} pixels, content scale {}, safe area {} {} {} {}",
+			m_Width, m_Height, static_cast<double>(m_ContentScale),
+			m_SafeArea.x, m_SafeArea.y, m_SafeArea.z, m_SafeArea.w);
 	}
 
 	void IOSWindow::Destroy()
@@ -499,8 +528,12 @@ namespace Helios
 
 	void IOSWindow::OnViewLayout(float width_points, float height_points)
 	{
-		if (width_points <= 0.0f || height_points <= 0.0f)
+		if (width_points <= 0.0f || height_points <= 0.0f || m_View == nullptr)
 			return;
+
+		/* 转屏或投到外接屏时屏幕 scale 可能变，跟着重算一次 */
+		m_ContentScale = static_cast<float>(ScreenScaleOf((__bridge UIView*)m_View));
+		m_SafeArea = ReadSafeArea((__bridge UIView*)m_View);
 
 		const uint32_t width = static_cast<uint32_t>(width_points * m_ContentScale + 0.5f);
 		const uint32_t height = static_cast<uint32_t>(height_points * m_ContentScale + 0.5f);
@@ -520,6 +553,14 @@ namespace Helios
 		}
 	}
 
+	void IOSWindow::OnSafeAreaChange()
+	{
+		if (m_View == nullptr)
+			return;
+
+		m_SafeArea = ReadSafeArea((__bridge UIView*)m_View);
+	}
+
 	void IOSWindow::OnDisplayLink()
 	{
 		Application* app = Application::Instance();
@@ -535,6 +576,8 @@ namespace Helios
 			return;
 
 		const CGSize bounds = ((__bridge UIView*)m_View).bounds.size;
+		m_ContentScale = static_cast<float>(ScreenScaleOf((__bridge UIView*)m_View));
+		m_SafeArea = ReadSafeArea((__bridge UIView*)m_View);
 		m_Width = static_cast<uint32_t>(bounds.width * m_ContentScale + 0.5f);
 		m_Height = static_cast<uint32_t>(bounds.height * m_ContentScale + 0.5f);
 

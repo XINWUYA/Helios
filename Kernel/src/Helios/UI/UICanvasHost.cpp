@@ -239,6 +239,10 @@ namespace Helios
 			m_ContextName.clear();
 			m_DocumentFile.clear();
 			m_Watched.clear();
+			/* 新文档没被摆过：让下一次 Update 重新落一次安全区 */
+			m_AppliedSafeArea = glm::vec4(0.0f);
+			m_AppliedWidth = -1;
+			m_AppliedHeight = -1;
 		}
 
 		void UICanvasHost::SetDensityRatio(float ratio)
@@ -248,12 +252,44 @@ namespace Helios
 				m_Context->SetDensityIndependentPixelRatio(m_Options.DensityRatio);
 		}
 
+		void UICanvasHost::SetSafeAreaInsets(const glm::vec4& insets)
+		{
+			m_SafeArea = insets;
+		}
+
+		void UICanvasHost::ApplySafeArea(int width, int height)
+		{
+			if (m_Document == nullptr)
+				return;
+
+			/* 桌面没有安全区：文档维持原来的 100%，不必去改它的盒子 */
+			if (m_SafeArea == glm::vec4(0.0f) && m_AppliedSafeArea == glm::vec4(0.0f))
+				return;
+			if (m_SafeArea == m_AppliedSafeArea && width == m_AppliedWidth && height == m_AppliedHeight)
+				return;
+
+			m_AppliedSafeArea = m_SafeArea;
+			m_AppliedWidth = width;
+			m_AppliedHeight = height;
+
+			/* 文档本体直接缩进安全区：绝对定位的子元素按它的 padding box 定位，
+			 * 加 padding 挪不动它们（CSS 就是这么定的），只能改文档自己的盒子 */
+			const float box_width = std::max(static_cast<float>(width) - m_SafeArea.x - m_SafeArea.z, 1.0f);
+			const float box_height = std::max(static_cast<float>(height) - m_SafeArea.y - m_SafeArea.w, 1.0f);
+			m_Document->SetProperty(Rml::PropertyId::Position, Rml::Property(Rml::Style::Position::Absolute));
+			m_Document->SetProperty(Rml::PropertyId::Left, Rml::Property(m_SafeArea.x, Rml::Unit::PX));
+			m_Document->SetProperty(Rml::PropertyId::Top, Rml::Property(m_SafeArea.y, Rml::Unit::PX));
+			m_Document->SetProperty(Rml::PropertyId::Width, Rml::Property(box_width, Rml::Unit::PX));
+			m_Document->SetProperty(Rml::PropertyId::Height, Rml::Property(box_height, Rml::Unit::PX));
+		}
+
 		void UICanvasHost::Update(int width, int height)
 		{
 			if (m_Context == nullptr)
 				return;
 
 			m_Context->SetDimensions(Rml::Vector2i(width, height));
+			ApplySafeArea(width, height);
 			/* 样式表要等第一次布局才打开：这一段打开的文件补进监听表 */
 			DiagnosticsScope diagnostics(m_Diagnostics.get());
 			FileInterface().BeginCapture();

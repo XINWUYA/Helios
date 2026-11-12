@@ -8,6 +8,7 @@
 #include "ElementJoystick.h"
 #include "UICanvasHost.h"
 
+#include "Helios/Application/Application.h"
 #include "Helios/Core/Input.h"
 #include "Helios/Profiler/RenderStatistics.h"
 #include "Helios/Renderer/RenderView.h"
@@ -44,6 +45,27 @@ namespace Helios
 			std::string CanvasContextPrefix(entt::entity canvas)
 			{
 				return "canvas_" + std::to_string(static_cast<uint32_t>(canvas));
+			}
+
+			/* 屏幕给的是逻辑点：dp 按点走，元素在手机上的物理大小才和设计稿一致。
+			 * 安全区换成物理像素 —— 画布一律按像素布局 */
+			struct ScreenMetrics
+			{
+				float DensityRatio{ 1.0f };
+				glm::vec4 SafeArea{ 0.0f };
+			};
+
+			ScreenMetrics ReadScreenMetrics()
+			{
+				ScreenMetrics metrics;
+				Application* application = Application::Instance();
+				if (application == nullptr)
+					return metrics;
+
+				const DeviceWindow& window = application->GetWindow();
+				metrics.DensityRatio = std::max(window.GetContentScale(), 0.01f);
+				metrics.SafeArea = window.GetSafeAreaInsets() * metrics.DensityRatio;
+				return metrics;
 			}
 		}
 
@@ -85,11 +107,14 @@ namespace Helios
 				CheckHotReload();
 			}
 
+			const ScreenMetrics metrics = ReadScreenMetrics();
 			for (const UniquePtr<CanvasRuntime>& canvas : m_Canvases)
 			{
 				if (!canvas->Host.IsOpen())
 					continue;
 
+				canvas->Host.SetDensityRatio(metrics.DensityRatio);
+				canvas->Host.SetSafeAreaInsets(metrics.SafeArea);
 				SyncJoysticks(*canvas);
 				SyncSliders(*canvas);
 				/* 尺寸取上一帧渲染时的视图尺寸：布局比画面慢一帧，命中测试也用它 */
@@ -156,6 +181,7 @@ namespace Helios
 				options.ContextPrefix = CanvasContextPrefix(entity);
 				options.Width = m_ViewWidth;
 				options.Height = m_ViewHeight;
+				options.DensityRatio = ReadScreenMetrics().DensityRatio;
 				/* 编辑器里同目录的样式也盯：改哪一份都能就地重排 */
 				options.WatchSiblingStyles = IsHotReloadEnabled();
 

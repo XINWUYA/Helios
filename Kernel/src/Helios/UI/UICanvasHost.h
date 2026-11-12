@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <glm/glm.hpp>
+
 #include "Helios/Common/Common.h"
 #include "Helios/Common/Export.h"
 #include "Helios/Core/KeyCodes.h"
@@ -56,6 +58,8 @@ namespace Helios
 			void Render(int width, int height);
 
 			void SetDensityRatio(float ratio);
+			/* 安全区（物理像素，左上下右）：文档本体缩进这块区域，控件就不会摆到刘海和 home 条底下 */
+			void SetSafeAreaInsets(const glm::vec4& insets);
 			[[nodiscard]] Change ReloadIfChanged();
 
 			/* ---- 输入（物理像素，原点在左上角）：返回 UI 是否消费了这次事件 ---- */
@@ -103,8 +107,14 @@ namespace Helios
 			void WatchFiles(const std::vector<std::filesystem::path>& files, const std::filesystem::path& document_file);
 			/* 同目录的样式表一起盯：<link> 由 RmlUi 在首次布局时才打开 */
 			void WatchSiblingStyles();
+			/* 把安全区落到文档盒子上；尺寸或安全区变了才动 */
+			void ApplySafeArea(int width, int height);
 
 			Options m_Options{};
+			glm::vec4 m_SafeArea{ 0.0f };
+			glm::vec4 m_AppliedSafeArea{ 0.0f };
+			int m_AppliedWidth{ -1 };
+			int m_AppliedHeight{ -1 };
 			std::string m_ContextName{};
 			std::string m_DocumentPath{};
 			Rml::Context* m_Context{ nullptr };

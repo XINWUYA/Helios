@@ -1,5 +1,6 @@
 /* 运行时 UI 的示例样式：左上角一块说明，左下角一个摇杆。
- * 单位按物理像素写，Context 的 dp-ratio 当前是 1。
+ * dp 跟着屏幕密度走，一个 dp 就是一个逻辑点，手机上按手指能点中的尺寸写。
+ * 文档本体由引擎缩进安全区，这里贴边只写 16dp 就够。
  * RmlUi 没有内建的标签默认样式，display 一律显式给。 */
 
 body
@@ -29,10 +30,10 @@ body
 {
 	display: block;
 	position: absolute;
-	left: 36dp;
-	top: 28dp;
+	left: 16dp;
+	top: 16dp;
 	/* 定宽：绝对定位的块是收缩宽度，不带宽度时文本框会把它撑破 */
-	width: 320dp;
+	width: 260dp;
 	padding: 14dp;
 	/* 整块吃指针：hud 那层是 none，这里不打开的话在面板上按下会被当成转视角 */
 	pointer-events: auto;
@@ -132,8 +133,8 @@ body
 {
 	display: flex;
 	position: absolute;
-	right: 36dp;
-	bottom: 36dp;
+	right: 16dp;
+	bottom: 16dp;
 	gap: 10dp;
 	pointer-events: auto;
 }
@@ -185,15 +186,16 @@ body
 	border: 2dp #7f77dd;
 }
 
+/* 拇指够得到的左下角：底盘 140dp，手柄 56dp，行程按底盘三成算 */
 #stick
 {
 	display: block;
 	position: absolute;
-	left: 120dp;
-	bottom: 100dp;
-	width: 180dp;
-	height: 180dp;
-	border-radius: 90dp;
+	left: 16dp;
+	bottom: 16dp;
+	width: 140dp;
+	height: 140dp;
+	border-radius: 70dp;
 	background-color: rgba(12, 16, 24, 120);
 	border: 2dp rgba(255, 255, 255, 70);
 	pointer-events: auto;
@@ -205,11 +207,11 @@ body
 {
 	display: block;
 	position: absolute;
-	left: 50dp;
-	top: 50dp;
-	width: 80dp;
-	height: 80dp;
-	border-radius: 40dp;
+	left: 40dp;
+	top: 40dp;
+	width: 56dp;
+	height: 56dp;
+	border-radius: 28dp;
 	background-color: rgba(242, 244, 248, 210);
 	border: 2dp rgba(12, 16, 24, 60);
 }
