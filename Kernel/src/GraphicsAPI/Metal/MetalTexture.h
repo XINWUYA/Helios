@@ -59,6 +59,8 @@ namespace Helios
         /* 按加载配置创建采样器状态；渲染目标使用默认采样器 */
         void CreateSamplerState(const TextureLoadConfig& load_config);
         void LoadFromFile(const std::string& path, const TextureLoadConfig& load_config);
+        /* 同名 .astc 存在就直传预烘的块数据，没烘过返回 false 走解码 */
+        bool TryLoadAstc(const std::string& path, const TextureLoadConfig& load_config);
 
         /* 依据尺寸与是否生成 mip 推导 mip 层级数 */
         static uint8_t ResolveMipLevels(uint32_t width, uint32_t height, bool gen_mips);

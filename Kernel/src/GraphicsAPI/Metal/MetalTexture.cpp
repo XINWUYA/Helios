@@ -8,9 +8,11 @@
 #include "MetalConversions.h"
 #include "MetalShader.h"
 #include "Helios/Core/TextureSettings.h"
+#include "Helios/Common/AssetPath.h"
 #include "Helios/Core/TextureDecode.h"
 
 #include <algorithm>
+#include <fstream>
 #include <cmath>
 #include <cstring>
 
@@ -463,12 +465,153 @@ namespace Helios
         }
     }
 
+    namespace
+    {
+        /* 容器头与 astcenc 原生格式一致，烘图脚本见 Tools/astc_bake.py */
+        constexpr uint32_t kAstcMagic = 0x5CA1AB13;
+
+        uint32_t ReadU24(const uint8_t* bytes)
+        {
+            return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8)
+                | (static_cast<uint32_t>(bytes[2]) << 16);
+        }
+
+        MTL::PixelFormat ToAstcPixelFormat(uint8_t block_x, uint8_t block_y, bool srgb)
+        {
+            const int key = block_x * 100 + block_y;
+            switch (key)
+            {
+            case 404: return srgb ? MTL::PixelFormatASTC_4x4_sRGB : MTL::PixelFormatASTC_4x4_LDR;
+            case 505: return srgb ? MTL::PixelFormatASTC_5x5_sRGB : MTL::PixelFormatASTC_5x5_LDR;
+            case 606: return srgb ? MTL::PixelFormatASTC_6x6_sRGB : MTL::PixelFormatASTC_6x6_LDR;
+            case 808: return srgb ? MTL::PixelFormatASTC_8x8_sRGB : MTL::PixelFormatASTC_8x8_LDR;
+            default: return MTL::PixelFormatInvalid;
+            }
+        }
+    }
+
+    bool MetalTexture::TryLoadAstc(const std::string& path, const TextureLoadConfig& load_config)
+    {
+        PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
+
+        std::filesystem::path astc_path = PathFromUtf8(path);
+        astc_path.replace_extension(".astc");
+
+        std::error_code error;
+        if (!std::filesystem::is_regular_file(astc_path, error))
+            return false;
+
+        std::ifstream file(astc_path, std::ios::binary | std::ios::ate);
+        if (!file)
+            return false;
+
+        const std::streamsize size = file.tellg();
+        if (size <= 16)
+            return false;
+
+        std::vector<uint8_t> data(static_cast<size_t>(size));
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(data.data()), size);
+
+        if (*reinterpret_cast<const uint32_t*>(data.data()) != kAstcMagic)
+        {
+            CORE_LOG_WARN("MetalTexture: bad ASTC header, fallback to decode: {}", astc_path.string());
+            return false;
+        }
+
+        const uint8_t block_x = data[4];
+        const uint8_t block_y = data[5];
+        const uint32_t width = ReadU24(data.data() + 7);
+        const uint32_t height = ReadU24(data.data() + 10);
+        if (width == 0 || height == 0)
+            return false;
+
+        const MTL::PixelFormat format = ToAstcPixelFormat(block_x, block_y, load_config.IsSrgb);
+        if (format == MTL::PixelFormatInvalid)
+        {
+            CORE_LOG_WARN("MetalTexture: ASTC block {}x{} unsupported, fallback to decode: {}",
+                block_x, block_y, astc_path.string());
+            return false;
+        }
+
+        /* 层数与大小必须和烘图脚本一致，对不上说明文件被改过 */
+        const uint8_t levels = ResolveMipLevels(width, height, true);
+        size_t expected = 16;
+        for (uint32_t level = 0; level < levels; ++level)
+        {
+            const uint32_t level_width = std::max(1u, width >> level);
+            const uint32_t level_height = std::max(1u, height >> level);
+            expected += static_cast<size_t>((level_width + block_x - 1) / block_x)
+                * ((level_height + block_y - 1) / block_y) * 16;
+        }
+        if (expected != data.size())
+        {
+            CORE_LOG_WARN("MetalTexture: ASTC size mismatch ({} vs {}), fallback to decode: {}",
+                data.size(), expected, astc_path.string());
+            return false;
+        }
+
+        MTL::Device* device = MetalRuntime::Device();
+        if (device == nullptr)
+            return false;
+
+        MTL::TextureDescriptor* texture_desc = MTL::TextureDescriptor::alloc()->init();
+        texture_desc->setTextureType(MTL::TextureType2D);
+        texture_desc->setPixelFormat(format);
+        texture_desc->setWidth(width);
+        texture_desc->setHeight(height);
+        texture_desc->setMipmapLevelCount(levels);
+        texture_desc->setStorageMode(MTL::StorageModeShared);
+        texture_desc->setUsage(MTL::TextureUsageShaderRead);
+        m_Texture = device->newTexture(texture_desc);
+        texture_desc->release();
+
+        if (m_Texture == nullptr)
+            return false;
+
+        /* 压缩数据按块行逐级上传：每行字节数 = 每行块数 × 128 位 */
+        size_t offset = 16;
+        for (uint32_t level = 0; level < levels; ++level)
+        {
+            const uint32_t level_width = std::max(1u, width >> level);
+            const uint32_t level_height = std::max(1u, height >> level);
+            const uint32_t blocks_x = (level_width + block_x - 1) / block_x;
+            const uint32_t blocks_y = (level_height + block_y - 1) / block_y;
+
+            const MTL::Region region = MTL::Region::Make2D(0, 0, level_width, level_height);
+            m_Texture->replaceRegion(region, level, data.data() + offset,
+                static_cast<NS::UInteger>(blocks_x) * 16);
+            offset += static_cast<size_t>(blocks_x) * blocks_y * 16;
+        }
+
+        m_TextureDesc.Width = width;
+        m_TextureDesc.Height = height;
+        m_TextureDesc.Depth = 1;
+        m_TextureDesc.MipLevels = levels;
+        m_TextureDesc.SamplerType = load_config.SamplerType;
+        m_TextureDesc.Usage = TextureUsage::Sampleable;
+        m_TextureDesc.Samples = 1;
+        /* 描述里记解码后的格式：着色器拿到的还是 RGBA 颜色 */
+        m_TextureDesc.Format = load_config.IsSrgb ? ToSrgbFormat(TextureFormat::RGBA8) : TextureFormat::RGBA8;
+
+        CreateSamplerState(load_config);
+
+        m_IsLoaded = true;
+        CORE_LOG_INFO("Texture loaded (ASTC {}x{}): {} ({}x{}, {} mip levels, {:.0f} KB)",
+            block_x, block_y, path, width, height, levels, static_cast<double>(size) / 1024.0);
+        return true;
+    }
+
     void MetalTexture::LoadFromFile(const std::string& path, const TextureLoadConfig& load_config)
     {
         PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
         m_Path = path;
         m_TextureLoadConfig = load_config;
+
+        /* 有预烘的块数据就直传，省掉解码与运行时生成 mip */
+        if (TryLoadAstc(path, load_config))
+            return;
 
         /* 像素先问预解码：材质解析前提交过的话，这里通常已经解好了 */
         DecodedImage image;
