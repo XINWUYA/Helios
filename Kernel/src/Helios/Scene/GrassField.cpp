@@ -1085,7 +1085,7 @@ namespace Helios
 		if (!g_IndirectDrawEnabled || view.View == nullptr || m_InstanceCount == 0
 			|| m_InstanceStorage == nullptr || m_ChunkBoundsBuffer == nullptr)
 			return;
-		if (Renderer::GetRenderAPI() == nullptr || !Renderer::GetRenderAPI()->SupportsCompute())
+		if (Renderer::GetRenderAPI() == nullptr || !Renderer::GetRenderAPI()->SupportsIndirect())
 			return;
 
 		/* 段预算：相机槽要全量，一段装完；级联槽按段数上限截断再均分。

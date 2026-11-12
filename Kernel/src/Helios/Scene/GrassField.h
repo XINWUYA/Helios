@@ -76,7 +76,7 @@ namespace Helios
 			Pending,             /* 还没画过 */
 			Indirect,            /* GPU 剔除 + 分段间接 */
 			BatchingSwitchOff,   /* 间接开关关着，按批提交 */
-			BatchingNoCompute,   /* 后端不支持计算着色器，按批提交 */
+			BatchingNoIndirect,  /* 后端没有间接绘制，按批提交 */
 			BatchingNoSlot,      /* 这一帧没备出剔除结果，按批提交 */
 			Chunk,               /* 批表也关着，逐块提交 */
 		};

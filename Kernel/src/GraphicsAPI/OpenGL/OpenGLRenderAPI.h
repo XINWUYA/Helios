@@ -52,6 +52,8 @@ namespace Helios
 			return true;
 #endif
 		}
+		/* 间接派发要 4.3，和计算同一档 */
+		[[nodiscard]] bool SupportsIndirect() const override { return SupportsCompute(); }
 		bool DispatchCompute(const SharedPtr<DeviceShader>& shader,
 			const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
 			uint32_t param_binding, const void* param_data, uint32_t param_size,

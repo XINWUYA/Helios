@@ -1255,7 +1255,7 @@ namespace Helios
 			return false;
 
 		const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI();
-		if (api == nullptr || !api->SupportsCompute())
+		if (api == nullptr || !api->SupportsIndirect())
 			return false;
 
 		const uint32_t node_bytes = static_cast<uint32_t>(m_NodeTable.size() * sizeof(TerrainNode));

@@ -77,6 +77,10 @@ namespace Helios
 		/* 后端有没有计算着色器（GL 4.3+ / Metal）。false 时调用方直接走 CPU 路径。 */
 		[[nodiscard]] virtual bool SupportsCompute() const { return false; }
 
+		/* 后端能不能从缓冲里读绘制和派发参数，为 true 时计算也一定可用。
+		 * GPU 驱动的草地剔除和地形选块都靠它，false 时调用方退回 CPU 路径。 */
+		[[nodiscard]] virtual bool SupportsIndirect() const { return false; }
+
 		/* 计算派发：shader 跑 group_count 个工作组。
 		 *   buffers       着色器 layout(binding = N) 与对应缓冲（uniform 块 / storage 缓冲按 shader 反射区分）
 		 *   param_*       同一趟的常量块（std140 布局），绑到 param_binding

@@ -168,9 +168,9 @@ namespace Helios
 				text = "Submit: batched (indirect off)";
 				hint = "Turn on GPU Grass Indirect Draw to cull on the GPU";
 				break;
-			case GrassField::DrawPath::BatchingNoCompute:
-				text = "Submit: batched (no compute support)";
-				hint = "This backend cannot run compute shaders";
+			case GrassField::DrawPath::BatchingNoIndirect:
+				text = "Submit: batched (no indirect support)";
+				hint = "This backend cannot draw or dispatch with indirect args";
 				color = EditorTheme::Token::Warning;
 				break;
 			case GrassField::DrawPath::BatchingNoSlot:

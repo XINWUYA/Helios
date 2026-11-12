@@ -99,6 +99,7 @@ namespace Helios
          * 下一个绘制会自己重开渲染编码器。装箱下标按 shader 反射换算：
          * uniform 块走 [[buffer(N + UniformBufferBase)]]，storage 缓冲直接用 binding。 */
         [[nodiscard]] bool SupportsCompute() const override { return true; }
+        [[nodiscard]] bool SupportsIndirect() const override { return m_SupportsIndirect; }
         bool DispatchCompute(const SharedPtr<DeviceShader>& shader,
             const std::vector<std::pair<uint32_t, SharedPtr<DeviceStorageBuffer>>>& buffers,
             uint32_t param_binding, const void* param_data, uint32_t param_size,
@@ -187,6 +188,7 @@ namespace Helios
 
         MTL::Device* m_Device{ nullptr };
         MTL::CommandQueue* m_CommandQueue{ nullptr };
+        bool m_SupportsIndirect{ false };
 
         CA::MetalLayer* m_MetalLayer{ nullptr };
         MTL::RenderPassDescriptor* m_RenderPassDescriptor{ nullptr };

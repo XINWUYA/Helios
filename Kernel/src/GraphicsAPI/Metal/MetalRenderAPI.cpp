@@ -157,6 +157,12 @@ namespace Helios
 
         CORE_LOG_INFO("Metal Device: {}", m_Device->name()->utf8String());
 
+        /* 间接参数要 Apple3 或 Mac2 起步，iOS 模拟器只报到 Apple2 */
+        m_SupportsIndirect = m_Device->supportsFamily(MTL::GPUFamilyApple3)
+            || m_Device->supportsFamily(MTL::GPUFamilyMac2);
+        if (!m_SupportsIndirect)
+            CORE_LOG_WARN("Metal device has no indirect draw or dispatch, GPU driven paths fall back to CPU");
+
 #ifdef DEBUG
         /* 调试模式下输出设备信息 */
         CORE_LOG_INFO("Metal Debug Mode: Enabled");
@@ -1240,6 +1246,8 @@ namespace Helios
         uint32_t param_binding, const void* param_data, uint32_t param_size,
         const SharedPtr<DeviceStorageBuffer>& args, uint32_t args_offset)
     {
+        if (!m_SupportsIndirect)
+            return false;
         auto* storage = args != nullptr
             ? dynamic_cast<MetalStorageBuffer*>(args.get()) : nullptr;
         if (storage == nullptr || storage->GetMetalBuffer() == nullptr)

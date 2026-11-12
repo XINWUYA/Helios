@@ -184,15 +184,15 @@ namespace Helios
 				}
 			}
 
-			/* 退回批表的原因：开关关着、后端跑不了计算、或者这一帧没备出剔除结果。
+			/* 退回批表的原因：开关关着、后端没有间接绘制、或者这一帧没备出剔除结果。
 			 * 面板照这个显示，不用自己去猜 */
 			GrassField::DrawPath GrassFallbackPath()
 			{
 				if (!GrassField::IsGlobalIndirectDrawEnabled())
 					return GrassField::DrawPath::BatchingSwitchOff;
 				const SharedPtr<RenderAPI>& api = Renderer::GetRenderAPI();
-				if (api == nullptr || !api->SupportsCompute())
-					return GrassField::DrawPath::BatchingNoCompute;
+				if (api == nullptr || !api->SupportsIndirect())
+					return GrassField::DrawPath::BatchingNoIndirect;
 				return GrassField::DrawPath::BatchingNoSlot;
 			}
 
