@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "Helios/Core/AssetManager.h"
+#include "Helios/Core/Jobs.h"
 #include "Helios/Renderer/Renderer.h"
 #include "Helios/VirtualDevice/DeviceShader.h"
 
@@ -182,8 +183,11 @@ namespace Helios
 		Build build;
 		build.Targets = targets;
 		build.StartTime = std::chrono::steady_clock::now();
-		build.Result = std::async(std::launch::async,
-			[targets]() { return BuildBatch(targets); });
+		build.Result = std::make_shared<std::vector<Prepared>>();
+		build.Task = Jobs::RunBackground([targets, result = build.Result]()
+		{
+			*result = BuildBatch(targets);
+		}, Jobs::Priority::Normal);
 		m_Building = std::move(build);
 	}
 
@@ -193,12 +197,30 @@ namespace Helios
 			return true;
 
 		Build& build = *m_Building;
-		if (!wait && build.Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+		if (wait)
+			build.Task.Wait();
+		else if (!build.Task.IsDone())
 			return false;
 
-		std::vector<Prepared> batch = build.Result.get();
+		const bool completed = build.Task.State() == Jobs::TaskState::Completed;
+		std::vector<Prepared> batch;
+		if (completed)
+			batch = std::move(*build.Result);
+
 		const double elapsed_ms = ElapsedMs(build.StartTime);
+		std::vector<Target> skipped = std::move(build.Targets);
 		m_Building.reset();
+
+		if (!completed)
+		{
+			/* 被跳过：这批的修改时间在开编前已经记过，不放回队列就再也发现不了 */
+			for (const Target& target : skipped)
+			{
+				if (!IsQueued(target.Path))
+					m_Pending.push_back(target.Path);
+			}
+			return true;
+		}
 
 		CommitBatch(batch, elapsed_ms);
 		return true;

@@ -1,12 +1,13 @@
 #pragma once
 #include <deque>
-#include <future>
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "Helios/Common/Common.h"
+#include "Helios/Core/Jobs.h"
 #include "Helios/Renderer/RenderCommon.h"
 #include "Helios/Renderer/ShaderVariantCatalog.h"
 
@@ -72,6 +73,8 @@ namespace Helios
 
 		/* Metal 能后台编；GL 的 program 要绑在调用线程的上下文上，只能主线程编 */
 		[[nodiscard]] static bool CanBuildAsync();
+		/* 同时最多几个在编：跟着后台名额走，给别的后台任务留一个 */
+		[[nodiscard]] static size_t MaxInFlight();
 		/* 后台编译默认开。回归与基准设 HELIOS_VARIANT_ASYNC=0 走同步：
 		 * 后台和主线程共用一把编译锁，异步调度会让"大量着色器连续加载"的基准变慢 */
 		[[nodiscard]] static bool AsyncEnabled();
@@ -83,7 +86,14 @@ namespace Helios
 
 		std::deque<Item> m_Pending;
 		std::unordered_set<std::string> m_Queued;
-		std::deque<std::pair<Item, std::future<SharedPtr<DeviceShader>>>> m_InFlight;
+		/* 在编的变体：任务终态说了算，Completed 之后 Result 才可读 */
+		struct InFlight
+		{
+			Item Item{};
+			Jobs::Task Task{};
+			std::shared_ptr<SharedPtr<DeviceShader>> Result{};
+		};
+		std::vector<InFlight> m_InFlight;
 		/* 编译失败过一次的组合不再自动重排：源码有明显错误时免得每帧都试一遍 */
 		std::unordered_set<std::string> m_Failed;
 		/* 严格模式的白名单（MakeKey 形式），空集合在非严格模式下无意义 */

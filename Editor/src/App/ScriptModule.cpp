@@ -1,6 +1,7 @@
 #include "Pch.h"
 #include "ScriptModule.h"
 #include "Helios/Common/AssetPath.h"
+#include "Helios/Core/Jobs.h"
 #include "Helios/Common/PathUtils.h"
 #include "Helios/Script/ScriptRegistry.h"
 #include "Platform/DynamicLibrary.h"
@@ -189,9 +190,8 @@ namespace Helios
 			}
 
 			CORE_LOG_INFO("[Script] No module under {}, building project scripts.", output_directory);
-			if (!Compile())
-				return false;
-			latest = FindLatestModule(output_directory);
+			/* 编译丢后台：编完由 Tick 交给调用方走 ReloadScripts 换上 */
+			return RequestCompile();
 		}
 
 		return LoadFile(latest);
@@ -199,9 +199,49 @@ namespace Helios
 
 	bool ScriptModule::Recompile()
 	{
-		if (!Compile())
+		return RequestCompile();
+	}
+
+	bool ScriptModule::RequestCompile()
+	{
+		/* 在编时直接拒掉，状态行继续显示"编译中"，不要被这次点击改掉 */
+		if (m_CompileActive)
 			return false;
-		return LoadFile(FindLatestModule(PathToUtf8(ModuleDirectory())));
+
+		/* 路径先拷一份：后台线程不读全局，也不碰成员 */
+		const std::filesystem::path project_dir = g_ProjectPath;
+		auto outcome = std::make_shared<BuildOutcome>();
+		m_BuildOutcome = outcome;
+		m_CompileActive = true;
+		m_Status = "Compiling scripts";
+		m_CompileTask = Jobs::RunBackground([project_dir, outcome]
+		{
+			outcome->Success = CompileProject(project_dir, outcome->Status);
+		}, Jobs::Priority::Low);
+		return true;
+	}
+
+	bool ScriptModule::Tick(float delta_time)
+	{
+		if (!m_CompileActive)
+		{
+			PollExternalModule(delta_time);
+			return false;
+		}
+
+		if (!m_CompileTask.IsDone())
+			return false;
+
+		/* 收结果：被跳过（退出清理）时没有产物可换 */
+		m_CompileActive = false;
+		if (m_CompileTask.State() != Jobs::TaskState::Completed)
+		{
+			m_Status = "Compile cancelled";
+			return false;
+		}
+
+		m_Status = m_BuildOutcome->Status;
+		return m_BuildOutcome->Success;
 	}
 
 	int ScriptModule::GetClassCount() const
@@ -212,16 +252,16 @@ namespace Helios
 	/* 项目级构建：把当前项目的源文件列表写成一个小工程，编译条件由引擎构建期生成的
 	 * 模板提供（HELIOS_SCRIPT_TEMPLATE）。产物和中间文件都留在项目 Cache 下，
 	 * 项目放哪块盘都能编，引擎构建目录不必知道它在哪。 */
-	bool ScriptModule::Compile()
+	bool ScriptModule::CompileProject(const std::filesystem::path& project_dir, std::string& status)
 	{
-		const std::filesystem::path scripts_dir = g_ProjectPath / "Scripts";
+		const std::filesystem::path scripts_dir = project_dir / "Scripts";
 		const std::filesystem::path build_root = ModuleDirectory();
 		const std::filesystem::path build_dir = build_root / "build";
 
 		const std::vector<std::filesystem::path> sources = CollectScriptSources(scripts_dir);
 		if (sources.empty())
 		{
-			m_Status = "No scripts";
+			status = "No scripts";
 			CORE_LOG_INFO("[Script] No scripts under {}.", PathToUtf8(scripts_dir));
 			return false;
 		}
@@ -229,7 +269,7 @@ namespace Helios
 		const std::filesystem::path template_path = PathFromUtf8(HELIOS_SCRIPT_TEMPLATE);
 		if (!std::filesystem::is_regular_file(template_path))
 		{
-			m_Status = "Build template missing";
+			status = "Build template missing";
 			CORE_LOG_ERROR("[Script] Script build template not found: {}", PathToUtf8(template_path));
 			return false;
 		}
@@ -241,7 +281,7 @@ namespace Helios
 			std::ofstream project_file(build_root / "CMakeLists.txt", std::ios::trunc);
 			if (!project_file)
 			{
-				m_Status = "Cannot write CMakeLists";
+				status = "Cannot write CMakeLists";
 				CORE_LOG_ERROR("[Script] Cannot write {}", PathToUtf8(build_root / "CMakeLists.txt"));
 				return false;
 			}
@@ -257,16 +297,28 @@ namespace Helios
 		}
 
 		CORE_LOG_INFO("[Script] Building {} script file(s) of {}.",
-			sources.size(), PathToUtf8(g_ProjectPath));
+			sources.size(), PathToUtf8(project_dir));
 
 		const std::string kernel_dir = PathToUtf8(FindKernelLibraryDirectory());
 		const std::string configure = "cmake -S \"" + PathToUtf8(build_root) + "\" -B \"" + PathToUtf8(build_dir)
 			+ "\" -DHELIOS_SCRIPT_CONFIG=" + HELIOS_BUILD_CONFIG
 			+ " -DCMAKE_BUILD_TYPE=" + HELIOS_BUILD_CONFIG
 			+ " -DHELIOS_SCRIPT_KERNEL_DIR=\"" + kernel_dir + "\"";
+		if (Jobs::IsCancelled())
+		{
+			status = "Compile cancelled";
+			return false;
+		}
 		if (!RunCommand(configure))
 		{
-			m_Status = "Configure failed";
+			status = "Configure failed";
+			return false;
+		}
+
+		/* 两步之间留一个取消点：cmake 本身没法中断，只能在调用之间退 */
+		if (Jobs::IsCancelled())
+		{
+			status = "Compile cancelled";
 			return false;
 		}
 
@@ -274,15 +326,15 @@ namespace Helios
 			+ "\" --config " + HELIOS_BUILD_CONFIG;
 		if (!RunCommand(build))
 		{
-			m_Status = "Compile failed";
+			status = "Compile failed";
 			return false;
 		}
 
-		m_Status = "Compiled";
+		status = "Compiled";
 		return true;
 	}
 
-	void ScriptModule::TickAutoReload(float delta_time)
+	void ScriptModule::PollExternalModule(float delta_time)
 	{
 		if (!m_AutoReloadEnabled)
 			return;

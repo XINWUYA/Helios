@@ -15,8 +15,7 @@ namespace Helios
 	namespace
 	{
 		/* 后台同时跑几个：一个变体几百毫秒，开太多会跟主线程抢 CPU */
-		constexpr size_t kMaxInFlight = 2;
-	}
+		}
 
 	ShaderVariantStreamer& ShaderVariantStreamer::Instance()
 	{
@@ -31,7 +30,14 @@ namespace Helios
 
 	bool ShaderVariantStreamer::CanBuildAsync()
 	{
-		return AsyncEnabled() && Renderer::CurrentAPI() == RenderAPI::Metal;
+		return AsyncEnabled() && Renderer::CurrentAPI() == RenderAPI::Metal && Jobs::IsInitialized();
+	}
+
+	size_t ShaderVariantStreamer::MaxInFlight()
+	{
+		/* 后台名额至少 1 个，这里最多占两个：留一个给贴图预解码、草地、烘焙 */
+		const uint32_t slots = Jobs::BackgroundSlots();
+		return static_cast<size_t>(std::clamp(slots > 1 ? slots - 1 : 1u, 1u, 2u));
 	}
 
 	bool ShaderVariantStreamer::AsyncEnabled()
@@ -152,14 +158,22 @@ namespace Helios
 		/* 先收上一批：到点了就入库，没到就等下一帧 */
 		for (auto it = m_InFlight.begin(); it != m_InFlight.end();)
 		{
-			if (it->second.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+			if (!it->Task.IsDone())
 			{
 				++it;
 				continue;
 			}
 
-			const Item item = it->first;
-			SharedPtr<DeviceShader> shader = it->second.get();
+			/* 没跑成（取消 / 过期 / 池满被丢）不算编译失败：下次请求还能再排 */
+			if (it->Task.State() != Jobs::TaskState::Completed)
+			{
+				m_Queued.erase(MakeKey(it->Item.Path, it->Item.Defines));
+				it = m_InFlight.erase(it);
+				continue;
+			}
+
+			const Item item = it->Item;
+			SharedPtr<DeviceShader> shader = std::move(*it->Result);
 			const std::string key = MakeKey(item.Path, item.Defines);
 			m_Queued.erase(key);
 
@@ -180,7 +194,7 @@ namespace Helios
 		uint32_t budget = m_FrameBudget;
 		while (budget-- > 0 && !m_Pending.empty())
 		{
-			if (async && m_InFlight.size() >= kMaxInFlight)
+			if (async && m_InFlight.size() >= MaxInFlight())
 				break;
 
 			const Item item = std::move(m_Pending.front());
@@ -188,10 +202,14 @@ namespace Helios
 
 			if (async)
 			{
-				m_InFlight.emplace_back(item, std::async(std::launch::async, [item]()
-					{
-						return BuildCpu(item);
-					}));
+				InFlight in_flight;
+				in_flight.Item = item;
+				in_flight.Result = std::make_shared<SharedPtr<DeviceShader>>();
+				in_flight.Task = Jobs::RunBackground([item, result = in_flight.Result]()
+				{
+					*result = BuildCpu(item);
+				}, Jobs::Priority::Normal);
+				m_InFlight.push_back(std::move(in_flight));
 				continue;
 			}
 

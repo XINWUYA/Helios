@@ -449,8 +449,8 @@ namespace Helios::AstcBake
 			s_Status.Current = Status::State::Running;
 		}
 
-		/* 走引擎的后台任务通道：低优先级，切工程时被 InvalidateBackground 收掉；
-		 * 没建池的场合（检查程序）就地执行，语义不变 */
+		/* 走引擎的后台任务通道：低优先级；退出时 InvalidateBackground 会把还在排队的丢掉，
+		 * Poll 那边按任务终态收尾。没建池的场合（检查程序）就地执行，语义不变 */
 		s_Task = Jobs::RunBackground([source_path, options] { Bake(source_path, options); },
 			Jobs::Priority::Low);
 		return true;

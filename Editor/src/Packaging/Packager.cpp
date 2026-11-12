@@ -325,6 +325,9 @@ namespace Helios::Build
 
 		CORE_LOG_INFO("[Package] 开始{}", LabelOf(target));
 
+		/* 裸线程而不是后台任务：打包是几分钟的外部进程，进了 Jobs 会让 Shutdown 卡住退出，
+		 * 还长期占一个后台名额。代价是这条线程 detach 之后不受管理 ——
+		 * 编辑器退出后它和子进程仍在跑，收尾时会写静态 s_State，此时编辑器已不再读它。 */
 		std::thread([target, project_dir]()
 			{
 				PackageResult result = RunImpl(target, project_dir);

@@ -2,7 +2,7 @@
 #include <chrono>
 #include <deque>
 #include <filesystem>
-#include <future>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -65,10 +65,12 @@ namespace Helios
 			SharedPtr<DeviceShader> Shader{};
 		};
 
+		/* 后台在编的一批：任务终态说了算，Completed 之后 Result 才可读 */
 		struct Build
 		{
 			std::vector<Target> Targets{};
-			std::future<std::vector<Prepared>> Result{};
+			Jobs::Task Task{};
+			std::shared_ptr<std::vector<Prepared>> Result{};
 			std::chrono::steady_clock::time_point StartTime{};
 		};
 
@@ -76,7 +78,9 @@ namespace Helios
 		void Poll();
 		/* 把队列整批开编：Metal 且允许时走后台线程，GL 只能当场做（编译要用调用线程的上下文） */
 		void StartBuild(bool allow_async);
-		/* 后台那批编完了就整批换上；wait 为真时等它编完。返回是否已经没有在编的批次 */
+		/* 后台那批编完了就整批换上；wait 为真时等它编完。
+		 * 任务被跳过（过期 / 池满）的一批放回队列，开编前已记的时间戳才不会把改动吃掉。
+		 * 返回是否已经没有在编的批次 */
 		bool FinishBuild(bool wait);
 		/* 按路径把活着的变体都收进来；找不到就不编 */
 		void CollectTargets(const std::vector<std::string>& paths, std::vector<Target>& out) const;
