@@ -1,6 +1,5 @@
 ﻿#pragma once
 #include <filesystem>
-#include <memory>
 #include <string>
 #include "Helios/Common/Common.h"
 #include "Helios/Core/Jobs.h"
@@ -21,6 +20,8 @@ namespace Helios
 		bool LoadLatest();
 		/* 丢一个后台编译：立刻返回是否已开始。编完在 Tick 里交给调用方换上 */
 		bool Recompile();
+		/* 后台编完后换上：只加载最新产物，找不到也不会再触发编译 */
+		bool LoadCompiled();
 		/* 后台正在编：菜单可以据此置灰，状态行也据此显示 */
 		[[nodiscard]] bool IsCompiling() const { return m_CompileActive; }
 
@@ -52,7 +53,7 @@ namespace Helios
 		static bool CompileProject(const std::filesystem::path& project_dir, std::string& status);
 		/* 提交后台编译：路径与结果槽先备好，主线程只改状态 */
 		bool RequestCompile();
-		/* 外部产物监听（原 TickAutoReload 的内容） */
+		/* 外部构建（IDE）编出新产物时自动重载 */
 		void PollExternalModule(float delta_time);
 		bool LoadFile(const std::string& path);
 

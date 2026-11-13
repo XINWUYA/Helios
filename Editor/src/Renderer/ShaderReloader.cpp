@@ -248,8 +248,13 @@ namespace Helios
 		std::vector<Prepared> batch;
 		batch.reserve(targets.size());
 		for (const Target& target : targets)
+		{
+			/* 一批可能编好几秒：每个之间查一次，退出时不用等整批编完 */
+			if (Jobs::IsCancelled())
+				break;
 			batch.push_back({ target.Path, target.Defines,
 				DeviceShader::PrepareReload(target.Path, target.Defines) });
+		}
 		return batch;
 	}
 

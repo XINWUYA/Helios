@@ -108,13 +108,13 @@ namespace Helios::Jobs
 	};
 
 	/* 投递后台任务：work 在 worker 上跑，on_main 在 work 完成后回主线程执行（被取消就不回）。
-	 * 返回的句柄总是有效：池满被丢或没建池就地执行时，State 也会落到终态 */
+	 * 返回的句柄总能查到终态：池满被丢、没建池就地执行时 IsValid 为假，State 照样落定 */
 	HELIOS_API Task RunBackground(std::function<void()> work, Priority priority = Priority::Normal,
 		std::function<void()> on_main = {});
 	/* 后台任务里查自己是否被取消或已过期 */
 	[[nodiscard]] HELIOS_API bool IsCancelled();
-	/* 让之前提交的后台任务全部过期：不再执行、不再回主线程。
-	 * 目前只有 Jobs::Shutdown 在调用；切项目接上它之前，消费者要先能处理"完成但没结果"。 */
+	/* 让之前提交的后台任务全部过期：不再执行、不再回主线程，句柄终态记为 Skipped。
+	 * 目前只有 Shutdown 调用；编辑器以后支持运行中切工程时，在换工程路径之前调一次 */
 	HELIOS_API void InvalidateBackground();
 
 	/* 主线程回调队列：任何线程都能投，主线程每帧按预算执行 */

@@ -202,6 +202,11 @@ namespace Helios
 		return RequestCompile();
 	}
 
+	bool ScriptModule::LoadCompiled()
+	{
+		return LoadFile(FindLatestModule(PathToUtf8(ModuleDirectory())));
+	}
+
 	bool ScriptModule::RequestCompile()
 	{
 		/* 在编时直接拒掉，状态行继续显示"编译中"，不要被这次点击改掉 */

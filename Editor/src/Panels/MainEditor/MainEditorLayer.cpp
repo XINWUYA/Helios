@@ -1353,10 +1353,9 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION();
 
-		/* IDE 那边编好的脚本产物自动跟上：轮询产物时间戳，编译成功才重载 */
-		/* 后台编完的脚本走 ReloadScripts 换上：运行中的脚本实例跟着迁移 */
+		/* 后台编完的脚本走 ReloadScripts 换上，运行中的实例跟着迁移；IDE 编出的产物在 Tick 里自动跟上 */
 		if (m_ScriptModule.Tick(delta_time))
-			m_Context.ReloadScripts([this]() { return m_ScriptModule.LoadLatest(); });
+			m_Context.ReloadScripts([this]() { return m_ScriptModule.LoadCompiled(); });
 
 		/* 着色器同理：盯依赖文件的修改时间，改了就地重载（帧边界提交，不打断绘制） */
 		m_ShaderReloader.Tick(delta_time);

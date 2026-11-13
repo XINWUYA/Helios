@@ -375,7 +375,7 @@ namespace Helios::Jobs
 
 		if (job == nullptr)
 		{
-			/* 池满：闭包在 CreateJob 返回时已析构，状态落到 Skipped，句柄照样有效 */
+			/* 池满：闭包在 CreateJob 返回时已析构，状态落到 Skipped，句柄照样能查终态 */
 			CORE_LOG_ERROR("[Jobs] Job pool exhausted, background task dropped");
 			return TaskAccess::Make(nullptr, 0, std::move(control));
 		}

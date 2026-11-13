@@ -1,7 +1,7 @@
 #include "Pch.h"
 #include "ShaderVariantStreamer.h"
 
-#include <chrono>
+#include <algorithm>
 
 #include "Helios/Core/AssetManager.h"
 #include "Helios/Core/Logger.h"
@@ -12,11 +12,6 @@
 
 namespace Helios
 {
-	namespace
-	{
-		/* 后台同时跑几个：一个变体几百毫秒，开太多会跟主线程抢 CPU */
-		}
-
 	ShaderVariantStreamer& ShaderVariantStreamer::Instance()
 	{
 		static ShaderVariantStreamer instance;
@@ -35,7 +30,7 @@ namespace Helios
 
 	size_t ShaderVariantStreamer::MaxInFlight()
 	{
-		/* 后台名额至少 1 个，这里最多占两个：留一个给贴图预解码、草地、烘焙 */
+		/* 一个变体几百毫秒，最多占两个后台名额，再留一个给贴图预解码、草地、烘焙 */
 		const uint32_t slots = Jobs::BackgroundSlots();
 		return static_cast<size_t>(std::clamp(slots > 1 ? slots - 1 : 1u, 1u, 2u));
 	}
