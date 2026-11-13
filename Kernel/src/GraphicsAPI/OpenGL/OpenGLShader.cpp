@@ -276,7 +276,7 @@ namespace Helios
 
 	void OpenGLShader::BindVertexArray(const SharedPtr<DeviceVertexArray>& vertex_array)
 	{
-		auto gl_vertex_array = std::dynamic_pointer_cast<OpenGLVertexArray>(vertex_array);
+		auto gl_vertex_array = DynamicPtrCast<OpenGLVertexArray>(vertex_array);
 		if (!gl_vertex_array)
 			return;
 

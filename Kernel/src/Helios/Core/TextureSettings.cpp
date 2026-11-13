@@ -110,7 +110,7 @@ namespace Helios
 
 		[[nodiscard]] bool ReadTextFile(const std::filesystem::path& path, std::string& out_text)
 		{
-			auto file = std::unique_ptr<FILE, decltype(&std::fclose)>(OpenUtf8File(path, "rb"), &std::fclose);
+			auto file = UniquePtr<FILE, decltype(&std::fclose)>(OpenUtf8File(path, "rb"), &std::fclose);
 			if (file == nullptr)
 				return false;
 
@@ -131,7 +131,7 @@ namespace Helios
 			if (!path.parent_path().empty())
 				std::filesystem::create_directories(path.parent_path(), error);
 
-			auto file = std::unique_ptr<FILE, decltype(&std::fclose)>(OpenUtf8File(path, "wb"), &std::fclose);
+			auto file = UniquePtr<FILE, decltype(&std::fclose)>(OpenUtf8File(path, "wb"), &std::fclose);
 			if (file == nullptr)
 				return false;
 			return text.empty() || std::fwrite(text.data(), 1, text.size(), file.get()) == text.size();

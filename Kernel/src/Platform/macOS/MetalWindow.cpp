@@ -43,7 +43,7 @@ namespace Helios
     {
         CreateMetalLayer(m_Window);
 
-        auto metalRenderAPI = std::dynamic_pointer_cast<MetalRenderAPI>(Renderer::GetRenderAPI());
+        auto metalRenderAPI = DynamicPtrCast<MetalRenderAPI>(Renderer::GetRenderAPI());
         if (!metalRenderAPI)
         {
             CORE_LOG_ERROR("MetalRenderAPI is not available!");
@@ -60,7 +60,7 @@ namespace Helios
 
     void MetalContext::CreateMetalLayer(GLFWwindow* window)
     {
-        auto metalRenderAPI = std::dynamic_pointer_cast<MetalRenderAPI>(Renderer::GetRenderAPI());
+        auto metalRenderAPI = DynamicPtrCast<MetalRenderAPI>(Renderer::GetRenderAPI());
         if (!metalRenderAPI)
         {
             CORE_LOG_ERROR("MetalRenderAPI is not available when creating MetalLayer!");
@@ -215,7 +215,7 @@ namespace Helios
     void MetalContext::SwapBuffers()
     {
         /* 提交命令缓冲区并呈现drawable */
-        auto metalRenderAPI = std::dynamic_pointer_cast<MetalRenderAPI>(Renderer::GetRenderAPI());
+        auto metalRenderAPI = DynamicPtrCast<MetalRenderAPI>(Renderer::GetRenderAPI());
         if (metalRenderAPI)
         {
             metalRenderAPI->Present();

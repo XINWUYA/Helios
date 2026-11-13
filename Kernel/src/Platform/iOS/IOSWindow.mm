@@ -184,7 +184,7 @@ namespace Helios
 
 	void MetalContextIOS::Init()
 	{
-		auto metal_render_api = std::dynamic_pointer_cast<MetalRenderAPI>(Renderer::GetRenderAPI());
+		auto metal_render_api = DynamicPtrCast<MetalRenderAPI>(Renderer::GetRenderAPI());
 		if (!metal_render_api)
 		{
 			CORE_LOG_ERROR("MetalRenderAPI is not available!");
@@ -222,7 +222,7 @@ namespace Helios
 
 	void MetalContextIOS::SwapBuffers()
 	{
-		if (auto metal_render_api = std::dynamic_pointer_cast<MetalRenderAPI>(Renderer::GetRenderAPI()))
+		if (auto metal_render_api = DynamicPtrCast<MetalRenderAPI>(Renderer::GetRenderAPI()))
 			metal_render_api->Present();
 	}
 

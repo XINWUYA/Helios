@@ -254,7 +254,7 @@ namespace Helios
 		if (model == nullptr || model->IsStaticModel() || !model->HasSkin())
 			return nullptr;
 
-		return std::static_pointer_cast<SkeletonModel>(model);
+		return StaticPtrCast<SkeletonModel>(model);
 	}
 
 	void SkeletonModel::EnsureSkinnedSegments()

@@ -82,7 +82,7 @@ namespace Helios
 
 		/* 用 OpenUtf8File 而不是 std::ofstream：路径在 Windows 上要按 UTF-8 → 宽字符走
 		 * （资源目录里带中文是常事），与场景 / 材质的写文件路径保持同一套。 */
-		std::unique_ptr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(m_File, "wb"), &std::fclose);
+		UniquePtr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(m_File, "wb"), &std::fclose);
 		if (!handle)
 		{
 			out_error = "Cannot open file: ";
@@ -102,7 +102,7 @@ namespace Helios
 
 	bool CreateAssetFileCommand::ReadFile(const std::filesystem::path& file, std::string& out_content)
 	{
-		std::unique_ptr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(file, "rb"), &std::fclose);
+		UniquePtr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(file, "rb"), &std::fclose);
 		if (!handle)
 			return false;
 

@@ -308,7 +308,7 @@ namespace Helios
 		ASSERT(attachment_index < m_FrameBufferDesc.ColorRenderBuffers.size());
 
 		const auto& render_buffer_info = m_FrameBufferDesc.ColorRenderBuffers[attachment_index];
-		const auto& texture = std::dynamic_pointer_cast<OpenGLTexture>(render_buffer_info.RenderTarget);
+		const auto& texture = DynamicPtrCast<OpenGLTexture>(render_buffer_info.RenderTarget);
 		
 #ifdef __APPLE__
 		// macOS only supports OpenGL 4.1, glClearTexImage requires OpenGL 4.4+
@@ -408,7 +408,7 @@ namespace Helios
 		}
 
 		/* 1. 获取rt的格式 */
-		const auto& texture = std::dynamic_pointer_cast<OpenGLTexture>(render_buffer_info.RenderTarget);
+		const auto& texture = DynamicPtrCast<OpenGLTexture>(render_buffer_info.RenderTarget);
 		GLenum texture_target = GL_TEXTURE_2D;
 		if (!!(texture->m_TextureDesc.Usage & TextureUsage::Sampleable)) /* 作为颜色rt */
 		{
@@ -517,7 +517,7 @@ namespace Helios
 		if (!target_info || !target_info->RenderTarget)
 			return;
 
-		const auto& texture = std::dynamic_pointer_cast<OpenGLTexture>(target_info->RenderTarget);
+		const auto& texture = DynamicPtrCast<OpenGLTexture>(target_info->RenderTarget);
 		if (!texture)
 			return;
 

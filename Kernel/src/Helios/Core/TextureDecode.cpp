@@ -74,7 +74,7 @@ namespace Helios
 		};
 
 		std::mutex s_SlotsMutex;
-		std::unordered_map<std::string, std::shared_ptr<Slot>> s_Slots;
+		std::unordered_map<std::string, SharedPtr<Slot>> s_Slots;
 
 		/* 真正解码：配置从贴图设置解析，跟 DeviceTexture::Create 走同一份口径 */
 		bool DecodeNow(const std::string& path, DecodedImage& out)
@@ -118,7 +118,7 @@ namespace Helios
 		if (s_Slots.find(path) != s_Slots.end())
 			return;
 
-		auto slot = std::make_shared<Slot>();
+		auto slot = CreateSharedPtr<Slot>();
 		s_Slots.emplace(path, slot);
 
 		slot->Task = Jobs::RunBackground([slot, path]
@@ -169,7 +169,7 @@ namespace Helios
 
 	bool TextureDecode::Take(const std::string& path, DecodedImage& out)
 	{
-		std::shared_ptr<Slot> slot;
+		SharedPtr<Slot> slot;
 		{
 			std::lock_guard lock(s_SlotsMutex);
 			const auto it = s_Slots.find(path);

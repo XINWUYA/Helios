@@ -968,7 +968,7 @@ namespace Helios
 			CORE_LOG_ERROR("Invalid UTF-8 scene path.");
 			return;
 		}
-		auto scene_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+		auto scene_file = UniquePtr<FILE, decltype(&std::fclose)>(
 			OpenUtf8File(scene_path, "wb"), &std::fclose);
 		if (!scene_file)
 		{
@@ -1032,7 +1032,7 @@ namespace Helios
 			CORE_LOG_ERROR("Invalid UTF-8 scene path.");
 			return false;
 		}
-		auto scene_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+		auto scene_file = UniquePtr<FILE, decltype(&std::fclose)>(
 			OpenUtf8File(scene_path, "rb"), &std::fclose);
 		if (!scene_file)
 		{

@@ -383,7 +383,7 @@ namespace Helios
 		resolved.reserve(buffers.size());
 		for (const auto& [binding, buffer] : buffers)
 		{
-			auto gl_buffer = std::dynamic_pointer_cast<OpenGLStorageBuffer>(buffer);
+			auto gl_buffer = DynamicPtrCast<OpenGLStorageBuffer>(buffer);
 			if (gl_buffer == nullptr || gl_buffer->GetBufferID() == 0)
 				return false;
 
@@ -501,7 +501,7 @@ namespace Helios
 			desc.Usage = TextureUsage::Sampleable;
 			m_DefaultTargetSnapshot = DeviceTexture::Create("DefaultTargetSnapshot", desc);
 		}
-		const auto snapshot = std::dynamic_pointer_cast<OpenGLTexture>(m_DefaultTargetSnapshot);
+		const auto snapshot = DynamicPtrCast<OpenGLTexture>(m_DefaultTargetSnapshot);
 		if (snapshot == nullptr)
 			return nullptr;
 
@@ -532,8 +532,8 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
-		const auto open_gl_src = std::dynamic_pointer_cast<OpenGLTexture>(src);
-		const auto open_gl_dst = std::dynamic_pointer_cast<OpenGLTexture>(dst);
+		const auto open_gl_src = DynamicPtrCast<OpenGLTexture>(src);
+		const auto open_gl_dst = DynamicPtrCast<OpenGLTexture>(dst);
 		if (!open_gl_src || !open_gl_dst || open_gl_src->GetTextureID() == 0 || open_gl_dst->GetTextureID() == 0)
 			return;
 

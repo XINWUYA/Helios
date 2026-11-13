@@ -290,7 +290,7 @@ namespace Helios
 
     MTL::Texture* MetalFrameBuffer::AcquireRenderTargetTexture(const RenderBufferInfo& render_buffer)
     {
-        auto metal_texture = std::dynamic_pointer_cast<MetalTexture>(render_buffer.RenderTarget);
+        auto metal_texture = DynamicPtrCast<MetalTexture>(render_buffer.RenderTarget);
         if (!metal_texture)
             return nullptr;
 

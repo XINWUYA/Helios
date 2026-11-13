@@ -127,7 +127,7 @@ namespace Helios::ModelManifest
 			}
 		}
 
-		auto file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+		auto file = UniquePtr<FILE, decltype(&std::fclose)>(
 			OpenUtf8File(PathFromUtf8(absolute), "wb"), &std::fclose);
 		if (!file)
 		{

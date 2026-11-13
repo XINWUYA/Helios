@@ -29,7 +29,7 @@ namespace Helios::Gif
 		/* 整个文件读进内存（stb 的动图接口只吃内存缓冲）；失败返回 false */
 		bool ReadAllBytes(const std::filesystem::path& path, std::vector<unsigned char>& out_bytes)
 		{
-			auto file = std::unique_ptr<FILE, decltype(&std::fclose)>(OpenUtf8File(path, "rb"), &std::fclose);
+			auto file = UniquePtr<FILE, decltype(&std::fclose)>(OpenUtf8File(path, "rb"), &std::fclose);
 			if (file == nullptr)
 				return false;
 

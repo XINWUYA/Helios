@@ -226,7 +226,7 @@ namespace Helios
 			return;
 
 		auto& shadow_map = m_CascadeShadowMaps[0];
-		auto light = std::dynamic_pointer_cast<DirectionalLight>(shadow_map->m_pLight);
+		auto light = DynamicPtrCast<DirectionalLight>(shadow_map->m_pLight);
 		auto& direction = light->GetDirection();
 		auto& shadow_map_info = light->GetShadowMapInfo();
 
@@ -563,7 +563,7 @@ namespace Helios
 
 		for (const auto& shadow_map : m_PunctualShadowMaps)
 		{
-			const auto light = std::dynamic_pointer_cast<PunctualLight>(shadow_map->m_pLight);
+			const auto light = DynamicPtrCast<PunctualLight>(shadow_map->m_pLight);
 			if (!light)
 				continue;
 
@@ -581,7 +581,7 @@ namespace Helios
 			{
 				/* 聚光：视图朝向 = 光传播方向，投影视锥全角 = 外锥角。
 				 * 锥角接近 180° 时透视矩阵退化，夹取到安全范围。 */
-				const auto spot = std::static_pointer_cast<SpotLight>(light);
+				const auto spot = StaticPtrCast<SpotLight>(light);
 				light_view_mat = ShadowMap::GetDirectionalLightViewMatrix(spot->GetDirection(), spot->GetPosition());
 				fov_degrees = glm::clamp(spot->GetAngle(), 1.0f, 170.0f);
 			}

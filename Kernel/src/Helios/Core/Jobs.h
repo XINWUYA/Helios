@@ -5,7 +5,7 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
-#include "Helios/Common/Export.h"
+#include "Helios/Common/Common.h"
 
 /* 引擎唯一的任务入口，内核是 Libraries/HeliosJobs（取自 Filament JobSystem）。
  * 帧内分片走 ParallelFor，编辑器长任务走 RunBackground，结果经 PostToMain 回主线程。
@@ -96,7 +96,7 @@ namespace Helios::Jobs
 
 	private:
 		friend struct TaskAccess;
-		Task(void* job, uint32_t owner, std::shared_ptr<TaskControl> control)
+		Task(void* job, uint32_t owner, SharedPtr<TaskControl> control)
 			: m_Job(job), m_Owner(owner), m_Control(std::move(control)) {}
 
 		/* 句柄记下建池代号：线程池重建后旧句柄一律视为已完成，不碰新任务池 */
@@ -104,7 +104,7 @@ namespace Helios::Jobs
 
 		void* m_Job = nullptr;
 		uint32_t m_Owner = 0;
-		std::shared_ptr<TaskControl> m_Control{};
+		SharedPtr<TaskControl> m_Control{};
 	};
 
 	/* 投递后台任务：work 在 worker 上跑，on_main 在 work 完成后回主线程执行（被取消就不回）。

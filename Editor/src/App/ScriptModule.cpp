@@ -210,7 +210,7 @@ namespace Helios
 
 		/* 路径先拷一份：后台线程不读全局，也不碰成员 */
 		const std::filesystem::path project_dir = g_ProjectPath;
-		auto outcome = std::make_shared<BuildOutcome>();
+		auto outcome = CreateSharedPtr<BuildOutcome>();
 		m_BuildOutcome = outcome;
 		m_CompileActive = true;
 		m_Status = "Compiling scripts";

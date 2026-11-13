@@ -1530,7 +1530,7 @@ namespace Helios
 				{
 					/* 太阳图标沿真实光向摆放（几何按"光向 = -Y"建，这里再旋到实际方向）。方向已经跟着实体旋转
 					 * 换算过，方向杆就不要再叠实体旋转（R 作用两次会转两圈）；图标屏上尺寸恒定。 */
-					const auto directional_light = std::static_pointer_cast<DirectionalLight>(light_component.m_Light);
+					const auto directional_light = StaticPtrCast<DirectionalLight>(light_component.m_Light);
 					glm::quat extra_rotation(1.0f, 0.0f, 0.0f, 0.0f);
 					const glm::vec3 direction = directional_light->GetDirection();
 					if (glm::length(direction) > 0.0f)
@@ -1545,7 +1545,7 @@ namespace Helios
 				{
 					/* 单位球 × range：球半径 = 衰减半径（真世界尺度；不吃实体缩放 ——
 					 * range 是影响范围的唯一来源） */
-					const auto point_light = std::static_pointer_cast<PointLight>(light_component.m_Light);
+					const auto point_light = StaticPtrCast<PointLight>(light_component.m_Light);
 					const float range = std::max(point_light->GetRange(), kGizmoMinRange);
 					submit(parts, GetPointLightGizmoVertexArray(), 1.0f, glm::quat(1.0f, 0.0f, 0.0f, 0.0f),
 						glm::vec3(range));
@@ -1557,7 +1557,7 @@ namespace Helios
 					/* 单位锥两套各向异性缩放：横向 = range·tan(锥角/2)、轴向 = range ——
 					 * 外锥张开到外锥角、内锥张开到内锥角（同一份几何两次绘制、颜色区分）。
 					 * 锥轴 = 实体旋转（与光向同源），不吃实体缩放 */
-					const auto spot_light = std::static_pointer_cast<SpotLight>(light_component.m_Light);
+					const auto spot_light = StaticPtrCast<SpotLight>(light_component.m_Light);
 					const float range = std::max(spot_light->GetRange(), kGizmoMinRange);
 					const auto cone_openness = [](float angle_deg)
 					{

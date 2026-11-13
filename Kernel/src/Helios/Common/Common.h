@@ -12,8 +12,10 @@
 
 namespace Helios
 {
-	template <typename T>
-	using UniquePtr = std::unique_ptr<T>;
+	/* 删除器带默认值：UniquePtr<T> 与 std::unique_ptr<T> 等价，
+	 * UniquePtr<FILE, decltype(&std::fclose)> 这类 RAII 句柄也能用同一套写法 */
+	template <typename T, typename Deleter = std::default_delete<T>>
+	using UniquePtr = std::unique_ptr<T, Deleter>;
 
 	template <typename T>
 	using SharedPtr = std::shared_ptr<T>;

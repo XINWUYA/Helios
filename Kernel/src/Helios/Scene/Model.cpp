@@ -537,7 +537,7 @@ namespace Helios
 		{
 			/* 有骨骼段的 .mesh 交给 SkeletonModel（同一个入口、同一个模型装载流程） */
 			SharedPtr<Model> model = MeshFileHasSkeleton(model_path)
-				? std::static_pointer_cast<Model>(CreateSharedPtr<SkeletonModel>(model_path))
+				? StaticPtrCast<Model>(CreateSharedPtr<SkeletonModel>(model_path))
 				: CreateSharedPtr<Model>(model_path);
 
 			model->m_GeometryPath = model_path;

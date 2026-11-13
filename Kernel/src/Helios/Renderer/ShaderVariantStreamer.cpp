@@ -204,7 +204,7 @@ namespace Helios
 			{
 				InFlight in_flight;
 				in_flight.Item = item;
-				in_flight.Result = std::make_shared<SharedPtr<DeviceShader>>();
+				in_flight.Result = CreateSharedPtr<SharedPtr<DeviceShader>>();
 				in_flight.Task = Jobs::RunBackground([item, result = in_flight.Result]()
 				{
 					*result = BuildCpu(item);

@@ -43,7 +43,7 @@ namespace Helios
         if (m_VertexBuffers.empty())
             return 0;
 
-        auto first_buffer = std::dynamic_pointer_cast<MetalVertexBuffer>(m_VertexBuffers[0]);
+        auto first_buffer = DynamicPtrCast<MetalVertexBuffer>(m_VertexBuffers[0]);
         return first_buffer ? first_buffer->GetVertexCount() : 0;
     }
 
@@ -60,7 +60,7 @@ namespace Helios
 
         for (size_t buffer_index = 0; buffer_index < m_VertexBuffers.size(); ++buffer_index)
         {
-            auto metal_buffer = std::dynamic_pointer_cast<MetalVertexBuffer>(m_VertexBuffers[buffer_index]);
+            auto metal_buffer = DynamicPtrCast<MetalVertexBuffer>(m_VertexBuffers[buffer_index]);
             if (!metal_buffer)
                 continue;
 

@@ -70,7 +70,7 @@ namespace Helios
 		{
 			std::vector<Target> Targets{};
 			Jobs::Task Task{};
-			std::shared_ptr<std::vector<Prepared>> Result{};
+			SharedPtr<std::vector<Prepared>> Result{};
 			std::chrono::steady_clock::time_point StartTime{};
 		};
 

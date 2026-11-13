@@ -72,7 +72,7 @@ namespace Helios
 		std::string m_IniPath;
 		/* 界面外观安装器（见 StyleInstaller；空 = ImGui 内置默认） */
 		StyleInstaller m_StyleInstaller;
-		std::unique_ptr<ImGuiRenderer> m_Renderer;
+		UniquePtr<ImGuiRenderer> m_Renderer;
 
 		/* 当前 content scale（SetupFonts 的入参；跨屏变化时更新） */
 		float m_ContentScale{ 1.0f };

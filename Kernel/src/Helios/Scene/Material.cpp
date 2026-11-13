@@ -1012,7 +1012,7 @@ namespace Helios
 			WriteBody(root, material);
 
 			/* 文件句柄走 UTF-8 路径的打开方式（Windows 上 char* 路径会丢非 ASCII） */
-			auto file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+			auto file = UniquePtr<FILE, decltype(&std::fclose)>(
 				OpenUtf8File(file_path, "wb"), &std::fclose);
 			if (!file)
 			{
@@ -1114,7 +1114,7 @@ namespace Helios
 				relocate(relocate, element);
 			}
 
-			auto file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+			auto file = UniquePtr<FILE, decltype(&std::fclose)>(
 				OpenUtf8File(PathFromUtf8(absolute), "wb"), &std::fclose);
 			if (!file)
 			{

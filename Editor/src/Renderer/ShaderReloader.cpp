@@ -183,7 +183,7 @@ namespace Helios
 		Build build;
 		build.Targets = targets;
 		build.StartTime = std::chrono::steady_clock::now();
-		build.Result = std::make_shared<std::vector<Prepared>>();
+		build.Result = CreateSharedPtr<std::vector<Prepared>>();
 		build.Task = Jobs::RunBackground([targets, result = build.Result]()
 		{
 			*result = BuildBatch(targets);

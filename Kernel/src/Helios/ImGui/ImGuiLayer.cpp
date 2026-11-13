@@ -98,7 +98,7 @@ namespace Helios
 		ImGui_ImplGlfw_InitForOpenGL(window, true);
 
 		// Create our custom renderer
-		m_Renderer = std::make_unique<ImGuiRenderer>();
+		m_Renderer = CreateUniquePtr<ImGuiRenderer>();
 		m_Renderer->Init();
 
 		CORE_LOG_INFO("ImGuiLayer initialized with custom ImGuiRenderer");

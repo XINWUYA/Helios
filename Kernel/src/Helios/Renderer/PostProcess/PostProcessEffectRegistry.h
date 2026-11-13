@@ -32,7 +32,7 @@ namespace Helios
 		{
 		public:
 			template <typename T>
-			void Set(const T& value) { m_Values[std::type_index(typeid(T))] = std::make_shared<T>(value); }
+			void Set(const T& value) { m_Values[std::type_index(typeid(T))] = CreateSharedPtr<T>(value); }
 
 			template <typename T>
 			[[nodiscard]] const T* Get() const
@@ -44,7 +44,7 @@ namespace Helios
 			[[nodiscard]] bool IsEmpty() const { return m_Values.empty(); }
 
 		private:
-			std::unordered_map<std::type_index, std::shared_ptr<void>> m_Values;
+			std::unordered_map<std::type_index, SharedPtr<void>> m_Values;
 		};
 
 		/* 效果注册项 */

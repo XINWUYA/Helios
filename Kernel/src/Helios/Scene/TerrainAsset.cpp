@@ -175,7 +175,7 @@ namespace Helios::TerrainAsset
 		if (file_path.has_parent_path())
 			std::filesystem::create_directories(file_path.parent_path(), error);
 
-		std::unique_ptr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(file_path, "wb"), &std::fclose);
+		UniquePtr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(file_path, "wb"), &std::fclose);
 		if (handle == nullptr)
 		{
 			CORE_LOG_ERROR("TerrainAsset::Write: cannot open '{}'", path);
@@ -199,7 +199,7 @@ namespace Helios::TerrainAsset
 		if (!TryPathFromUtf8(path, file_path))
 			return false;
 
-		std::unique_ptr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(file_path, "rb"), &std::fclose);
+		UniquePtr<FILE, decltype(&std::fclose)> handle(OpenUtf8File(file_path, "rb"), &std::fclose);
 		if (handle == nullptr)
 		{
 			CORE_LOG_WARN("TerrainAsset::Read: cannot open '{}'", path);

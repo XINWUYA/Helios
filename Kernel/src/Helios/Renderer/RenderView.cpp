@@ -290,7 +290,7 @@ namespace Helios
 						? shadow_info->ShadowFar : camera->GetFarClip();
 					radius = std::max(radius, reach * 2.0f);
 				}
-				else if (const auto punctual = std::dynamic_pointer_cast<PunctualLight>(light))
+				else if (const auto punctual = DynamicPtrCast<PunctualLight>(light))
 				{
 					radius = std::max(radius, punctual->GetRange() + glm::distance(punctual->GetPosition(), center));
 				}

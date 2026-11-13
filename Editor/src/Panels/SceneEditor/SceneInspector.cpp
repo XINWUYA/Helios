@@ -1447,7 +1447,7 @@ namespace Helios
 		else if (entry.Kind == AssetFileKind::Scene)
 		{
 			/* 场景统计：实体数 + 各类别的数量（本地解析一遍，结果缓存在成员里） */
-			auto scene_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+			auto scene_file = UniquePtr<FILE, decltype(&std::fclose)>(
 				OpenUtf8File(absolute_path, "rb"), &std::fclose);
 			if (scene_file == nullptr)
 				return;

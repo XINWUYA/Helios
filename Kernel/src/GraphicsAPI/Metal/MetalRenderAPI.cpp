@@ -592,7 +592,7 @@ namespace Helios
         auto index_buffer = metal_vertex_array->GetIndexBuffer();
         auto* metal_index_buffer = index_buffer != nullptr
             ? static_cast<MetalIndexBuffer*>(index_buffer.get()) : nullptr;
-        auto storage = std::dynamic_pointer_cast<MetalStorageBuffer>(args_buffer);
+        auto storage = DynamicPtrCast<MetalStorageBuffer>(args_buffer);
         if (metal_index_buffer == nullptr || storage == nullptr || storage->GetMetalBuffer() == nullptr)
         {
             CORE_LOG_ERROR("DrawIndexedIndirect: index buffer or args buffer missing!");
@@ -694,7 +694,7 @@ namespace Helios
     {
         PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
-        auto metal_texture = std::dynamic_pointer_cast<MetalTexture>(texture);
+        auto metal_texture = DynamicPtrCast<MetalTexture>(texture);
         if (!metal_texture || !metal_texture->GetMetalTexture())
             return;
 
@@ -755,7 +755,7 @@ namespace Helios
         if (m_DefaultTargetSnapshot == nullptr)
             return nullptr;
 
-        auto metal_dst = std::dynamic_pointer_cast<MetalTexture>(m_DefaultTargetSnapshot);
+        auto metal_dst = DynamicPtrCast<MetalTexture>(m_DefaultTargetSnapshot);
         if (!metal_dst || !metal_dst->GetMetalTexture())
             return nullptr;
 
@@ -814,8 +814,8 @@ namespace Helios
     {
         PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
 
-        auto metal_src = std::dynamic_pointer_cast<MetalTexture>(src);
-        auto metal_dst = std::dynamic_pointer_cast<MetalTexture>(dst);
+        auto metal_src = DynamicPtrCast<MetalTexture>(src);
+        auto metal_dst = DynamicPtrCast<MetalTexture>(dst);
         if (!metal_src || !metal_dst || !metal_src->GetMetalTexture() || !metal_dst->GetMetalTexture())
             return;
 
@@ -1292,7 +1292,7 @@ namespace Helios
         resolved.reserve(buffers.size());
         for (const auto& [binding, buffer] : buffers)
         {
-            auto storage = std::dynamic_pointer_cast<MetalStorageBuffer>(buffer);
+            auto storage = DynamicPtrCast<MetalStorageBuffer>(buffer);
             if (storage == nullptr || storage->GetMetalBuffer() == nullptr)
                 return false;
             resolved.emplace_back(to_buffer_index(binding), storage->GetMetalBuffer());

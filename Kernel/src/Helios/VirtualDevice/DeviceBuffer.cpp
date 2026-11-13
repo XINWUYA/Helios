@@ -110,7 +110,7 @@ namespace Helios
 		/* GL 的缓冲名与用途无关：同一块显存直接当顶点缓冲用，VAO 只记缓冲名 */
 		if (Renderer::CurrentAPI() == RenderAPI::OpenGL)
 		{
-			auto gl_storage = std::dynamic_pointer_cast<OpenGLStorageBuffer>(storage);
+			auto gl_storage = DynamicPtrCast<OpenGLStorageBuffer>(storage);
 			if (gl_storage != nullptr && gl_storage->GetBufferID() != 0)
 				return CreateSharedPtr<OpenGLVertexBuffer>(name, gl_storage->GetBufferID(), size);
 		}
@@ -118,7 +118,7 @@ namespace Helios
 #if HELIOS_PLATFORM_APPLE
 		if (Renderer::CurrentAPI() == RenderAPI::Metal)
 		{
-			auto metal_storage = std::dynamic_pointer_cast<MetalStorageBuffer>(storage);
+			auto metal_storage = DynamicPtrCast<MetalStorageBuffer>(storage);
 			if (metal_storage != nullptr && metal_storage->GetMetalBuffer() != nullptr)
 				return CreateSharedPtr<MetalVertexBuffer>(name, metal_storage->GetMetalBuffer(), size);
 		}

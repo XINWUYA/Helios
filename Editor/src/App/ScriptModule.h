@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include "Helios/Common/Common.h"
 #include "Helios/Core/Jobs.h"
 #include "HeliosConfig.h"
 
@@ -66,7 +67,7 @@ namespace Helios
 
 		/* 后台编译：任务终态 + 结果槽，Tick 里收 */
 		Jobs::Task m_CompileTask{};
-		std::shared_ptr<BuildOutcome> m_BuildOutcome{};
+		SharedPtr<BuildOutcome> m_BuildOutcome{};
 		bool m_CompileActive{ false };
 
 		/* 外部产物监听：一秒查一次，只认修改时间往前走的那一份 */

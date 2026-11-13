@@ -400,7 +400,7 @@ namespace Helios
 			return;
 		}
 
-		auto clip_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+		auto clip_file = UniquePtr<FILE, decltype(&std::fclose)>(
 			OpenUtf8File(clip_path, "wb"), &std::fclose);
 		if (!clip_file)
 		{
@@ -473,7 +473,7 @@ namespace Helios
 			return false;
 		}
 
-		auto clip_file = std::unique_ptr<FILE, decltype(&std::fclose)>(
+		auto clip_file = UniquePtr<FILE, decltype(&std::fclose)>(
 			OpenUtf8File(clip_path, "rb"), &std::fclose);
 		if (!clip_file)
 		{

@@ -347,7 +347,7 @@ namespace Helios
 		float m_InstanceMaxY{ 0.0f };
 		uint32_t m_SlopeCulledCount{ 0 };
 		/* 后台重建：同 key 只起一个任务，结果在主线程上传 */
-		std::shared_ptr<AsyncBuild> m_AsyncBuild;
+		SharedPtr<AsyncBuild> m_AsyncBuild;
 		uint64_t m_AsyncKey{ 0 };
 		Jobs::Task m_AsyncTask;
 		uint32_t m_CapacityBytes{ 0 };

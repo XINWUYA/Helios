@@ -14,7 +14,7 @@ namespace Helios::Jobs
 {
 	struct TaskAccess
 	{
-		static Task Make(void* job, uint32_t owner, std::shared_ptr<TaskControl> control)
+		static Task Make(void* job, uint32_t owner, SharedPtr<TaskControl> control)
 		{
 			return Task(job, owner, std::move(control));
 		}
@@ -52,7 +52,7 @@ namespace Helios::Jobs
 		using HeliosJobs::JobSystem;
 
 		std::mutex s_InitMutex;
-		std::unique_ptr<JobSystem> s_System;
+		UniquePtr<JobSystem> s_System;
 		HeliosJobs::ThreadQueue s_MainQueue;
 		std::atomic<uint32_t> s_Generation{ 0 };
 		uint32_t s_SystemId = 0;
@@ -62,7 +62,7 @@ namespace Helios::Jobs
 		{
 			std::function<void()> Work;
 			std::function<void()> OnMain;
-			std::shared_ptr<TaskControl> Control;
+			SharedPtr<TaskControl> Control;
 			uint32_t Generation = 0;
 
 			/* 跑完、取消、过期、池满被丢、退出清理都会析构到这里：
@@ -136,7 +136,7 @@ namespace Helios::Jobs
 		const uint32_t workers = worker_count != 0 ? worker_count : hardware - 1;
 		desc.BackgroundSlots = workers >= 3 ? std::max(2u, workers / 3) : 1u;
 
-		s_System = std::make_unique<JobSystem>(desc);
+		s_System = CreateUniquePtr<JobSystem>(desc);
 		s_System->Adopt();
 		++s_SystemId;
 		CORE_LOG_INFO("[Jobs] {} workers, {} background slots", s_System->GetWorkerCount(), s_System->GetBackgroundSlots());
@@ -145,7 +145,7 @@ namespace Helios::Jobs
 
 	void Shutdown()
 	{
-		std::unique_ptr<JobSystem> system;
+		UniquePtr<JobSystem> system;
 		{
 			std::lock_guard lock(s_InitMutex);
 			system = std::move(s_System);
@@ -321,14 +321,14 @@ namespace Helios::Jobs
 
 	Task RunBackground(std::function<void()> work, Priority priority, std::function<void()> on_main)
 	{
-		auto control = std::make_shared<TaskControl>();
+		auto control = CreateSharedPtr<TaskControl>();
 		if (!work)
 		{
 			control->Finish(TaskState::Skipped);
 			return TaskAccess::Make(nullptr, 0, std::move(control));
 		}
 
-		auto payload = std::make_unique<BackgroundPayload>();
+		auto payload = CreateUniquePtr<BackgroundPayload>();
 		payload->Work = std::move(work);
 		payload->OnMain = std::move(on_main);
 		payload->Control = control;

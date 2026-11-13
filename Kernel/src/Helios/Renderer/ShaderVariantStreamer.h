@@ -91,7 +91,7 @@ namespace Helios
 		{
 			Item Item{};
 			Jobs::Task Task{};
-			std::shared_ptr<SharedPtr<DeviceShader>> Result{};
+			SharedPtr<SharedPtr<DeviceShader>> Result{};
 		};
 		std::vector<InFlight> m_InFlight;
 		/* 编译失败过一次的组合不再自动重排：源码有明显错误时免得每帧都试一遍 */

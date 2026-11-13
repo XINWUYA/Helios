@@ -84,7 +84,7 @@ namespace Helios
 
 		template <typename T>
 		explicit ComponentSnapshot(const T& component)
-			: m_Value(std::make_shared<T>(component)), m_Type(typeid(T))
+			: m_Value(CreateSharedPtr<T>(component)), m_Type(typeid(T))
 		{
 		}
 
@@ -101,7 +101,7 @@ namespace Helios
 		}
 
 	private:
-		std::shared_ptr<void> m_Value;
+		SharedPtr<void> m_Value;
 		std::type_index       m_Type{ typeid(void) };
 	};
 
