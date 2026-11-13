@@ -400,14 +400,11 @@ cmake-build-release/
 .workbuddy/
 
 # CMake generated files
+# 生成物都落在构建目录里，那里已经整目录忽略；cmake/ 下的模块与工具链是源码
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
-*.cmake
-!CMakeLists.txt
-# 交叉编译工具链是源码，不是生成物
-!cmake/toolchains/*.cmake
 
 /Kernel/src/Helios/Profiler/Tracy/TracyClient.cpp
 
