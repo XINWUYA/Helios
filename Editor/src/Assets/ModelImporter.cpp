@@ -780,6 +780,10 @@ namespace Helios
 			if (resolve(aiTextureType_AMBIENT, ambient))
 				attach("u_AmbientTexture", ambient);
 
+			AssimpTextureRef occlusion;
+			if (resolve(aiTextureType_AMBIENT_OCCLUSION, occlusion))
+				attach("u_AOTexture", occlusion);
+
 			AssimpTextureRef specular;
 			if (resolve(aiTextureType_SPECULAR, specular))
 				attach("u_SpecularTexture", specular);

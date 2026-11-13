@@ -374,6 +374,7 @@ namespace Helios
 				"        <ParamInfo Type=\"0\" Name=\"u_MetallicTexture\" Value=\"Textures/Black.png\"/>\n"
 				"        <ParamInfo Type=\"0\" Name=\"u_EmissiveTexture\" Value=\"Textures/Black.png\"/>\n"
 				"        <ParamInfo Type=\"0\" Name=\"u_AmbientTexture\" Value=\"Textures/Black.png\"/>\n"
+				"        <ParamInfo Type=\"0\" Name=\"u_AOTexture\" Value=\"Textures/White.png\"/>\n"
 				"    </Parameters>\n"
 				"</Material>\n";
 		}

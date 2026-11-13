@@ -298,12 +298,14 @@ void main()
 	{
 		const float ambient_visibility = AmbientShadowVisibility(n, l, shadow);
 
-		/* 有探针时按逐像素选择取 IBL（权重混合 / 距离最近）；无探针退回平面环境项 */
+		/* 有探针时按逐像素选择取 IBL（权重混合 / 距离最近）；无探针退回平面环境项。
+		 * 探针这一支要自己乘 AO，回退项在 ComposeFallbackAmbient 里已经乘过 */
 		if (u_ProbeCount > 0)
 		{
 			const SProbeSelection selection = SelectIBLProbes(world_pos);
 			lighting_result += max(vec3(0.0f),
-				EvaluateProbeIBL(selection, n, v, gbuffer.Roughness, gbuffer.Metallic, gbuffer.Albedo)) * ambient_visibility;
+				EvaluateProbeIBL(selection, n, v, gbuffer.Roughness, gbuffer.Metallic, gbuffer.Albedo))
+				* ambient_visibility * gbuffer.AO;
 		}
 		else
 		{

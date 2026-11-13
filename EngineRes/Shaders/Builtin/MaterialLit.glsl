@@ -5,7 +5,7 @@
 #include "MaterialInput.glsl"
 #include "Uniforms.glsl"
 
-/* 标准 lit 材质的贴图契约：9 个采样器（材质转换 / 调试视图都按名字找），声明随本库走，
+/* 标准 lit 材质的贴图契约：10 个采样器（材质转换 / 调试视图都按名字找），声明随本库走，
  * 前向材质着色器与延迟 GBuffer 自动同源。@property = 归材质管的参数（面板列、写进 .mtl），
  * @group = 面板上的小标题；引擎逐绘制给的不标。显示名 / 控件 / 范围 / 条件见 DeviceShader.h。 */
 uniform sampler2D u_AlbedoTexture; // @group(Surface) @property
@@ -17,9 +17,13 @@ uniform sampler2D u_RoughnessTexture; // @group(Surface) @property
 uniform sampler2D u_MetallicTexture; // @group(Surface) @property
 uniform sampler2D u_EmissiveTexture; // @group(Surface) @property
 uniform sampler2D u_AmbientTexture; // @group(Surface) @property
+uniform sampler2D u_AOTexture; // @group(Surface) @property @variant(MTL_AO)
 
 /* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）：所有材质贴图采样共用、缺省不变换 */
 uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @group(Surface) @property
+
+/* 视差深度（UV 单位）：只有开视差档才读。图集 UV 下 1 个单位等于整张图，取 0.005 上下 */
+uniform float u_ParallaxDepth = 0.008f; // @group(Detail) @property(Depth) @range(0.0, 0.05)
 
 /* 标准 lit 材质的采样装配：输入世界位置 / 主 UV / 顶点色 / 世界法线 / 世界切线，
  * 输出填好的 SMaterialInput。前向与延迟共用这唯一一份实现。 */
@@ -39,11 +43,12 @@ void CalculateLitMaterial(inout SMaterialInput mtl,
 
 	vec2 sample_uv = base_uv;
 #if MTL_PARALLAX
-	/* 视差映射：按高度图把采样 UV 沿视线方向偏移；掠射角下 view_dir.z 趋零，钳制防噪声放大。
-	 * 关闭时没有高度图，偏移恒为 0，与默认黑图逐位一致 */
+	/* 视差映射：高度按深度缩放并扣掉一半基准，视线 z 加偏置压住掠射角的放大，
+	 * 否则 tan 一爆整张贴图会被拖出几十厘米的错位 */
 	vec3 view_dir = normalize(TBN * (u_ViewPos - world_position));
-	float height = texture(u_BumpTexture, base_uv).x;
-	sample_uv = base_uv - view_dir.xy / max(view_dir.z, 1e-3f) * height;
+	float height = texture(u_BumpTexture, base_uv).r * u_ParallaxDepth - u_ParallaxDepth * 0.5f;
+	view_dir.z += 0.42f;
+	sample_uv = base_uv - height * (view_dir.xy / view_dir.z);
 #endif
 
 	/* Albedo 转线性空间后再乘顶点色（sRGB 解码漏了会整片发白，是历史漂移点） */
@@ -64,8 +69,13 @@ void CalculateLitMaterial(inout SMaterialInput mtl,
 	mtl.Specular = texture(u_SpecularTexture, sample_uv).rgb;
 	mtl.Emission = texture(u_EmissiveTexture, sample_uv).rgb;
 	mtl.Ambient = texture(u_AmbientTexture, sample_uv).rgb;
-	/* 材质体系暂未接入的通道：填中性值 */
+	/* AO 是表面烘焙的低频遮蔽，不跟着视差偏移；没配 AO 图的材质按无遮蔽算 */
+#if MTL_AO
+	mtl.AO = texture(u_AOTexture, base_uv).r;
+#else
 	mtl.AO = 1.0f;
+#endif
+	/* 材质体系暂未接入的通道：填中性值 */
 	mtl.Anisotropy = 0.0f;
 	mtl.IOR = 0.0f;
 	mtl.ClearCoatThickness = 0.0f;

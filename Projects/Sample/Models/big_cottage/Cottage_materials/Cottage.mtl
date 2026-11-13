@@ -8,11 +8,12 @@
     <ParamInfo Type="0" Name="u_MetallicTexture" Value="Models/big_cottage/Cottage_Dirt/Cottage_Dirt_Metallic.png"/>
     <ParamInfo Type="4" Name="AlbedoColor" Value="0.800000 0.800000 0.800000" />
     <ParamInfo Type="0" Name="u_SpecularTexture" Value="Textures/Black.png"/>
-    <ParamInfo Type="0" Name="u_BumpTexture" Value="Textures/Black.png"/>
+    <ParamInfo Type="0" Name="u_BumpTexture" Value="Models/big_cottage/Cottage_Dirt/Cottage_Dirt_Height.png"/>
     <ParamInfo Type="0" Name="u_NormalTexture" Value="Models/big_cottage/Cottage_Dirt/Cottage_Dirt_Normal.png"/>
     <ParamInfo Type="0" Name="u_DisplacementTexture" Value="Textures/Black.png"/>
     <ParamInfo Type="0" Name="u_RoughnessTexture" Value="Models/big_cottage/Cottage_Dirt/Cottage_Dirt_Roughness.png"/>
     <ParamInfo Type="0" Name="u_EmissiveTexture" Value="Textures/Black.png"/>
+    <ParamInfo Type="0" Name="u_AOTexture" Value="Models/big_cottage/Cottage_Dirt/Cottage_Dirt_AO.png"/>
     <ParamInfo Type="2" Name="IOR" Value="1" />
   </Parameters>
   <RasterState CullMode="1" FrontFaceType="0" EnableBlend="true" BlendEquationRGB="0" BlendEquationA="0" BlendFuncSrcRGB="1" BlendFuncSrcA="1" BlendFuncDstRGB="0" BlendFuncDstA="0" EnableDepthWrite="true" DepthCompareFunc="1" EnableColorWrite="true" />

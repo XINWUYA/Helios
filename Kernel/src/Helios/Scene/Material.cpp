@@ -586,7 +586,7 @@ namespace Helios
 		{
 			/* 跟 Default/Error 一样：只能在获取时初始化（静态期 GL 还没就绪）。着色器用
 			 * PBRStandard（场景物体的通用默认外观：前向直画，延迟侧由 G-Buffer Pass 自动转换），
-			 * 9 个采样点必须全有贴图 —— 白模就用内置默认贴图配满，零外部依赖。 */
+			 * 10 个采样点必须全有贴图 —— 白模就用内置默认贴图配满，零外部依赖。 */
 			m_pBuiltinWhiteMaterial->SetShader(
 				AssetManager::Instance().GetOrLoad<DeviceShader>(ABSOLUTE_PATH("Shaders/MaterialShaders/PBRStandard.glsl")));
 
@@ -607,6 +607,7 @@ namespace Helios
 			white.SetTexture("u_MetallicTexture", texture_black);
 			white.SetTexture("u_EmissiveTexture", texture_black);
 			white.SetTexture("u_AmbientTexture", texture_black);
+			white.SetTexture("u_AOTexture", texture_white);
 		}
 		return m_pBuiltinWhiteMaterial;
 	}
@@ -776,8 +777,8 @@ namespace Helios
 	{
 		PROFILE_CPU_FUNCTION_CH(ProfileChannel::Scene);
 
-		/* 注意：Ambient 不能用黑 —— 缺贴图的材质走 "albedo × 0.3" 回退环境项，
-		 * 黑贴图会让延迟端在没有探针时把这个环境项丢掉。 */
+		/* 注意：Ambient / AO 不能用黑 —— 缺贴图的材质走 "albedo × 0.3" 回退环境项，
+		 * 黑贴图会让延迟端把这个环境项整个吞掉。 */
 		static BuiltinAsset<DeviceTexture> s_normal("Textures/normal.png");
 		static BuiltinAsset<DeviceTexture> s_white("Textures/White.png");
 		static BuiltinAsset<DeviceTexture> s_black("Textures/Black.png");
@@ -785,7 +786,8 @@ namespace Helios
 			return s_normal.Get();
 		if (sampler_name.find("Albedo") != std::string::npos
 			|| sampler_name.find("Roughness") != std::string::npos
-			|| sampler_name.find("Ambient") != std::string::npos)
+			|| sampler_name.find("Ambient") != std::string::npos
+			|| sampler_name.find("AO") != std::string::npos)
 			return s_white.Get();
 		return s_black.Get();
 	}

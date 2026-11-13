@@ -53,8 +53,9 @@ SForwardShade ShadeForwardSurface(const SMaterialInput mtl, vec3 world_position)
 	if (u_ComposeAmbientEmission > 0)
 	{
 		vec3 ambient;
+		/* 探针 IBL 也要乘 AO：回退环境项在 ComposeFallbackAmbient 里已经乘过，别重复 */
 		if (u_UseIBL != 0)
-			ambient = max(vec3(0.0f), EvaluateIBL(N, V, mtl.Roughness, mtl.Metallic, mtl.Albedo));
+			ambient = max(vec3(0.0f), EvaluateIBL(N, V, mtl.Roughness, mtl.Metallic, mtl.Albedo)) * mtl.AO;
 		else
 			ambient = max(vec3(0.0f), ComposeFallbackAmbient(mtl.Ambient, mtl.Albedo, mtl.AO));
 		color += ambient * AmbientShadowVisibility(N, L, shadow) + mtl.Emission;
