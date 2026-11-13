@@ -9,7 +9,9 @@ layout(std140, binding = 5) uniform SkyUniformBuffer
 	vec4 u_SkySunRadiance;    /* rgb 大气层外的阳光辐照度（已换算到引擎亮度量级），
 	                           * a 盘面竖直压扁因子（大气折射，贴地平线时日面是扁的） */
 	vec4 u_SkyMoonDirection;  /* xyz 指向月亮，w 月亮角半径（弧度） */
-	vec4 u_SkyMoonRadiance;   /* rgb 月亮色（已按月相与高度衰减），a 盘面竖直压扁因子 */
+	vec4 u_SkyMoonRadiance;   /* rgb 月亮色（已按月相与高度衰减），a 盘面竖直压扁因子。月盘用这一份 */
+	vec4 u_SkyMoonScatter;    /* rgb 夜空散射用的月亮辐亮度（已乘夜空倍率），a 保留。
+	                           * 散射与月盘外那圈辉光用这一份 */
 	vec4 u_SkyMoonLightDirection; /* xyz 月亮看到的太阳方向（月面着色），w 保留 */
 	vec4 u_SkyRayleigh;       /* xyz 瑞利散射系数（1/m），w 瑞利标高（m） */
 	vec4 u_SkyMie;            /* x 米氏散射系数，y 米氏标高，z 各向异性 g，w 浑浊度缩放 */

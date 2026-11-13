@@ -36,6 +36,9 @@ namespace Helios
 			.Group("Brightness")
 			.Field(&SkyComponent::m_SunIntensity, "SunIntensity", FieldType::Float, 0.05f, 5.0f)
 			.Field(&SkyComponent::m_MoonIntensity, "MoonIntensity", FieldType::Float, 0.002f, 0.12f)
+			/* 夜空倍率：月光照地由 MoonIntensity 管，它只压天上的散射与辉光，月盘不变 */
+			.Field(&SkyComponent::m_MoonSkyGlow, "MoonSkyGlow", FieldType::Float, 0.01f, 1.0f)
+			.Range(0.0f, 1.0f)
 			.Field(&SkyComponent::m_StarIntensity, "StarIntensity", FieldType::Float, 0.01f, 1.0f)
 			.Group("Atmosphere")
 			.Field(&SkyComponent::m_Haze, "Haze", FieldType::Float, 0.01f, 1.0f)

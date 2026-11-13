@@ -43,7 +43,10 @@ namespace Helios
 			 * 直接拿太阳方向当月面光源时，纬度一高满月也会被画成半月 */
 			glm::vec3 MoonLightDirection{ 0.0f, 1.0f, 0.0f };
 			float SunIntensity{ 1.0f };
+			/* 月亮亮度：月盘与月亮那盏方向光都按它，夜空散射再乘 MoonSkyGlow */
 			float MoonIntensity{ 0.0f };
+			/* 夜空散射的倍率（0..1）：只压天上那一段，月盘与方向光照旧按满亮度 */
+			float MoonSkyGlow{ 1.0f };
 			float StarIntensity{ 1.0f };
 			float StarRotation{ 0.0f }; /* 星空绕极轴转过的角度（弧度） */
 			float MoonPhase{ 0.5f };    /* 0 新月 / 0.5 满月 */

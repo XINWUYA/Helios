@@ -219,6 +219,8 @@ namespace Helios
 			const float illuminated = ComputeMoonIlluminatedFraction(state.MoonPhase);
 			const float above_horizon = glm::smoothstep(-0.02f, 0.10f, state.MoonDirection.y);
 			state.MoonIntensity = std::max(sky.m_MoonIntensity, 0.0f) * illuminated * above_horizon;
+			/* 夜空倍率只压天上那一段，月光照地与月盘都按满亮度 */
+			state.MoonSkyGlow = std::clamp(sky.m_MoonSkyGlow, 0.0f, 1.0f);
 			state.MoonLightDirection = ComputeMoonLightDirection(state.MoonDirection, state.SunDirection,
 				state.MoonPhase);
 

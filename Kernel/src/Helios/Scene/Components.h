@@ -546,6 +546,10 @@ namespace Helios
 		/* 日月星强度：太阳强度同时写进方向光，天空散射按同一份换算 */
 		float m_SunIntensity{ 5.0f };
 		float m_MoonIntensity{ 0.12f };
+		/* 夜空里月亮贡献的倍率：只压散射与月盘外那圈辉光，月盘和月光直射不受影响。
+		 * 想让地面更亮又不想把天照亮时压它，别去抬 MoonIntensity。探针烘的夜空读的
+		 * 也是这份散射，靠间接光照亮的地面会跟着暗一点 */
+		float m_MoonSkyGlow{ 1.0f };
 		float m_StarIntensity{ 1.0f };
 		/* 雾霾（米氏散射强度缩放）与天空曝光 */
 		float m_Haze{ 1.0f };

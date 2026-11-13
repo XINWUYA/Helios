@@ -512,11 +512,12 @@ void main()
 	float night = 1.0f - smoothstep(-0.08f, 0.12f, sun_elevation);
 
 	/* 月亮同样在散射。满月只有太阳的几十分之一，但夜空本来就暗，
-	 * 月亮附近会浮出一圈辉光；白天这遍跳过，省一半积分 */
+	 * 月亮附近会浮出一圈辉光；白天这遍跳过，省一半积分。
+	 * 辐亮度用散射专用那一份：夜空倍率只压天上这一段，月盘与月光照地都不受影响 */
 	if (night > 0.0f)
 	{
 		vec3 moon_transmittance;
-		radiance += ScatterFromLight(view_dir, u_SkyMoonDirection.xyz, u_SkyMoonRadiance.rgb,
+		radiance += ScatterFromLight(view_dir, u_SkyMoonDirection.xyz, u_SkyMoonScatter.rgb,
 			moon_transmittance) * night;
 	}
 
@@ -555,7 +556,8 @@ void main()
 			* smoothstep(0.90f, 1.10f, moon_ratio);
 
 		radiance += Moon(view_dir, pixel_angle, u_SkyMoonRadiance.w) * transmittance;
-		radiance += u_SkyMoonRadiance.rgb * transmittance * moon_glow;
+		/* 月辉也吃同一个夜空倍率，否则压了散射还剩一圈亮圈浮在天上 */
+		radiance += u_SkyMoonScatter.rgb * transmittance * moon_glow;
 		/* 星星同样走大气透过率：贴近地平线时被吃掉一大半并偏红，与日月同一套消光 */
 		radiance += Stars(view_dir, night) * transmittance;
 		radiance += kNightAirglow * night;

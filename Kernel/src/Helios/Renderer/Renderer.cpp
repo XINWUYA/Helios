@@ -82,8 +82,10 @@ namespace Helios
 		glm::vec4 SunRadiance{ 1.0f };
 		/* xyz 指向月亮，w 月亮角半径 */
 		glm::vec4 MoonDirection{ 0.0f, -1.0f, 0.0f, 0.012f };
-		/* rgb 月亮色（按月相与高度衰减过），a 盘面竖直压扁因子 */
+		/* rgb 月亮色（按月相与高度衰减过），a 盘面竖直压扁因子。月盘用这一份 */
 		glm::vec4 MoonRadiance{ 1.0f };
+		/* rgb 夜空散射用的月亮辐亮度（已乘夜空倍率），a 保留。散射与月盘外辉光用这一份 */
+		glm::vec4 MoonScatter{ 1.0f };
 		/* xyz 月亮看到的太阳方向（月面着色用），w 保留 */
 		glm::vec4 MoonLightDirection{ 0.0f, 1.0f, 0.0f, 0.0f };
 		/* xyz 瑞利散射系数（1/m），w 瑞利标高（m） */
@@ -308,6 +310,9 @@ namespace Helios
 		data.MoonDirection = glm::vec4(state.MoonDirection, state.MoonAngularRadius);
 		data.MoonRadiance = glm::vec4(state.MoonColor * (state.MoonIntensity * Sky::kSunIrradianceScale),
 			state.MoonFlattening);
+		/* 天上那一段单独送一份：夜空倍率压它，月盘还是满亮 */
+		data.MoonScatter = glm::vec4(state.MoonColor
+			* (state.MoonIntensity * state.MoonSkyGlow * Sky::kSunIrradianceScale), 0.0f);
 		data.MoonLightDirection = glm::vec4(state.MoonLightDirection, 0.0f);
 		data.Rayleigh = glm::vec4(state.Atmos.RayleighBeta, state.Atmos.RayleighScaleHeight);
 		data.Mie = glm::vec4(state.Atmos.MieBeta, state.Atmos.MieScaleHeight,
