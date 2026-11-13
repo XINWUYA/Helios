@@ -163,11 +163,11 @@ cmake --build build --config Debug -- -j8
    - 支持Tracy性能分析
 
 2. **Editor**: 场景编辑器应用
-   - 依赖Kernel和ImGuizmo
+   - 依赖Kernel
    - 控制台应用程序
 
 3. **ModelEditor**: 模型编辑器应用
-   - 依赖Kernel和ImGuizmo
+   - 依赖Kernel
    - 控制台应用程序
 
 4. **Sample_SkyBox**: 天空盒示例
@@ -184,7 +184,6 @@ cmake --build build --config Debug -- -j8
 - **GLFW**: 窗口和输入管理
 - **Glad**: OpenGL加载器
 - **ImGui**: 即时模式GUI
-- **ImGuizmo**: 3D变换gizmo
 - **glm**: 数学库
 - **spdlog**: 日志库
 - **assimp**: 资产导入库
