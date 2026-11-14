@@ -2,6 +2,7 @@
 #include "OpenGLRenderAPI.h"
 #include "OpenGLBuffer.h"
 #include "OpenGLCommon.h"
+#include "OpenGLFrameBuffer.h"
 #include "OpenGLShader.h"
 #include "OpenGLTexture.h"
 #include <Helios/Profiler/Profiler.h>
@@ -94,6 +95,7 @@ namespace Helios
 	void OpenGLRenderAPI::Clear()
 	{
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		OpenGLFrameBuffer::ReapplyBoundClearValues();
 	}
 
 	/* 应用光栅化状态：只下发变化的字段。驱动虽然也会折叠重复配置，

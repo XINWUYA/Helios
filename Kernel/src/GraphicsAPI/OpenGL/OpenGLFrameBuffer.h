@@ -22,6 +22,9 @@ namespace Helios
 		/* 指定某个ColorAttachment */
         void ClearAttachment(uint32_t attachment_index, int level, const PixelDesc& pixel_desc, void* data) override;
 
+		/* RenderAPI::Clear 之后调用：把当前绑定帧缓冲的逐附件清屏值补回来 */
+		static void ReapplyBoundClearValues();
+
 	private:
 		/* 绑定一个RenderBuffer到FrameBuffer */
 		void AttachARenderBuffer(const RenderBufferInfo& render_buffer_info, GLenum attachment);
@@ -32,6 +35,10 @@ namespace Helios
 		/* 多重采样：临时附件建在 RBO 上，Unbind 时解析回描述里的单采样目标 */
 		void CreateMultisampleAttachments(const std::string& name);
 		void ResolveMultisample();
+		/* 按描述里的 ColorClearValues 逐附件清屏 */
+		void ApplyClearValues();
+
+		inline static OpenGLFrameBuffer* s_BoundFrameBuffer = nullptr;
 
 		uint32_t m_FrameBufferId{ 0 };
 		uint32_t m_ResolveFrameBufferId{ 0 };

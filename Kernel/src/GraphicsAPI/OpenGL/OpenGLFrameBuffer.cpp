@@ -118,6 +118,8 @@ namespace Helios
 	{
 		if (GLState::CurrentFramebuffer() == m_FrameBufferId)
 			GLState::BindFramebuffer(0);
+		if (s_BoundFrameBuffer == this)
+			s_BoundFrameBuffer = nullptr;
 		if (!m_MultisampleRenderbuffers.empty())
 			glDeleteRenderbuffers(static_cast<GLsizei>(m_MultisampleRenderbuffers.size()), m_MultisampleRenderbuffers.data());
 		if (m_ResolveFrameBufferId != 0)
@@ -228,6 +230,19 @@ namespace Helios
 		if (bind_info.Mode == FrameBufferBindMode::Layered)
 			SetAttachmentLayer(bind_info.TargetAttachment, bind_info.ColorIndex, bind_info.LayerIndex, bind_info.MipLevel);
 
+		s_BoundFrameBuffer = this;
+		ApplyClearValues();
+	}
+
+	/* glClear 用全局清屏色刷所有颜色附件，刷完把附件自己的清屏值补回来 */
+	void OpenGLFrameBuffer::ReapplyBoundClearValues()
+	{
+		if (s_BoundFrameBuffer != nullptr && GLState::CurrentFramebuffer() == s_BoundFrameBuffer->m_FrameBufferId)
+			s_BoundFrameBuffer->ApplyClearValues();
+	}
+
+	void OpenGLFrameBuffer::ApplyClearValues()
+	{
 		const size_t clear_count = std::min(
 			m_FrameBufferDesc.ColorClearValues.size(), m_FrameBufferDesc.ColorRenderBuffers.size());
 		if (clear_count > 0)
@@ -265,6 +280,8 @@ namespace Helios
 
 		if (m_ResolveFrameBufferId != 0)
 			ResolveMultisample();
+		if (s_BoundFrameBuffer == this)
+			s_BoundFrameBuffer = nullptr;
 		GLState::BindFramebuffer(0);
 	}
 
