@@ -17,7 +17,8 @@ float SampleShadowPCF(sampler2DArray shadowMap, vec2 shadow_uv, float layer, flo
 		for (int y = -1; y <= 1; ++y)
 		{
 			vec2 offset = vec2(x, y) * texel_size;
-			float closest_depth = texture(shadowMap, vec3(shadow_uv + offset, layer)).r;
+			/* 阴影图只有一级：显式取 0 级，不依赖屏幕导数（延迟光照会提前 return） */
+			float closest_depth = textureLod(shadowMap, vec3(shadow_uv + offset, layer), 0.0f).r;
 			/* 遮挡判定：遮挡物更靠近光源 ⇒ 深度值更大（Reversed-Z） */
 			shadow += current_depth < closest_depth ? 1.0f : 0.0f;
 		}

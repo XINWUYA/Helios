@@ -170,19 +170,19 @@ void SampleProbeIBL(int probe, vec3 N, vec3 R, float roughness, out vec3 irradia
 	float intensity = u_ProbeIntensity0;
 	if (probe == 0)
 	{
-		irradiance = texture(u_IrradianceMap0, N).rgb;
+		irradiance = textureLod(u_IrradianceMap0, N, 0.0f).rgb;
 		prefiltered = textureLod(u_PrefilterMap0, R, roughness * log2(float(textureSize(u_PrefilterMap0, 0).x))).rgb;
 	}
 	else if (probe == 1)
 	{
 		intensity = u_ProbeIntensity1;
-		irradiance = texture(u_IrradianceMap1, N).rgb;
+		irradiance = textureLod(u_IrradianceMap1, N, 0.0f).rgb;
 		prefiltered = textureLod(u_PrefilterMap1, R, roughness * log2(float(textureSize(u_PrefilterMap1, 0).x))).rgb;
 	}
 	else
 	{
 		intensity = u_ProbeIntensity2;
-		irradiance = texture(u_IrradianceMap2, N).rgb;
+		irradiance = textureLod(u_IrradianceMap2, N, 0.0f).rgb;
 		prefiltered = textureLod(u_PrefilterMap2, R, roughness * log2(float(textureSize(u_PrefilterMap2, 0).x))).rgb;
 	}
 
@@ -212,7 +212,7 @@ void EvaluateProbeIBLComponents(SProbeSelection sel, vec3 N, vec3 V, float rough
 		prefiltered = mix(prefiltered, prefiltered1, sel.Weight1);
 	}
 
-	const vec2 brdf = texture(u_BRDFLut, vec2(ndv, roughness)).rg;
+	const vec2 brdf = textureLod(u_BRDFLut, vec2(ndv, roughness), 0.0f).rg;
 
 	diffuse = ComposeIBLDiffuse(N, V, metallic, roughness, albedo, irradiance);
 	specular = ComposeIBLSpecular(N, V, metallic, roughness, albedo, prefiltered, brdf);
@@ -231,6 +231,14 @@ vec3 EvaluateProbeIBL(SProbeSelection sel, vec3 N, vec3 V, float roughness, floa
 
 void main()
 {
+	/* 背景像素（反向 Z 下深度 0 就是远平面）：天空在后面的通道整片盖掉，这里不用算光照。
+	 * 调试档位要读数，照旧往下走。提前 return 后屏幕导数失效，后面的采样都得用 texelFetch / textureLod */
+	if (u_DebugView == 0 && LoadGBufferDepth(vert2frag.TexCoord) <= 0.0f)
+	{
+		OutFragColor = vec4(0.0f);
+		return;
+	}
+
 	SGBufferData gbuffer;
 	CalculateGBuffer(gbuffer, vert2frag.TexCoord);
 

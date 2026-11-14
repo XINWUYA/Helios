@@ -30,10 +30,22 @@ uniform sampler2D u_GBufferTexture4;
 /* 深度附件：世界位置改成从它反投影，G-Buffer 不再存位置 */
 uniform sampler2D u_GBufferDepth;
 
+/* G-Buffer 一律按整数坐标逐像素读：texture() 要靠 2x2 邻居算导数，
+ * 调用方提前 return 后导数失效，深度边界会混进背景像素 */
+ivec2 GBufferTexel(vec2 uv)
+{
+	return ivec2(uv * vec2(textureSize(u_GBufferDepth, 0)));
+}
+
+float LoadGBufferDepth(vec2 uv)
+{
+	return texelFetch(u_GBufferDepth, GBufferTexel(uv), 0).r;
+}
+
 /* 深度反投影：uv 与深度还原世界坐标。深度是窗口空间的 [0,1]，换回 NDC 要乘 2 减 1 */
 vec3 ReconstructWorldPosition(vec2 uv)
 {
-	const float depth = texture(u_GBufferDepth, uv).r;
+	const float depth = LoadGBufferDepth(uv);
 	/* 深度已经是 D3D 风格的 [0,1]，直接当 NDC z 用；uv 的 (0,0) 与 NDC 左下角一致 */
 	const vec4 ndc = vec4(uv * 2.0f - 1.0f, depth, 1.0f);
 	const vec4 world = u_InvViewProjectionMat * ndc;
@@ -42,11 +54,12 @@ vec3 ReconstructWorldPosition(vec2 uv)
 
 void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 {
-	vec4 color0 = texture(u_GBufferTexture0, uv);
-	vec4 color1 = texture(u_GBufferTexture1, uv);
-	vec4 color2 = texture(u_GBufferTexture2, uv);
-	vec4 color3 = texture(u_GBufferTexture3, uv);
-	vec4 color4 = texture(u_GBufferTexture4, uv);
+	const ivec2 texel = GBufferTexel(uv);
+	vec4 color0 = texelFetch(u_GBufferTexture0, texel, 0);
+	vec4 color1 = texelFetch(u_GBufferTexture1, texel, 0);
+	vec4 color2 = texelFetch(u_GBufferTexture2, texel, 0);
+	vec4 color3 = texelFetch(u_GBufferTexture3, texel, 0);
+	vec4 color4 = texelFetch(u_GBufferTexture4, texel, 0);
 
 	gbuffer.Albedo = color0.rgb;
 	gbuffer.AO = color0.a;
