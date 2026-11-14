@@ -3,6 +3,7 @@
 
 #include "Helios/Application/Application.h"
 #include "Helios/Application/ProjectConfig.h"
+#include "Helios/Common/AssetPath.h"
 #include "Helios/Events/ApplicationEvent.h"
 #include "Helios/Events/KeyEvent.h"
 #include "Helios/Events/MouseEvent.h"
@@ -32,14 +33,17 @@ namespace Helios
 		/* 脚本先挂上：场景里的挂载点按类名建实例，类得先在注册表里 */
 		m_Scripts.LoadLatest();
 
-		if (config.StartupScene.empty())
+		/* 命令行给了场景就先跑它，其余照项目配置的启动场景走 */
+		const std::filesystem::path scene_argument = GetSceneArgument();
+		const std::string scene_reference = scene_argument.empty() ? config.StartupScene : PathToUtf8(scene_argument);
+		if (scene_reference.empty())
 		{
 			CORE_LOG_ERROR("Project {} has no startup scene. Set one in the Editor first.", config.Name);
 			return;
 		}
 
-		m_ScenePath = config.StartupScene;
-		const std::string scene_path = ABSOLUTE_PATH(m_ScenePath);
+		const std::string scene_path = ABSOLUTE_PATH(scene_reference.c_str());
+		m_ScenePath = RELATIVE_PATH(scene_path.c_str());
 		m_pScene = CreateSharedPtr<Scene>();
 		if (!m_pScene->Deserializer(scene_path))
 		{

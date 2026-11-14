@@ -15,7 +15,7 @@ namespace Helios
 	class WindowResizeEvent;
 
 	/* 运行当前项目的游戏层：载入启动场景、挂上项目脚本、把指针和按键转给场景画布。
-	 * Player 直接用它；示例或新项目要叠自己的界面就继承一层，别再抄一份 */
+	 * 启动场景可由命令行 --scene 覆盖。Player 直接用它；示例或新项目要叠自己的界面就继承一层，别再抄一份 */
 	class HELIOS_API GameLayer : public ILayer
 	{
 	public:

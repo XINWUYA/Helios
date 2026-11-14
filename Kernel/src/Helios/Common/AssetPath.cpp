@@ -16,6 +16,9 @@ namespace Helios
 		/* 有人显式指定过工程（命令行 / 启动页切换）：这时候随包的工程不能顶掉它 */
 		bool s_ProjectPathExplicit = false;
 
+		/* 命令行给的场景文件，空表示没给，游戏层照旧跑项目里配的启动场景 */
+		std::filesystem::path s_SceneArgument;
+
 		/* 相对路径里出现 .. 就说明跑到根外面去了，这一份不能当资产相对路径用 */
 		bool IsInsideRoot(const std::filesystem::path& relative)
 		{
@@ -221,5 +224,50 @@ namespace Helios
 		}
 
 		return specified;
+	}
+
+	std::filesystem::path ParseSceneArgument(int argc, const char* const* argv)
+	{
+		s_SceneArgument.clear();
+		if (argv == nullptr)
+			return {};
+
+		for (int index = 1; index < argc; ++index)
+		{
+			const std::string_view argument = argv[index] != nullptr ? argv[index] : "";
+			std::string_view value;
+
+			if (argument.rfind("--scene=", 0) == 0)
+				value = argument.substr(8);
+			else if (argument == "--scene" && index + 1 < argc)
+				value = argv[++index] != nullptr ? argv[index] : "";
+			else
+				continue;
+
+			std::filesystem::path path;
+			if (TryPathFromUtf8(value, path) && !path.empty())
+				s_SceneArgument = path;
+			else
+				s_SceneArgument.clear();
+		}
+
+		if (s_SceneArgument.empty() || s_SceneArgument.is_absolute())
+			return s_SceneArgument;
+
+		/* 相对路径先按项目内资产找，找不到再按工作目录算：shell 里两种写法都常见。
+		 * 两处都没有就保持原样，交给加载那层按项目结构报错 */
+		std::error_code error;
+		if (std::filesystem::exists(ResolveAssetPath(s_SceneArgument), error))
+			return s_SceneArgument;
+
+		const std::filesystem::path from_working_directory = std::filesystem::absolute(s_SceneArgument, error);
+		if (!error && std::filesystem::exists(from_working_directory, error))
+			s_SceneArgument = from_working_directory;
+		return s_SceneArgument;
+	}
+
+	const std::filesystem::path& GetSceneArgument()
+	{
+		return s_SceneArgument;
 	}
 }

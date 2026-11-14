@@ -36,9 +36,10 @@ namespace Helios
 {
 	int RunApplication(int argc, char** argv, ApplicationFactory factory)
 	{
-		/* --project 在 iOS 上也认（simctl launch 后面接参数），显式工程优先于随包那份 */
+		/* 命令行参数在 iOS 上也认（simctl launch 后面接参数），显式工程优先于随包那份 */
 		Logger::Init();
 		ParseProjectArgument(argc, argv);
+		ParseSceneArgument(argc, argv);
 		s_Factory = std::move(factory);
 
 		@autoreleasepool

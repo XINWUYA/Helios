@@ -54,4 +54,12 @@ namespace Helios
 	/* 命令行解析：--project <dir> 或 --project=<dir>，后出现的覆盖前面的。
 	 * 返回值表示命令行是否指定了项目（编辑器据此决定直接进工程还是先出启动页）。 */
 	HELIOS_API bool ParseProjectArgument(int argc, const char* const* argv);
+
+	/* 命令行解析：--scene <file> 或 --scene=<file>，返回空表示没指定。
+	 * 相对路径先按项目内资产找，没有再按工作目录算；要在 ParseProjectArgument 之后调。
+	 * 解析结果留在 GetSceneArgument，游戏层按它覆盖项目里配的启动场景。 */
+	HELIOS_API std::filesystem::path ParseSceneArgument(int argc, const char* const* argv);
+
+	/* 命令行指定的场景文件，空表示没指定 */
+	HELIOS_API const std::filesystem::path& GetSceneArgument();
 }

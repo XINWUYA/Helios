@@ -19,6 +19,8 @@ namespace Helios
 		Logger::Init();
 		/* 项目根：编译期默认值，--project 可覆盖 */
 		ParseProjectArgument(argc, argv);
+		/* 要跑的场景也能另行指定，换场景不用改 Project.xml */
+		ParseSceneArgument(argc, argv);
 
 		{
 			UniquePtr<Application> app = factory();
