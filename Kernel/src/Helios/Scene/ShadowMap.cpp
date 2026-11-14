@@ -1079,8 +1079,17 @@ namespace Helios
 				 * 也不能跟 LightUniformBuffer 成员重名（撞名编译不过）。 */
 				const auto& casters = render_view->GetShadowCasterObjects();
 				std::vector<uint32_t> face_casters;
+
+				/* 视锥外的点状光源这一帧没人采样它的阴影层，六个面都跳过。
+				 * 调试视图与抓帧仍按全量出图，否则面板里会缺层 */
+				const bool skip_invisible = render_view->GetDebugViewMode() == DebugViewMode::None
+					&& !render_view->GetFrameGraph()->GetCapture().IsEnabled();
+
 				for (const auto& punctual_shadow_map : m_PunctualShadowMaps)
 				{
+					if (skip_invisible && !render_view->IsLightingLight(punctual_shadow_map->m_pLight.get()))
+						continue;
+
 					const uint8_t layer = punctual_shadow_map->GetLayer();
 					PROFILE_GPU_SCOPE(layer_names[layer]);
 

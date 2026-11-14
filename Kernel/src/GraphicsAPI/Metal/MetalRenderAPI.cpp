@@ -226,8 +226,9 @@ namespace Helios
         m_CurrentRenderEncoder->setViewport(viewport);
     }
 
-    /* 裁剪矩形的 y 方向和视口同源：调用方按 OpenGL 约定给"原点左下"的矩形，而 Metal framebuffer
-     * 原点在左上，需要翻转（否则裁剪框上下镜像、内容被剔掉）。转换只在本后端内部完成。 */
+    /* 裁剪矩形的 y 方向跟着视口走：离屏通道的视口是翻转的（见 ApplyViewport），
+     * framebuffer 行序已经与 GL 一致，裁剪框按 GL 坐标直接用；只有画到 drawable
+     * 时视口不翻转，才要折成左上原点。整屏矩形的两种算法结果相同。 */
     void MetalRenderAPI::SetScissor(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
     {
         PROFILE_CPU_FUNCTION_CH(ProfileChannel::Render);
@@ -237,7 +238,8 @@ namespace Helios
             /* 视口高度取自基类记下的 applied 视口，与 y 同属 framebuffer 像素坐标系；
              * 还没设过视口或数值异常时退化为不翻转，避免下溢成巨大值。 */
             const uint32_t viewport_height = GetAppliedViewport().Height;
-            const uint32_t flipped_y = (viewport_height > y && viewport_height - y >= height)
+            const uint32_t flipped_y = (!m_CurrentPassIsOffscreen
+                && viewport_height > y && viewport_height - y >= height)
                 ? (viewport_height - y - height)
                 : y;
 

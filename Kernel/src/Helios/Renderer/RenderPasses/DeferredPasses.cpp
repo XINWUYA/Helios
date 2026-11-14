@@ -345,6 +345,62 @@ namespace Helios
 				frame_graph->GetBlackboard()["Velocity"] = gbuffer_pass->GetData().Velocity;
 			}
 
+			/* 一笔光照的裁剪矩形（像素，原点左下）。方向光、正交视图与未知类型一律整屏。
+			 * 半径按范围球的切线角算，比投影包围盒紧，也不必处理角点绕到相机背后。 */
+			ViewportRegion ComputeLightScreenRect(const RenderView& render_view, Light* light)
+			{
+				const auto& viewport = render_view.GetViewportRegion();
+				const ViewportRegion full{ 0, 0, viewport.Width, viewport.Height };
+
+				const Camera* camera = render_view.GetCullingCamera();
+				if (camera == nullptr || light == nullptr
+					|| camera->GetProjectionType() != CameraProjectionType::Perspective)
+					return full;
+
+				const PunctualLight* punctual = AsPunctualLight(light);
+				if (punctual == nullptr || punctual->GetRange() <= 0.0f)
+					return full;
+
+				const float radius = punctual->GetRange();
+				const glm::vec3 view_center = glm::vec3(
+					camera->GetViewMatrix() * glm::vec4(light->GetPosition(), 1.0f));
+				const float distance = glm::length(view_center);
+				/* 相机落在球内、或球心跑到相机背后：投影发散，按整屏处理 */
+				if (view_center.z >= 0.0f || distance <= radius)
+					return full;
+
+				const glm::mat4& projection = camera->GetProjectionMatrix();
+				const glm::vec4 clip = projection * glm::vec4(view_center, 1.0f);
+				if (clip.w <= 1e-6f)
+					return full;
+
+				/* 切线角换算成 NDC 半径，再乘半屏尺寸得像素半径；留两个像素余量给 TAA 抖动 */
+				const float tangent = radius / std::sqrt(distance * distance - radius * radius);
+				const float half_width = 0.5f * static_cast<float>(viewport.Width);
+				const float half_height = 0.5f * static_cast<float>(viewport.Height);
+				const float center_x = (clip.x / clip.w * 0.5f + 0.5f) * static_cast<float>(viewport.Width);
+				const float center_y = (clip.y / clip.w * 0.5f + 0.5f) * static_cast<float>(viewport.Height);
+				const float extent_x = tangent * std::abs(projection[0][0]) * half_width + 2.0f;
+				const float extent_y = tangent * std::abs(projection[1][1]) * half_height + 2.0f;
+
+				const auto clamp_to = [](float value, float high)
+				{
+					return static_cast<int32_t>(std::clamp(value, 0.0f, high));
+				};
+
+				const int32_t min_x = clamp_to(center_x - extent_x, static_cast<float>(viewport.Width));
+				const int32_t max_x = clamp_to(center_x + extent_x, static_cast<float>(viewport.Width));
+				const int32_t min_y = clamp_to(center_y - extent_y, static_cast<float>(viewport.Height));
+				const int32_t max_y = clamp_to(center_y + extent_y, static_cast<float>(viewport.Height));
+
+				ViewportRegion rect;
+				rect.MinX = min_x;
+				rect.MinY = min_y;
+				rect.Width = static_cast<uint32_t>(std::max(1, max_x - min_x));
+				rect.Height = static_cast<uint32_t>(std::max(1, max_y - min_y));
+				return rect;
+			}
+
 			/* Lighting Pass：全屏逐光源加法合成，输出即视图最终颜色（天空与叠加层都写进它本身）。
 			 * 返回光照结果句柄（视图输出）。 */
 			FrameGraphResourceHandleTyped<FrameGraphTexture> AddLightingPass(RenderView& render_view)
@@ -437,13 +493,9 @@ namespace Helios
 								}
 							}
 
-							const auto& lights = render_view.GetValidLights();
-
-							/* 主阴影光源：环境项只在它的那一笔合成 —— 其它笔没有阴影数据，
-							 * 环境项跟着它们会收不到阴影 */
-							size_t primary_shadow_light = 0;
-							if (const auto& shadow_maps = render_view.GetShadowMapManager())
-								primary_shadow_light = shadow_maps->FindPrimaryShadowLightIndex(lights);
+							/* 视锥外的点光 / 聚光已在视图里剔掉，方向光恒参与 */
+							const auto& lighting_lights = render_view.GetLightingLights();
+							const Light* const ambient_light = render_view.GetAmbientLight().get();
 
 							const int debug_view_value = LightingDebugViewValue(render_view.GetDebugViewMode());
 
@@ -491,8 +543,9 @@ namespace Helios
 							material->SetTexture("u_BRDFLut",
 								ibl_brdf_lut != nullptr ? ibl_brdf_lut : DeviceTexture::Black());
 
-							/* 单笔光照：light 为空时按"无光源"填 UBO（只合成环境光 + IBL） */
-							const auto draw_light = [&](const SharedPtr<Light>& light, size_t light_index)
+							/* 单笔光照：light 为空时按"无光源"填 UBO（只合成环境光 + IBL）。
+							 * 点光 / 聚光按覆盖矩形裁剪，衰减为零的那片像素连片元都不跑 */
+							const auto draw_light = [&](const SharedPtr<Light>& light)
 							{
 								if (light != nullptr)
 								{
@@ -504,17 +557,27 @@ namespace Helios
 									Renderer::FillEmptyLightUniformBuffer();
 								}
 
-								/* 环境光 / 自发光与光源无关，只在主阴影光源那一笔合成（多光源逐笔加法叠加） */
+								/* 环境光 / 自发光与光源无关，只在负责合成的那一笔累加（多光源逐笔加法叠加） */
+								const bool compose_ambient = light.get() == ambient_light;
 								material->SetParameters(ParamType::Int, "u_ComposeAmbientEmission",
-									light_index == primary_shadow_light ? 1 : 0);
+									compose_ambient ? 1 : 0);
+
+								/* 合成环境项那一笔要铺满整屏：环境项不跟着光源范围走，裁了会缺一块 */
+								const ViewportRegion scissor = compose_ambient
+									? ViewportRegion{ 0, 0, render_view.GetViewportRegion().Width,
+										render_view.GetViewportRegion().Height }
+									: ComputeLightScreenRect(render_view, light.get());
+								Renderer::GetRenderAPI()->SetScissor(
+									static_cast<uint32_t>(scissor.MinX), static_cast<uint32_t>(scissor.MinY),
+									scissor.Width, scissor.Height);
 								Renderer::Submit(material, Renderer::GetFullScreenVertexArray());
 							};
 
 							/* 光源全被层剔掉：补一笔无光源的环境 / IBL 合成，别让画面空掉 */
-							if (lights.empty())
-								draw_light(nullptr, 0);
-							for (size_t light_index = 0; light_index < lights.size(); ++light_index)
-								draw_light(lights[light_index], light_index);
+							if (lighting_lights.empty())
+								draw_light(nullptr);
+							for (const auto& light : lighting_lights)
+								draw_light(light);
 						}
 						render_pass_info->Unbind();
 					}
@@ -524,7 +587,7 @@ namespace Helios
 				return lighting_pass->GetData().LightingResult;
 			}
 
-			/* 前向直画 Pass：G-Buffer 只装得下标准材质契约的着色器，自定义着色器（纯色 / Unlit）
+			/* 前向直画 Pass：G-Buffer 只装得下接了材质契约的着色器（lit / 无光照），其余自定义着色器
 			 * 的裸 uniform 转不过去 —— 这类不透明物体在这里用自身着色器直画，覆盖掉光照结果对应像素。
 			 * 放在天空之后：背景先铺好，深度沿用 G-Buffer 的场景深度（反向 Z，GreaterEqual 比较）。 */
 			void AddForwardOpaquePass(RenderView& render_view)

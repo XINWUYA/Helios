@@ -227,6 +227,15 @@ namespace Helios
 		/* 获取光源 */
 		[[nodiscard]] const std::vector<SharedPtr<Light>>& GetValidLights() const { return m_ValidLights; }
 
+		/* 光照提交用的光源子集：范围球在视锥外的点光 / 聚光、以及强度为 0 的灯已经剔掉。
+		 * m_ValidLights 仍是全量 —— 阴影注册与调试视图按全量走，不受剔除影响。 */
+		[[nodiscard]] const std::vector<SharedPtr<Light>>& GetLightingLights() const { return m_LightingLights; }
+		/* 环境项与自发光挂在哪一笔合成：本帧参与光照的主阴影光源，没有就退到第一盏。
+		 * 为空表示本帧没有光源，调用方按"无光源"那一笔合成 */
+		[[nodiscard]] const SharedPtr<Light>& GetAmbientLight() const { return m_AmbientLight; }
+		/* 这盏灯本帧参与光照吗（阴影图只给参与光照的灯渲染） */
+		[[nodiscard]] bool IsLightingLight(const Light* light) const;
+
 		/* 本视图是否存在需要投影的光源（级联或点光/聚光任一） */
 		[[nodiscard]] bool HasShadowCast() const { return m_IsHasShadowCast; }
 
@@ -286,6 +295,9 @@ namespace Helios
 		std::vector<VisibleMeshObject> m_VisibleMeshObjects{};
 		/* 对场景产生影响的光源 */
 		std::vector<SharedPtr<Light>> m_ValidLights{};
+		/* 进光照的光源（视锥外的点光 / 聚光已剔除）与合成环境项的那一盏 */
+		std::vector<SharedPtr<Light>> m_LightingLights{};
+		SharedPtr<Light> m_AmbientLight{};
 		/* 上一帧注册进阴影管理器的光源（含阴影配置签名）：同一批光源不必重建，
 		 * 重建会把级联矩阵整份作废，等于每帧拿全场景投射物重新拟合一遍 */
 		std::vector<SharedPtr<Light>> m_ShadowLights{};

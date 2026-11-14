@@ -46,7 +46,8 @@ namespace Helios
 				const SubmitParams& params)
 			{
 				const auto probe_manager = params.IgnoreProbes ? nullptr : scene.GetReflectionProbeManager();
-				const auto& lights = render_view.GetValidLights();
+				/* 视锥外的点光 / 聚光已在视图里剔掉：逐光源重画时每少一盏就少一整遍几何 */
+				const auto& lights = render_view.GetLightingLights();
 				const ShadowMapManager* shadow_maps = render_view.GetShadowMapManager().get();
 				const glm::vec3 view_position = (params.SortOrigin != nullptr)
 					? *params.SortOrigin
@@ -60,10 +61,9 @@ namespace Helios
 					: RenderSorting::CollectDrawList(visible_objects, transparent, view_position,
 						[](const VisibleMeshObject& object) { return RenderSorting::IsForwardOnlyOpaque(object); });
 
-				/* 环境项放在主阴影光源那一笔里合成：只有那笔的阴影因子非 0，
+				/* 环境项放在合成环境的那一笔里：只有那笔的阴影因子非 0，
 				 * 环境项才吃得到阴影（见 AmbientShadowVisibility） */
-				const size_t ambient_light_index = (shadow_maps != nullptr)
-					? shadow_maps->FindPrimaryShadowLightIndex(lights) : 0;
+				const Light* const ambient_light = render_view.GetAmbientLight().get();
 
 				/* 前向直画用材质自身 shader：没写的贴图槽补默认贴图（缺绑定 Metal 会断言），
 				 * 没写的值参数补默认值（裸 uniform 是 per-program 状态，不补会沿用上一个材质的值）。
@@ -166,7 +166,7 @@ namespace Helios
 
 					if (debug_single_pass)
 					{
-						Renderer::FillLightUniformBuffer(lights[std::min(ambient_light_index, lights.size() - 1)], shadow_maps);
+						Renderer::FillLightUniformBuffer(render_view.GetAmbientLight(), shadow_maps);
 						Renderer::Submit(material, mesh_primitive, &per_draw);
 						continue;
 					}
@@ -176,7 +176,7 @@ namespace Helios
 						Renderer::FillLightUniformBuffer(lights[light_index], shadow_maps);
 
 						/* 合成开关只在环境项那一笔打开，其余笔加法叠加 */
-						compose_value = light_index == ambient_light_index ? 1 : 0;
+						compose_value = lights[light_index].get() == ambient_light ? 1 : 0;
 						if (light_index > 0)
 							per_draw.RasterStateOverride = MakeAdditiveRasterState(base_state);
 
@@ -359,9 +359,9 @@ namespace Helios
 
 		void FillGrassLightUniform(RenderView& render_view)
 		{
-			/* 草只吃主方向光：光照 UBO 一次只装一个光源，逐光源重画会让顶点量翻好几倍。
-			 * 主阴影光源优先，没有阴影就取第一盏。 */
-			const auto& lights = render_view.GetValidLights();
+			/* 草只吃一盏灯：光照 UBO 一次只装一个光源，逐光源重画会让顶点量翻好几倍。
+			 * 用合成环境项的那一笔 —— 主阴影光源被视锥剔掉时它就是替补 */
+			const auto& lights = render_view.GetLightingLights();
 			if (lights.empty())
 			{
 				Renderer::FillEmptyLightUniformBuffer();
@@ -369,9 +369,7 @@ namespace Helios
 			}
 
 			const ShadowMapManager* shadow_maps = render_view.GetShadowMapManager().get();
-			const size_t primary = (shadow_maps != nullptr)
-				? shadow_maps->FindPrimaryShadowLightIndex(lights) : 0;
-			Renderer::FillLightUniformBuffer(lights[std::min(primary, lights.size() - 1)], shadow_maps);
+			Renderer::FillLightUniformBuffer(render_view.GetAmbientLight(), shadow_maps);
 		}
 
 		void SubmitGrassFields(RenderView& render_view, Scene& scene, DebugViewMode debug_view)

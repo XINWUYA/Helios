@@ -67,10 +67,10 @@ namespace Helios::TerrainDraw
 			return slot;
 		}
 
-		/* 地形只吃主方向光：先把光照 UBO 填成主阴影光源，与草地同一份口径 */
+		/* 地形只吃一盏灯：光照 UBO 填成合成环境项的那一笔，与草地同一份口径 */
 		void FillPrimaryLight(RenderView& view)
 		{
-			const auto& lights = view.GetValidLights();
+			const auto& lights = view.GetLightingLights();
 			if (lights.empty())
 			{
 				Renderer::FillEmptyLightUniformBuffer();
@@ -78,9 +78,7 @@ namespace Helios::TerrainDraw
 			}
 
 			const ShadowMapManager* shadow_maps = view.GetShadowMapManager().get();
-			const size_t primary = (shadow_maps != nullptr)
-				? shadow_maps->FindPrimaryShadowLightIndex(lights) : 0;
-			Renderer::FillLightUniformBuffer(lights[std::min(primary, lights.size() - 1)], shadow_maps);
+			Renderer::FillLightUniformBuffer(view.GetAmbientLight(), shadow_maps);
 		}
 
 		/* 高度图与覆盖范围：材质本身多块地形共用，逐地形的差异全走 per-draw 覆盖。

@@ -15,6 +15,7 @@
 #include <Helios/Scene/ReflectionProbe.h>
 #include <Helios/Scene/SkeletonModel.h>
 #include <Helios/Renderer/Renderer.h>
+#include <Helios/Renderer/Frustum.h>
 #include <Helios/Renderer/RenderPasses/DeferredPasses.h>
 #include <Helios/Renderer/RenderPasses/GrassPasses.h>
 #include <Helios/Renderer/RenderPasses/ScenePass.h>
@@ -514,6 +515,17 @@ namespace Helios
 		}
 	}
 
+	/* 这盏灯本帧是否参与光照：光列表只有几盏，线性找就够 */
+	bool RenderView::IsLightingLight(const Light* light) const
+	{
+		for (const auto& entry : m_LightingLights)
+		{
+			if (entry.get() == light)
+				return true;
+		}
+		return false;
+	}
+
 	/* 准备光源信息 */
 	void RenderView::PrepareLights(bool register_shadows)
 	{
@@ -565,6 +577,30 @@ namespace Helios
 			}
 		}
 
+		/* 光照提交只带视锥内的点状光源：范围球与视锥不相交的，贡献一定是零。
+		 * 阴影注册仍按上面积累的全量走，否则相机一动就要重挂阴影图。 */
+		m_LightingLights.clear();
+		m_LightingLights.reserve(m_ValidLights.size());
+		const Camera* lighting_camera = GetCullingCamera();
+		const bool cull_lights = m_IsEnableCulling && lighting_camera != nullptr;
+		Frustum lighting_frustum;
+		if (cull_lights)
+			lighting_frustum = Frustum::FromViewProjection(lighting_camera->GetViewProjectionMatrix());
+
+		for (const auto& light : m_ValidLights)
+		{
+			if (cull_lights)
+			{
+				if (const PunctualLight* punctual = AsPunctualLight(light.get()))
+				{
+					const float radius = punctual->GetRange();
+					if (radius > 0.0f && lighting_frustum.IsOutside(light->GetPosition(), glm::vec3(radius)))
+						continue;
+				}
+			}
+			m_LightingLights.push_back(light);
+		}
+
 		/* 级联阴影只有一套，管理器按注册顺序认第一盏方向光当宿主，所以要把真正在照明的那盏
 		 * 排在前面：太阳落下、月亮接班时顺序会翻，阴影才不会挂在一盏照不到东西的光上 */
 		std::stable_sort(shadow_lights.begin(), shadow_lights.end(),
@@ -596,6 +632,34 @@ namespace Helios
 
 		m_IsHasShadowCast = !m_pShadowMapManager->GetCascadeShadowMaps().empty()
 			|| !m_pShadowMapManager->GetPunctualShadowMaps().empty();
+
+		/* 环境项挂在主阴影光源那一笔上；它被剔掉时退到第一盏参与光照的灯。
+		 * 必须放在阴影注册之后：注册会重建级联，早算会读到上一帧的宿主 */
+		const size_t primary_light_index = m_pShadowMapManager->FindPrimaryShadowLightIndex(m_ValidLights);
+		const Light* primary_light = (primary_light_index < m_ValidLights.size())
+			? m_ValidLights[primary_light_index].get() : nullptr;
+
+		m_AmbientLight.reset();
+		for (const auto& light : m_LightingLights)
+		{
+			if (light.get() == primary_light)
+			{
+				m_AmbientLight = light;
+				break;
+			}
+		}
+		if (m_AmbientLight == nullptr && !m_LightingLights.empty())
+			m_AmbientLight = m_LightingLights.front();
+
+		/* 强度 0 的灯算不出任何光照（夜里没升起来的月亮就是这样），省掉它那一笔。
+		 * 合成环境项那一盏除外：环境项不乘强度 */
+		m_LightingLights.erase(
+			std::remove_if(m_LightingLights.begin(), m_LightingLights.end(),
+				[this](const SharedPtr<Light>& light)
+				{
+					return light->GetIntensity() <= 0.0f && light != m_AmbientLight;
+				}),
+			m_LightingLights.end());
 	}
 
 	/* 给本帧可见对象补上一帧的世界矩阵：TAA 没开就都填当前值（速度 0），开了才维护跨帧表。
