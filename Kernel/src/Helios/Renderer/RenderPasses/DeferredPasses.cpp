@@ -220,10 +220,12 @@ namespace Helios
 						pass_desc.Attachments.ColorAttachments(4) = data.GBufferTexture4;
 						/* 速度在拾取通道前面；关掉拾取时它就是最后一个附件 */
 						pass_desc.Attachments.ColorAttachments(5) = data.Velocity;
+						pass_desc.ColorClearValues.resize(7);
+						/* 没写 G-Buffer 的像素着色模型读作 0（SHADING_MODEL_NONE），默认清屏值 alpha 是 1 */
+						pass_desc.ColorClearValues[2] = glm::vec4(0.0f);
 						if (object_id_enabled)
 						{
 							pass_desc.Attachments.ColorAttachments(6) = data.ObjectId;
-							pass_desc.ColorClearValues.resize(7);
 							/* 空像素读作 -1，拾取时按"没点到"处理 */
 							pass_desc.ColorClearValues[6] = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);
 						}

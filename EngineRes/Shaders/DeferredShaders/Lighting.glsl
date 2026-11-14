@@ -265,14 +265,14 @@ void main()
 
 	/* 双面植被（草）：环绕漫反射加逆光透射，没有镜面项。
 	 * 两个系数取草的默认值，材质里逐片改的值不会生效 */
-	if (ShadingModelIs(gbuffer.ShadingModel, SHADING_MODEL_FOLIAGE))
+	if (gbuffer.ShadingModel == SHADING_MODEL_FOLIAGE)
 	{
 		const float wrap = 0.4f;
 		const float transmission_power = 4.0f;
 		const float ndl = clamp((dot(n, l) + wrap) / (1.0f + wrap), 0.0f, 1.0f);
 		vec3 grass_color = gbuffer.Albedo * ndl * INV_PI * LightFactor(attenuation, shadow);
 		const float back_light = pow(max(dot(-l, v), 0.0f), transmission_power);
-		/* CustomData 在模型 ID 1 下是透射色（rgb）与透射强度（a） */
+		/* 植被模型下 CustomData 是透射色（rgb）与透射强度（a） */
 		grass_color += gbuffer.CustomData.rgb * gbuffer.Albedo * gbuffer.CustomData.a
 			* back_light * LightFactor(attenuation, shadow);
 
@@ -320,7 +320,7 @@ void main()
 			/* 平面环境项与前向的无 IBL 回退走同一份合成 */
 			lighting_result += max(vec3(0.0f), ComposeFallbackAmbient(gbuffer.Ambient, gbuffer.Albedo, gbuffer.AO)) * ambient_visibility;
 		}
-		/* 走到这里的都是模型 ID 0，CustomData.rgb 是自发光 */
+		/* 走到这里的都是标准模型，CustomData.rgb 是自发光 */
 		lighting_result += gbuffer.CustomData.rgb;
 	}
 

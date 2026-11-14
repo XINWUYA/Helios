@@ -86,7 +86,7 @@ void main()
 layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: AO */
 layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal(10:10:10); a: 接受阴影(2 bit) */
 layout(location = 2) out vec4 GBufferTexture2; /* r: Roughness; g: Metallic; b: Specular; a: 着色模型 ID */
-layout(location = 3) out vec4 GBufferTexture3; /* CustomData：ID 0 是 Emission + IOR，ID 1 是透射色 + 强度 */
+layout(location = 3) out vec4 GBufferTexture3; /* CustomData：标准 = 自发光 + IOR，植被 = 透射色 + 强度 */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
 layout(location = 5) out vec2 Velocity;        /* 屏幕空间运动矢量（UV 单位） */
 #if HELIOS_EDITOR
@@ -127,8 +127,8 @@ void main()
 	/* 法线按 n*0.5+0.5 编码：10:10:10 存不了负值；alpha 那 2 位放接受阴影 */
 	GBufferTexture1 = vec4(mtl.Normal * 0.5f + 0.5f, vert2frag.ReceiveShadow);
 	/* 三个 BRDF 标量挤一张，alpha 留给着色模型 ID */
-	GBufferTexture2 = vec4(mtl.Roughness, mtl.Metallic, mtl.Specular.r, SHADING_MODEL_STANDARD);
-	/* 第三张是自定义数据，这里按模型 ID 0 填自发光与 IOR */
+	GBufferTexture2 = vec4(mtl.Roughness, mtl.Metallic, mtl.Specular.r, EncodeShadingModel(SHADING_MODEL_STANDARD));
+	/* 第三张是自定义数据，标准模型下填自发光与 IOR */
 	GBufferTexture3 = vec4(mtl.Emission, mtl.IOR);
 	GBufferTexture4 = vec4(mtl.Ambient, mtl.Anisotropy);
 

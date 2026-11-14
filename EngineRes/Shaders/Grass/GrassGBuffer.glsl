@@ -163,7 +163,7 @@ void main()
 	GBufferTexture0 = vec4(albedo, ao);
 	GBufferTexture1 = vec4(N * 0.5f + 0.5f, vert2frag.ReceiveShadow);
 	/* 草没有金属度与镜面项，高光通道留 0，alpha 是模型 ID */
-	GBufferTexture2 = vec4(u_Roughness, 0.0f, 0.0f, SHADING_MODEL_FOLIAGE);
+	GBufferTexture2 = vec4(u_Roughness, 0.0f, 0.0f, EncodeShadingModel(SHADING_MODEL_FOLIAGE));
 	/* 块底面的薄度折进强度：底面不参与透射，与 Grass.glsl 的 thinness 同义 */
 	GBufferTexture3 = vec4(u_TransmissionColor, u_Transmission * thinness);
 	/* 没有 IBL 时延迟用 Ambient 兜底：rgb 是环境色，与 Grass.glsl 的 vec3(1) 一致，a 是各向异性 */

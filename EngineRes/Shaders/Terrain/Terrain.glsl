@@ -166,7 +166,7 @@ void main()
 	GBufferTexture1 = vec4(surface.Normal * 0.5f + 0.5f, vert2frag.ReceiveShadow);
 	/* 地形没有金属度与高光贴图：前向的 MakeMaterialInput 这两个都是 0，这里也要填 0，
 	 * 填 0.04 会让高光档与 IBL 的菲涅尔跟前向对不上 */
-	GBufferTexture2 = vec4(surface.Roughness, 0.0f, 0.0f, SHADING_MODEL_STANDARD);
+	GBufferTexture2 = vec4(surface.Roughness, 0.0f, 0.0f, EncodeShadingModel(SHADING_MODEL_STANDARD));
 	GBufferTexture3 = vec4(0.0f);
 	/* 环境兜底色写全 1：前向的 MakeMaterialInput 默认是 vec3(1)，a 是各向异性 */
 	GBufferTexture4 = vec4(1.0f, 1.0f, 1.0f, 0.0f);

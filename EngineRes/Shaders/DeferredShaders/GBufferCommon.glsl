@@ -15,7 +15,7 @@ struct SGBufferData
 	float Roughness;      /* Texture2.r */
 	float Metallic;       /* Texture2.g */
 	float Specular;       /* Texture2.b，标量，材质里三通道通常一样 */
-	float ShadingModel;   /* Texture2.a，0 = 标准 PBR，1 = 双面植被 */
+	int ShadingModel;     /* Texture2.a，编号见 ShadingModel.glsl */
 	vec4 CustomData;      /* Texture3，语义按 ShadingModel 解释，取值处各自说明 */
 	vec3 Ambient;         /* Texture4.rgb */
 	float Anisotropy;     /* Texture4.a */
@@ -69,7 +69,7 @@ void CalculateGBuffer(inout SGBufferData gbuffer, vec2 uv)
 	gbuffer.Roughness = color2.r;
 	gbuffer.Metallic = color2.g;
 	gbuffer.Specular = color2.b;
-	gbuffer.ShadingModel = color2.a;
+	gbuffer.ShadingModel = DecodeShadingModel(color2.a);
 	/* 第三张是自定义数据，语义由 ShadingModel 决定，用到的两处各自解释 */
 	gbuffer.CustomData = color3;
 	gbuffer.Ambient = color4.rgb;
