@@ -6,6 +6,7 @@
 #define SHADING_MODEL_NONE     0
 #define SHADING_MODEL_STANDARD 1
 #define SHADING_MODEL_FOLIAGE  2
+#define SHADING_MODEL_UNLIT    3
 
 float EncodeShadingModel(int id)
 {

@@ -86,7 +86,7 @@ namespace Helios::RenderSorting
 		return key;
 	}
 
-	/* 延迟管线下装不进 G-Buffer 的不透明对象：自定义着色器（纯色 / Unlit）的裸 uniform
+	/* 延迟管线下装不进 G-Buffer 的不透明对象：没接材质契约的自定义着色器，裸 uniform
 	 * 转不过去，改在光照之后用自身着色器前向直画。天空有专属 Pass、透明走前向透明批；
 	 * 没有着色器的材质仍按 G-Buffer 兜底画（转换时补默认贴图），不在这里。 */
 	inline bool IsForwardOnlyOpaque(const VisibleMeshObject& object)

@@ -121,6 +121,11 @@ namespace Helios
 				material->SetTexture(sampler_name, Material::DefaultTextureForSampler(sampler_name));
 			}
 
+			/* 不吃直接光的源材质（MaterialShaders/Unlit.glsl 这类）走 G-Buffer 的无光照变体，
+			 * 判据与前向"单笔原样提交"同一个 */
+			if (source.GetShader() != gbuffer_shader && !source.SupportsDirectLighting())
+				material->SetParameters(ParamType::Int, "u_Unlit", 1);
+
 			material->SetRasterState(source.GetRasterState());
 			return material;
 		}

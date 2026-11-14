@@ -242,6 +242,14 @@ void main()
 	SGBufferData gbuffer;
 	CalculateGBuffer(gbuffer, vert2frag.TexCoord);
 
+	/* 无光照：颜色只在合成环境项那一笔原样输出，其余光源那几笔和光照类调试档不加 */
+	if (gbuffer.ShadingModel == SHADING_MODEL_UNLIT)
+	{
+		OutFragColor = (u_DebugView == 0 && u_ComposeAmbientEmission > 0)
+			? vec4(gbuffer.CustomData.rgb, 1.0f) : vec4(0.0f);
+		return;
+	}
+
 	vec3 world_pos = gbuffer.WorldPosition;
 	vec3 n = normalize(gbuffer.WorldNormal);
 	vec3 v = normalize(u_ViewPos - world_pos);

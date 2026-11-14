@@ -237,7 +237,7 @@
         <Entity ID="68" Name="Sphere">
             <Transform Position="6.615978 1.312009 8.926401" Rotation="0.000000 -0.000000 0.000000" Scale="1.000000 1.000000 1.000000"/>
             <Model ModelPath="BuiltinSphere" CastShadow="true" ReceiveShadow="true" EnableSkinning="true">
-                <MaterialOverride Slot="Default" Instance="true" Source="Materials/Red.mtl" ShaderPath="Shaders/SolidShader.glsl" RenderQueue="2000">
+                <MaterialOverride Slot="Default" Instance="true" Source="Materials/Red.mtl" ShaderPath="Shaders/MaterialShaders/Unlit.glsl" RenderQueue="2000">
                     <Parameters>
                         <ParamInfo Type="2" Name="u_Opacity" Value="0.47"/>
                         <ParamInfo Type="5" Name="u_Color" Value="1.000000 0.000000 0.000000 1.000000"/>

@@ -76,8 +76,12 @@ void main()
 #include "../Builtin/Uniforms.glsl"
 #include "../Builtin/MaterialInput.glsl"
 #include "../Builtin/MaterialLit.glsl"
+#include "../Builtin/MaterialUnlit.glsl"
 #include "../Builtin/Velocity.glsl"
 #include "ShadingModel.glsl"
+
+/* 无光照变体：源材质不吃直接光（MaterialShaders/Unlit.glsl 这类）时，材质转换把它置 1 */
+uniform int u_Unlit = 0; // @variant(MTL_UNLIT)
 
 /* 编辑器视图开关：只有编辑器视口要写实体 id。关掉时少一张附件，
  * 速度图顶到 6、编号仍然连续；以后编辑器专用的输出都挂这个维度 */
@@ -86,7 +90,7 @@ void main()
 layout(location = 0) out vec4 GBufferTexture0; /* rgb: Albedo; a: AO */
 layout(location = 1) out vec4 GBufferTexture1; /* rgb: WorldNormal(10:10:10); a: 接受阴影(2 bit) */
 layout(location = 2) out vec4 GBufferTexture2; /* r: Roughness; g: Metallic; b: Specular; a: 着色模型 ID */
-layout(location = 3) out vec4 GBufferTexture3; /* CustomData：标准 = 自发光 + IOR，植被 = 透射色 + 强度 */
+layout(location = 3) out vec4 GBufferTexture3; /* CustomData：标准 = 自发光 + IOR，植被 = 透射色 + 强度，无光照 = 自身颜色 */
 layout(location = 4) out vec4 GBufferTexture4; /* rgb: Ambient; a: Anisotropy */
 layout(location = 5) out vec2 Velocity;        /* 屏幕空间运动矢量（UV 单位） */
 #if HELIOS_EDITOR
@@ -112,6 +116,20 @@ in SVextex2Frag vert2frag;
 
 void main()
 {
+#if HELIOS_EDITOR
+	ObjectId = vert2frag.ObjectId;
+#endif
+	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);
+
+#if MTL_UNLIT
+	/* 颜色同时写进基色与自定义数据：光照阶段原样输出后者，调试视图的 Albedo 档也看得到 */
+	const vec3 unlit_color = CalculateUnlitColor(vert2frag.TexCoord, vert2frag.BaseColor).rgb;
+	GBufferTexture0 = vec4(unlit_color, 1.0f);
+	GBufferTexture1 = vec4(normalize(vert2frag.Normal) * 0.5f + 0.5f, 0.0f);
+	GBufferTexture2 = vec4(1.0f, 0.0f, 0.0f, EncodeShadingModel(SHADING_MODEL_UNLIT));
+	GBufferTexture3 = vec4(unlit_color, 0.0f);
+	GBufferTexture4 = vec4(0.0f);
+#else
 	/* 材质采样走公共库（与前向材质着色器同一份，见 Builtin/MaterialLit.glsl） */
 	SMaterialInput mtl;
 	/* 变体关掉切线时传零向量，MaterialLit 只在 TBN 分支里读它 */
@@ -131,9 +149,5 @@ void main()
 	/* 第三张是自定义数据，标准模型下填自发光与 IOR */
 	GBufferTexture3 = vec4(mtl.Emission, mtl.IOR);
 	GBufferTexture4 = vec4(mtl.Ambient, mtl.Anisotropy);
-
-#if HELIOS_EDITOR
-	ObjectId = vert2frag.ObjectId;
 #endif
-	Velocity = ComputeVelocityFromClip(vert2frag.CurClip, vert2frag.PrevClip);
 }

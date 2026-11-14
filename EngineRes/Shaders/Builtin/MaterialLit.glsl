@@ -2,13 +2,14 @@
 #define MATERIAL_LIT_GLSL
 
 #include "Math.glsl"
+#include "MaterialAlbedo.glsl"
 #include "MaterialInput.glsl"
 #include "Uniforms.glsl"
 
-/* 标准 lit 材质的贴图契约：10 个采样器（材质转换 / 调试视图都按名字找），声明随本库走，
- * 前向材质着色器与延迟 GBuffer 自动同源。@property = 归材质管的参数（面板列、写进 .mtl），
- * @group = 面板上的小标题；引擎逐绘制给的不标。显示名 / 控件 / 范围 / 条件见 DeviceShader.h。 */
-uniform sampler2D u_AlbedoTexture; // @group(Surface) @property
+/* 标准 lit 材质的贴图契约：主贴图在 MaterialAlbedo.glsl，其余 9 个采样器在这里（材质转换 /
+ * 调试视图都按名字找），声明随本库走，前向材质着色器与延迟 GBuffer 自动同源。
+ * @property = 归材质管的参数（面板列、写进 .mtl），@group = 面板上的小标题；
+ * 引擎逐绘制给的不标。显示名 / 控件 / 范围 / 条件见 DeviceShader.h。 */
 uniform sampler2D u_SpecularTexture; // @group(Surface) @property
 uniform sampler2D u_NormalTexture; // @group(Detail) @property @variant(MTL_NORMAL)
 uniform sampler2D u_BumpTexture; // @group(Detail) @property @variant(MTL_PARALLAX)
@@ -18,9 +19,6 @@ uniform sampler2D u_MetallicTexture; // @group(Surface) @property
 uniform sampler2D u_EmissiveTexture; // @group(Surface) @property
 uniform sampler2D u_AmbientTexture; // @group(Surface) @property
 uniform sampler2D u_AOTexture; // @group(Surface) @property @variant(MTL_AO)
-
-/* 主贴图 UV 缩放偏移（xy=缩放，zw=偏移）：所有材质贴图采样共用、缺省不变换 */
-uniform vec4 u_AlbedoTilingOffset = vec4(1.0f, 1.0f, 0.0f, 0.0f); // @group(Surface) @property
 
 /* 视差高度（米）：只有开视差档才读。按表面实际尺度换算，图集里各处 UV 密度不同也不会错位 */
 uniform float u_ParallaxHeight = 0.05f; // @group(Detail) @property(Height) @range(0.0, 0.3)
@@ -32,7 +30,7 @@ void CalculateLitMaterial(inout SMaterialInput mtl,
 {
 	vec3 N = normalize(world_normal);
 
-	vec2 base_uv = uv * u_AlbedoTilingOffset.xy + u_AlbedoTilingOffset.zw;
+	vec2 base_uv = ApplyAlbedoTiling(uv);
 
 #if MTL_PARALLAX || MTL_NORMAL
 	/* TBN：导入网格的切线不保证与法线垂直，Gram-Schmidt 重新正交化 */
